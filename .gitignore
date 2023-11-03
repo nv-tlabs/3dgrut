@@ -1,0 +1,7 @@
+**__pycache__
+.vscode
+
+external/
+runs/
+
+debug_**
