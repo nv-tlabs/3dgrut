@@ -5,3 +5,5 @@ external/
 runs/
 
 debug_**
+
+imgui.ini

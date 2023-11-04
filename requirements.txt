@@ -1,0 +1,8 @@
+git+https://github.com/nmwsharp/polyscope-py.git@v2
+argparse
+plyfiile
+
+--index-url https://download.pytorch.org/whl/cu118
+torch 
+torchvision 
+torchaudio
