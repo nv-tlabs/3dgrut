@@ -1,5 +1,19 @@
+
 # Ray Tracing Gaussian Splats
 
+## Dependencies
+- __CUDA 11.7 or newer__.
+- __Python 3.10 or newer__.
+
+## Set up the environment
+
+To set up the environment using conda, you can run the following
+
+```
+conda create -n 3dgrt python=3.10
+conda activate 3dgrt 
+pip install -r requirements.txt
+```
 
 ## Using the GUI
 
