@@ -188,7 +188,7 @@ extern "C" __global__ void __raygen__rg()
             // ---> gres = exp(-0.5 * grayDist)        
             // ===> d_gres / d_grayDist = -0.5 * exp(-0.5 * grayDist) 
             //                          = -0.5 * gres
-            const float grayDistGrd = -0.5 * gres * gresGrd;
+            const float grayDistGrd = -0.5f * gres * gresGrd;
 
             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
             // ---> grayDist = dot(gcrod, gcrod) 
