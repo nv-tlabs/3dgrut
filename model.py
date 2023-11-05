@@ -135,7 +135,7 @@ class MixtureOfGaussians(torch.nn.Module):
             self.set_optimizable_parameters()
 
     def build_bvh(self):
-        optixtracer.build_mog_bvh(self.optix_ctx, self._positions, self.rotation_activation(self._rotation), self.scale_activation(self._scale), 3, True)
+        optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), 3, True)
 
     def init_from_point_cloud(self, pc_path: str):
         pass
@@ -143,7 +143,7 @@ class MixtureOfGaussians(torch.nn.Module):
     def reset_density(self):
         updated_densities = inverse_sigmoid(torch.min(self.get_density, torch.ones_like(self.density)*0.01))
         optimizable_tensors = self.replace_tensor_to_optimizer(updated_densities, "density")
-        self._density = optimizable_tensors["density"]
+        self.density = optimizable_tensors["density"]
 
 
     def replace_tensor_to_optimizer(self, tensor, name: str):
@@ -179,7 +179,7 @@ class MixtureOfGaussians(torch.nn.Module):
     
     @property
     def get_features(self):
-        return self._features
+        return self.features
     
     @property
     def get_density(self):

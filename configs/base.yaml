@@ -2,11 +2,10 @@ path: ???
 experiment_name: ""
 resume: ""
 n_iterations: 30000
+with_gui: false
 
 dataset:
   type: colmap
-
-
 
 model:
   density_activation: sigmoid
@@ -25,8 +24,6 @@ model:
 
 checkpoint:
   frequency: 1000
-
-with_gui: false
 
 optimizer:
   type: adam
