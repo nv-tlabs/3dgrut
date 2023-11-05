@@ -47,16 +47,6 @@ def main(args):
     model = MixtureOfGaussians(args)
     model.set_optix_context()
 
-    #TODO: add loading from checkpoint or dataset point cloud
-    ply_path = None
-    try:
-        ply_path = os.path.join(args.path, "point_cloud.ply")
-        model.load_from_pretrained_point_cloud(ply_path)
-    except FileNotFoundError as e:
-        # Since this data set has no colmap data, we start with random points
-        logging.info(f"PLY point cloud not found under path: {ply_path}")
-        model.randomize_point_cloud()
-
     if args.with_gui:
         import polyscope as ps
         import polyscope.imgui as psim
@@ -202,6 +192,13 @@ def main(args):
         ps.set_user_callback(ps_ui_callback)
        
 
+    try:
+        ply_path = os.path.join(args.path, "point_cloud.ply")
+        model.load_from_pretrained_point_cloud(ply_path)
+    except FileNotFoundError as e:
+        # Since this data set has no colmap data, we start with random points
+        logging.info(f"PLY point cloud not found under path: {ply_path}")
+        model.randomize_point_cloud()
 
     if args.resume:
         logging.info(f"Loading a pretrained checkpoint from {args.resume}!")
@@ -212,7 +209,14 @@ def main(args):
         global_step = checkpoint['global_step']
 
     else:
-        model.init_from_pretrained_point_cloud(os.path.join(args.path, "point_cloud.ply"))
+        ply_path = None
+        try:
+            model.init_from_pretrained_point_cloud(os.path.join(args.path, "point_cloud.ply"))
+        except FileNotFoundError as e:
+            # Since this data set has no colmap data, we start with random points
+            logging.info(f"PLY point cloud not found under path: {ply_path}")
+            model.randomize_point_cloud()
+            
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         global_step = 0
 
