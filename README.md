@@ -13,6 +13,11 @@ To set up the environment using conda, you can run the following
 conda create -n 3dgrt python=3.10
 conda activate 3dgrt 
 pip install -r requirements.txt
+
+# Install simple-knn submodule
+pushd thirdparty/simple-knn
+pip install -e .
+popd
 ```
 
 ## Using the GUI

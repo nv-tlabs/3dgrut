@@ -89,12 +89,8 @@ class NeRFDataset(Dataset):
             self.rgbs = torch.FloatTensor(np.stack(self.rgbs)) # (N_images, hw, ?)
         self.poses = torch.FloatTensor(self.poses) # (N_images, 3, 4)
 
-
     def __len__(self):
-        if self.split.startswith('train'):
-            return 1000
         return len(self.poses)
-    
 
     def __getitem__(self, idx):
         if self.split.startswith('train'):
@@ -122,3 +118,11 @@ class NeRFDataset(Dataset):
                 rays_o, rays_d = get_rays(directions, pose)
 
                 return rays_o,rays_d,rgb
+
+    @property
+    def image_h(self):
+        return self.img_wh[0]
+
+    @property
+    def image_w(self):
+        return self.img_wh[1]

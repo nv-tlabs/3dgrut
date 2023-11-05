@@ -1,8 +1,10 @@
+import logging
+import numpy as np
 import torch
 from plyfile import PlyData
-import numpy as np
-from utils import to_torch, get_activation_function
+from utils import to_torch, get_activation_function, inverse_sigmoid
 from libs import optixtracer
+
 
 class MixtureOfGaussians(torch.nn.Module):
     def __init__(self, args):
@@ -66,9 +68,48 @@ class MixtureOfGaussians(torch.nn.Module):
         if set_optimizable_parameters:
             self.set_optimizable_parameters()
 
+    @torch.no_grad()
+    def randomize_point_cloud(self,
+                              num_gsplat: int = 100_000,
+                              max_sh_degree: int = 3,
+                              dtype = torch.float32,
+                              set_optimizable_parameters: bool = True):
+        try:
+            from simple_knn._C import distCUDA2
+        except ImportError as e:
+            logging.error('Cannot import simple_knn. Please check README.md & make sure library is properly installed.')
+            logging.error(e)
+        logging.info(f"Generating random point cloud ({num_gsplat})...")
+
+        # We create random points inside the bounds of the synthetic Blender scenes
+        # xyz in [-1.3, 1.3]
+        fused_point_cloud = torch.rand((num_gsplat, 3), dtype=dtype, device=self.device) * 2.6 - 1.3
+        # sh in [0, 0.0039]
+        fused_color = torch.rand((num_gsplat, 3), dtype=dtype, device=self.device) / 255.0
+
+        features = torch.zeros((num_gsplat, 3, (max_sh_degree + 1) ** 2), dtype=dtype, device=self.device)
+        features[:, :3, 0] = fused_color
+        features[:, 3:, 1:] = 0.0
+        features = features.transpose(1, 2).reshape(num_gsplat, -1).contiguous()
+
+        dist2 = torch.clamp_min(distCUDA2(fused_point_cloud), 0.0000001)
+        scales = torch.log(torch.sqrt(dist2))[..., None].repeat(1, 3)
+        rots = torch.zeros((num_gsplat, 4), device=self.device)
+        rots[:, 0] = 1
+
+        opacities = inverse_sigmoid(0.1 * torch.ones((num_gsplat, 1), dtype=dtype, device=self.device))
+
+        self._positions = torch.nn.Parameter(fused_point_cloud)  # type: ignore
+        self._rotation = torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
+        self._scale = torch.nn.Parameter(scales.to(dtype=dtype, device=self.device))
+        self._density = torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device))
+        self._features = torch.nn.Parameter(features.to(dtype=dtype, device=self.device))
+
+        if set_optimizable_parameters:
+            self.set_optimizable_parameters()
+
     def build_bvh(self):
         optixtracer.build_mog_bvh(self.optix_ctx, self._positions, self.rotation_activation(self._rotation), self.scale_activation(self._scale), 3, True)
-
 
     def init_from_point_cloud(self, pc_path: str):
         pass

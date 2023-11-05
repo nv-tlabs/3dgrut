@@ -1,6 +1,6 @@
 import os
 import sys
-
+import logging
 import torch 
 import argparse
 import torch.utils.data
@@ -12,6 +12,7 @@ import numpy as np
 
 from tqdm import tqdm
 from datasets.colmap_dataset import ColmapDataset
+from datasets.nerf_dataset import NeRFDataset
 from model import MixtureOfGaussians
 from datasets.utils import move_to_gpu
 from loss_utils import ssim
@@ -26,8 +27,14 @@ def main(args):
     val_period = 1
     use_ssim = False
 
-    train_dataset = ColmapDataset(args.path, split='train', sample_full_image=True)
-    val_dataset = ColmapDataset(args.path, split='val', sample_full_image=True)
+    if args.data_type == 'nerf':
+        train_dataset = NeRFDataset(args.path, split='train', sample_full_image=True)
+        val_dataset = NeRFDataset(args.path, split='val', sample_full_image=True)
+    elif args.data_type == 'colmap':
+        train_dataset = ColmapDataset(args.path, split='train', sample_full_image=True)
+        val_dataset = ColmapDataset(args.path, split='val', sample_full_image=True)
+    else:
+        raise ValueError(f'Unsupported dataset type: {args.data_type}. Choose between: ["colmap", "nerf"]. ')
 
     train_dataloader = torch.utils.data.DataLoader(train_dataset, num_workers=8, batch_size=1, shuffle=True)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=8, batch_size=1, shuffle=False)
@@ -37,7 +44,14 @@ def main(args):
     model.set_optix_context()
 
     #TODO: add loading from checkpoint or dataset point cloud
-    model.load_from_pretrained_point_cloud(os.path.join(args.path, "point_cloud.ply"))
+    ply_path = None
+    try:
+        ply_path = os.path.join(args.path, "point_cloud.ply")
+        model.load_from_pretrained_point_cloud(ply_path)
+    except FileNotFoundError as e:
+        # Since this data set has no colmap data, we start with random points
+        logging.info(f"PLY point cloud not found under path: {ply_path}")
+        model.randomize_point_cloud()
 
     if args.with_gui:
         import polyscope as ps
@@ -273,6 +287,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--path", type=str, required=True, help="Update frequency of the BVH structure in iterations - will only be performed if position, scale, rotation are being optimized")
+    parser.add_argument("--data-type", type=str, default='colmap', help="Type of dataset class to load and parse content in --path. One of [colmap, nerf]")
     parser.add_argument("--bvh-update-frequency", type=int, default=50, help="Update frequency of the BVH structure in iterations - will only be performed if position, scale, rotation are being optimized")
     parser.add_argument("--density-activation", type=str, default='sigmoid', help="The name of the activation function that will be used for the density. One of [exp, sigmoid, normalize]")
     parser.add_argument("--scale-activation", type=str, default='exp', help="The name of the activation function that will be used for the scale. One of [exp, sigmoid, normalize]")
