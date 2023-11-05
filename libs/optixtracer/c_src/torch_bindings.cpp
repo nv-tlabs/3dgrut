@@ -48,12 +48,14 @@
 namespace
 {
 
-inline float slabSpacingFromAABB(const OptixAabb& aabb, const uint32_t maxNumSlabs = 16)
+inline float slabSpacingFromAABB(const OptixAabb& aabb, const uint32_t maxNumSlabs = 32)
 {
     const float aabbDiag_x = aabb.maxX - aabb.minX;
     const float aabbDiag_y = aabb.maxY - aabb.minY;
     const float aabbDiag_z = aabb.maxZ - aabb.minZ;
-    return sqrt(aabbDiag_x * aabbDiag_x + aabbDiag_y * aabbDiag_y + aabbDiag_z * aabbDiag_z) / maxNumSlabs;
+    return maxNumSlabs > 0 ?
+               sqrt(aabbDiag_x * aabbDiag_x + aabbDiag_y * aabbDiag_y + aabbDiag_z * aabbDiag_z) / maxNumSlabs :
+               1e9;
 }
 
 } // namespace name
@@ -68,6 +70,14 @@ void computeGaussianEnclosingOctaHedron(uint32_t gNum,
                                         int3* gPrimTri,
                                         OptixAabb* gPrimAABB);
 
+void computeGaussianEnclosingAABB(uint32_t gNum,
+                                        torch::Tensor gPos,
+                                        torch::Tensor gRot,
+                                        torch::Tensor gScl,
+                                        float sigmaSclTh,
+                                        OptixAabb* gPrimAABB,
+                                        OptixAabb* gAABB);
+
 void build_mog_bvh(OptiXStateWrapper& stateWrapper,
                    torch::Tensor mogPos,
                    torch::Tensor mogRot,
@@ -80,6 +90,7 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
     const uint32_t gPrimNumTri = MOGPrimNumTri;
 
     // Create enclosing geometry primitives from 3d gaussians
+    if (!(MOGTracingDefaultPipeline & MOGTracingPipelineIS))
     {
         // TODO : reuse the same buffer if same size + async function
         CUDA_CHECK(cudaFree(reinterpret_cast<void*>(stateWrapper.pState->gPrimVrt)));
@@ -98,6 +109,31 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
         computeGaussianEnclosingOctaHedron(gNum, mogPos, mogRot, mogScl, enclosingSigmaFactorThreshold,
                                            reinterpret_cast<float3*>(stateWrapper.pState->gPrimVrt),
                                            reinterpret_cast<int3*>(stateWrapper.pState->gPrimTri),
+                                           reinterpret_cast<OptixAabb*>(optixAabbPtr));
+
+        CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(&stateWrapper.pState->gasAABB),
+                              reinterpret_cast<void*>(optixAabbPtr), sizeof(OptixAabb), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaFree(reinterpret_cast<void*>(optixAabbPtr)));
+
+        // std::cout << "AABB = [ (" << stateWrapper.pState->gasAABB.minX << " , " << stateWrapper.pState->gasAABB.minY
+                //   << " , " << stateWrapper.pState->gasAABB.minZ << " ) ( " << stateWrapper.pState->gasAABB.maxX << " , "
+                //   << stateWrapper.pState->gasAABB.maxY << " , " << stateWrapper.pState->gasAABB.maxZ << " ) ] "
+                //   << std::endl;
+    }
+    else
+    {
+        // TODO : reuse the same buffer if same size + async function
+        CUDA_CHECK(cudaFree(reinterpret_cast<void*>(stateWrapper.pState->gPrimAABB)));
+        CUDA_CHECK(
+            cudaMalloc(reinterpret_cast<void**>(&stateWrapper.pState->gPrimAABB), sizeof(OptixAabb) * gNum));
+        
+        CUdeviceptr optixAabbPtr = 0;
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&optixAabbPtr), sizeof(OptixAabb)));
+
+        stateWrapper.pState->gPrimNumTri = 0;
+
+        computeGaussianEnclosingAABB(gNum, mogPos, mogRot, mogScl, enclosingSigmaFactorThreshold,
+                                           reinterpret_cast<OptixAabb*>(stateWrapper.pState->gPrimAABB),
                                            reinterpret_cast<OptixAabb*>(optixAabbPtr));
 
         CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(&stateWrapper.pState->gasAABB),
@@ -134,27 +170,40 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_sbt_index), sizeof(sbt_index)));
         CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_sbt_index), sbt_index, sizeof(sbt_index), cudaMemcpyHostToDevice));
 
+        OptixBuildInput prim_input = {};
 
-        // Our build input is a simple list of non-indexed triangle vertices
-        const uint32_t triangle_input_flags[1] = { OPTIX_GEOMETRY_FLAG_NONE };
-        OptixBuildInput triangle_input = {};
-        triangle_input.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
-        triangle_input.triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
-        triangle_input.triangleArray.numVertices = gPrimNumVert * gNum;
-        triangle_input.triangleArray.vertexBuffers = &stateWrapper.pState->gPrimVrt;
-        triangle_input.triangleArray.indexFormat = OPTIX_INDICES_FORMAT_UNSIGNED_INT3;
-        triangle_input.triangleArray.numIndexTriplets = gPrimNumTri * gNum;
-        triangle_input.triangleArray.indexBuffer = stateWrapper.pState->gPrimTri;
-        triangle_input.triangleArray.flags = triangle_input_flags;
-        triangle_input.triangleArray.numSbtRecords = 1;
-        // triangle_input.triangleArray.numSbtRecords = 2;
-        // triangle_input.triangleArray.sbtIndexOffsetBuffer        = d_sbt_index;
-        // triangle_input.triangleArray.sbtIndexOffsetSizeInBytes   = sizeof( uint32_t );
-        // triangle_input.triangleArray.sbtIndexOffsetStrideInBytes = sizeof( uint32_t );
-
+        if (!(MOGTracingDefaultPipeline & MOGTracingPipelineIS))
+        {
+            // Our build input is a simple list of non-indexed triangle vertices
+            const uint32_t prim_input_flags[1] = { OPTIX_GEOMETRY_FLAG_NONE };
+            prim_input.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
+            prim_input.triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
+            prim_input.triangleArray.numVertices = gPrimNumVert * gNum;
+            prim_input.triangleArray.vertexBuffers = &stateWrapper.pState->gPrimVrt;
+            prim_input.triangleArray.indexFormat = OPTIX_INDICES_FORMAT_UNSIGNED_INT3;
+            prim_input.triangleArray.numIndexTriplets = gPrimNumTri * gNum;
+            prim_input.triangleArray.indexBuffer = stateWrapper.pState->gPrimTri;
+            prim_input.triangleArray.flags = prim_input_flags;
+            prim_input.triangleArray.numSbtRecords = 1;
+            // prim_input.triangleArray.numSbtRecords = 2;
+            // prim_input.triangleArray.sbtIndexOffsetBuffer        = d_sbt_index;
+            // prim_input.triangleArray.sbtIndexOffsetSizeInBytes   = sizeof( uint32_t );
+            // prim_input.triangleArray.sbtIndexOffsetStrideInBytes = sizeof( uint32_t );
+        }
+        else
+        {
+            // Our build input is a simple list of non-indexed triangle vertices
+            const uint32_t prim_input_flags[1] = { OPTIX_GEOMETRY_FLAG_NONE };
+            prim_input.type = OPTIX_BUILD_INPUT_TYPE_CUSTOM_PRIMITIVES;
+            prim_input.customPrimitiveArray.numPrimitives = gNum;
+            prim_input.customPrimitiveArray.aabbBuffers = &stateWrapper.pState->gPrimVrt;
+            prim_input.customPrimitiveArray.strideInBytes = 0;
+            prim_input.customPrimitiveArray.flags = prim_input_flags;
+            prim_input.customPrimitiveArray.numSbtRecords = 1;
+        }
 
         OptixAccelBufferSizes gas_buffer_sizes;
-        OPTIX_CHECK(optixAccelComputeMemoryUsage(stateWrapper.pState->context, &accel_options, &triangle_input,
+        OPTIX_CHECK(optixAccelComputeMemoryUsage(stateWrapper.pState->context, &accel_options, &prim_input,
                                                  1, // Number of build inputs
                                                  &gas_buffer_sizes));
         CUdeviceptr d_temp_buffer_gas;
@@ -232,6 +281,12 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
         OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingCH, cudaStream, paramsDevice,
                                 sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingCH, rayOri.size(2),
                                 rayOri.size(1), rayOri.size(0)));
+    }
+    else if (MOGTracingDefaultPipeline == MOGTracingPipelineIS)
+    {
+        OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingIS, cudaStream, paramsDevice,
+                                sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingIS, rayRad.size(2),
+                                rayRad.size(1), rayRad.size(0)));
     }
     else
     {

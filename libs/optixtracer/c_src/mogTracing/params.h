@@ -22,7 +22,8 @@ enum MOGTracingPipeline
 {
     MOGTracingPipelineCH = 0,
     MOGTracingPipelineAH = 1,
-    MOGTracingDefaultPipeline = MOGTracingPipelineAH
+    MOGTracingPipelineIS = 1,
+    MOGTracingDefaultPipeline = MOGTracingPipelineIS
 };
 
 struct MoGTracingParams

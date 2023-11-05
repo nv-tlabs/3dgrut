@@ -21,7 +21,8 @@ struct OptiXState
     uint32_t gPrimNumTri; ///< number of triangles per gaussian primitive
     CUdeviceptr gPrimVrt; ///< buffer containing the vertices of the gaussian primitive
     CUdeviceptr gPrimTri; ///< buffer containing the vertices index of the gaussian primitive triangles
-    
+    CUdeviceptr gPrimAABB; ///< buffer containing the gaussians AABB to be usedwith custom primitives
+
     // closest hit forward pipeline : the scene is iteratively traced for a closest hit until a density threshold has been reached
     OptixPipeline pipelineMoGTracingCH;
     OptixShaderBindingTable sbtMoGTracingCH;
@@ -36,6 +37,12 @@ struct OptiXState
     OptixPipeline pipelineMoGTracingAHBwd;
     OptixShaderBindingTable sbtMoGTracingAHBwd;
     OptixModule moduleMoGTracingAHBwd;
+
+    // any hit forward pipeline : the scene is iteratively traced for any hit on ray stabs. The candidate hits are sorted and accumulated in the raygen shader.
+    OptixPipeline pipelineMoGTracingIS;
+    OptixShaderBindingTable sbtMoGTracingIS;
+    OptixModule moduleMoGTracingIS;
+
 };
 
 class OptiXStateWrapper
