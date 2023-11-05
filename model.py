@@ -135,6 +135,20 @@ class MixtureOfGaussians(torch.nn.Module):
         return self.density_activation(self._density)
     
 
+    def get_model_parameters(self) -> dict:
+        return {
+            "positions": self._positions,
+            "rotation": self._rotation,
+            "scale": self._scale,
+            "density": self._density,
+            "features": self._features,
+            # Add other attributes that we need at restore
+            "active_features": self.n_active_features,
+            "args": self.args
+        }
+
+
+
     def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
         pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(self.optix_ctx, rays_o, rays_d, self._positions, 
             self.rotation_activation(self._rotation), self.scale_activation(self._scale), self.density_activation(self._density), self._features)

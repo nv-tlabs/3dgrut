@@ -3,6 +3,7 @@ import sys
 import logging
 import torch 
 import argparse
+import logging
 import torch.utils.data
 
 from torchmetrics import PeakSignalNoiseRatio
@@ -20,6 +21,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.getcwd())))
 
 
 DEFAULT_DEVICE = torch.device('cuda')
+
+logging.addLevelName( logging.WARNING, "\033[1;31m%s\033[1;0m" % logging.getLevelName(logging.WARNING))
+logging.addLevelName( logging.ERROR, "\033[1;41m%s\033[1;0m" % logging.getLevelName(logging.ERROR))
 
 def main(args):
     # Run the training process
@@ -199,23 +203,36 @@ def main(args):
        
 
 
-    # Initialize the optimizer and pass it the parameters
+    #TODO: add loading from checkpoint or dataset point cloud
+    if args.resume
+
+    else:
+        model.load_from_pretrained_point_cloud(os.path.join(args.path, "point_cloud.ply"))
+        
 
     # TODO: add different learning rate or other setting for each parameter
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     n_epochs = int(n_iterations/train_dataset.__len__())
-    iteration = 0
+    global_step = 0
 
     # Criterions that we log during training
     criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda")}
 
-    writer = SummaryWriter()
-    for i in range(n_epochs):
-        if i % val_period == 0:
+    # Initialize the tensorboard writer
+    if args.experiment_name and os.path.exists(f'runs/{args.experiment_name}'):
+        logging.warning("The selected experiment name already exists and the checkpoints could be overwritten!")
+
+    writer = SummaryWriter(log_dir=f'runs/{args.experiment_name}' if args.experiment_name else None)
+
+
+    for epoch_idx in range(n_epochs):
+        if epoch_idx % val_period == 0:
             val_iteration = 0
             with tqdm(val_dataloader) as pbar:
                 pbar.set_description("Validation:" )
+                val_psnr = []
+                val_loss = []
                 for batch in pbar:
                     with torch.no_grad():
                         rays_ori, rays_dir, rgb_gt = move_to_gpu(batch)
@@ -227,18 +244,18 @@ def main(args):
                         outputs = model(rays_ori, rays_dir)
 
                         # Compute the loss
-                        loss = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
-                        psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
-                        pbar.set_postfix({'iteration': iteration, 'psnr': psnr, 'loss': loss.item()})
+                        val_loss.append(torch.abs(outputs['pred_rgb'] - rgb_gt).mean().item())
+                        val_psnr.append(criterions["psnr"](outputs['pred_rgb'], rgb_gt).item())
 
-                        writer.add_scalar("psnr/val", psnr, i)
-                        writer.add_scalar("loss_l1/val", loss.item(), i)
+                        pbar.set_postfix({'iteration': val_iteration, 'psnr': val_psnr[-1], 'loss': val_loss[-1]})
 
                         if val_iteration == 0:
-                            writer.add_image('image/val', outputs['pred_rgb'][-1].clip(0,1.0), iteration, dataformats='HWC')
-                            writer.add_image('image/gt', rgb_gt[-1].clip(0,1.0), iteration, dataformats='HWC')
+                            writer.add_image('image/val', outputs['pred_rgb'][-1].clip(0,1.0), global_step, dataformats='HWC')
+                            writer.add_image('image/gt', rgb_gt[-1].clip(0,1.0), global_step, dataformats='HWC')
                         val_iteration += 1
 
+                writer.add_scalar("psnr/val", np.mean(val_psnr), global_step)
+                writer.add_scalar("loss_l1/val", np.mean(val_loss), global_step)
 
         with tqdm(train_dataloader) as pbar:
             for batch in pbar:
@@ -253,11 +270,11 @@ def main(args):
                 
                 # Compute the loss
                 loss = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
-                writer.add_scalar("Loss_l1/train", loss.item(), iteration)
+                writer.add_scalar("Loss_l1/train", loss.item(), global_step)
                 if use_ssim:
                     loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
                     loss += loss_ssim
-                    writer.add_scalar("Loss_ssim/train", loss_ssim.item(), iteration)
+                    writer.add_scalar("Loss_ssim/train", loss_ssim.item(), global_step)
 
                 # backpropagate the gradients and update the parameters
                 loss.backward()
@@ -265,13 +282,19 @@ def main(args):
                 optimizer.zero_grad()
 
                 psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
-                iteration += 1
-                pbar.set_postfix({'iteration': iteration, 'psnr': psnr, 'loss': loss.item()})
-                writer.add_scalar("psnr/train", psnr, iteration)
+                global_step += 1
+                pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
+                writer.add_scalar("psnr/train", psnr, global_step)
 
                 # Update the BVH if required
-                if iteration > 0 and args.bvh_update_frequency > 0:
+                if global_step > 0 and args.bvh_update_frequency > 0 and global_step % args.bvh_update_frequency:
                     model.build_bvh()
+
+                # Update the BVH if required
+                if global_step > 0 and global_step % args.checkpoint_frequency == 0:
+                    parameters = model.get_model_parameters()
+                    parameters |= {'optimizer': optimizer.state_dict(), "global_step": global_step, "epoch": epoch_idx}
+                    torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
 
                 if args.with_gui:
                     if model.get_position.requires_grad:
@@ -288,6 +311,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--path", type=str, required=True, help="Update frequency of the BVH structure in iterations - will only be performed if position, scale, rotation are being optimized")
     parser.add_argument("--data-type", type=str, default='colmap', help="Type of dataset class to load and parse content in --path. One of [colmap, nerf]")
+    parser.add_argument("--experiment-name", type=str, default="", help="If provided, the tensorboard logs and checkpoints will be stored in this folder name under ./runs/. If not, a name will be a defined automatically")
+    parser.add_argument("--resume", type=str, default="", help="If the checkpoint path is provided, it will be used to initialize the model and continue training.")
     parser.add_argument("--bvh-update-frequency", type=int, default=50, help="Update frequency of the BVH structure in iterations - will only be performed if position, scale, rotation are being optimized")
     parser.add_argument("--density-activation", type=str, default='sigmoid', help="The name of the activation function that will be used for the density. One of [exp, sigmoid, normalize]")
     parser.add_argument("--scale-activation", type=str, default='exp', help="The name of the activation function that will be used for the scale. One of [exp, sigmoid, normalize]")
@@ -296,6 +321,7 @@ if __name__ == "__main__":
     parser.add_argument("--optimize-rotation", action='store_true', help="Set true if the rotation should be optimized as well")
     parser.add_argument("--optimize-scale", action='store_true', help="Set true if the scale should be optimized as well")
     parser.add_argument("--optimize-position", action='store_true', help="Set true if the position should be optimized as well")
+    parser.add_argument("--checkpoint-frequency", type=int, default=1000, help="Specifies the period in which the checkpoints will be stored in terms of number of iterations")
     parser.add_argument("--with-gui", action='store_true', help="Enable a polyscope GUI")
     args = parser.parse_args()
 
