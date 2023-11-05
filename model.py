@@ -39,13 +39,18 @@ class MixtureOfGaussians(torch.nn.Module):
         if self.args.optimize_position:
             self._positions.requires_grad = True
 
-    def store_checkpoint(self, checkpoint_path: str):
-        pass
 
-    def load_from_checkpoint(self, checkpoint_path: str):
-        pass
+    def init_from_checkpoint(self, checkpoint: dict):
+            self._positions = checkpoint["positions"]
+            self._rotation = checkpoint["rotation"]
+            self._scale = checkpoint["scale"]
+            self._density = checkpoint["density"]
+            self._features = checkpoint["features"]
+            self.n_active_features = checkpoint["active_features"]
+            self.set_optimizable_parameters()
 
-    def load_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
+
+    def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
         data = PlyData.read(pc_path)
         num_gsplat = len(data['vertex'])
         self._positions = torch.nn.Parameter(to_torch(np.transpose(np.stack((data['vertex']['x'], data['vertex']['y'], data['vertex']['z']), dtype=np.float32)), device=self.device))  # type: ignore
@@ -134,6 +139,20 @@ class MixtureOfGaussians(torch.nn.Module):
     def get_density(self):
         return self.density_activation(self._density)
     
+
+    def get_model_parameters(self) -> dict:
+        return {
+            "positions": self._positions,
+            "rotation": self._rotation,
+            "scale": self._scale,
+            "density": self._density,
+            "features": self._features,
+            # Add other attributes that we need at restore
+            "active_features": self.n_active_features,
+            "args": self.args
+        }
+
+
 
     def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
         pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(self.optix_ctx, rays_o, rays_d, self._positions, 
