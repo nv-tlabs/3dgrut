@@ -11,16 +11,17 @@ class MixtureOfGaussians(torch.nn.Module):
         super().__init__()
 
         self.conf = conf
-        self._positions = torch.empty([0,3])  # Positions of the 3D Gaussians (x, y, z) [n_gaussians, 3]
-        self._rotation = torch.empty([0,4])   # Rotation of each Gaussian represented as a unit quaternion [n_gaussians, 4]
-        self._scale  = torch.empty([0,3])     # Anisotropic scale of each Gaussian [n_gaussians, 3]
-        self._density = torch.empty([0,1])    # Density of each Gaussian [n_gaussians, 1]
-        self._features  = torch.empty([0,1])  # Feature vector associated to each Gaussian (can be RGB, SH or a latent code) [n_gaussians, n_features]
+        self.positions = torch.empty([0,3])  # Positions of the 3D Gaussians (x, y, z) [n_gaussians, 3]
+        self.rotation = torch.empty([0,4])   # Rotation of each Gaussian represented as a unit quaternion [n_gaussians, 4]
+        self.scale  = torch.empty([0,3])     # Anisotropic scale of each Gaussian [n_gaussians, 3]
+        self.density = torch.empty([0,1])    # Density of each Gaussian [n_gaussians, 1]
+        self.features  = torch.empty([0,1])  # Feature vector associated to each Gaussian (can be RGB, SH or a latent code) [n_gaussians, n_features]
         self.n_active_features = 0
         self.device = 'cuda'
+        self.optimizer = None
         self.optix_ctx = None
-        self.density_activation = get_activation_function(self.conf.density_activation)
-        self.scale_activation =  get_activation_function(self.conf.scale_activation)
+        self.density_activation = get_activation_function(self.conf.model.density_activation)
+        self.scale_activation =  get_activation_function(self.conf.model.scale_activation)
         self.rotation_activation =   get_activation_function("normalize") # The default value of the dim parameter is 1
 
     def set_optix_context(self):
@@ -28,36 +29,56 @@ class MixtureOfGaussians(torch.nn.Module):
         self.optix_ctx = optixtracer.OptiXContext()
 
     def set_optimizable_parameters(self):
-        if self.conf.optimize_density:
-            self._density.requires_grad = True
-        if self.conf.optimize_features:
-            self._features.requires_grad = True
-        if self.conf.optimize_rotation:
-            self._rotation.requires_grad = True
-        if self.conf.optimize_scale:
-            self._scale.requires_grad = True
-        if self.conf.optimize_position:
-            self._positions.requires_grad = True
-
+        if not self.conf.model.optimize_density:
+            self.density.requires_grad = False
+        if not self.conf.model.optimize_features:
+            self.features.requires_grad = False
+        if not self.conf.model.optimize_rotation:
+            self.rotation.requires_grad = False
+        if not self.conf.model.optimize_scale:
+            self.scale.requires_grad = False
+        if not self.conf.model.optimize_position:
+            self.positions.requires_grad = False
 
     def init_from_checkpoint(self, checkpoint: dict):
-            self._positions = checkpoint["positions"]
-            self._rotation = checkpoint["rotation"]
-            self._scale = checkpoint["scale"]
-            self._density = checkpoint["density"]
-            self._features = checkpoint["features"]
-            self.n_active_features = checkpoint["active_features"]
-            self.set_optimizable_parameters()
+        self.positions = checkpoint["positions"]
+        self.rotation = checkpoint["rotation"]
+        self.scale = checkpoint["scale"]
+        self.density = checkpoint["density"]
+        self.features = checkpoint["features"]
+        self.n_active_features = checkpoint["active_features"]
+        self.set_optimizable_parameters()
+        self.setup_optimizer(state_dict=checkpoint['optimizer'])
+            
+    def setup_optimizer(self, state_dict=None):
+        params = []
+        for name, args in self.conf.optimizer.params.items():
+            module =  getattr(self, name)
+            if isinstance(module, torch.nn.Module):
+                module_parameters = filter(lambda p: p.requires_grad, module.parameters())
+                n_params = sum([np.prod(p.size(), dtype=int) for p in module_parameters])
 
+                if n_params > 0:
+                    params.append({"params": module.parameters(), "name": name, **args})
+
+            elif isinstance(module, torch.nn.Parameter):
+                if module.requires_grad:
+                    params.append({"params": [module], "name": name, **args})
+
+        self.optimizer = torch.optim.Adam(params, lr=self.conf.optimizer.lr, eps=self.conf.optimizer.eps)
+
+        # When loading from the checkpoint also load the state dict
+        if state_dict is not None:
+            self.optimizer.load_state_dict(state_dict)
 
     def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
         data = PlyData.read(pc_path)
         num_gsplat = len(data['vertex'])
-        self._positions = torch.nn.Parameter(to_torch(np.transpose(np.stack((data['vertex']['x'], data['vertex']['y'], data['vertex']['z']), dtype=np.float32)), device=self.device))  # type: ignore
-        self._rotation = torch.nn.Parameter(to_torch(np.transpose(np.stack((data['vertex']['rot_0'], data['vertex']['rot_1'], data['vertex']['rot_2'], data['vertex']['rot_3']), dtype=np.float32)), device=self.device))  # type: ignore
-        self._scale = torch.nn.Parameter(to_torch(np.transpose(np.stack((data['vertex']['scale_0'], data['vertex']['scale_1'], data['vertex']['scale_2']), dtype=np.float32)), device=self.device))  # type: ignore
-        self._density = torch.nn.Parameter(to_torch(data['vertex']['opacity'].astype(np.float32).reshape(num_gsplat, 1), device=self.device))
-        self._features = torch.nn.Parameter(to_torch(np.transpose(np.stack((
+        self.positions = torch.nn.Parameter(to_torch(np.transpose(np.stack((data['vertex']['x'], data['vertex']['y'], data['vertex']['z']), dtype=np.float32)), device=self.device))  # type: ignore
+        self.rotation = torch.nn.Parameter(to_torch(np.transpose(np.stack((data['vertex']['rot_0'], data['vertex']['rot_1'], data['vertex']['rot_2'], data['vertex']['rot_3']), dtype=np.float32)), device=self.device))  # type: ignore
+        self.scale = torch.nn.Parameter(to_torch(np.transpose(np.stack((data['vertex']['scale_0'], data['vertex']['scale_1'], data['vertex']['scale_2']), dtype=np.float32)), device=self.device))  # type: ignore
+        self.density = torch.nn.Parameter(to_torch(data['vertex']['opacity'].astype(np.float32).reshape(num_gsplat, 1), device=self.device))
+        self.features = torch.nn.Parameter(to_torch(np.transpose(np.stack((
                             data['vertex']['f_dc_0'], data['vertex']['f_dc_1'], data['vertex']['f_dc_2'],
                             data['vertex']['f_rest_0'],data['vertex']['f_rest_1'],data['vertex']['f_rest_2'],data['vertex']['f_rest_3'],data['vertex']['f_rest_4'],
                             data['vertex']['f_rest_5'],data['vertex']['f_rest_6'],data['vertex']['f_rest_7'],data['vertex']['f_rest_8'],data['vertex']['f_rest_9'],
@@ -104,11 +125,11 @@ class MixtureOfGaussians(torch.nn.Module):
 
         opacities = inverse_sigmoid(0.1 * torch.ones((num_gsplat, 1), dtype=dtype, device=self.device))
 
-        self._positions = torch.nn.Parameter(fused_point_cloud)  # type: ignore
-        self._rotation = torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
-        self._scale = torch.nn.Parameter(scales.to(dtype=dtype, device=self.device))
-        self._density = torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device))
-        self._features = torch.nn.Parameter(features.to(dtype=dtype, device=self.device))
+        self.positions = torch.nn.Parameter(fused_point_cloud)  # type: ignore
+        self.rotation = torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
+        self.scale = torch.nn.Parameter(scales.to(dtype=dtype, device=self.device))
+        self.density = torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device))
+        self.features = torch.nn.Parameter(features.to(dtype=dtype, device=self.device))
 
         if set_optimizable_parameters:
             self.set_optimizable_parameters()
@@ -119,17 +140,42 @@ class MixtureOfGaussians(torch.nn.Module):
     def init_from_point_cloud(self, pc_path: str):
         pass
 
+    def reset_density(self):
+        updated_densities = inverse_sigmoid(torch.min(self.get_density, torch.ones_like(self.density)*0.01))
+        optimizable_tensors = self.replace_tensor_to_optimizer(updated_densities, "density")
+        self._density = optimizable_tensors["density"]
+
+
+    def replace_tensor_to_optimizer(self, tensor, name: str):
+        assert self.optimizer is not None, "Optimizer need to be initialized when storing the checkpoint"
+        optimizable_tensors = {}
+
+        for group in self.optimizer.param_groups:
+            if group["name"] == name:
+                stored_state = self.optimizer.state.get(group['params'][0], None)
+                stored_state["exp_avg"] = torch.zeros_like(tensor)
+                stored_state["exp_avg_sq"] = torch.zeros_like(tensor)
+
+                del self.optimizer.state[group['params'][0]]
+                group["params"][0] = torch.nn.Parameter(tensor.requires_grad_(True))
+                self.optimizer.state[group['params'][0]] = stored_state
+
+                optimizable_tensors[group["name"]] = group["params"][0]
+        return optimizable_tensors
+
+
+
     @property
     def get_scale(self):
-        return self.scale_activation(self._scale)
+        return self.scale_activation(self.scale)
     
     @property
     def get_rotation(self):
-        return self.rotation_activation(self._rotation)
+        return self.rotation_activation(self.rotation)
     
     @property
     def get_position(self):
-        return self._positions
+        return self.positions
     
     @property
     def get_features(self):
@@ -137,25 +183,28 @@ class MixtureOfGaussians(torch.nn.Module):
     
     @property
     def get_density(self):
-        return self.density_activation(self._density)
+        return self.density_activation(self.density)
     
 
     def get_model_parameters(self) -> dict:
+        assert self.optimizer is not None, "Optimizer need to be initialized when storing the checkpoint"
+
         return {
-            "positions": self._positions,
-            "rotation": self._rotation,
-            "scale": self._scale,
-            "density": self._density,
-            "features": self._features,
+            "positions": self.positions,
+            "rotation": self.rotation,
+            "scale": self.scale,
+            "density": self.density,
+            "features": self.features,
             # Add other attributes that we need at restore
-            "active_features": self.n_active_features
+            "active_features": self.n_active_features,
+            # Add optimizer state dict
+            "optimizer": self.optimizer.state_dict(),
+            "config": self.conf
         }
 
-
-
     def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
-        pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(self.optix_ctx, rays_o, rays_d, self._positions, 
-            self.rotation_activation(self._rotation), self.scale_activation(self._scale), self.density_activation(self._density), self._features)
+        pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(self.optix_ctx, rays_o, rays_d, self.positions, 
+            self.rotation_activation(self.rotation), self.scale_activation(self.scale), self.density_activation(self.density), self.features)
 
         return {
             'pred_rgb': pred_rgb,

@@ -46,7 +46,7 @@ def main(conf):
     val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=8, batch_size=1, shuffle=False)
 
     # Initialize the model and the optix context
-    model = MixtureOfGaussians(conf.model)
+    model = MixtureOfGaussians(conf)
     model.set_optix_context()
 
     if conf.with_gui:
@@ -192,26 +192,23 @@ def main(conf):
             update_render_view_viz()
 
         ps.set_user_callback(ps_ui_callback)
-       
 
     if conf.resume:
         logging.info(f"Loading a pretrained checkpoint from {conf.resume}!")
         checkpoint = torch.load(conf.resume)
         model.init_from_checkpoint(checkpoint)
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-        optimizer.load_state_dict(checkpoint['optimizer'])
         global_step = checkpoint['global_step']
 
     else:
         ply_path = None
         try:
-            model.init_from_pretrained_point_cloud(os.path.join(conf.path, "point_cloud.ply"))
+            ply_path = os.path.join(conf.path, "point_cloud.ply")
+            model.init_from_pretrained_point_cloud(ply_path)
         except FileNotFoundError as e:
             # Since this data set has no colmap data, we start with random points
             logging.info(f"PLY point cloud not found under path: {ply_path}")
-            model.randomize_point_cloud()
-            
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+            model.randomize_point_cloud() 
+        model.setup_optimizer()
         global_step = 0
 
     n_epochs = int(n_iterations/train_dataset.__len__())
@@ -226,7 +223,8 @@ def main(conf):
 
     writer = SummaryWriter(log_dir=f'runs/{conf.experiment_name}' if conf.experiment_name else None)
 
-
+    assert model.optimizer is not None, "Optimizer needs to be initialized before the training can start!"
+    
     for epoch_idx in range(n_epochs):
         if epoch_idx % val_period == 0:
             val_iteration = 0
@@ -279,8 +277,8 @@ def main(conf):
 
                 # backpropagate the gradients and update the parameters
                 loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
+                model.optimizer.step()
+                model.optimizer.zero_grad()
 
                 psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
                 global_step += 1
@@ -294,7 +292,7 @@ def main(conf):
                 # Save the checkpoint
                 if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
                     parameters = model.get_model_parameters()
-                    parameters |= {'optimizer': optimizer.state_dict(), "global_step": global_step, "epoch": epoch_idx, "config": conf}
+                    parameters |= {"global_step": global_step, "epoch": epoch_idx}
                     torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
 
                 if conf.with_gui:

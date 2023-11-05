@@ -11,19 +11,36 @@ dataset:
 model:
   density_activation: sigmoid
   scale_activation: exp
+  optimize_density: true
+  optimize_features: true
   optimize_position: false
-  optimize_density: false
-  optimize_features: false
   optimize_rotation: false
   optimize_scale: false
   bvh_update_frequency: 1
-
   densify_prune:
-    frequency: 
-    start_iteration: 0
-    end_iteration: 20000
+    frequency: 100
+    start_iteration: 500
+    end_iteration: 15000
+    grad_threshold: 0.0002
 
 checkpoint:
   frequency: 1000
 
 with_gui: false
+
+optimizer:
+  type: adam
+  args:
+  lr: 0.01
+  eps: 1.e-15
+  params:
+    positions:
+        lr: 0.01
+    density:
+        lr: 0.01
+    features:
+        lr: 0.01
+    rotation:
+        lr: 0.01
+    scale:
+        lr: 0.01
