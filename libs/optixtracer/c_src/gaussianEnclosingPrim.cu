@@ -21,7 +21,7 @@ namespace
 constexpr float oneOverCosQuarterPi = 1.41421356237; // 1 / cos(pi/4)
 constexpr uint32_t octaHedronNumVrt = 6;
 constexpr uint32_t octaHedronNumTri = 8;
-constexpr uint32_t aabbNumVrt = 6;
+constexpr uint32_t aabbNumVrt = 8;
 
 template <typename scalar_t>
 __global__ void computeGaussianEnclosingOctaHedronKernel(
@@ -99,9 +99,14 @@ __global__ void computeGaussianEnclosingAABBKernel(
         const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
         const float3 aabbVrt[aabbNumVrt] = {
-            make_float3(0, 0, -1), make_float3(0, 1, 0),
-            make_float3(-1, 0, 0), make_float3(0, -1, 0),
-            make_float3(1, 0, 0),  make_float3(0, 0, 1)
+            make_float3(-1, -1, -1), 
+            make_float3(-1, -1,  1),
+            make_float3(-1,  1, -1), 
+            make_float3(-1,  1,  1),
+            make_float3( 1, -1, -1), 
+            make_float3( 1, -1,  1),
+            make_float3( 1,  1, -1), 
+            make_float3( 1,  1,  1)
         };
 
         OptixAabb& aabb = gPrimAABB[idx];

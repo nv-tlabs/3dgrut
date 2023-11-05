@@ -35,4 +35,7 @@ struct MoGTracingBwdParams
     OptixAabb aabb;
     float minTransmittance;
     float slabSpacing;
+
+    float hitMinGaussianResponse;
+    float3 padd;
 };
