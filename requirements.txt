@@ -8,3 +8,8 @@ tensorboard
 tqdm
 fire
 toml
+# NeRF Dataset requirements
+kornia
+opencv-python
+einops
+imageio

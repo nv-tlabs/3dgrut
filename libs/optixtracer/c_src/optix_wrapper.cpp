@@ -14,6 +14,7 @@
 #include <torch/extension.h>
 #endif
 
+#include <fstream>
 #include <algorithm>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
