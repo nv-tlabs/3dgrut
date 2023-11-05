@@ -8,6 +8,7 @@ tensorboard
 tqdm
 fire
 toml
+omegaconf
 # NeRF Dataset requirements
 kornia
 opencv-python

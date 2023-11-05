@@ -12,6 +12,8 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 
 from tqdm import tqdm
+from omegaconf import OmegaConf
+
 from datasets.colmap_dataset import ColmapDataset
 from datasets.nerf_dataset import NeRFDataset
 from model import MixtureOfGaussians
@@ -25,29 +27,29 @@ DEFAULT_DEVICE = torch.device('cuda')
 logging.addLevelName( logging.WARNING, "\033[1;31m%s\033[1;0m" % logging.getLevelName(logging.WARNING))
 logging.addLevelName( logging.ERROR, "\033[1;41m%s\033[1;0m" % logging.getLevelName(logging.ERROR))
 
-def main(args):
+def main(conf):
     # Run the training process
     n_iterations = 10e4
     val_period = 1
     use_ssim = False
 
-    if args.data_type == 'nerf':
-        train_dataset = NeRFDataset(args.path, split='train', sample_full_image=True)
-        val_dataset = NeRFDataset(args.path, split='val', sample_full_image=True)
-    elif args.data_type == 'colmap':
-        train_dataset = ColmapDataset(args.path, split='train', sample_full_image=True)
-        val_dataset = ColmapDataset(args.path, split='val', sample_full_image=True)
+    if conf.dataset.type == 'nerf':
+        train_dataset = NeRFDataset(conf.path, split='train', sample_full_image=True)
+        val_dataset = NeRFDataset(conf.path, split='val', sample_full_image=True)
+    elif conf.dataset.type == 'colmap':
+        train_dataset = ColmapDataset(conf.path, split='train', sample_full_image=True)
+        val_dataset = ColmapDataset(conf.path, split='val', sample_full_image=True)
     else:
-        raise ValueError(f'Unsupported dataset type: {args.data_type}. Choose between: ["colmap", "nerf"]. ')
+        raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf"]. ')
 
     train_dataloader = torch.utils.data.DataLoader(train_dataset, num_workers=8, batch_size=1, shuffle=True)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=8, batch_size=1, shuffle=False)
 
     # Initialize the model and the optix context
-    model = MixtureOfGaussians(args)
+    model = MixtureOfGaussians(conf.model)
     model.set_optix_context()
 
-    if args.with_gui:
+    if conf.with_gui:
         import polyscope as ps
         import polyscope.imgui as psim
 
@@ -192,17 +194,9 @@ def main(args):
         ps.set_user_callback(ps_ui_callback)
        
 
-    try:
-        ply_path = os.path.join(args.path, "point_cloud.ply")
-        model.load_from_pretrained_point_cloud(ply_path)
-    except FileNotFoundError as e:
-        # Since this data set has no colmap data, we start with random points
-        logging.info(f"PLY point cloud not found under path: {ply_path}")
-        model.randomize_point_cloud()
-
-    if args.resume:
-        logging.info(f"Loading a pretrained checkpoint from {args.resume}!")
-        checkpoint = torch.load(args.resume)
+    if conf.resume:
+        logging.info(f"Loading a pretrained checkpoint from {conf.resume}!")
+        checkpoint = torch.load(conf.resume)
         model.init_from_checkpoint(checkpoint)
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         optimizer.load_state_dict(checkpoint['optimizer'])
@@ -211,7 +205,7 @@ def main(args):
     else:
         ply_path = None
         try:
-            model.init_from_pretrained_point_cloud(os.path.join(args.path, "point_cloud.ply"))
+            model.init_from_pretrained_point_cloud(os.path.join(conf.path, "point_cloud.ply"))
         except FileNotFoundError as e:
             # Since this data set has no colmap data, we start with random points
             logging.info(f"PLY point cloud not found under path: {ply_path}")
@@ -227,10 +221,10 @@ def main(args):
     criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda")}
 
     # Initialize the tensorboard writer
-    if args.experiment_name and os.path.exists(f'runs/{args.experiment_name}'):
+    if conf.experiment_name and os.path.exists(f'runs/{conf.experiment_name}'):
         logging.warning("The selected experiment name already exists and the checkpoints could be overwritten!")
 
-    writer = SummaryWriter(log_dir=f'runs/{args.experiment_name}' if args.experiment_name else None)
+    writer = SummaryWriter(log_dir=f'runs/{conf.experiment_name}' if conf.experiment_name else None)
 
 
     for epoch_idx in range(n_epochs):
@@ -294,16 +288,16 @@ def main(args):
                 writer.add_scalar("psnr/train", psnr, global_step)
 
                 # Update the BVH if required
-                if global_step > 0 and args.bvh_update_frequency > 0 and global_step % args.bvh_update_frequency:
+                if global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency:
                     model.build_bvh()
 
-                # Update the BVH if required
-                if global_step > 0 and global_step % args.checkpoint_frequency == 0:
+                # Save the checkpoint
+                if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
                     parameters = model.get_model_parameters()
-                    parameters |= {'optimizer': optimizer.state_dict(), "global_step": global_step, "epoch": epoch_idx}
+                    parameters |= {'optimizer': optimizer.state_dict(), "global_step": global_step, "epoch": epoch_idx, "config": conf}
                     torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
 
-                if args.with_gui:
+                if conf.with_gui:
                     if model.get_position.requires_grad:
                         update_cloud_viz()
         
@@ -316,20 +310,11 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--path", type=str, required=True, help="Update frequency of the BVH structure in iterations - will only be performed if position, scale, rotation are being optimized")
-    parser.add_argument("--data-type", type=str, default='colmap', help="Type of dataset class to load and parse content in --path. One of [colmap, nerf]")
-    parser.add_argument("--experiment-name", type=str, default="", help="If provided, the tensorboard logs and checkpoints will be stored in this folder name under ./runs/. If not, a name will be a defined automatically")
-    parser.add_argument("--resume", type=str, default="", help="If the checkpoint path is provided, it will be used to initialize the model and continue training.")
-    parser.add_argument("--bvh-update-frequency", type=int, default=50, help="Update frequency of the BVH structure in iterations - will only be performed if position, scale, rotation are being optimized")
-    parser.add_argument("--density-activation", type=str, default='sigmoid', help="The name of the activation function that will be used for the density. One of [exp, sigmoid, normalize]")
-    parser.add_argument("--scale-activation", type=str, default='exp', help="The name of the activation function that will be used for the scale. One of [exp, sigmoid, normalize]")
-    parser.add_argument("--optimize-density", action='store_true', help="Set false if the density should be optimized as well")
-    parser.add_argument("--optimize-features", action='store_true', help="Set true if the features should be optimized as well")
-    parser.add_argument("--optimize-rotation", action='store_true', help="Set true if the rotation should be optimized as well")
-    parser.add_argument("--optimize-scale", action='store_true', help="Set true if the scale should be optimized as well")
-    parser.add_argument("--optimize-position", action='store_true', help="Set true if the position should be optimized as well")
-    parser.add_argument("--checkpoint-frequency", type=int, default=1000, help="Specifies the period in which the checkpoints will be stored in terms of number of iterations")
-    parser.add_argument("--with-gui", action='store_true', help="Enable a polyscope GUI")
-    args = parser.parse_args()
+    parser.add_argument("--config", type=str, required=True, help="Path to the config file")
+    args, remainder = parser.parse_known_args()
 
-    main(args)
+    base_conf = OmegaConf.load(args.config)
+    cli_conf = OmegaConf.from_cli(remainder)
+    conf = OmegaConf.merge(base_conf, cli_conf)
+
+    main(conf)

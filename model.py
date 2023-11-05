@@ -7,10 +7,10 @@ from libs import optixtracer
 
 
 class MixtureOfGaussians(torch.nn.Module):
-    def __init__(self, args):
+    def __init__(self, conf):
         super().__init__()
 
-        self.args = args
+        self.conf = conf
         self._positions = torch.empty([0,3])  # Positions of the 3D Gaussians (x, y, z) [n_gaussians, 3]
         self._rotation = torch.empty([0,4])   # Rotation of each Gaussian represented as a unit quaternion [n_gaussians, 4]
         self._scale  = torch.empty([0,3])     # Anisotropic scale of each Gaussian [n_gaussians, 3]
@@ -19,8 +19,8 @@ class MixtureOfGaussians(torch.nn.Module):
         self.n_active_features = 0
         self.device = 'cuda'
         self.optix_ctx = None
-        self.density_activation = get_activation_function(args.density_activation)
-        self.scale_activation =  get_activation_function(args.scale_activation)
+        self.density_activation = get_activation_function(self.conf.density_activation)
+        self.scale_activation =  get_activation_function(self.conf.scale_activation)
         self.rotation_activation =   get_activation_function("normalize") # The default value of the dim parameter is 1
 
     def set_optix_context(self):
@@ -28,15 +28,15 @@ class MixtureOfGaussians(torch.nn.Module):
         self.optix_ctx = optixtracer.OptiXContext()
 
     def set_optimizable_parameters(self):
-        if self.args.optimize_density:
+        if self.conf.optimize_density:
             self._density.requires_grad = True
-        if self.args.optimize_features:
+        if self.conf.optimize_features:
             self._features.requires_grad = True
-        if self.args.optimize_rotation:
+        if self.conf.optimize_rotation:
             self._rotation.requires_grad = True
-        if self.args.optimize_scale:
+        if self.conf.optimize_scale:
             self._scale.requires_grad = True
-        if self.args.optimize_position:
+        if self.conf.optimize_position:
             self._positions.requires_grad = True
 
 
@@ -148,8 +148,7 @@ class MixtureOfGaussians(torch.nn.Module):
             "density": self._density,
             "features": self._features,
             # Add other attributes that we need at restore
-            "active_features": self.n_active_features,
-            "args": self.args
+            "active_features": self.n_active_features
         }
 
 
