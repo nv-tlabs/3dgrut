@@ -1,10 +1,4 @@
 #!/bin/bash
 
-# I use this script to install dependencies/my library or do data initialization.
-# Basically, it is just a bash script that I run before executing my actual training command.
-
-# Install dependencies
-# python3 -m pip install -r requirements.txt
-
-
-apt-get update || exit 1
+# A bash script that is run before executing the actual training command.
+source activate 3dgrt

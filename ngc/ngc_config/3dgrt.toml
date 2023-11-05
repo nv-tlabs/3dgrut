@@ -4,7 +4,7 @@ description = "Running our 3D gaussian ray tracing code."
 # This command is run before any other specified commands (see README)
 #    Note: workspace_path is pulled from the `[ngc.workspace.path]` value
 #          end this command with `;` as additional commands will be appended
-base_command = "cd {workspace_path}/experiments/{exp_name}; . ./ngc_prepare.sh;"
+base_command = "cd {workspace_path}/experiments/{exp_name}; . ./ngc/ngc_prepare.sh;"
 
 [ngc]
 name = "3dgrt.notamodel.3dgrt_app"
@@ -14,7 +14,7 @@ result_path = "/result"
 [ngc.ace]
 id = 257
 name = "nv-us-west-2"
-instance = "dgx1v.32g.1.norm" 
+instance = "dgx1v.16g.1.norm" 
 
 # Can mount more by adding more `[ngc.workspaceXYZ]` categories
 # but this one will be used by the local workspace commands
