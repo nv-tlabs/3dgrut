@@ -203,18 +203,21 @@ def main(args):
        
 
 
-    #TODO: add loading from checkpoint or dataset point cloud
-    if args.resume
+    if args.resume:
+        logging.info(f"Loading a pretrained checkpoint from {args.resume}!")
+        checkpoint = torch.load(args.resume)
+        model.init_from_checkpoint(checkpoint)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        global_step = checkpoint['global_step']
 
     else:
-        model.load_from_pretrained_point_cloud(os.path.join(args.path, "point_cloud.ply"))
-        
-
-    # TODO: add different learning rate or other setting for each parameter
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        model.init_from_pretrained_point_cloud(os.path.join(args.path, "point_cloud.ply"))
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        global_step = 0
 
     n_epochs = int(n_iterations/train_dataset.__len__())
-    global_step = 0
+
 
     # Criterions that we log during training
     criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda")}

@@ -39,13 +39,18 @@ class MixtureOfGaussians(torch.nn.Module):
         if self.args.optimize_position:
             self._positions.requires_grad = True
 
-    def store_checkpoint(self, checkpoint_path: str):
-        pass
 
-    def load_from_checkpoint(self, checkpoint_path: str):
-        pass
+    def init_from_checkpoint(self, checkpoint: dict):
+            self._positions = checkpoint["positions"]
+            self._rotation = checkpoint["rotation"]
+            self._scale = checkpoint["scale"]
+            self._density = checkpoint["density"]
+            self._features = checkpoint["features"]
+            self.n_active_features = checkpoint["active_features"]
+            self.set_optimizable_parameters()
 
-    def load_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
+
+    def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
         data = PlyData.read(pc_path)
         num_gsplat = len(data['vertex'])
         self._positions = torch.nn.Parameter(to_torch(np.transpose(np.stack((data['vertex']['x'], data['vertex']['y'], data['vertex']['z']), dtype=np.float32)), device=self.device))  # type: ignore
