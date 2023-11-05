@@ -25,3 +25,66 @@ python -m pip install cuda-python cupy
 ```
 
 The latter two packages `cuda-python` and `cupy` may very slow to install and/or create CUDA versioning problems, which is why we don't install them by default. (In the future we could remove these by writing a few of our own cuda bindings.)
+
+## NGC utils
+
+Based on [ngc-toolbox](https://gitlab-master.nvidia.com/jalucas/ngc-toolbox/-/tree/main?ref_type=heads) see more detailed REAME in `./ngc/README.md`
+
+### Updating Docker container
+```bash
+python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml build_docker
+python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml push_docker
+```
+### Workspace
+
+Mounting a workspace locally:
+```bash
+python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml mount_workspace
+```
+Unmounting:
+```bash
+python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml unmount_workspace
+```
+
+Syncing current version of code to workspace:
+```bash
+python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml sync_workspace my_experiment_name
+```
+This will create a copy of the code in the workspace, in the directory `experiments`.
+
+### Jobs
+Before any job, the command will execute `./ngc/ngc_prepare.sh`.
+
+
+Start an interactive job:
+```bash
+python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml run_interactive_job --runtime 4h 
+```
+The job will spin up and you'll be assigned a job ID (presented in the command output). You can connect to the job via `ngc batch exec <job_id>`.
+
+
+Runnig a normal job:
+```bash
+python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml run_job "python train.py --arg1 value1 --arg2 value2" experiment_name
+```
+
+
+**A large batch of jobs**
+
+First, generate a file where each line corresponds to a different command to be run. For example,
+
+> grid_search.txt
+```
+python train.py --arg1 a1 --arg2 a2
+python train.py --arg1 b1 --arg2 a2
+python train.py --arg1 a1 --arg2 b2
+python train.py --arg1 b1 --arg2 b2
+```
+
+Then execute `python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml  generate_job_array grid_search.txt grid_search grid_search_jobs/`.
+The final three arguments are the file containing the commands, a name for the experiment, and the output folder to place the job data.
+Running this command creates a new directory called `grid_search_jobs` containing the files `[cmd_0.json, cmd_1.json, cmd_2.json, cmd_3.json]`. You can then dispatch all jobs to NGC via,
+
+`python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml  run_job_array grid_search_jobs`
+
+_This could also be achieve in one step, by adding the `--run` flag to the `generate_job_array` command._

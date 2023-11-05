@@ -6,3 +6,5 @@ plyfile
 torchmetrics
 tensorboard
 tqdm
+fire
+toml
