@@ -4,7 +4,7 @@
 
 FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
 
-LABEL maintainer="Riccardo de Lutio <rdelutio@nvidia.com>"
+LABEL org.opencontainers.image.authors="Riccardo de Lutio <rdelutio@nvidia.com>"
 
 # Needed for string substitution
 ENV DEBIAN_FRONTEND=noninteractive
