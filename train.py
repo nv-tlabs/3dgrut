@@ -16,6 +16,7 @@ from omegaconf import OmegaConf
 
 from datasets.colmap_dataset import ColmapDataset
 from datasets.nerf_dataset import NeRFDataset
+from datasets.ngp_dataset import NGPDataset
 from model import MixtureOfGaussians
 from datasets.utils import move_to_gpu
 from loss_utils import ssim
@@ -50,8 +51,16 @@ def main(conf):
             batch_size=conf.dataset.train.batch_size
         )
         val_dataset = ColmapDataset(conf.path, split='val', sample_full_image=True)
+    elif conf.dataset.type == 'ngp':
+        train_dataset = NGPDataset(
+            conf.path, 
+            split='train', 
+            sample_full_image=conf.dataset.train.sample_full_image, 
+            batch_size=conf.dataset.train.batch_size
+        )
+        val_dataset = NGPDataset(conf.path, split='val', sample_full_image=True, val_downsample=5)
     else:
-        raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf"]. ')
+        raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp]. ')
 
     train_dataloader = torch.utils.data.DataLoader(train_dataset, num_workers=8, batch_size=1, shuffle=True)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=8, batch_size=1, shuffle=False)
@@ -261,9 +270,6 @@ def main(conf):
                 for batch in pbar:
                     with torch.no_grad():
                         rays_ori, rays_dir, rgb_gt = move_to_gpu(batch)
-                        rays_ori = rays_ori.reshape(rays_ori.shape[0], train_dataset.image_h, train_dataset.image_w, 3)
-                        rays_dir = rays_dir.reshape(rays_ori.shape[0], train_dataset.image_h, train_dataset.image_w, 3)
-                        rgb_gt = rgb_gt.reshape(rays_ori.shape[0], train_dataset.image_h, train_dataset.image_w, 3)
 
                         # Compute the outputs of a single batch
                         outputs = model(rays_ori, rays_dir)
