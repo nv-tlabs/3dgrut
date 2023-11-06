@@ -35,10 +35,20 @@ def main(conf):
     use_ssim = False
 
     if conf.dataset.type == 'nerf':
-        train_dataset = NeRFDataset(conf.path, split='train', sample_full_image=conf.dataset.train.sample_full_image)
+        train_dataset = NeRFDataset(
+            conf.path, 
+            split='train', 
+            sample_full_image=conf.dataset.train.sample_full_image, 
+            batch_size=conf.dataset.train.batch_size
+        )
         val_dataset = NeRFDataset(conf.path, split='val', sample_full_image=True)
     elif conf.dataset.type == 'colmap':
-        train_dataset = ColmapDataset(conf.path, split='train', sample_full_image=conf.dataset.train.sample_full_image)
+        train_dataset = ColmapDataset(
+            conf.path, 
+            split='train', 
+            sample_full_image=conf.dataset.train.sample_full_image, 
+            batch_size=conf.dataset.train.batch_size
+        )
         val_dataset = ColmapDataset(conf.path, split='val', sample_full_image=True)
     else:
         raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf"]. ')

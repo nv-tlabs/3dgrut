@@ -114,7 +114,7 @@ class NeRFDataset(Dataset):
                 pix_idxs = np.arange(self.img_wh[0]*self.img_wh[1])
                 out_shape = (self.image_h,self.image_w,3)
             else:
-                img_idxs = np.random.choice(len(self.poses), 1)[0]
+                img_idxs = np.random.choice(len(self.poses), self.batch_size, replace=True)
                 pix_idxs = np.random.choice(self.img_wh[0]*self.img_wh[1], self.batch_size)
                 out_shape = (1,self.batch_size,3)
             rgb = self.rgbs[img_idxs, pix_idxs]

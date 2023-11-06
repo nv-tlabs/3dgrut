@@ -8,6 +8,7 @@ dataset:
   type: colmap
   
   train:
+    batch_size: 8192
     sample_full_image: False
   
 initialization:
