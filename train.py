@@ -110,7 +110,7 @@ def main(conf):
         
         ps.init()
 
-        ps_point_cloud = ps.register_point_cloud("centers", to_np(model.get_position), 
+        ps_point_cloud = ps.register_point_cloud("centers", to_np(model.get_positions), 
                                 radius=1e-3, point_render_mode='quad')
         ps_point_cloud_buffer = ps_point_cloud.get_buffer("points")
 
