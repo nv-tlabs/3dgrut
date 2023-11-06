@@ -130,12 +130,14 @@ class ColmapDataset(Dataset):
                 frame_idx = np.array((idx,))
                 u = np.tile(np.arange(self.image_w), self.image_h)
                 v = np.arange(self.image_h).repeat(self.image_w)
+                out_shape = (self.image_h,self.image_w,3)
 
             else:
                 # Sample random frame
-                frame_idx = np.random.choice(self.n_frames, self.batch_size)
+                frame_idx = np.random.choice(self.n_frames, self.batch_size, replace=True)
                 u = np.random.choice(self.image_w, self.batch_size, replace=True)
                 v = np.random.choice(self.image_h, self.batch_size, replace=True)
+                out_shape = (1,self.batch_size,3)
 
             ray_o_cam, ray_d_cam = pinhole_camera_rays(u, v, self.intrinsic[frame_idx,0], self.intrinsic[frame_idx,1], self.image_w, self.image_h)
 
@@ -143,7 +145,7 @@ class ColmapDataset(Dataset):
 
             rgb = self.rgb[frame_idx, v, u]
 
-            return ray_o, ray_d, rgb
+            return ray_o.reshape(out_shape), ray_d.reshape(out_shape), rgb.reshape(out_shape)
 
         elif self.split == 'val':
             frame_idx = np.array((idx,))
@@ -155,4 +157,5 @@ class ColmapDataset(Dataset):
             ray_o, ray_d = camera_to_world_rays(ray_o_cam, ray_d_cam, self.poses[frame_idx])
             rgb = self.rgb[frame_idx, v, u]
             
-            return ray_o, ray_d, rgb
+            assert self.sample_full_image, 'val mode assumes sampling full images'
+            return ray_o.reshape(self.image_h,self.image_w,3), ray_d.reshape(self.image_h,self.image_w,3), rgb.reshape(self.image_h,self.image_w,3)

@@ -107,36 +107,37 @@ class NeRFDataset(Dataset):
         return len(self.poses)
 
     def __getitem__(self, idx):
-        if self.split.startswith('train'):
-            # training pose is retrieved in train.py
-            
+        if self.split == 'train':          
             # randomly select pixels
             if self.sample_full_image:
                 img_idxs = idx
                 pix_idxs = np.arange(self.img_wh[0]*self.img_wh[1])
+                out_shape = (self.image_h,self.image_w,3)
             else:
                 img_idxs = np.random.choice(len(self.poses), 1)[0]
                 pix_idxs = np.random.choice(self.img_wh[0]*self.img_wh[1], self.batch_size)
+                out_shape = (1,self.batch_size,3)
             rgb = self.rgbs[img_idxs, pix_idxs]
             poses = self.poses[img_idxs]
             directions = self.directions[pix_idxs]
             rays_o, rays_d = get_rays(directions, poses)
 
-            return rays_o,rays_d,rgb
+            return rays_o.reshape(out_shape),rays_d.reshape(out_shape),rgb.reshape(out_shape)
 
-        else:
+        elif self.split == 'val':
+            assert self.sample_full_image, 'val mode assumes sampling full images'
             if len(self.rgbs)>0: # if ground truth available
                 rgb = self.rgbs[idx]
                 pose =self.poses[idx]
                 directions = self.directions[np.arange(self.img_wh[0]*self.img_wh[1])]
                 rays_o, rays_d = get_rays(directions, pose)
 
-                return rays_o,rays_d,rgb
+                return rays_o.reshape(self.image_h,self.image_w,3), rays_d.reshape(self.image_h,self.image_w,3), rgb.reshape(self.image_h,self.image_w,3)
 
     @property
     def image_h(self):
-        return self.img_wh[0]
+        return self.img_wh[1]
 
     @property
     def image_w(self):
-        return self.img_wh[1]
+        return self.img_wh[0]
