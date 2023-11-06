@@ -36,28 +36,38 @@ model:
 
   # Start and end iteration are not used in 3DGS
   reset_density:
-      frequency: 3000 # Opacity reset interval in 3DGS default value 3000
-      start_iteration: 0
-      end_iteration: {$n_iterations}
-      # This parameter is hardcoded in the 3DGS to 0.01
-      new_max_density: 0.01 # The density of the all the Gaussians will be set to min(density, this) 
+    frequency: 3000 # Opacity reset interval in 3DGS default value 3000
+    start_iteration: 0
+    end_iteration: {$n_iterations}
+    # This parameter is hardcoded in the 3DGS to 0.01
+    new_max_density: 0.01 # The density of the all the Gaussians will be set to min(density, this) 
 
 checkpoint:
   frequency: 1000
 
 optimizer:
-  type: adam
-  args:
+  type: adam # We only support adam for now
   lr: 0.01
   eps: 1.e-15
   params:
     positions:
-        lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.00016
+      lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.00016
     density:
-        lr: 0.05 # 3DGS value: 0.05
+      lr: 0.05 # 3DGS value: 0.05
     features:
-        lr: 0.0025 # 3DGS value: 0.0025
+      lr: 0.0025 # 3DGS value: 0.0025
     rotation:
-        lr: 0.001 # 3DGS value: 0.001
+      lr: 0.001 # 3DGS value: 0.001
     scale:
-        lr: 0.005 # 3DGS value: 0.005
+      lr: 0.005 # 3DGS value: 0.005
+
+scheduler:
+  positions:
+    # In the 3DGS paper they additionally have a parameter lr_delay_mult, but is is not being used so I drop it here
+    type: exp
+    lr_init: {$optimizer.params.positions.lr}
+    lr_final: 0000016
+    max_steps: {$n_iterations} 
+
+  density:
+    type: skip

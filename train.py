@@ -288,6 +288,9 @@ def main(conf):
                 model.optimizer.step()
                 model.optimizer.zero_grad()
 
+                # Make a scheduler step
+                model.scheduler_step(global_step)
+
                 psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
                 global_step += 1
                 pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})

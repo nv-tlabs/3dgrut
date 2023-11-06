@@ -1,11 +1,12 @@
 import logging, sys, os, struct
 
 import numpy as np
+import copy
 import torch
 from plyfile import PlyData
 
 from libs import optixtracer
-from utils import to_torch, get_activation_function, inverse_sigmoid
+from utils import to_torch, get_activation_function, inverse_sigmoid, get_scheduler
 from datasets.colmap_utils import read_next_bytes
 from geometry import nearest_neighbor_dist_cpuKD
 
@@ -155,9 +156,25 @@ class MixtureOfGaussians(torch.nn.Module):
 
         self.optimizer = torch.optim.Adam(params, lr=self.conf.optimizer.lr, eps=self.conf.optimizer.eps)
 
+        self.setup_scheduler()
+
         # When loading from the checkpoint also load the state dict
         if state_dict is not None:
             self.optimizer.load_state_dict(state_dict)
+
+    def setup_scheduler(self):
+        self.schedulers = {}
+        for name, args in self.conf.scheduler.items():
+            if args.type is not None and getattr(self, name).requires_grad:
+                self.schedulers[name] = (get_scheduler(args.type)(**args))
+
+
+    def scheduler_step(self, step):
+        for param_group in self.optimizer.param_groups:
+            if param_group["name"] in self.schedulers:
+                lr = self.schedulers[param_group["name"]](step)
+                if lr is not None:
+                    param_group['lr'] = lr
 
     def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
         data = PlyData.read(pc_path)
