@@ -465,6 +465,8 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path, const std::string&
         &pState->moduleMoGTracingIS, 
         &pState->pipelineMoGTracingIS, 
         pState->sbtMoGTracingIS);
+
+    printf("End of OptiXStateWrapper \n");
 }
 
 OptiXStateWrapper::~OptiXStateWrapper(void)
