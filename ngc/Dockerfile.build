@@ -1,0 +1,48 @@
+# Copyright (c) 2023 NVIDIA CORPORATION.  All rights reserved.
+
+# BUILD: docker image build -t nvcr.io/nvidian/ct-toronto-ai/3dgrt:<TAG> -f ngc/Dockerfile.build .
+
+FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
+
+LABEL maintainer="Riccardo de Lutio <rdelutio@nvidia.com>"
+
+# Needed for string substitution
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN \
+    # Add additional system libraries
+    apt-get update -qq --fix-missing && \
+    apt-get install -y --no-install-recommends software-properties-common && \
+    add-apt-repository -y ppa:ubuntu-toolchain-r/test && \
+    apt-get -y update -qq --fix-missing && \
+    apt-get -y install --no-install-recommends \
+        build-essential git libgl1-mesa-glx wget ninja-build \
+    && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install conda
+ENV CONDA_DIR=/opt/conda
+RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
+    chmod +x /tmp/miniconda.sh && \
+    /bin/bash /tmp/miniconda.sh -b -p $CONDA_DIR && \
+    rm -f /tmp/miniconda.sh
+
+# Populate data required to install / build dependencies
+WORKDIR /workspace/build
+ADD requirements.txt requirements.txt
+ADD thirdparty thirdparty
+
+# Create environment and install dependencies
+ENV CONDA_ENV=3dgrt
+RUN $CONDA_DIR/bin/conda create -n $CONDA_ENV python=3.10
+RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install -r requirements.txt
+WORKDIR /workspace/build/thirdparty/simple-knn
+RUN $CONDA_DIR/envs/$CONDA_ENV/bin/python setup.py install
+
+WORKDIR /workspace
+
+# Removing the thirdparty code to avoid confusion with the code in the workspace
+RUN rm -r build
+
+# Make sure to activate the correct environment on startup
+RUN echo "source /opt/conda/bin/activate ${CONDA_ENV}" >> /root/.bashrc

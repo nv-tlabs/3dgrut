@@ -2,7 +2,7 @@
 # Ray Tracing Gaussian Splats
 
 ## Dependencies
-- __CUDA 11.7 or newer__.
+- __CUDA 11.8 or newer__.
 - __Python 3.10 or newer__.
 
 ## Set up the environment
@@ -16,7 +16,7 @@ pip install -r requirements.txt
 
 # Install simple-knn submodule
 pushd thirdparty/simple-knn
-pip install -e .
+pip install .
 popd
 ```
 
