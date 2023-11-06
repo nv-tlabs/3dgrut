@@ -9,6 +9,7 @@ tqdm
 fire
 toml
 omegaconf
+scikit-learn
 # NeRF Dataset requirements
 kornia
 opencv-python
