@@ -67,7 +67,7 @@ extern "C" __global__ void __raygen__rg()
     constexpr float epsT = 1e-9;
     const float slabSpacing = params.slabSpacing;
     float startT = fmaxf(0.0f, minMaxT.x - epsT);
-    
+
     float hitDistance = 0;
     float3 radiance = make_float3(0);
     uint32_t numHits = 0;
@@ -118,8 +118,8 @@ extern "C" __global__ void __raygen__rg()
             const float grayDir = dot(gcrod, gcrod);
             const float gres = expf(-0.5 * grayDir);
             const float galpha = gres * gdns;
-            const float3 grad = computeColorFromSH<0>(gpos,rayOri,gId,params);
-               
+            const float3 grad = computeColorFromSH(params.sphDegree, gpos, rayOri, gId, params);
+
             const float weight = galpha * transmit;
 
             radiance += grad * weight;

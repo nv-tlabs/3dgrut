@@ -136,7 +136,8 @@ extern "C" __global__ void __raygen__rg()
 
             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
             // compute the gradient wrt to the sph coefficients and position (through the sph view direction)
-            const float3 grad = computeColorFromSHBwd<0>(
+            const float3 grad = computeColorFromSHBwd(
+                params.sphDegree,
                 rayOri,
                 gId,
                 gpos,

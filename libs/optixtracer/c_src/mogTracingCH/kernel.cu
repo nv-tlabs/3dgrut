@@ -63,7 +63,7 @@ extern "C" __global__ void __raygen__rg()
     RayPayload p;
     p.hitT = 0;
 
-    while ( (transmit > params.minTransmittance) && (numHits < params.maxNumHits) )
+    while ((transmit > params.minTransmittance) && (numHits < params.maxNumHits))
     {
         trace(p, rayOri, rayDir, p.hitT + 1e-9, 1e16);
         if (p.hitT < 0)
@@ -92,7 +92,7 @@ extern "C" __global__ void __raygen__rg()
         const float grayDir = dot(gcrod, gcrod);
         const float gres = expf(-0.5 * grayDir);
         const float galpha = gres * gdns;
-        const float3 grad = computeColorFromSH<0>(gpos,rayOri,gId,params);
+        const float3 grad = computeColorFromSH(params.sphDegree, gpos, rayOri, gId, params);
         // const float4 gRadAlpha = make_float4(params.mogSph[gId][0],params.mogSph[gId][1],params.mogSph[gId][2],1.);
         // //params.mogDns[gId][0]); const float4 gRadAlpha =
         // make_float4(p.triId&1,p.triId&2,p.triId&4,params.mogDns[gId][0]); const float4 gRadAlpha =

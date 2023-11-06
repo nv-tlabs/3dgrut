@@ -278,6 +278,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
     paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, 0);
     paramsHost.maxNumHits = stateWrapper.pState->maxNumHits;
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
+    paramsHost.sphDegree = MOGTracingDefaultSphDegree; 
 
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
 
@@ -353,6 +354,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, 0);
     paramsHost.maxNumHits = stateWrapper.pState->maxNumHits;
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
+    paramsHost.sphDegree = MOGTracingDefaultSphDegree; 
 
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
 
