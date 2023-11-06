@@ -294,7 +294,7 @@ def main(conf):
                 writer.add_scalar("psnr/train", psnr, global_step)
 
                 # Update the BVH if required
-                if global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency:
+                if global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0:
                     model.build_bvh()
 
                 # Save the checkpoint
@@ -302,6 +302,18 @@ def main(conf):
                     parameters = model.get_model_parameters()
                     parameters |= {"global_step": global_step, "epoch": epoch_idx}
                     torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
+
+                # Densify the Gaussians
+                if global_step > conf.model.densify.start_iteration and global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
+                    model.densify_gaussians(1.0)
+
+                # Prune the Gaussians
+                if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
+                    model.prune_gaussians()
+
+                # Reset the Gaussian density 
+                if global_step > conf.model.reset_density.start_iteration and global_step < conf.model.reset_density.end_iteration and global_step % conf.model.reset_density.frequency == 0:
+                    model.reset_density()
 
                 if conf.with_gui:
                     if model.get_positions.requires_grad:
