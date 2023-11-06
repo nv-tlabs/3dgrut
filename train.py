@@ -304,8 +304,8 @@ def main(conf):
                     torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
 
                 if conf.with_gui:
-                    # if model.get_position.requires_grad:
-                    update_cloud_viz()
+                    if model.get_position.requires_grad:
+                        update_cloud_viz()
         
                     update_render_view_viz()
 
