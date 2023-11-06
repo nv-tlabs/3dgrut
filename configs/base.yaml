@@ -20,28 +20,56 @@ model:
   optimize_rotation: false
   optimize_scale: false
   bvh_update_frequency: 1
-  densify_prune:
+  densify:
+    frequency: 100 # densification_interval in 3DGS with default value 100
+    start_iteration: 500 # densify_from_iter in 3DGS default value 500
+    end_iteration: 15000 # densify_until_iter in 3DGS default value 15_000
+    grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
+    relative_size_threshold: 0.01 # Gaussians larger than relative_size_threshold * scene_extent will be split not cloned. Called percent_dense in 3DGS with default value 0.01
+    split:
+      n_gaussians: 2 # Hardcoded to 2 in 3DGS
+
+  # They use the same values for pruning and densification so check the above values
+  prune:
     frequency: 100
     start_iteration: 500
     end_iteration: 15000
-    grad_threshold: 0.0002
+    density_threshold: # All Gaussians with the density lower than this will be pruned away
+
+  # Start and end iteration are not used in 3DGS
+  reset_density:
+    frequency: 3000 # Opacity reset interval in 3DGS default value 3000
+    start_iteration: 0
+    end_iteration: ${n_iterations}
+    # This parameter is hardcoded in the 3DGS to 0.01
+    new_max_density: 0.01 # The density of the all the Gaussians will be set to min(density, this) 
 
 checkpoint:
   frequency: 1000
 
 optimizer:
-  type: adam
-  args:
+  type: adam # We only support adam for now
   lr: 0.01
   eps: 1.e-15
   params:
     positions:
-        lr: 0.01
+      lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.00016
     density:
-        lr: 0.01
+      lr: 0.05 # 3DGS value: 0.05
     features:
-        lr: 0.01
+      lr: 0.0025 # 3DGS value: 0.0025
     rotation:
-        lr: 0.01
+      lr: 0.001 # 3DGS value: 0.001
     scale:
-        lr: 0.01
+      lr: 0.005 # 3DGS value: 0.005
+
+scheduler:
+  positions:
+    # In the 3DGS paper they additionally have a parameter lr_delay_mult, but is is not being used so I drop it here
+    type: exp
+    lr_init: ${optimizer.params.positions.lr}
+    lr_final: 0000016
+    max_steps: ${n_iterations} 
+
+  density:
+    type: skip

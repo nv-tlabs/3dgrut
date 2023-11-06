@@ -110,14 +110,14 @@ def main(conf):
         
         ps.init()
 
-        ps_point_cloud = ps.register_point_cloud("centers", to_np(model.get_position), 
+        ps_point_cloud = ps.register_point_cloud("centers", to_np(model.get_positions), 
                                 radius=1e-3, point_render_mode='quad')
         ps_point_cloud_buffer = ps_point_cloud.get_buffer("points")
 
         
         def update_cloud_viz():
             # direct on-GPU update, must not have changed size
-            ps_point_cloud_buffer.update_data_from_device(model.get_position.detach())
+            ps_point_cloud_buffer.update_data_from_device(model.get_positions.detach())
 
         def render_from_current_ps_view():
 
@@ -288,13 +288,16 @@ def main(conf):
                 model.optimizer.step()
                 model.optimizer.zero_grad()
 
+                # Make a scheduler step
+                model.scheduler_step(global_step)
+
                 psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
                 global_step += 1
                 pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
                 writer.add_scalar("psnr/train", psnr, global_step)
 
                 # Update the BVH if required
-                if global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency:
+                if global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0:
                     model.build_bvh()
 
                 # Save the checkpoint
@@ -303,8 +306,20 @@ def main(conf):
                     parameters |= {"global_step": global_step, "epoch": epoch_idx}
                     torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
 
+                # Densify the Gaussians
+                if global_step > conf.model.densify.start_iteration and global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
+                    model.densify_gaussians(1.0)
+
+                # Prune the Gaussians
+                if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
+                    model.prune_gaussians()
+
+                # Reset the Gaussian density 
+                if global_step > conf.model.reset_density.start_iteration and global_step < conf.model.reset_density.end_iteration and global_step % conf.model.reset_density.frequency == 0:
+                    model.reset_density()
+
                 if conf.with_gui:
-                    if model.get_position.requires_grad:
+                    if model.get_positions.requires_grad:
                         update_cloud_viz()
         
                     update_render_view_viz()
