@@ -9,12 +9,12 @@ from datasets.utils import pinhole_camera_rays, camera_to_world_rays
 
 class ColmapDataset(Dataset):
 
-    def __init__(self, path, split='train', sample_full_image=False):
+    def __init__(self, path, split='train', sample_full_image=False, batch_size=8192):
         self.path = path
         self.split = split
         self.llff_test_split = 8
         self.sample_full_image = sample_full_image
-        self.batch_size = 8192
+        self.batch_size = batch_size
 
         try:
             cameras_extrinsic_file = os.path.join(self.path, "sparse/0", "images.bin")
