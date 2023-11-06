@@ -7,7 +7,9 @@ with_gui: false
 dataset:
   type: colmap
   
-initialization_method: point_cloud      # one of [colmap, point_cloud, random]
+initialization:
+  method: point_cloud      # one of [colmap, point_cloud, random]
+  num_gaussians: 100_000   # method=random only: number of initial gaussians to use
 
 model:
   density_activation: sigmoid

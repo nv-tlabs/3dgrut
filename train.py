@@ -58,10 +58,10 @@ def main(conf):
 
     else: # Initialize
 
-        if conf.initialization_method == 'colmap':
+        if conf.initialization.method == 'colmap':
             model.init_from_colmap(conf.path)
 
-        elif conf.initialization_method == 'point_cloud':
+        elif conf.initialization.method == 'point_cloud':
             ply_path = None
             try:
                 ply_path = os.path.join(conf.path, "point_cloud.ply")
@@ -70,11 +70,11 @@ def main(conf):
                 logging.exception(e)
                 raise e
          
-        elif conf.initialization_method == 'random':
-            model.randomize_point_cloud()
+        elif conf.initialization.method == 'random':
+            model.randomize_point_cloud(num_gsplat=conf.initialization.num_gaussians)
 
         else:
-           raise ValueError(f"unrecognized initialization_method {conf.initialization_method}, choose from [colmap, point_cloud, random]")
+           raise ValueError(f"unrecognized initialization.method {conf.initialization.method}, choose from [colmap, point_cloud, random]")
 
         model.build_bvh()
         model.setup_optimizer()
