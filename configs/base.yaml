@@ -19,9 +19,9 @@ model:
   scale_activation: exp
   optimize_density: true
   optimize_features: true
-  optimize_position: false
-  optimize_rotation: false
-  optimize_scale: false
+  optimize_position: true
+  optimize_rotation: true
+  optimize_scale: true
   bvh_update_frequency: 1
   densify:
     frequency: 100 # densification_interval in 3DGS with default value 100
