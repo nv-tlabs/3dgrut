@@ -5,14 +5,22 @@ import numpy as np
 import os
 from tqdm import tqdm
 from datasets.nerf_utils import get_ray_directions, read_image, get_rays
+from PIL import Image
+
 
 class NeRFDataset(Dataset):
-    def __init__(self, root_dir, split='train', sample_full_image=False,batch_size=8192, **kwargs):
+    def __init__(self, root_dir, split='train', sample_full_image=False, batch_size=8192,
+                 use_white_background=False, **kwargs):
         self.root_dir = root_dir 
         self.split = split
         
         self.sample_full_image = sample_full_image
         self.batch_size = batch_size
+
+        # True: Transparent pixels with non-saturated alpha values will be blended with white
+        # False: Transparent pixels with non-saturated alpha values will be blended with black
+        self.use_white_background = use_white_background
+
         self.read_intrinsics()
 
         if kwargs.get('read_meta', True):
@@ -22,13 +30,19 @@ class NeRFDataset(Dataset):
         with open(os.path.join(self.root_dir, "transforms_train.json"), 'r') as f:
             meta = json.load(f)
 
-        w = h = int(800)
+        # !! Assumptions !!
+        # 1. All images have the same intrinsics
+        # 2. Principal point is at canvas center
+        # 3. Camera has no distortion params
+        first_frame_path = meta['frames'][0]['file_path']
+        frame = Image.open(os.path.join(self.root_dir,first_frame_path + '.png'))
+        w = frame.width
+        h = frame.height
         fx = fy = 0.5*w/np.tan(0.5*meta['camera_angle_x'])
 
         K = np.float32([[fx, 0, w/2],
                         [0, fy, h/2],
                         [0,  0,   1]])
-
 
         self.K = torch.FloatTensor(K)
         self.directions = get_ray_directions(h, w, self.K)
@@ -81,7 +95,7 @@ class NeRFDataset(Dataset):
 
             try:
                 img_path = os.path.join(self.root_dir, f"{frame['file_path']}.png")
-                img = read_image(img_path, self.img_wh)
+                img = read_image(img_path, self.img_wh, blend_a=self.use_white_background)
                 self.rgbs += [img]
             except: pass
 
