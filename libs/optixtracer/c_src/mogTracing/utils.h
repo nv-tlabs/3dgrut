@@ -51,7 +51,8 @@ static __device__ inline float computeGHitDistance(uint32_t gId, const float3& r
     const float3 ro =  iscl*((rayOri - gPos)*rot);
     const float3 rd = safe_normalize(iscl*((rayDir*rot)));
 
-    return dot(ro,ro) / dot(rd,ro);
+    const float3 grds = gScl * rd * dot(rd, -1*ro);
+    return sqrtf(dot(grds,grds));
 }
 
 #endif

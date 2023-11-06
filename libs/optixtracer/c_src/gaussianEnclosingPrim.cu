@@ -95,7 +95,8 @@ __global__ void computeGaussianEnclosingAABBKernel(
     {
         float33 rot;
         invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
-        const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
+        //const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
+        const float scl = ( (gScl[idx][0] + gScl[idx][1] + gScl[idx][2]) / 3.0f ) * sigmaSclTh;
         const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
         const float3 aabbVrt[aabbNumVrt] = {
@@ -113,7 +114,7 @@ __global__ void computeGaussianEnclosingAABBKernel(
 #pragma unroll
         for (int i = 0; i < aabbNumVrt; ++i)
         {
-            const float3 vrt = (aabbVrt[i] * scl) * rot + trans;
+            const float3 vrt = (aabbVrt[i] * scl) /** rot*/ + trans;
             if (i==0)
             {
                 aabb.minX = vrt.x;

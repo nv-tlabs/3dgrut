@@ -16,8 +16,6 @@ extern "C"
     __constant__ MoGTracingParams params;
 }
 
-static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = 32;
-
 struct RayPayload
 {
     unsigned int ahNumHits; // number of valid hits in ahHitTable
@@ -46,7 +44,8 @@ static __device__ __inline__ void trace(
                tmax, // Max intersection distance
                0.0f, // rayTime -- used for motion blur
                OptixVisibilityMask(255), // Specify always visible
-               OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT | OPTIX_RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
+               OPTIX_RAY_FLAG_NONE,
+               //OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT | OPTIX_RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
                0, // SBT offset   -- See SBT discussion
                1, // SBT stride   -- See SBT discussion
                0, // missSBTIndex -- See SBT discussion
@@ -67,24 +66,39 @@ extern "C" __global__ void __raygen__rg()
     // ray- aabb intersection to determine number of segments
     const float2 minMaxT = intersectAABB(params.aabb, rayOri, rayDir);
     constexpr float epsT = 1e-9;
-    //const float slabSpacing = MoGTracingAHMaxNumHitPerSlab * params.expectedDistanceBetweenHit + epsT;
     const float slabSpacing = params.slabSpacing;
     float startT = fmaxf(0.0f, minMaxT.x - epsT);
-    
+
     float hitDistance = 0;
-    float3 radiance = make_float3(0);
+    float3 radiance = make_float3(0, 0, 0);
     uint32_t numHits = 0;
     float transmit = 1.0f;
     RayPayload p;
 
-    while ((startT <= minMaxT.y) && (transmit > params.minTransmittance))
+    while ((startT <= minMaxT.y) && (transmit > params.minTransmittance) && (numHits < params.maxNumHits))
     {
         p.ahNumHits = 0;
         trace(&p, rayOri, rayDir, startT + epsT, startT + slabSpacing);
+
         if (p.ahNumHits == 0)
         {
             startT += slabSpacing;
             continue;
+        }
+
+        int N = p.ahNumHits;
+        // bubble sort
+        for (int i = 0; i < N; i++)
+        {
+            for (int j = 0; j < N - i - 1; j++)
+            {
+                const float2 tmp = p.ahHitTable[i];
+                if (tmp.x < p.ahHitTable[j].x)
+                {
+                    p.ahHitTable[i] = p.ahHitTable[j];
+                    p.ahHitTable[j] = tmp;
+                }
+            }
         }
 
         // in case we got more hits than available slots, start the next ray from the last hit
@@ -120,15 +134,17 @@ extern "C" __global__ void __raygen__rg()
             const float3 gcrod = cross(grd, gro);
             const float grayDir = dot(gcrod, gcrod);
             const float gres = expf(-0.5 * grayDir);
-            const float galpha = gres * gdns;
+            //const float galpha = gres * gdns;
 
-            const float3 gradu =
+            const float3 grad =
                 SH_C0 * make_float3(params.mogSph[gId][0], params.mogSph[gId][1], params.mogSph[gId][2]) +
                 make_float3(0.5);
-            const float3 grad =
-                make_float3(gradu.x > SHRadMinBound ? gradu.x : expf(gradu.x - SHRadMinBound) * SHRadMinBound,
-                            gradu.y > SHRadMinBound ? gradu.y : expf(gradu.y - SHRadMinBound) * SHRadMinBound,
-                            gradu.z > SHRadMinBound ? gradu.z : expf(gradu.z - SHRadMinBound) * SHRadMinBound);
+            // const float3 grad =
+            //     make_float3(gradu.x > SHRadMinBound ? gradu.x : expf(gradu.x - SHRadMinBound) * SHRadMinBound,
+            //                 gradu.y > SHRadMinBound ? gradu.y : expf(gradu.y - SHRadMinBound) * SHRadMinBound,
+            //                 gradu.z > SHRadMinBound ? gradu.z : expf(gradu.z - SHRadMinBound) * SHRadMinBound);
+
+            const float galpha = gdns;
 
             const float weight = galpha * transmit;
 
@@ -149,13 +165,13 @@ extern "C" __global__ void __raygen__rg()
 
 extern "C" __global__ void __closesthit__ch()
 {
-    const unsigned int ahHitTablePtr0 = optixGetPayload_1();
-    const unsigned int ahHitTablePtr1 = optixGetPayload_2();
-    float2* ahHitTablePtr =
-        reinterpret_cast<float2*>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
-    const unsigned int gId = optixGetPrimitiveIndex();
-    ahHitTablePtr[0] = { optixGetRayTmax(), uint_as_float(gId) };
-    optixSetPayload_0(1);
+    // const unsigned int ahHitTablePtr0 = optixGetPayload_1();
+    // const unsigned int ahHitTablePtr1 = optixGetPayload_2();
+    // float2* ahHitTablePtr =
+    //     reinterpret_cast<float2*>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
+    // const unsigned int gId = optixGetPrimitiveIndex();
+    // ahHitTablePtr[0] = { optixGetRayTmax(), uint_as_float(gId) };
+    // optixSetPayload_0(1);
 }
 
 extern "C" __global__ void __miss__ms()
@@ -165,6 +181,37 @@ extern "C" __global__ void __miss__ms()
 
 extern "C" __global__ void __intersection__is()
 {
+    // const float3 ro = optixGetWorldRayOrigin();
+    // const float3 rd = optixGetWorldRayDirection();
+
+    // const float tmin = optixGetRayTmin();
+    // const float tmax = optixGetRayTmax();
+
+    // const unsigned int gId = optixGetPrimitiveIndex();
+
+    // const float3 gPos = make_float3(params.mogPos[gId][0], params.mogPos[gId][1], params.mogPos[gId][2]);
+    // const float4 gRot =
+    //     make_float4(params.mogRot[gId][0], params.mogRot[gId][1], params.mogRot[gId][2], params.mogRot[gId][3]);
+    // const float3 gScl = make_float3(params.mogScl[gId][0], params.mogScl[gId][1], params.mogScl[gId][2]);
+    
+    // float33 rot;
+    // rotationMatrix(make_float4(gRot.x, gRot.y, gRot.z, gRot.w), rot);
+    // const float3 giscl = make_float3(1 / gScl.x, 1 / gScl.y, 1 / gScl.z);
+    // const float3 gro = giscl * ((ro - gPos) * rot);
+    // const float3 grd = safe_normalize(giscl * ((rd * rot)));
+    // const float3 grds = gScl * grd * dot(grd, -1*gro);
+    // const float t = sqrtf(dot(grds,grds));
+    // if (t > tmin && t < tmax)
+    // {
+    //     const float gdns = params.mogDns[gId][0];
+    //     const float3 gcrod = cross(grd, gro);
+    //     const float gres = expf(-0.5 * dot(gcrod, gcrod));
+    //     if (gres > params.hitMinGaussianResponse)
+    //     {
+    //         optixReportIntersection(t, 0);
+    //     }
+    // }
+
     const float3 ro = optixGetWorldRayOrigin();
     const float3 rd = optixGetWorldRayDirection();
 
@@ -174,22 +221,13 @@ extern "C" __global__ void __intersection__is()
     const unsigned int gId = optixGetPrimitiveIndex();
 
     const float3 gPos = make_float3(params.mogPos[gId][0], params.mogPos[gId][1], params.mogPos[gId][2]);
-    const float4 gRot =
-        make_float4(params.mogRot[gId][0], params.mogRot[gId][1], params.mogRot[gId][2], params.mogRot[gId][3]);
-    const float3 gScl = make_float3(params.mogScl[gId][0], params.mogScl[gId][1], params.mogScl[gId][2]);
-    float33 rot;
-    rotationMatrix(make_float4(gRot.x, gRot.y, gRot.z, gRot.w), rot);
-    const float3 giscl = make_float3(1 / gScl.x, 1 / gScl.y, 1 / gScl.z);
-    const float3 gro = giscl * ((ro - gPos) * rot);
-    const float3 grd = safe_normalize(giscl * ((rd * rot)));
-    const float3 grds = gScl * grd * dot(grd, -1*gro);
-    const float t = sqrtf(dot(grds,grds));
+    
+    const float t = length(gPos - ro);
     if (t > tmin && t < tmax)
     {
-        const float gdns = params.mogDns[gId][0];
-        const float3 gcrod = cross(grd, gro);
-        const float gres = expf(-0.5 * dot(gcrod, gcrod));
-        if (gres > params.hitMinGaussianResponse)
+        const float mscl = params.mogScl[gId][0] + params.mogScl[gId][1] + params.mogScl[gId][2];
+        const float3 samplePos = ro + rd * t;
+        if( length(gPos - samplePos) < mscl )
         {
             optixReportIntersection(t, 0);
         }
@@ -198,24 +236,38 @@ extern "C" __global__ void __intersection__is()
 
 extern "C" __global__ void __anyhit__ah()
 {
-    const unsigned int ahHitTablePtr0 = optixGetPayload_1();
-    const unsigned int ahHitTablePtr1 = optixGetPayload_2();
-    float2* ahHitTablePtr =
-        reinterpret_cast<float2*>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
+    // const unsigned int ahHitTablePtr0 = optixGetPayload_1();
+    // const unsigned int ahHitTablePtr1 = optixGetPayload_2();
+    // float2* ahHitTablePtr =
+    //     reinterpret_cast<float2*>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
+    // unsigned int ahNumHits = optixGetPayload_0();
+    // const unsigned int gId = optixGetPrimitiveIndex();
+    // const float2 ahHit = { optixGetRayTmax(), uint_as_float(gId) };
+    // if ((ahNumHits < MoGTracingAHMaxNumHitPerSlab) || (ahHit.x < ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x))
+    // {
+    //     ahNumHits = min(ahNumHits + 1, MoGTracingAHMaxNumHitPerSlab); // increment num hit
+    //     int i = ahNumHits - 1; // assert(ahNumHits-1 is garbage)
+    //     for (; (i > 0) && (ahHit.x < ahHitTablePtr[i - 1].x); --i)
+    //     {
+    //         ahHitTablePtr[i] = ahHitTablePtr[i - 1];
+    //     }
+    //     // assert(i==0 || (ahHit.x >= ahHitTablePtr[i-1].x))
+    //     ahHitTablePtr[i] = ahHit;
+    //     optixSetPayload_0(ahNumHits);
+    //     optixIgnoreIntersection();
+    // }
+
     unsigned int ahNumHits = optixGetPayload_0();
-    const unsigned int gId = optixGetPrimitiveIndex();
-    const float2 ahHit = { optixGetRayTmax(), uint_as_float(gId) };
-    if ((ahNumHits < MoGTracingAHMaxNumHitPerSlab) || (ahHit.x < ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x))
+    if (ahNumHits < MoGTracingAHMaxNumHitPerSlab)
     {
-        ahNumHits = min(ahNumHits + 1, MoGTracingAHMaxNumHitPerSlab); // increment num hit
-        int i = ahNumHits - 1; // assert(ahNumHits-1 is garbage)
-        for (; (i > 0) && (ahHit.x < ahHitTablePtr[i - 1].x); --i)
-        {
-            ahHitTablePtr[i] = ahHitTablePtr[i - 1];
-        }
-        // assert(i==0 || (ahHit.x >= ahHitTablePtr[i-1].x))
-        ahHitTablePtr[i] = ahHit;
-        optixSetPayload_0(ahNumHits);
+            const unsigned int ahHitTablePtr0 = optixGetPayload_1();
+            const unsigned int ahHitTablePtr1 = optixGetPayload_2();
+            float2* ahHitTablePtr =
+                reinterpret_cast<float2*>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);    
+            const unsigned int gId = optixGetPrimitiveIndex();
+        const float2 ahHit = { optixGetRayTmax(), uint_as_float(gId) };
+        ahHitTablePtr[ahNumHits] = ahHit;
+        optixSetPayload_0(ahNumHits+1);
         optixIgnoreIntersection();
     }
 }

@@ -60,7 +60,7 @@ inline float slabSpacingFromAABB(const OptixAabb& aabb, const uint32_t maxNumSla
 
 inline float minGaussianResponse(const float s)
 {
-    return exp(-0.5f*s*s);
+    return exp(-0.5f * s * s);
 }
 
 } // namespace name
@@ -76,26 +76,29 @@ void computeGaussianEnclosingOctaHedron(uint32_t gNum,
                                         OptixAabb* gPrimAABB);
 
 void computeGaussianEnclosingAABB(uint32_t gNum,
-                                        torch::Tensor gPos,
-                                        torch::Tensor gRot,
-                                        torch::Tensor gScl,
-                                        float sigmaSclTh,
-                                        OptixAabb* gPrimAABB,
-                                        OptixAabb* gAABB);
+                                  torch::Tensor gPos,
+                                  torch::Tensor gRot,
+                                  torch::Tensor gScl,
+                                  float sigmaSclTh,
+                                  OptixAabb* gPrimAABB,
+                                  OptixAabb* gAABB);
 
 void build_mog_bvh(OptiXStateWrapper& stateWrapper,
                    torch::Tensor mogPos,
                    torch::Tensor mogRot,
                    torch::Tensor mogScl,
                    float enclosingSigmaFactorThreshold,
-                   unsigned int rebuild)
+                   unsigned int rebuild,
+                   unsigned int maxNumHits)
 {
     const uint32_t gNum = mogPos.size(0);
     const uint32_t gPrimNumVert = MOGPrimNumVert;
     const uint32_t gPrimNumTri = MOGPrimNumTri;
 
-    // Create enclosing geometry primitives from 3d gaussians
+    stateWrapper.pState->maxNumHits = maxNumHits;
     stateWrapper.pState->gaussianSigmaThreshold = enclosingSigmaFactorThreshold;
+    
+    // Create enclosing geometry primitives from 3d gaussians
     if (!(MOGTracingDefaultPipeline & MOGTracingPipelineIS))
     {
         // TODO : reuse the same buffer if same size + async function
@@ -130,17 +133,16 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
     {
         // TODO : reuse the same buffer if same size + async function
         CUDA_CHECK(cudaFree(reinterpret_cast<void*>(stateWrapper.pState->gPrimAABB)));
-        CUDA_CHECK(
-            cudaMalloc(reinterpret_cast<void**>(&stateWrapper.pState->gPrimAABB), sizeof(OptixAabb) * gNum));
-        
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&stateWrapper.pState->gPrimAABB), sizeof(OptixAabb) * gNum));
+
         CUdeviceptr optixAabbPtr = 0;
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&optixAabbPtr), sizeof(OptixAabb)));
 
         stateWrapper.pState->gPrimNumTri = 0;
 
         computeGaussianEnclosingAABB(gNum, mogPos, mogRot, mogScl, enclosingSigmaFactorThreshold,
-                                           reinterpret_cast<OptixAabb*>(stateWrapper.pState->gPrimAABB),
-                                           reinterpret_cast<OptixAabb*>(optixAabbPtr));
+                                     reinterpret_cast<OptixAabb*>(stateWrapper.pState->gPrimAABB),
+                                     reinterpret_cast<OptixAabb*>(optixAabbPtr));
 
         CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(&stateWrapper.pState->gasAABB),
                               reinterpret_cast<void*>(optixAabbPtr), sizeof(OptixAabb), cudaMemcpyDeviceToHost));
@@ -273,7 +275,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
     paramsHost.rayHit = packed_accessor32<float, 4>(rayHit);
     paramsHost.minTransmittance = MOGTracingDefaultMinTransmittance;
     paramsHost.aabb = stateWrapper.pState->gasAABB;
-    paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb);
+    paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, 0);
+    paramsHost.maxNumHits = stateWrapper.pState->maxNumHits;
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
 
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
@@ -347,7 +350,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.mogSphGrd = packed_accessor32<float, 2>(mogSphGrd);
     paramsHost.minTransmittance = MOGTracingDefaultMinTransmittance;
     paramsHost.aabb = stateWrapper.pState->gasAABB;
-    paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb);
+    paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, 0);
+    paramsHost.maxNumHits = stateWrapper.pState->maxNumHits;
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
 
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();

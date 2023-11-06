@@ -408,6 +408,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path, const std::string&
         OPTIX_CHECK( optixDeviceContextCreate( cuCtx, &options, &pState->context ) );
     }
 
+    pState->maxNumHits = 1024;
     pState->gaussianSigmaThreshold = 3.0f;
 
     //

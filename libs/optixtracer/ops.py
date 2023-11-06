@@ -138,14 +138,23 @@ def trace_mog_grad(optix_ctx, ray_ori, ray_dir, ray_radiance, mog_pos, mog_rot, 
 
 #----------------------------------------------------------------------------
 #
-def build_mog_bvh(optix_ctx, mog_pos, mog_rot, mog_scl, enclosing_sigma_factor_threshold, rebuild):
+def build_mog_bvh(
+        optix_ctx, 
+        mog_pos, 
+        mog_rot, 
+        mog_scl, 
+        enclosing_sigma_factor_threshold, 
+        rebuild, 
+        max_num_hits=1024
+):
     _plugin.build_mog_bvh(
         optix_ctx.cpp_wrapper,
         mog_pos.view(-1, 3),
         mog_rot.view(-1, 4),
         mog_scl.view(-1, 3),
         enclosing_sigma_factor_threshold,
-        rebuild
+        rebuild,
+        max_num_hits
     )
 
 #----------------------------------------------------------------------------

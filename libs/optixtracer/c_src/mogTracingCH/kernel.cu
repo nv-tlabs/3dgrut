@@ -63,7 +63,7 @@ extern "C" __global__ void __raygen__rg()
     RayPayload p;
     p.hitT = 0;
 
-    while (transmit > params.minTransmittance)
+    while ( (transmit > params.minTransmittance) && (numHits < params.maxNumHits) )
     {
         trace(p, rayOri, rayDir, p.hitT + 1e-9, 1e16);
         if (p.hitT < 0)

@@ -16,8 +16,6 @@ extern "C"
     __constant__ MoGTracingParams params;
 }
 
-static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = 32;
-
 struct RayPayload
 {
     unsigned int ahNumHits; // number of valid hits in ahHitTable
@@ -67,7 +65,6 @@ extern "C" __global__ void __raygen__rg()
     // ray- aabb intersection to determine number of segments
     const float2 minMaxT = intersectAABB(params.aabb, rayOri, rayDir);
     constexpr float epsT = 1e-9;
-    // const float slabSpacing = MoGTracingAHMaxNumHitPerSlab * params.expectedDistanceBetweenHit + epsT;
     const float slabSpacing = params.slabSpacing;
     float startT = fmaxf(0.0f, minMaxT.x - epsT);
     
@@ -77,7 +74,7 @@ extern "C" __global__ void __raygen__rg()
     float transmit = 1.0f;
     RayPayload p;
 
-    while ((startT <= minMaxT.y) && (transmit > params.minTransmittance))
+    while ((startT <= minMaxT.y) && (transmit > params.minTransmittance) && (numHits < params.maxNumHits))
     {
         p.ahNumHits = 0;
         trace(&p, rayOri, rayDir, startT + epsT, startT + slabSpacing);
@@ -90,7 +87,7 @@ extern "C" __global__ void __raygen__rg()
         // in case we got more hits than available slots, start the next ray from the last hit
         if (p.ahNumHits == MoGTracingAHMaxNumHitPerSlab)
         {
-            startT = p.ahHitTable[MoGTracingAHMaxNumHitPerSlab - 1].x;
+            startT = p.ahHitTable[p.ahNumHits - 1].x;
         }
         else
         {
@@ -138,25 +135,6 @@ extern "C" __global__ void __raygen__rg()
     params.rayRad[idx.z][idx.y][idx.x][2] = radiance.z;
     params.rayDns[idx.z][idx.y][idx.x][0] = 1 - transmit;
     params.rayHit[idx.z][idx.y][idx.x][0] = numHits;
-}
-
-extern "C" __global__ void __miss__ms()
-{
-    // TODO : fetch background or generate random background (maybe done outside of tracer)
-}
-
-extern "C" __global__ void __intersection__is()
-{
-    const float3 ro = optixGetWorldRayOrigin();
-    const float3 rd = optixGetWorldRayDirection();
-    const float tmin = optixGetRayTmin();
-    const float tmax = optixGetRayTmax();
-    const unsigned int gId = optixGetPrimitiveIndex() / MOGPrimNumTri;
-    const float t = computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params);
-    if (t > tmin && t < tmax)
-    {
-        optixReportIntersection(t, 0);
-    }
 }
 
 extern "C" __global__ void __anyhit__ah()

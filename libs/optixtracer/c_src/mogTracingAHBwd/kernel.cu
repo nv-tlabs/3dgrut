@@ -16,8 +16,6 @@ extern "C"
     __constant__ MoGTracingBwdParams params;
 }
 
-static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = 32;
-
 struct RayPayload
 {
     unsigned int ahNumHits; // number of valid hits in ahHitTable
@@ -67,10 +65,10 @@ extern "C" __global__ void __raygen__rg()
     // ray- aabb intersection to determine number of segments
     const float2 minMaxT = intersectAABB(params.aabb, rayOri, rayDir);
     constexpr float epsT = 1e-9;
-    // const float slabSpacing = MoGTracingAHMaxNumHitPerSlab * params.expectedDistanceBetweenHit + epsT;
     const float slabSpacing = params.slabSpacing;
     float startT = fmaxf(0.0f, minMaxT.x - epsT);
 
+    uint32_t numHits = 0;
     float transmit = 1.0f;
     RayPayload p;
 
@@ -85,7 +83,7 @@ extern "C" __global__ void __raygen__rg()
 
     float3 accumulatedRayRad = make_float3(0);
 
-    while ((startT <= minMaxT.y) && (transmit > params.minTransmittance))
+    while ((startT <= minMaxT.y) && (transmit > params.minTransmittance) && (numHits < params.maxNumHits))
     {
         p.ahNumHits = 0;
         trace(&p, rayOri, rayDir, startT + epsT, startT + slabSpacing);
@@ -256,13 +254,10 @@ extern "C" __global__ void __raygen__rg()
             atomicAdd(&params.mogRotGrd[gId][3], grotGrdPoscr.w + grotGrdRayDirR.w);
 
             transmit = nextTransmit;
+            
+            numHits++;
         }
     }
-}
-
-extern "C" __global__ void __miss__ms()
-{
-    // TODO : fetch background or generate random background (maybe done outside of tracer)
 }
 
 extern "C" __global__ void __anyhit__ah()

@@ -17,6 +17,7 @@ struct OptiXState
     OptixTraversableHandle gasHandle;
     CUdeviceptr            gasBuffer;
     OptixAabb gasAABB;
+    uint32_t maxNumHits;
     float gaussianSigmaThreshold;
     
     uint32_t gPrimNumTri; ///< number of triangles per gaussian primitive
