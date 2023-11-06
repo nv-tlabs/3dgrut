@@ -29,6 +29,8 @@ class MixtureOfGaussians(torch.nn.Module):
         self.scale_activation_inv =  get_activation_function(self.conf.model.scale_activation, inverse=True)
         self.rotation_activation =   get_activation_function("normalize") # The default value of the dim parameter is 1
 
+        self.split_n_gaussians = self.conf.model.densify_prune.split.n_gaussians
+
     def set_optix_context(self):
         torch.zeros(1, device=self.device) # Create a dummy tensor to force cuda context init
         self.optix_ctx = optixtracer.OptiXContext()
@@ -217,7 +219,6 @@ class MixtureOfGaussians(torch.nn.Module):
         optimizable_tensors = self.replace_tensor_to_optimizer(updated_densities, "density")
         self.density = optimizable_tensors["density"]
 
-
     def replace_tensor_to_optimizer(self, tensor, name: str):
         assert self.optimizer is not None, "Optimizer need to be initialized when storing the checkpoint"
         optimizable_tensors = {}
@@ -236,6 +237,98 @@ class MixtureOfGaussians(torch.nn.Module):
         return optimizable_tensors
 
 
+    def cat_tensors_to_optimizer(self, tensors_dict):
+        assert self.optimizer is not None, "Optimizer need to be initialized before concatenating the values"
+
+        optimizable_tensors = {}
+        for group in self.optimizer.param_groups:
+            extension_tensor = tensors_dict[group["name"]]
+            stored_state = self.optimizer.state.get(group['params'][0], None)
+            if stored_state is not None:
+
+                stored_state["exp_avg"] = torch.cat((stored_state["exp_avg"], torch.zeros_like(extension_tensor)), dim=0)
+                stored_state["exp_avg_sq"] = torch.cat((stored_state["exp_avg_sq"], torch.zeros_like(extension_tensor)), dim=0)
+
+                del self.optimizer.state[group['params'][0]]
+                group["params"][0] = torch.nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(group["params"][0].required_grad))
+                self.optimizer.state[group['params'][0]] = stored_state
+
+                optimizable_tensors[group["name"]] = group["params"][0]
+            else:
+                group["params"][0] = torch.nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(group["params"][0].required_grad))
+                optimizable_tensors[group["name"]] = group["params"][0]
+
+        return optimizable_tensors
+    
+    def split_and_clone(self, scene_extent):
+        assert self.optimizer is not None, "Optimizer need to be initialized before splitting and cloning the Gaussians"
+        assert self.get_positions.requires_grad, "Trying to perform split and clone but the positions are not being optimized"
+
+        positional_grad_norm = None
+        for group in self.optimizer.param_groups:
+            if group["name"] == "positions":
+                positional_grad_norm = torch.norm(self.optimizer.state.get(group['params'][0], None)["exp_avg"], dim=-1)
+
+        self.clone(positional_grad_norm, scene_extent)
+
+
+
+    def split(self, positional_grad_norm, scene_extent):
+
+        n_init_points = self.get_positions.shape[0]
+
+        # Extract points that satisfy the gradient condition
+        padded_grad = torch.zeros((n_init_points), device="cuda")
+        padded_grad[:positional_grad_norm.shape[0]] = positional_grad_norm.squeeze()
+        mask = torch.where(padded_grad >= self.split_grad_threshold, True, False)
+        mask = torch.logical_and(mask, torch.max(self.get_scale, dim=1).values > self.percent_dense*scene_extent)
+
+
+        stds = self.get_scale[mask].repeat(self.split_n_gaussians, 1)
+        means =torch.zeros((stds.size(0), 3),device="cuda")
+        samples = torch.normal(mean=means, std=stds)
+        rots = quaternion_to_so3(self.rotation[mask]).repeat(self.split_n_gaussians,1,1)
+
+
+
+        add_gaussians = {
+                "positions": torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_positions[mask].repeat(self.split_n_gaussians, 1),
+                "features":  self.features[mask].repeat(self.split_n_gaussians,1),
+                "density":  self.density[mask].repeat(self.split_n_gaussians,1),
+                "scale":  get_activation_function(self.conf.model.scale_activation, inverse=True)(self.get_scale[mask].repeat(self.split_n_gaussians,1) / (0.8*self.split_n_gaussians)),
+                "rotation": self.rotation[mask].repeat(self.split_n_gaussians,1)
+                }
+
+        optimizable_tensors = self.cat_tensors_to_optimizer(add_gaussians)
+        self.positions = optimizable_tensors["positions"]
+        self.features = optimizable_tensors["features"]
+        self.density = optimizable_tensors["density"]
+        self.scale = optimizable_tensors["scale"]
+        self.rotation = optimizable_tensors["rotation"]
+
+
+    def clone(self, positional_grad_norm, scene_extent):
+        assert positional_grad_norm is not None, "Positional gradients must be available in order to clone the Gaussians"
+        # Extract points that satisfy the gradient condition
+        mask = torch.where(positional_grad_norm >= self.clone_grad_threshold, True, False)
+
+        # If the gaussians are larger they shouldn't be cloned, but rather split
+        mask = torch.logical_and(mask, torch.max(self.get_scale, dim=1).values <= self.percent_dense * scene_extent)
+
+        # Use the mask to dupicate these points
+        add_gaussians = {
+                "positions": self.positions[mask],
+                "features": self.features[mask],
+                "density": self.density[mask],
+                "scale": self.scale[mask],
+                "rotation": self.rotation[mask]} 
+
+        optimizable_tensors = self.cat_tensors_to_optimizer(add_gaussians)
+        self.positions = optimizable_tensors["positions"]
+        self.features = optimizable_tensors["features"]
+        self.density = optimizable_tensors["density"]
+        self.scale = optimizable_tensors["scale"]
+        self.rotation = optimizable_tensors["rotation"]
 
     @property
     def get_scale(self):
@@ -246,7 +339,7 @@ class MixtureOfGaussians(torch.nn.Module):
         return self.rotation_activation(self.rotation)
     
     @property
-    def get_position(self):
+    def get_positions(self):
         return self.positions
     
     @property

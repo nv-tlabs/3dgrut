@@ -117,7 +117,7 @@ def main(conf):
         
         def update_cloud_viz():
             # direct on-GPU update, must not have changed size
-            ps_point_cloud_buffer.update_data_from_device(model.get_position.detach())
+            ps_point_cloud_buffer.update_data_from_device(model.get_positions.detach())
 
         def render_from_current_ps_view():
 
@@ -304,7 +304,7 @@ def main(conf):
                     torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
 
                 if conf.with_gui:
-                    if model.get_position.requires_grad:
+                    if model.get_positions.requires_grad:
                         update_cloud_viz()
         
                     update_render_view_viz()

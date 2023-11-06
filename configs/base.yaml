@@ -23,6 +23,8 @@ model:
     start_iteration: 500
     end_iteration: 15000
     grad_threshold: 0.0002
+    split:
+      n_gaussians: 2
 
 checkpoint:
   frequency: 1000
