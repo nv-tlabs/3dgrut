@@ -38,7 +38,7 @@ model:
   reset_density:
     frequency: 3000 # Opacity reset interval in 3DGS default value 3000
     start_iteration: 0
-    end_iteration: {$n_iterations}
+    end_iteration: ${n_iterations}
     # This parameter is hardcoded in the 3DGS to 0.01
     new_max_density: 0.01 # The density of the all the Gaussians will be set to min(density, this) 
 
@@ -65,9 +65,9 @@ scheduler:
   positions:
     # In the 3DGS paper they additionally have a parameter lr_delay_mult, but is is not being used so I drop it here
     type: exp
-    lr_init: {$optimizer.params.positions.lr}
+    lr_init: ${optimizer.params.positions.lr}
     lr_final: 0000016
-    max_steps: {$n_iterations} 
+    max_steps: ${n_iterations} 
 
   density:
     type: skip
