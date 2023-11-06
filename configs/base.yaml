@@ -7,6 +7,9 @@ with_gui: false
 dataset:
   type: colmap
   
+  train:
+    sample_full_image: False
+  
 initialization:
   method: point_cloud      # one of [colmap, point_cloud, random]
   num_gaussians: 100_000   # method=random only: number of initial gaussians to use

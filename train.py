@@ -35,10 +35,10 @@ def main(conf):
     use_ssim = False
 
     if conf.dataset.type == 'nerf':
-        train_dataset = NeRFDataset(conf.path, split='train', sample_full_image=True)
+        train_dataset = NeRFDataset(conf.path, split='train', sample_full_image=conf.dataset.train.sample_full_image)
         val_dataset = NeRFDataset(conf.path, split='val', sample_full_image=True)
     elif conf.dataset.type == 'colmap':
-        train_dataset = ColmapDataset(conf.path, split='train', sample_full_image=True)
+        train_dataset = ColmapDataset(conf.path, split='train', sample_full_image=conf.dataset.train.sample_full_image)
         val_dataset = ColmapDataset(conf.path, split='val', sample_full_image=True)
     else:
         raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf"]. ')
@@ -268,9 +268,6 @@ def main(conf):
             for batch in pbar:
                 # Move data to GPU
                 rays_ori, rays_dir, rgb_gt = move_to_gpu(batch)
-                rays_ori = rays_ori.reshape(rays_ori.shape[0], train_dataset.image_h, train_dataset.image_w, 3)
-                rays_dir = rays_dir.reshape(rays_ori.shape[0], train_dataset.image_h, train_dataset.image_w, 3)
-                rgb_gt = rgb_gt.reshape(rays_ori.shape[0], train_dataset.image_h, train_dataset.image_w, 3)
 
                 # Compute the outputs of a single batch
                 outputs = model(rays_ori, rays_dir)
