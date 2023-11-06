@@ -11,6 +11,11 @@ def to_torch(data: npt.NDArray, device: str, dtype: Optional[torch.dtype] = None
     """Converts a numpy array to a torch tensor on target device with optional type-casting"""
     return torch.from_numpy(data).to(device=device, dtype=dtype)
 
+def to_np(x):
+    """
+    Really, definitely convert a torch tensor to a numpy array
+    """
+    return x.detach().cpu().numpy()
 
 def show_image(imgs, figAxes=None):
     """Utility to show a list of image tensors"""

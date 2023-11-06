@@ -1,10 +1,13 @@
-import logging
+import logging, sys, os, struct
+
 import numpy as np
 import torch
 from plyfile import PlyData
-from utils import to_torch, get_activation_function, inverse_sigmoid
-from libs import optixtracer
 
+from libs import optixtracer
+from utils import to_torch, get_activation_function, inverse_sigmoid
+from datasets.colmap_utils import read_next_bytes
+from geometry import nearest_neighbor_dist_cpuKD
 
 class MixtureOfGaussians(torch.nn.Module):
     def __init__(self, conf):
@@ -21,7 +24,9 @@ class MixtureOfGaussians(torch.nn.Module):
         self.optimizer = None
         self.optix_ctx = None
         self.density_activation = get_activation_function(self.conf.model.density_activation)
+        self.density_activation_inv = get_activation_function(self.conf.model.density_activation, inverse=True)
         self.scale_activation =  get_activation_function(self.conf.model.scale_activation)
+        self.scale_activation_inv =  get_activation_function(self.conf.model.scale_activation, inverse=True)
         self.rotation_activation =   get_activation_function("normalize") # The default value of the dim parameter is 1
 
     def set_optix_context(self):
@@ -49,6 +54,77 @@ class MixtureOfGaussians(torch.nn.Module):
         self.n_active_features = checkpoint["active_features"]
         self.set_optimizable_parameters()
         self.setup_optimizer(state_dict=checkpoint['optimizer'])
+   
+    def default_initialize_from_points(self, pts_np, colors_np=None):
+        """
+        Given an Nx3 array of points (and optionally Nx3 rgb colors), 
+        initialize default values for the other parameters of the model
+        """
+                              
+        dtype = torch.float32
+
+        N = pts_np.shape[0]
+        positions = to_torch(pts_np, dtype=dtype, device=self.device)
+       
+        # identity rotations
+        rots = torch.zeros((N,4), dtype=dtype, device=self.device)
+        rots[:,0] = 1. # they're quaternions
+
+        # set the scale as function of the distance from the origin
+        # TODO this might not make sense for large-scale scenes
+        dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(positions), 1e-3)
+        scales = torch.log(dist)[..., None].repeat(1, 3)
+
+        # set density as a constant
+        opacities = self.density_activation_inv(0.1 * torch.ones((N,1), dtype=dtype, device=self.device))
+
+        # set colors, constant if they weren't given
+        if colors_np is None:
+            features = 0.5 * torch.ones((N,3), dtype=dtype, device=self.device)
+        else:
+            features = to_torch(colors_np, dtype=dtype, device=self.device)
+
+        self.positions = torch.nn.Parameter(positions.to(dtype=dtype, device=self.device))
+        self.rotation = torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
+        self.scale = torch.nn.Parameter(scales.to(dtype=dtype, device=self.device))
+        self.density = torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device))
+        self.features = torch.nn.Parameter(features.to(dtype=dtype, device=self.device))
+        self.n_active_features = 3
+
+        self.set_optimizable_parameters()
+        self.setup_optimizer()
+
+    def init_from_colmap(self, root_path: str):
+
+        # TODO this reads from the binary format, also implement the nearly-identical plaintext version?
+
+        points_file = os.path.join(root_path, "sparse/0", "points3D.bin")
+        if not os.path.isfile(points_file):
+            raise ValueError(f"colomap points file {points_file} not found")
+
+        with open(points_file, "rb") as file:
+
+            n_pts = read_next_bytes(file, 8, "Q")[0]
+            logging.info(f"Found {n_pts} colmap points")
+
+            file_pts = np.zeros((n_pts, 3), dtype=np.float32)
+            file_rgb = np.zeros((n_pts, 3), dtype=np.float32)
+
+            for i_pt in range(n_pts):
+
+                # read the points
+                pt_data = read_next_bytes(file, 43, "QdddBBBd")
+                file_pts[i_pt,:] = np.array(pt_data[1:4])
+                file_rgb[i_pt,:] = np.array(pt_data[4:7])
+                # NOTE: error stored in last element of file, currently not used
+
+                # skip the track data
+                t_len = read_next_bytes(file, num_bytes=8, format_char_sequence="Q")[0]
+                read_next_bytes(file, num_bytes=8*t_len, format_char_sequence="ii"*t_len)
+                
+        file_rgb = file_rgb / 255.
+
+        self.default_initialize_from_points(file_pts, file_rgb)
             
     def setup_optimizer(self, state_dict=None):
         params = []
@@ -100,11 +176,7 @@ class MixtureOfGaussians(torch.nn.Module):
                               max_sh_degree: int = 3,
                               dtype = torch.float32,
                               set_optimizable_parameters: bool = True):
-        try:
-            from simple_knn._C import distCUDA2
-        except ImportError as e:
-            logging.error('Cannot import simple_knn. Please check README.md & make sure library is properly installed.')
-            logging.error(e)
+    
         logging.info(f"Generating random point cloud ({num_gsplat})...")
 
         # We create random points inside the bounds of the synthetic Blender scenes
@@ -118,8 +190,8 @@ class MixtureOfGaussians(torch.nn.Module):
         features[:, 3:, 1:] = 0.0
         features = features.transpose(1, 2).reshape(num_gsplat, -1).contiguous()
 
-        dist2 = torch.clamp_min(distCUDA2(fused_point_cloud), 0.0000001)
-        scales = torch.log(torch.sqrt(dist2))[..., None].repeat(1, 3)
+        dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(fused_point_cloud), 1e-3)
+        scales = torch.log(dist)[..., None].repeat(1, 3)
         rots = torch.zeros((num_gsplat, 4), device=self.device)
         rots[:, 0] = 1
 

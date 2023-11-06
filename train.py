@@ -19,6 +19,7 @@ from datasets.nerf_dataset import NeRFDataset
 from model import MixtureOfGaussians
 from datasets.utils import move_to_gpu
 from loss_utils import ssim
+from utils import to_np
 sys.path.append(os.path.dirname(os.path.dirname(os.getcwd()))) 
 
 
@@ -49,6 +50,36 @@ def main(conf):
     model = MixtureOfGaussians(conf)
     model.set_optix_context()
 
+    if conf.resume: # Load a checkpoint
+        logging.info(f"Loading a pretrained checkpoint from {conf.resume}!")
+        checkpoint = torch.load(conf.resume)
+        model.init_from_checkpoint(checkpoint)
+        global_step = checkpoint['global_step']
+
+    else: # Initialize
+
+        if conf.initialization_method == 'colmap':
+            model.init_from_colmap(conf.path)
+
+        elif conf.initialization_method == 'point_cloud':
+            ply_path = None
+            try:
+                ply_path = os.path.join(conf.path, "point_cloud.ply")
+                model.init_from_pretrained_point_cloud(ply_path)
+            except FileNotFoundError as e:
+                logging.exception(e)
+                raise e
+         
+        elif conf.initialization_method == 'random':
+            model.randomize_point_cloud()
+
+        else:
+           raise ValueError(f"unrecognized initialization_method {conf.initialization_method}, choose from [colmap, point_cloud, random]")
+
+        model.build_bvh()
+        model.setup_optimizer()
+        global_step = 0
+
     if conf.with_gui:
         import polyscope as ps
         import polyscope.imgui as psim
@@ -68,7 +99,7 @@ def main(conf):
         ps.set_bounding_box((0, 0, 0), (1, 1, 1))
 
         # viz stateful parameters & options
-        viz_do_train = True
+        viz_do_train = False
         viz_render_styles = ['color', 'density']
         viz_render_style_ind = 0
         viz_curr_render_size = None
@@ -79,7 +110,7 @@ def main(conf):
         
         ps.init()
 
-        ps_point_cloud = ps.register_point_cloud("centers", model.get_position.detach().cpu().numpy(), 
+        ps_point_cloud = ps.register_point_cloud("centers", to_np(model.get_position), 
                                 radius=1e-3, point_render_mode='quad')
         ps_point_cloud_buffer = ps_point_cloud.get_buffer("points")
 
@@ -172,14 +203,8 @@ def main(conf):
                 viz_render_color_buffer.update_data_from_device(sple_orad.detach())
 
             elif style == "density":
-                # append 1s for alpha
                 viz_render_scalar_buffer.update_data_from_device(sple_odns.detach())
 
-     
-        # test evaluations
-        update_cloud_viz()
-        render_from_current_ps_view()
-        update_render_view_viz()
 
         def ps_ui_callback():
             nonlocal viz_do_train, viz_render_style_ind
@@ -193,23 +218,6 @@ def main(conf):
 
         ps.set_user_callback(ps_ui_callback)
 
-    if conf.resume:
-        logging.info(f"Loading a pretrained checkpoint from {conf.resume}!")
-        checkpoint = torch.load(conf.resume)
-        model.init_from_checkpoint(checkpoint)
-        global_step = checkpoint['global_step']
-
-    else:
-        ply_path = None
-        try:
-            ply_path = os.path.join(conf.path, "point_cloud.ply")
-            model.init_from_pretrained_point_cloud(ply_path)
-        except FileNotFoundError as e:
-            # Since this data set has no colmap data, we start with random points
-            logging.info(f"PLY point cloud not found under path: {ply_path}")
-            model.randomize_point_cloud() 
-        model.setup_optimizer()
-        global_step = 0
 
     n_epochs = int(n_iterations/train_dataset.__len__())
 
