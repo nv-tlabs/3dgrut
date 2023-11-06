@@ -25,7 +25,7 @@ enum MOGTracingMode
 static constexpr int MOGPrimNumVert = 6; ///< octaHedron have 6 vertices
 static constexpr int MOGPrimNumTri = 8; ///< octaHedron have 8 triangles
 
-static constexpr float MOGTracingDefaultMinTransmittance = 0.01f;
+static constexpr float MOGTracingDefaultMinTransmittance = 0.03f;
 static constexpr float MOGTracingDefaultExpectedDistanceBetweenHit = 0.1f;
 static constexpr float MOGTracingDefaultMaxNumHits = 1024;
 static constexpr float MOGTracingDefaultHitMinGaussianResponse = 0.01f;

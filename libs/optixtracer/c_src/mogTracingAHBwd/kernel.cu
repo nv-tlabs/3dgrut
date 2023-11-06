@@ -127,24 +127,23 @@ extern "C" __global__ void __raygen__rg()
             const float grayDist = dot(gcrod, gcrod);
             const float gres = expf(-0.5f * grayDist);
             const float galpha = gres * gdns;
-            // const float galpha = fminf(GAlphaMax, gres * gdns);
-            // if (galpha < GAlphaMin)
-            // {
-            //     continue;
-            // }
-            const float3 gradu =
-                SH_C0 * make_float3(params.mogSph[gId][0], params.mogSph[gId][1], params.mogSph[gId][2]) +
-                make_float3(0.5);
-            const float3 grad =
-                make_float3(gradu.x > SHRadMinBound ? gradu.x : expf(gradu.x - SHRadMinBound) * SHRadMinBound,
-                            gradu.y > SHRadMinBound ? gradu.y : expf(gradu.y - SHRadMinBound) * SHRadMinBound,
-                            gradu.z > SHRadMinBound ? gradu.z : expf(gradu.z - SHRadMinBound) * SHRadMinBound);
-
+            
             const float weight = galpha * transmit;
 
             // NB : no gradient wrt d_rayDns assert(rayDnsGrd==0)
-
+            
             // gradient computation wrt rayRad
+
+            // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            // compute the gradient wrt to the sph coefficients and position (through the sph view direction)
+            const float3 grad = computeColorFromSHBwd<0>(
+                rayOri,
+                gId,
+                gpos,
+                weight,
+                rayRadGrd,
+                params
+            );
 
             // >>> rayRadiance = accumulatedRayRad + weigth * rayRad + (1-galpha)*transmit * residualRayRad
             const float3 rayRad = weight * grad;
@@ -154,15 +153,6 @@ extern "C" __global__ void __raygen__rg()
                 maxf3((nextTransmit <= params.minTransmittance ? make_float3(0) :
                                                                  (totalRayRad - accumulatedRayRad) / nextTransmit),
                       make_float3(0));
-
-            // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-            // ---> rayRad = weight * grad = weight * explu(gsph0 * SH_C0 + 0.5,SHRadMinBound)
-            // with explu(x,a) = x if x > a else a*e(x-a)
-            // ===> d_rayRad / d_gsph0 =   weight * SH_C0
-            const float shc0w = SH_C0 * weight;
-            atomicAdd(&params.mogSphGrd[gId][0], (gradu.x > SHRadMinBound ? 1 : grad.x) * shc0w * rayRadGrd.x);
-            atomicAdd(&params.mogSphGrd[gId][1], (gradu.y > SHRadMinBound ? 1 : grad.y) * shc0w * rayRadGrd.y);
-            atomicAdd(&params.mogSphGrd[gId][2], (gradu.z > SHRadMinBound ? 1 : grad.z) * shc0w * rayRadGrd.z);
 
             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
             // ---> rayRadiance = accumulatedRayRad + galpha * transmit * grad + (1-galpha) * transmit * residualRayRad

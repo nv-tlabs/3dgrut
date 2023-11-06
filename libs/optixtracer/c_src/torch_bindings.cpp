@@ -183,7 +183,7 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
         if (!(MOGTracingDefaultPipeline & MOGTracingPipelineIS))
         {
             // Our build input is a simple list of non-indexed triangle vertices
-            const uint32_t prim_input_flags[1] = { OPTIX_GEOMETRY_FLAG_NONE };
+            const uint32_t prim_input_flags[1] = { OPTIX_GEOMETRY_FLAG_REQUIRE_SINGLE_ANYHIT_CALL };
             prim_input.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
             prim_input.triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
             prim_input.triangleArray.numVertices = gPrimNumVert * gNum;
@@ -200,7 +200,7 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
         }
         else
         {
-            const uint32_t prim_input_flags[1] = { OPTIX_GEOMETRY_FLAG_NONE };
+            const uint32_t prim_input_flags[1] = { OPTIX_GEOMETRY_FLAG_REQUIRE_SINGLE_ANYHIT_CALL };
             prim_input.type = OPTIX_BUILD_INPUT_TYPE_CUSTOM_PRIMITIVES;
             prim_input.customPrimitiveArray.numPrimitives = gNum;
             prim_input.customPrimitiveArray.aabbBuffers = &stateWrapper.pState->gPrimAABB;

@@ -36,6 +36,7 @@ struct MoGTracingBwdParams
     float minTransmittance;
     float slabSpacing;
 
+    unsigned int maxNumHits;
     float hitMinGaussianResponse;
-    float3 padd;
+    float2 padd;
 };

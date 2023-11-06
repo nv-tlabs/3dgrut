@@ -29,18 +29,14 @@ static constexpr float SH_C3[] = {
 	-0.5900435899266435f
 };
 
-// This code has been adapated from ::::::::::::::::::::::::::::::::::::::
-//
-/*
- * Copyright (C) 2023, Inria
- * GRAPHDECO research group, https://team.inria.fr/graphdeco
- * All rights reserved.
- *
- * This software is free for non-commercial, research and evaluation use 
- * under the terms of the LICENSE.md file.
- *
- * For inquiries contact  george.drettakis@inria.fr
- */
+// TODO : rewrite and optimize
+
+template <typename TParams>
+inline __device__ float3 getSphCoeff(TParams& params, int gId, int idx)
+{
+    const int off = idx * 3;
+    return make_float3(params.mogSph[gId][off + 0], params.mogSph[gId][off + 1], params.mogSph[gId][off + 2]);
+}
 
 template<int deg=3, typename TParams>
 static __device__ float3 computeColorFromSH(
@@ -95,129 +91,135 @@ static __device__ float3 computeColorFromSH(
     );
 }
 
-// template <int deg=3, numCoeffs=16, typename TParams>
-// __device__ float3 computeColorFromSHBwd(
-// 	const float3&gpos, 
-// 	const float3& rori,
-// 	const float3& rayRadGrd,
-// 	uint32_t gid,
-// 	TParams& params 
-// 	float3& dL_grad, 
-// 	float3& dL_gpos, 
-// 	float3& dL_gsph)
-// {
-// 	const float3 dir = safe_normalize(gpos - rori);
+template <typename TParams>
+inline __device__ void addSphCoeffGrd(TParams& params, int gId, int idx, const float3& val)
+{
+    const int off = idx * 3;
+    atomicAdd(&params.mogSphGrd[gId][off + 0], val.x);
+    atomicAdd(&params.mogSphGrd[gId][off + 1], val.y);
+    atomicAdd(&params.mogSphGrd[gId][off + 2], val.z);
+}
+
+template <int deg = 3, typename TParams>
+__device__ float3 computeColorFromSHBwd(
+    const float3& rori, uint32_t gId, const float3& gpos, float weight, const float3& rayRadGrd, TParams& params)
+{
+    // radiance unclamped
+    const float3 gradu =
+        SH_C0 * make_float3(params.mogSph[gId][0], params.mogSph[gId][1], params.mogSph[gId][2]) + make_float3(0.5);
+   
+    // clamped radiance
+    const float3 grad = make_float3(gradu.x > SHRadMinBound ? gradu.x : expf(gradu.x - SHRadMinBound) * SHRadMinBound,
+                                    gradu.y > SHRadMinBound ? gradu.y : expf(gradu.y - SHRadMinBound) * SHRadMinBound,
+                                    gradu.z > SHRadMinBound ? gradu.z : expf(gradu.z - SHRadMinBound) * SHRadMinBound);
+
+    // 
+    float3 dL_dRGB = rayRadGrd;
+    dL_dRGB.x *= (gradu.x > SHRadMinBound ? 1 : grad.x) * weight;
+    dL_dRGB.y *= (gradu.y > SHRadMinBound ? 1 : grad.y) * weight;
+    dL_dRGB.z *= (gradu.z > SHRadMinBound ? 1 : grad.z) * weight;
+
+    // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    // ---> rayRad = weight * grad = weight * explu(gsph0 * SH_C0 +
+    // 0.5,SHRadMinBound) with explu(x,a) = x if x > a else a*e(x-a)
+    // ===> d_rayRad / d_gsph0 =   weight * SH_C0
+    addSphCoeffGrd(params, gId, 0, SH_C0 * dL_dRGB);
+
+    if (deg > 0)
+    {
+        const float3 sphdiru = gpos - rori;
+        const float3 sphdir = safe_normalize(sphdiru);
+    
+        float3 dRGBdx = make_float3(0);
+        float3 dRGBdy = make_float3(0);
+        float3 dRGBdz = make_float3(0);
+        float x = sphdir.x;
+        float y = sphdir.y;
+        float z = sphdir.z;
+
+        float dRGBdsh1 = -SH_C1 * y;
+        float dRGBdsh2 = SH_C1 * z;
+        float dRGBdsh3 = -SH_C1 * x;
+
+        addSphCoeffGrd(params, gId, 1, dRGBdsh1 * dL_dRGB);
+        addSphCoeffGrd(params, gId, 2, dRGBdsh2 * dL_dRGB);
+        addSphCoeffGrd(params, gId, 3, dRGBdsh3 * dL_dRGB);
+
+        dRGBdx = -SH_C1 * getSphCoeff(params,gId,3);    
+        dRGBdy = -SH_C1 * getSphCoeff(params,gId,1);
+        dRGBdz =  SH_C1 * getSphCoeff(params,gId,2);
+
+        if (deg > 1)
+        {
+            float xx = x * x, yy = y * y, zz = z * z;
+            float xy = x * y, yz = y * z, xz = x * z;
+
+            float dRGBdsh4 = SH_C2[0] * xy;
+            float dRGBdsh5 = SH_C2[1] * yz;
+            float dRGBdsh6 = SH_C2[2] * (2.f * zz - xx - yy);
+            float dRGBdsh7 = SH_C2[3] * xz;
+            float dRGBdsh8 = SH_C2[4] * (xx - yy);
+
+            addSphCoeffGrd(params, gId, 4, dRGBdsh4 * dL_dRGB);
+            addSphCoeffGrd(params, gId, 5, dRGBdsh5 * dL_dRGB);
+            addSphCoeffGrd(params, gId, 6, dRGBdsh6 * dL_dRGB);
+            addSphCoeffGrd(params, gId, 7, dRGBdsh7 * dL_dRGB);
+            addSphCoeffGrd(params, gId, 8, dRGBdsh8 * dL_dRGB);
+
+            dRGBdx +=
+                SH_C2[0] * y * getSphCoeff(params, gId, 4) + SH_C2[2] * 2.f * -x * getSphCoeff(params, gId, 6) + SH_C2[3] * z * getSphCoeff(params, gId, 7) + SH_C2[4] * 2.f * x * getSphCoeff(params, gId, 8);
+            dRGBdy +=
+                SH_C2[0] * x * getSphCoeff(params, gId, 4) + SH_C2[1] * z * getSphCoeff(params, gId, 5) + SH_C2[2] * 2.f * -y * getSphCoeff(params, gId, 6) + SH_C2[4] * 2.f * -y * getSphCoeff(params, gId, 8);
+            dRGBdz += SH_C2[1] * y * getSphCoeff(params, gId, 5) + SH_C2[2] * 2.f * 2.f * z * getSphCoeff(params, gId, 6) + SH_C2[3] * x * getSphCoeff(params, gId, 7);
+
+            if (deg > 2)
+            {
+                float dRGBdsh9 = SH_C3[0] * y * (3.f * xx - yy);
+                float dRGBdsh10 = SH_C3[1] * xy * z;
+                float dRGBdsh11 = SH_C3[2] * y * (4.f * zz - xx - yy);
+                float dRGBdsh12 = SH_C3[3] * z * (2.f * zz - 3.f * xx - 3.f * yy);
+                float dRGBdsh13 = SH_C3[4] * x * (4.f * zz - xx - yy);
+                float dRGBdsh14 = SH_C3[5] * z * (xx - yy);
+                float dRGBdsh15 = SH_C3[6] * x * (xx - 3.f * yy);
+
+                addSphCoeffGrd(params, gId, 9,  dRGBdsh9 *  dL_dRGB);
+                addSphCoeffGrd(params, gId, 10, dRGBdsh10 * dL_dRGB);
+                addSphCoeffGrd(params, gId, 11, dRGBdsh11 * dL_dRGB);
+                addSphCoeffGrd(params, gId, 12, dRGBdsh12 * dL_dRGB);
+                addSphCoeffGrd(params, gId, 13, dRGBdsh13 * dL_dRGB);
+                addSphCoeffGrd(params, gId, 14, dRGBdsh14 * dL_dRGB);
+                addSphCoeffGrd(params, gId, 15, dRGBdsh15 * dL_dRGB);
+
+                dRGBdx += (SH_C3[0] * getSphCoeff(params, gId, 9)  * 3.f * 2.f * xy + SH_C3[1] * getSphCoeff(params, gId, 10) * yz + SH_C3[2] * getSphCoeff(params, gId, 11) * -2.f * xy +
+                           SH_C3[3] * getSphCoeff(params, gId, 12) * -3.f * 2.f * xz + SH_C3[4] * getSphCoeff(params, gId, 13) * (-3.f * xx + 4.f * zz - yy) +
+                           SH_C3[5] * getSphCoeff(params, gId, 14) * 2.f * xz + SH_C3[6] * getSphCoeff(params, gId, 15) * 3.f * (xx - yy));
+
+                dRGBdy += (SH_C3[0] * getSphCoeff(params, gId, 9) * 3.f * (xx - yy) + SH_C3[1] * getSphCoeff(params, gId, 10) * xz +
+                           SH_C3[2] * getSphCoeff(params, gId, 11) * (-3.f * yy + 4.f * zz - xx) + SH_C3[3] * getSphCoeff(params, gId, 12) * -3.f * 2.f * yz +
+                           SH_C3[4] * getSphCoeff(params, gId, 13) * -2.f * xy + SH_C3[5] * getSphCoeff(params, gId, 14) * -2.f * yz +
+                           SH_C3[6] * getSphCoeff(params, gId, 15) * -3.f * 2.f * xy);
+
+                dRGBdz += (SH_C3[1] * getSphCoeff(params, gId, 10) * xy + SH_C3[2] * getSphCoeff(params, gId, 11) * 4.f * 2.f * yz +
+                           SH_C3[3] * getSphCoeff(params, gId, 12) * 3.f * (2.f * zz - xx - yy) + SH_C3[4] * getSphCoeff(params, gId, 13) * 4.f * 2.f * xz +
+                           SH_C3[5] * getSphCoeff(params, gId, 14) * (xx - yy));
+            }
+        }
 	
-// 	float3 rad = SH_C0 * params.mogSph[gId][0];
-	
-// 	float3 dL_dRGB = rayRadGrd;
-// 	dL_dRGB.x *= clamped[3 * idx + 0] ? 0 : 1;
-// 	dL_dRGB.y *= clamped[3 * idx + 1] ? 0 : 1;
-// 	dL_dRGB.z *= clamped[3 * idx + 2] ? 0 : 1;
+        // The view direction is an input to the computation. View direction
+        // is influenced by the Gaussian's mean, so SHs gradients
+        // must propagate back into 3D position.
+        const float3 dL_ddir = make_float3( dot(dRGBdx, dL_dRGB), dot(dRGBdy, dL_dRGB), dot(dRGBdz, dL_dRGB) );
 
-// 	glm::vec3 dRGBdx(0, 0, 0);
-// 	glm::vec3 dRGBdy(0, 0, 0);
-// 	glm::vec3 dRGBdz(0, 0, 0);
-// 	float x = dir.x;
-// 	float y = dir.y;
-// 	float z = dir.z;
+        // Account for normalization of direction
+        const float3 dL_dmean =  safe_normalize_bw(sphdiru, dL_ddir);
 
-// 	// Target location for this Gaussian to write SH gradients to
-// 	glm::vec3* dL_dsh = dL_dshs + idx * max_coeffs;
-
-// 	// No tricks here, just high school-level calculus.
-// 	float dRGBdsh0 = SH_C0;
-// 	dL_dsh[0] = dRGBdsh0 * dL_dRGB;
-// 	if (deg > 0)
-// 	{
-// 		float dRGBdsh1 = -SH_C1 * y;
-// 		float dRGBdsh2 = SH_C1 * z;
-// 		float dRGBdsh3 = -SH_C1 * x;
-// 		dL_dsh[1] = dRGBdsh1 * dL_dRGB;
-// 		dL_dsh[2] = dRGBdsh2 * dL_dRGB;
-// 		dL_dsh[3] = dRGBdsh3 * dL_dRGB;
-
-// 		dRGBdx = -SH_C1 * sh[3];
-// 		dRGBdy = -SH_C1 * sh[1];
-// 		dRGBdz = SH_C1 * sh[2];
-
-// 		if (deg > 1)
-// 		{
-// 			float xx = x * x, yy = y * y, zz = z * z;
-// 			float xy = x * y, yz = y * z, xz = x * z;
-
-// 			float dRGBdsh4 = SH_C2[0] * xy;
-// 			float dRGBdsh5 = SH_C2[1] * yz;
-// 			float dRGBdsh6 = SH_C2[2] * (2.f * zz - xx - yy);
-// 			float dRGBdsh7 = SH_C2[3] * xz;
-// 			float dRGBdsh8 = SH_C2[4] * (xx - yy);
-// 			dL_dsh[4] = dRGBdsh4 * dL_dRGB;
-// 			dL_dsh[5] = dRGBdsh5 * dL_dRGB;
-// 			dL_dsh[6] = dRGBdsh6 * dL_dRGB;
-// 			dL_dsh[7] = dRGBdsh7 * dL_dRGB;
-// 			dL_dsh[8] = dRGBdsh8 * dL_dRGB;
-
-// 			dRGBdx += SH_C2[0] * y * sh[4] + SH_C2[2] * 2.f * -x * sh[6] + SH_C2[3] * z * sh[7] + SH_C2[4] * 2.f * x * sh[8];
-// 			dRGBdy += SH_C2[0] * x * sh[4] + SH_C2[1] * z * sh[5] + SH_C2[2] * 2.f * -y * sh[6] + SH_C2[4] * 2.f * -y * sh[8];
-// 			dRGBdz += SH_C2[1] * y * sh[5] + SH_C2[2] * 2.f * 2.f * z * sh[6] + SH_C2[3] * x * sh[7];
-
-// 			if (deg > 2)
-// 			{
-// 				float dRGBdsh9 = SH_C3[0] * y * (3.f * xx - yy);
-// 				float dRGBdsh10 = SH_C3[1] * xy * z;
-// 				float dRGBdsh11 = SH_C3[2] * y * (4.f * zz - xx - yy);
-// 				float dRGBdsh12 = SH_C3[3] * z * (2.f * zz - 3.f * xx - 3.f * yy);
-// 				float dRGBdsh13 = SH_C3[4] * x * (4.f * zz - xx - yy);
-// 				float dRGBdsh14 = SH_C3[5] * z * (xx - yy);
-// 				float dRGBdsh15 = SH_C3[6] * x * (xx - 3.f * yy);
-// 				dL_dsh[9] = dRGBdsh9 * dL_dRGB;
-// 				dL_dsh[10] = dRGBdsh10 * dL_dRGB;
-// 				dL_dsh[11] = dRGBdsh11 * dL_dRGB;
-// 				dL_dsh[12] = dRGBdsh12 * dL_dRGB;
-// 				dL_dsh[13] = dRGBdsh13 * dL_dRGB;
-// 				dL_dsh[14] = dRGBdsh14 * dL_dRGB;
-// 				dL_dsh[15] = dRGBdsh15 * dL_dRGB;
-
-// 				dRGBdx += (
-// 					SH_C3[0] * sh[9] * 3.f * 2.f * xy +
-// 					SH_C3[1] * sh[10] * yz +
-// 					SH_C3[2] * sh[11] * -2.f * xy +
-// 					SH_C3[3] * sh[12] * -3.f * 2.f * xz +
-// 					SH_C3[4] * sh[13] * (-3.f * xx + 4.f * zz - yy) +
-// 					SH_C3[5] * sh[14] * 2.f * xz +
-// 					SH_C3[6] * sh[15] * 3.f * (xx - yy));
-
-// 				dRGBdy += (
-// 					SH_C3[0] * sh[9] * 3.f * (xx - yy) +
-// 					SH_C3[1] * sh[10] * xz +
-// 					SH_C3[2] * sh[11] * (-3.f * yy + 4.f * zz - xx) +
-// 					SH_C3[3] * sh[12] * -3.f * 2.f * yz +
-// 					SH_C3[4] * sh[13] * -2.f * xy +
-// 					SH_C3[5] * sh[14] * -2.f * yz +
-// 					SH_C3[6] * sh[15] * -3.f * 2.f * xy);
-
-// 				dRGBdz += (
-// 					SH_C3[1] * sh[10] * xy +
-// 					SH_C3[2] * sh[11] * 4.f * 2.f * yz +
-// 					SH_C3[3] * sh[12] * 3.f * (2.f * zz - xx - yy) +
-// 					SH_C3[4] * sh[13] * 4.f * 2.f * xz +
-// 					SH_C3[5] * sh[14] * (xx - yy));
-// 			}
-// 		}
-// 	}
-
-// 	// The view direction is an input to the computation. View direction
-// 	// is influenced by the Gaussian's mean, so SHs gradients
-// 	// must propagate back into 3D position.
-// 	glm::vec3 dL_ddir(glm::dot(dRGBdx, dL_dRGB), glm::dot(dRGBdy, dL_dRGB), glm::dot(dRGBdz, dL_dRGB));
-
-// 	// Account for normalization of direction
-// 	float3 dL_dmean = dnormvdv(float3{ dir_orig.x, dir_orig.y, dir_orig.z }, float3{ dL_ddir.x, dL_ddir.y, dL_ddir.z });
-
-// 	// Gradients of loss w.r.t. Gaussian means, but only the portion 
-// 	// that is caused because the mean affects the view-dependent color.
-// 	// Additional mean gradient is accumulated in below methods.
-// 	dL_dmeans[idx] += glm::vec3(dL_dmean.x, dL_dmean.y, dL_dmean.z);
-// }
+        // Gradients of loss w.r.t. Gaussian means, but only the portion 
+        // that is caused because the mean affects the view-dependent color.
+        // Additional mean gradient is accumulated in below methods.
+        atomicAdd(&params.mogPosGrd[gId][0], dL_dmean.x);
+        atomicAdd(&params.mogPosGrd[gId][1], dL_dmean.y);
+        atomicAdd(&params.mogPosGrd[gId][2], dL_dmean.z);
+    }
+}
 
 #endif
