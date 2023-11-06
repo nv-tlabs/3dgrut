@@ -46,3 +46,6 @@ RUN rm -r build
 
 # Make sure to activate the correct environment on startup
 RUN echo "source /opt/conda/bin/activate ${CONDA_ENV}" >> /root/.bashrc
+
+# Required for OptiX drivers
+ENV NVIDIA_DRIVER_CAPABILITIES compute,utility,graphics
