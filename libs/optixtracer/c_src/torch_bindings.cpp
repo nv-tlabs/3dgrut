@@ -255,7 +255,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
                                                                   torch::Tensor mogRot,
                                                                   torch::Tensor mogScl,
                                                                   torch::Tensor mogDns,
-                                                                  torch::Tensor mogSph)
+                                                                  torch::Tensor mogSph,
+                                                                  const uint32_t sh_degs_to_calculate)
 {
     const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
     torch::Tensor rayRad = torch::empty({ rayOri.size(0), rayOri.size(1), rayOri.size(2), 3 }, opts);
@@ -329,7 +330,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     torch::Tensor mogSph,
     torch::Tensor rayRadGrd,
     torch::Tensor rayDnsGrd,
-    torch::Tensor rayHitGrd)
+    torch::Tensor rayHitGrd,
+    const uint32_t sh_degs_to_calculate)
 {
     const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
     torch::Tensor mogPosGrd = torch::zeros({ mogPos.size(0), mogPos.size(1) }, opts);

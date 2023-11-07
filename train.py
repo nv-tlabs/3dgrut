@@ -328,6 +328,10 @@ def main(conf):
                 rays_ori, rays_dir, rgb_gt = move_to_gpu(batch)
                 scene_updated = False
 
+                # Every 1000 its we increase the levels of SH up to a maximum degree
+                if global_step % 1000 == 0:
+                    model.sh_degs_to_calculate = max(model.sh_degs_to_calculate + 1, 3)
+
                 # Compute the outputs of a single batch
                 outputs = model(rays_ori, rays_dir)
                 
