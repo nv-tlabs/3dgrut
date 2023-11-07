@@ -466,11 +466,11 @@ class CameraDataset(Dataset):
     def read_focal_length(self, transform_json: dict) -> bool:
         def _read_focal_length(resolution, axis):
             if axis + "_fov" in transform_json:
-                return fov2focal(resolution, transform_json[axis + "_fov"])
+                return fov2focal(transform_json[axis + "_fov"], resolution)
             elif "fl_" + axis in transform_json:
                 return transform_json["fl_" + axis]
             elif "camera_angle_" + axis in transform_json:
-                return fov2focal(resolution, transform_json["camera_angle_" + axis])
+                return fov2focal(transform_json["camera_angle_" + axis], resolution)
             else:
                 return 0.0
 

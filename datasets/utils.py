@@ -42,10 +42,10 @@ def load_gsplat_mog(file_path):
         torch.from_numpy(gsplat_sph).to(DEFAULT_DEVICE)
     )
 
-def fov2focal(fov, pixels):
-    return pixels / (2 * math.tan(fov / 2))
+def fov2focal(fov_radians: float, pixels: int):
+    return pixels / (2 * math.tan(fov_radians / 2))
 
-def focal2fov(focal, pixels):
+def focal2fov(focal: float, pixels: int):
     return 2*math.atan(pixels/(2*focal))
 
 def pinhole_camera_rays(x, y, f_x, f_y, w, h):
