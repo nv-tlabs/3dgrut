@@ -117,18 +117,11 @@ def get_scheduler(scheduler: str) -> Callable:
     return SCHEDULER_DICT[scheduler]
 
 
-
-SH_DEGREE_TO_NUM_FEATURES = {
-    1: 3,
-    2: 12,
-    3: 27,
-    4: 48
-}
+def sh_degree_to_specular_dim(degree):
+    """ Number of dimensions used by SH of deg [1..degree], inclusive """
+    return 3 * ((degree + 1) ** 2 - 1)
 
 
-NUM_FEATURES_TO_SH_DEGREE = {
-    3:  1,
-    12: 2,
-    27: 3,
-    48: 4
-}
+def sh_degree_to_num_features(degree):
+    """ Number of dimensions used by SH of deg [0..degree], inclusive """
+    return sh_degree_to_specular_dim(degree) + 3

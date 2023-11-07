@@ -7,6 +7,7 @@ with_gui: false
 
 dataset:
   type: colmap
+  downsample_factor: 1  # for datasets that include multi-scale versions of images [colmap]
   
   train:
     batch_size: 8192
@@ -27,10 +28,11 @@ model:
   optimize_scale: true
   bvh_update_frequency: 1
   progressive_training:
-    init_n_features: 1
-    max_n_features: 3
-    increase_frequency: 1000
-    increase_step: 1
+    feature_type: 'sh'        # one of [sh, mlp], currently only sh supported
+    init_n_features: 0        # sh: initial sh deg | mlp: num of dims initially unmasked
+    max_n_features: 3         # sh: maximum sh deg | mlp: total num of dims finally unmasked
+    increase_frequency: 1000  # unmask more feature dimensions every N global steps
+    increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
     
   densify:
     frequency: 100 # densification_interval in 3DGS with default value 100
@@ -72,7 +74,7 @@ optimizer:
     features_albedo:
       lr: 0.0025 # 3DGS value: 0.0025
     features_specular:
-      lr: ${div:${optimizer.features_albedo.lr},20} # 3DGS value 20x smaller than lr of features_albedo
+      lr: ${div:${optimizer.params.features_albedo.lr},20} # 3DGS value 20x smaller than lr of features_albedo
     rotation:
       lr: 0.001 # 3DGS value: 0.001
     scale:

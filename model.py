@@ -5,7 +5,8 @@ import torch
 from plyfile import PlyData
 
 from libs import optixtracer
-from utils import to_torch, get_activation_function, inverse_sigmoid, get_scheduler, quaternion_to_so3, SH_DEGREE_TO_NUM_FEATURES
+from utils import to_torch, get_activation_function, inverse_sigmoid, get_scheduler, quaternion_to_so3, \
+    sh_degree_to_num_features, sh_degree_to_specular_dim
 from datasets.colmap_utils import read_next_bytes
 from datasets.utils import PointCloud
 from geometry import nearest_neighbor_dist_cpuKD
@@ -40,33 +41,144 @@ class MixtureOfGaussians(torch.nn.Module):
         self.new_max_density = self.conf.model.reset_density.new_max_density
 
         # Check if we would like to do progressive training
+        self.feature_type = 'sh'
         self.n_active_features = self.conf.model.progressive_training.init_n_features
-        self.max_n_features = self.conf.model.progressive_training.max_n_features 
-        if self.max_n_features > self.n_active_features:
+        self.max_n_features = self.conf.model.progressive_training.max_n_features   # For SH, this is the SH degree
+        self.progressive_training = False
+        if self.n_active_features < self.max_n_features:
             self.feature_dim_increase_interval = self.conf.model.progressive_training.increase_frequency
             self.feature_dim_increase_step = self.conf.model.progressive_training.increase_step
+            self.progressive_training = True
+
+    def validate_fields(self):
+        num_gsplat = self.positions.shape[0]
+        assert self.positions.shape == (num_gsplat, 3)
+        assert self.density.shape == (num_gsplat, 1)
+        assert self.rotation.shape == (num_gsplat, 4)
+        assert self.scale.shape == (num_gsplat, 3)
+
+        if self.feature_type == 'sh':
+            assert self.features_albedo.shape == (num_gsplat, 3)
+            specular_sh_dims = sh_degree_to_specular_dim(self.max_n_features)
+            assert self.features_specular.shape == (num_gsplat, specular_sh_dims)
+        else:
+            raise ValueError('Neural features not yet supported.')
 
     def set_optix_context(self):
         torch.zeros(1, device=self.device) # Create a dummy tensor to force cuda context init
         self.optix_ctx = optixtracer.OptiXContext()
 
-    def set_optimizable_parameters(self):
-        if not self.conf.model.optimize_density:
-            self.density.requires_grad = False
-        if not self.conf.model.optimize_features_albedo:
-            self.features_albedo.requires_grad = False
-        if not self.conf.model.optimize_features_specular:
-            self.features_specular.requires_grad = False
-        if not self.conf.model.optimize_rotation:
-            self.rotation.requires_grad = False
-        if not self.conf.model.optimize_scale:
-            self.scale.requires_grad = False
-        if not self.conf.model.optimize_position:
-            self.positions.requires_grad = False
+    def init_from_colmap(self, root_path: str):
+        # TODO this reads from the binary format, also implement the nearly-identical plaintext version?
+        points_file = os.path.join(root_path, "sparse/0", "points3D.bin")
+        if not os.path.isfile(points_file):
+            raise ValueError(f"colomap points file {points_file} not found")
 
-    def update_optimizable_parameters(self, optimizable_tensors: dict[str, torch.Tensor]):
-        for name, value in optimizable_tensors.items():
-            setattr(self, name, value)
+        with open(points_file, "rb") as file:
+
+            n_pts = read_next_bytes(file, 8, "Q")[0]
+            logging.info(f"Found {n_pts} colmap points")
+
+            file_pts = np.zeros((n_pts, 3), dtype=np.float32)
+            file_rgb = np.zeros((n_pts, 3), dtype=np.float32)
+
+            for i_pt in range(n_pts):
+                # read the points
+                pt_data = read_next_bytes(file, 43, "QdddBBBd")
+                file_pts[i_pt, :] = np.array(pt_data[1:4])
+                file_rgb[i_pt, :] = np.array(pt_data[4:7])
+                # NOTE: error stored in last element of file, currently not used
+
+                # skip the track data
+                t_len = read_next_bytes(file, num_bytes=8, format_char_sequence="Q")[0]
+                read_next_bytes(file, num_bytes=8 * t_len, format_char_sequence="ii" * t_len)
+
+        file_rgb = file_rgb / 255.
+
+        self.default_initialize_from_points(file_pts, file_rgb)
+        self.validate_fields()
+
+    def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
+        data = PlyData.read(pc_path)
+        num_gsplat = len(data['vertex'])
+        self.positions = torch.nn.Parameter(to_torch(
+            np.transpose(np.stack((data['vertex']['x'], data['vertex']['y'], data['vertex']['z']), dtype=np.float32)),
+            device=self.device))  # type: ignore
+        self.rotation = torch.nn.Parameter(to_torch(np.transpose(np.stack(
+            (data['vertex']['rot_0'], data['vertex']['rot_1'], data['vertex']['rot_2'], data['vertex']['rot_3']),
+            dtype=np.float32)), device=self.device))  # type: ignore
+        self.scale = torch.nn.Parameter(to_torch(np.transpose(
+            np.stack((data['vertex']['scale_0'], data['vertex']['scale_1'], data['vertex']['scale_2']),
+                     dtype=np.float32)), device=self.device))  # type: ignore
+        self.density = torch.nn.Parameter(
+            to_torch(data['vertex']['opacity'].astype(np.float32).reshape(num_gsplat, 1), device=self.device))
+        self.features_albedo = torch.nn.Parameter(to_torch(np.transpose(np.stack((
+            data['vertex']['f_dc_0'], data['vertex']['f_dc_1'], data['vertex']['f_dc_2']),
+            dtype=np.float32)), device=self.device))  # type: ignore
+        self.features_specular = torch.nn.Parameter(to_torch(np.transpose(np.stack((
+            data['vertex']['f_rest_0'], data['vertex']['f_rest_1'], data['vertex']['f_rest_2'],
+            data['vertex']['f_rest_3'], data['vertex']['f_rest_4'],
+            data['vertex']['f_rest_5'], data['vertex']['f_rest_6'], data['vertex']['f_rest_7'],
+            data['vertex']['f_rest_8'], data['vertex']['f_rest_9'],
+            data['vertex']['f_rest_10'], data['vertex']['f_rest_11'], data['vertex']['f_rest_12'],
+            data['vertex']['f_rest_13'], data['vertex']['f_rest_14'],
+            data['vertex']['f_rest_15'], data['vertex']['f_rest_16'], data['vertex']['f_rest_17'],
+            data['vertex']['f_rest_18'], data['vertex']['f_rest_19'],
+            data['vertex']['f_rest_20'], data['vertex']['f_rest_21'], data['vertex']['f_rest_22'],
+            data['vertex']['f_rest_23'], data['vertex']['f_rest_24'],
+            data['vertex']['f_rest_25'], data['vertex']['f_rest_26'], data['vertex']['f_rest_27'],
+            data['vertex']['f_rest_28'], data['vertex']['f_rest_29'],
+            data['vertex']['f_rest_30'], data['vertex']['f_rest_31'], data['vertex']['f_rest_32'],
+            data['vertex']['f_rest_33'], data['vertex']['f_rest_34'],
+            data['vertex']['f_rest_35'], data['vertex']['f_rest_36'], data['vertex']['f_rest_37'],
+            data['vertex']['f_rest_38'], data['vertex']['f_rest_39'],
+            data['vertex']['f_rest_40'], data['vertex']['f_rest_41'], data['vertex']['f_rest_42'],
+            data['vertex']['f_rest_43'], data['vertex']['f_rest_44']),
+            dtype=np.float32)), device=self.device))  # type: ignore
+
+        if set_optimizable_parameters:
+            self.set_optimizable_parameters()
+        self.validate_fields()
+
+    @torch.no_grad()
+    def init_from_random_point_cloud(self,
+                                     num_gsplat: int = 100_000,
+                                     dtype=torch.float32,
+                                     set_optimizable_parameters: bool = True):
+
+        logging.info(f"Generating random point cloud ({num_gsplat})...")
+
+        # We create random points inside the bounds of the synthetic Blender scenes
+        # xyz in [-1.3, 1.3]
+        fused_point_cloud = torch.rand((num_gsplat, 3), dtype=dtype, device=self.device) * 2.6 - 1.3
+        # sh albedo in [0, 0.0039]
+        fused_color = torch.rand((num_gsplat, 3), dtype=dtype, device=self.device) / 255.0
+
+        features_albedo = features_specular = None
+        if self.feature_type == 'sh':
+            features_albedo = fused_color.contiguous()
+            max_sh_degree = self.max_n_features
+            num_specular_features = sh_degree_to_specular_dim(max_sh_degree)
+            features_specular = torch.zeros((num_gsplat, num_specular_features),
+                                            dtype=dtype, device=self.device).contiguous()
+
+        dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(fused_point_cloud), 1e-3)
+        scales = torch.log(dist)[..., None].repeat(1, 3)
+        rots = torch.zeros((num_gsplat, 4), device=self.device)
+        rots[:, 0] = 1
+
+        opacities = inverse_sigmoid(0.1 * torch.ones((num_gsplat, 1), dtype=dtype, device=self.device))
+
+        self.positions = torch.nn.Parameter(fused_point_cloud)  # type: ignore
+        self.rotation = torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
+        self.scale = torch.nn.Parameter(scales.to(dtype=dtype, device=self.device))
+        self.density = torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device))
+        self.features_albedo = torch.nn.Parameter(features_albedo.to(dtype=dtype, device=self.device))
+        self.features_specular = torch.nn.Parameter(features_specular.to(dtype=dtype, device=self.device))
+
+        if set_optimizable_parameters:
+            self.set_optimizable_parameters()
+        self.validate_fields()
 
     def init_from_checkpoint(self, checkpoint: dict):
         self.positions = checkpoint["positions"]
@@ -79,7 +191,8 @@ class MixtureOfGaussians(torch.nn.Module):
         self.max_n_features = checkpoint["max_n_features"]
         self.set_optimizable_parameters()
         self.setup_optimizer(state_dict=checkpoint['optimizer'])
-   
+        self.validate_fields()
+
     def default_initialize_from_points(self, pts_np, colors_np=None):
         """
         Given an Nx3 array of points (and optionally Nx3 rgb colors), 
@@ -105,52 +218,23 @@ class MixtureOfGaussians(torch.nn.Module):
 
         # set colors, constant if they weren't given
         if colors_np is None:
-            features = 0.5 * torch.ones((N,3), dtype=dtype, device=self.device)
+            features_albedo = 0.5 * torch.ones((N, 3), dtype=dtype, device=self.device)
         else:
-            features = to_torch(colors_np, dtype=dtype, device=self.device)
+            features_albedo = to_torch(colors_np, dtype=dtype, device=self.device)
+        num_specular_dims = sh_degree_to_specular_dim(self.max_n_features)
+        features_specular = torch.zeros((N, num_specular_dims))
 
         self.positions = torch.nn.Parameter(positions.to(dtype=dtype, device=self.device))
         self.rotation = torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
         self.scale = torch.nn.Parameter(scales.to(dtype=dtype, device=self.device))
         self.density = torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device))
-        self.features_albedo = torch.nn.Parameter(features.to(dtype=dtype, device=self.device))
-        self.features_specular = torch.nn.Parameter(features.to(dtype=dtype, device=self.device))
+        self.features_albedo = torch.nn.Parameter(features_albedo.to(dtype=dtype, device=self.device))
+        self.features_specular = torch.nn.Parameter(features_specular.to(dtype=dtype, device=self.device))
         self.n_active_features = 1
 
         self.set_optimizable_parameters()
         self.setup_optimizer()
-
-    def init_from_colmap(self, root_path: str):
-
-        # TODO this reads from the binary format, also implement the nearly-identical plaintext version?
-
-        points_file = os.path.join(root_path, "sparse/0", "points3D.bin")
-        if not os.path.isfile(points_file):
-            raise ValueError(f"colomap points file {points_file} not found")
-
-        with open(points_file, "rb") as file:
-
-            n_pts = read_next_bytes(file, 8, "Q")[0]
-            logging.info(f"Found {n_pts} colmap points")
-
-            file_pts = np.zeros((n_pts, 3), dtype=np.float32)
-            file_rgb = np.zeros((n_pts, 3), dtype=np.float32)
-
-            for i_pt in range(n_pts):
-
-                # read the points
-                pt_data = read_next_bytes(file, 43, "QdddBBBd")
-                file_pts[i_pt,:] = np.array(pt_data[1:4])
-                file_rgb[i_pt,:] = np.array(pt_data[4:7])
-                # NOTE: error stored in last element of file, currently not used
-
-                # skip the track data
-                t_len = read_next_bytes(file, num_bytes=8, format_char_sequence="Q")[0]
-                read_next_bytes(file, num_bytes=8*t_len, format_char_sequence="ii"*t_len)
-                
-        file_rgb = file_rgb / 255.
-
-        self.default_initialize_from_points(file_pts, file_rgb)
+        self.validate_fields()
             
     def init_from_lidar(self, 
                         point_cloud : PointCloud, 
@@ -190,7 +274,6 @@ class MixtureOfGaussians(torch.nn.Module):
             if args.type is not None and getattr(self, name).requires_grad:
                 self.schedulers[name] = (get_scheduler(args.type)(**args))
 
-
     def scheduler_step(self, step):
         for param_group in self.optimizer.param_groups:
             if param_group["name"] in self.schedulers:
@@ -198,83 +281,42 @@ class MixtureOfGaussians(torch.nn.Module):
                 if lr is not None:
                     param_group['lr'] = lr
 
-    def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
-        data = PlyData.read(pc_path)
-        num_gsplat = len(data['vertex'])
-        self.positions = torch.nn.Parameter(to_torch(np.transpose(np.stack((data['vertex']['x'], data['vertex']['y'], data['vertex']['z']), dtype=np.float32)), device=self.device))  # type: ignore
-        self.rotation = torch.nn.Parameter(to_torch(np.transpose(np.stack((data['vertex']['rot_0'], data['vertex']['rot_1'], data['vertex']['rot_2'], data['vertex']['rot_3']), dtype=np.float32)), device=self.device))  # type: ignore
-        self.scale = torch.nn.Parameter(to_torch(np.transpose(np.stack((data['vertex']['scale_0'], data['vertex']['scale_1'], data['vertex']['scale_2']), dtype=np.float32)), device=self.device))  # type: ignore
-        self.density = torch.nn.Parameter(to_torch(data['vertex']['opacity'].astype(np.float32).reshape(num_gsplat, 1), device=self.device))
+    def set_optimizable_parameters(self):
+        if not self.conf.model.optimize_density:
+            self.density.requires_grad = False
+        if not self.conf.model.optimize_features_albedo:
+            self.features_albedo.requires_grad = False
+        if not self.conf.model.optimize_features_specular:
+            self.features_specular.requires_grad = False
+        if not self.conf.model.optimize_rotation:
+            self.rotation.requires_grad = False
+        if not self.conf.model.optimize_scale:
+            self.scale.requires_grad = False
+        if not self.conf.model.optimize_position:
+            self.positions.requires_grad = False
 
-        feat_dc = np.transpose(np.stack((data['vertex']['f_dc_0'], data['vertex']['f_dc_1'], data['vertex']['f_dc_2'])))
-        feat_sh = np.transpose(np.stack((
-                    data['vertex']['f_rest_0'],data['vertex']['f_rest_1'],data['vertex']['f_rest_2'],data['vertex']['f_rest_3'],data['vertex']['f_rest_4'],
-                    data['vertex']['f_rest_5'],data['vertex']['f_rest_6'],data['vertex']['f_rest_7'],data['vertex']['f_rest_8'],data['vertex']['f_rest_9'],
-                    data['vertex']['f_rest_10'],data['vertex']['f_rest_11'],data['vertex']['f_rest_12'],data['vertex']['f_rest_13'],data['vertex']['f_rest_14'],
-                    data['vertex']['f_rest_15'],data['vertex']['f_rest_16'],data['vertex']['f_rest_17'],data['vertex']['f_rest_18'],data['vertex']['f_rest_19'],
-                    data['vertex']['f_rest_20'],data['vertex']['f_rest_21'],data['vertex']['f_rest_22'],data['vertex']['f_rest_23'],data['vertex']['f_rest_24'],
-                    data['vertex']['f_rest_25'],data['vertex']['f_rest_26'],data['vertex']['f_rest_27'],data['vertex']['f_rest_28'],data['vertex']['f_rest_29'],
-                    data['vertex']['f_rest_30'],data['vertex']['f_rest_31'],data['vertex']['f_rest_32'],data['vertex']['f_rest_33'],data['vertex']['f_rest_34'],
-                    data['vertex']['f_rest_35'],data['vertex']['f_rest_36'],data['vertex']['f_rest_37'],data['vertex']['f_rest_38'],data['vertex']['f_rest_39'],
-                    data['vertex']['f_rest_40'],data['vertex']['f_rest_41'],data['vertex']['f_rest_42'],data['vertex']['f_rest_43'],data['vertex']['f_rest_44']
-                  )))
-
-        feat_sh = feat_sh.reshape(num_gsplat, 3, -1)
-        feat_sh = np.transpose(feat_sh, axes=(0,2,1)).reshape(num_gsplat, -1)
-        feat_combined = np.concatenate((feat_dc, feat_sh), axis=-1)
-        self.features = torch.nn.Parameter(to_torch(feat_combined.astype(np.float32), device=self.device))
-
-        if set_optimizable_parameters:
-            self.set_optimizable_parameters()
-
-    @torch.no_grad()
-    def randomize_point_cloud(self,
-                              num_gsplat: int = 100_000,
-                              max_sh_degree: int = 3,
-                              dtype = torch.float32,
-                              set_optimizable_parameters: bool = True):
-    
-        logging.info(f"Generating random point cloud ({num_gsplat})...")
-
-        # We create random points inside the bounds of the synthetic Blender scenes
-        # xyz in [-1.3, 1.3]
-        fused_point_cloud = torch.rand((num_gsplat, 3), dtype=dtype, device=self.device) * 2.6 - 1.3
-        # sh in [0, 0.0039]
-        fused_color = torch.rand((num_gsplat, 3), dtype=dtype, device=self.device) / 255.0
-
-        features = torch.zeros((num_gsplat, 3, (max_sh_degree + 1) ** 2), dtype=dtype, device=self.device)
-        features[:, :3, 0] = fused_color
-        features[:, 3:, 1:] = 0.0
-        features = features.transpose(1, 2).reshape(num_gsplat, -1).contiguous()
-
-        dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(fused_point_cloud), 1e-3)
-        scales = torch.log(dist)[..., None].repeat(1, 3)
-        rots = torch.zeros((num_gsplat, 4), device=self.device)
-        rots[:, 0] = 1
-
-        opacities = inverse_sigmoid(0.1 * torch.ones((num_gsplat, 1), dtype=dtype, device=self.device))
-
-        self.positions = torch.nn.Parameter(fused_point_cloud)  # type: ignore
-        self.rotation = torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
-        self.scale = torch.nn.Parameter(scales.to(dtype=dtype, device=self.device))
-        self.density = torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device))
-        self.features = torch.nn.Parameter(features.to(dtype=dtype, device=self.device))
-
-        if set_optimizable_parameters:
-            self.set_optimizable_parameters()
+    def update_optimizable_parameters(self, optimizable_tensors: dict[str, torch.Tensor]):
+        for name, value in optimizable_tensors.items():
+            setattr(self, name, value)
 
     def build_bvh(self):
         optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), True)
 
-    def init_from_point_cloud(self, pc_path: str):
-        pass
-
     def increase_num_active_features(self) -> None:
         self.n_active_features = min(self.max_n_features, self.n_active_features + self.feature_dim_increase_step)
 
-    def get_active_feature_mask(self) -> None:
-        mask = torch.zeros((1, SH_DEGREE_TO_NUM_FEATURES[self.max_n_features]))
-        mask[0,:SH_DEGREE_TO_NUM_FEATURES[self.n_active_features]] = 1.0
+    def get_active_feature_mask(self) -> torch.Tensor:
+        if self.feature_type == 'sh':
+            current_sh_degree = self.n_active_features
+            max_sh_degree = self.max_n_features
+            active_features = sh_degree_to_num_features(current_sh_degree)
+            num_features = sh_degree_to_num_features(max_sh_degree)
+        else:
+            active_features = self.n_active_features
+            num_features = self.max_n_features
+        mask = torch.zeros((1, num_features), device=self.device, dtype=self.get_features().dtype)
+        mask[0,:active_features] = 1.0
+        return mask
 
     def reset_density(self):
         updated_densities = inverse_sigmoid(torch.min(self.get_density(), torch.ones_like(self.density) * self.new_max_density))
@@ -381,11 +423,13 @@ class MixtureOfGaussians(torch.nn.Module):
 
         add_gaussians = {
                 "positions": torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_positions()[mask].repeat(self.split_n_gaussians, 1),
-                "features":  self.features[mask].repeat(self.split_n_gaussians,1),
                 "density":  self.density[mask].repeat(self.split_n_gaussians,1),
                 "scale":  get_activation_function(self.conf.model.scale_activation, inverse=True)(self.get_scale()[mask].repeat(self.split_n_gaussians,1) / (0.8*self.split_n_gaussians)),
                 "rotation": self.rotation[mask].repeat(self.split_n_gaussians,1)
                 }
+        if self.feature_type == 'sh':
+            add_gaussians["features_albedo"] = self.features_albedo[mask].repeat(self.split_n_gaussians, 1)
+            add_gaussians["features_specular"] = self.features_specular[mask].repeat(self.split_n_gaussians, 1)
 
         # Concatenate new tensors to the optimizer variables 
         optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
@@ -402,11 +446,12 @@ class MixtureOfGaussians(torch.nn.Module):
         # Use the mask to dupicate these points
         add_gaussians = {
                 "positions": self.positions[mask],
-                "features_albedo": self.features_albedo[mask],
-                "features_specular": self.features_specular[mask],
                 "density": self.density[mask],
                 "scale": self.scale[mask],
-                "rotation": self.rotation[mask]} 
+                "rotation": self.rotation[mask]}
+        if self.feature_type == 'sh':
+            add_gaussians["features_albedo"] = self.features_albedo[mask]
+            add_gaussians["features_specular"] = self.features_specular[mask]
 
         optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
         self.update_optimizable_parameters(optimizable_tensors)
@@ -446,18 +491,15 @@ class MixtureOfGaussians(torch.nn.Module):
            return self.density
         else:
            return self.density_activation(self.density)
-    
 
     def get_model_parameters(self) -> dict:
         assert self.optimizer is not None, "Optimizer need to be initialized when storing the checkpoint"
 
-        return {
+        model_params = {
             "positions": self.positions,
             "rotation": self.rotation,
             "scale": self.scale,
             "density": self.density,
-            "features_albedo": self.features_albedo,
-            "features_specular": self.features_specular,
             # Add other attributes that we need at restore
             "n_active_features": self.n_active_features,
             "max_n_features": self.max_n_features,
@@ -465,6 +507,10 @@ class MixtureOfGaussians(torch.nn.Module):
             "optimizer": self.optimizer.state_dict(),
             "config": self.conf
         }
+        if self.feature_type == 'sh':
+            model_params["features_albedo"] = self.features_albedo
+            model_params["features_specular"] = self.features_specular
+        return model_params
 
     def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
         
@@ -474,8 +520,8 @@ class MixtureOfGaussians(torch.nn.Module):
 
         pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(
                 self.optix_ctx, rays_o, rays_d, 
-                self.positions, self.get_rotation(), features, 
-                self.get_density(), )
+                self.positions, self.get_rotation(), self.get_scale(),
+                self.get_density(), features)
 
         return {
             'pred_rgb': pred_rgb,
