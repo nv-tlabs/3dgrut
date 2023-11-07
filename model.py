@@ -5,7 +5,7 @@ import torch
 from plyfile import PlyData
 
 from libs import optixtracer
-from utils import to_torch, get_activation_function, inverse_sigmoid, get_scheduler, quaternion_to_so3
+from utils import to_torch, get_activation_function, inverse_sigmoid, get_scheduler, quaternion_to_so3, SH_DEGREE_TO_NUM_FEATURES
 from datasets.colmap_utils import read_next_bytes
 from datasets.utils import PointCloud
 from geometry import nearest_neighbor_dist_cpuKD
@@ -21,7 +21,6 @@ class MixtureOfGaussians(torch.nn.Module):
         self.scale     = torch.empty([0,3])     # Anisotropic scale of each Gaussian [n_gaussians, 3]
         self.density   = torch.empty([0,1])    # Density of each Gaussian [n_gaussians, 1]
         self.features  = torch.empty([0,1])  # Feature vector associated to each Gaussian (can be RGB, SH or a latent code) [n_gaussians, n_features]
-        self.n_active_features = 0
         self.device = 'cuda'
         self.optimizer = None
         self.optix_ctx = None
@@ -38,6 +37,13 @@ class MixtureOfGaussians(torch.nn.Module):
         self.clone_grad_threshold = self.conf.model.densify.clone_grad_threshold
         self.split_grad_threshold = self.conf.model.densify.split_grad_threshold
         self.new_max_density = self.conf.model.reset_density.new_max_density
+
+        # Check if we would like to do progressive training
+        self.n_active_features = self.conf.model.progressive_training.init_n_features
+        self.max_n_features = self.conf.model.progressive_training.max_n_features 
+        if self.max_n_features > self.n_active_features:
+            self.feature_dim_increase_interval = self.conf.model.progressive_training.increase_frequency
+            self.feature_dim_increase_step = self.conf.model.progressive_training.increase_step
 
     def set_optix_context(self):
         torch.zeros(1, device=self.device) # Create a dummy tensor to force cuda context init
@@ -103,7 +109,7 @@ class MixtureOfGaussians(torch.nn.Module):
         self.scale = torch.nn.Parameter(scales.to(dtype=dtype, device=self.device))
         self.density = torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device))
         self.features = torch.nn.Parameter(features.to(dtype=dtype, device=self.device))
-        self.n_active_features = 3
+        self.n_active_features = 1
 
         self.set_optimizable_parameters()
         self.setup_optimizer()
@@ -256,6 +262,13 @@ class MixtureOfGaussians(torch.nn.Module):
 
     def init_from_point_cloud(self, pc_path: str):
         pass
+
+    def increase_num_active_features(self) -> None:
+        self.n_active_features = min(self.max_n_features, self.n_active_features + self.feature_dim_increase_step)
+
+    def get_active_feature_mask(self) -> None:
+        mask = torch.zeros((1, SH_DEGREE_TO_NUM_FEATURES[self.max_n_features]))
+        mask[0,:SH_DEGREE_TO_NUM_FEATURES[self.n_active_features]] = 1.0
 
     def reset_density(self):
         updated_densities = inverse_sigmoid(torch.min(self.get_density(), torch.ones_like(self.density) * self.new_max_density))
@@ -445,11 +458,15 @@ class MixtureOfGaussians(torch.nn.Module):
         }
 
     def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
-
+        
+        features = self.get_features()
+        if self.progressive_training:
+            features *= self.get_active_feature_mask()
+            
         pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(
                 self.optix_ctx, rays_o, rays_d, 
                 self.positions, self.get_rotation(), self.get_scale(), 
-                self.get_density(), self.get_features())
+                self.get_density(), )
 
         return {
             'pred_rgb': pred_rgb,

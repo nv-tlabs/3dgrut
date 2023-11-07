@@ -366,6 +366,9 @@ def main(conf):
                     model.reset_density()
                     scene_updated = True
 
+                if model.progressive_training and global_step > 0 and global_step % model.feature_dim_increase_interval == 0:
+                    model.increase_num_active_features()
+
                 # Update the BVH if required
                 if scene_updated or (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
                     model.build_bvh()

@@ -20,11 +20,18 @@ model:
   density_activation: sigmoid
   scale_activation: exp
   optimize_density: true
-  optimize_features: true
+  optimize_features_albedo: true
+  optimize_features_specular: true
   optimize_position: true
   optimize_rotation: true
   optimize_scale: true
   bvh_update_frequency: 1
+  progressive_training:
+    init_n_features: 1
+    max_n_features: 3
+    increase_frequency: 1000
+    increase_step: 1
+    
   densify:
     frequency: 100 # densification_interval in 3DGS with default value 100
     start_iteration: 500 # densify_from_iter in 3DGS default value 500
@@ -62,8 +69,10 @@ optimizer:
       lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.00016
     density:
       lr: 0.05 # 3DGS value: 0.05
-    features:
+    features_albedo:
       lr: 0.0025 # 3DGS value: 0.0025
+    features_specular:
+      lr: ${div:${optimizer.features_albedo.lr},20} # 3DGS value 20x smaller than lr of features_albedo
     rotation:
       lr: 0.001 # 3DGS value: 0.001
     scale:

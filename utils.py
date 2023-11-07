@@ -3,6 +3,11 @@ from typing import Optional, Callable, TypeVar
 import torch
 import numpy as np
 import numpy.typing as npt
+from typing import Optional, Callable
+from torch.optim.lr_scheduler import ExponentialLR, StepLR
+from omegaconf import OmegaConf
+
+OmegaConf.register_new_resolver("div", lambda a, b: a / b)
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
@@ -66,9 +71,6 @@ def get_activation_function(activation_function: str, inverse=False) -> Callable
     else:
         return INVERSE_ACTIVATION_DICT[activation_function]
 
-
-
-
 def quaternion_to_so3(r):
     norm = torch.sqrt(r[:,0]*r[:,0] + r[:,1]*r[:,1] + r[:,2]*r[:,2] + r[:,3]*r[:,3])
 
@@ -114,3 +116,19 @@ SCHEDULER_DICT: dict[str, Callable] = {
 def get_scheduler(scheduler: str) -> Callable:
     return SCHEDULER_DICT[scheduler]
 
+
+
+SH_DEGREE_TO_NUM_FEATURES = {
+    1: 3,
+    2: 12,
+    3: 27,
+    4: 48
+}
+
+
+NUM_FEATURES_TO_SH_DEGREE = {
+    1: 3,
+    2: 12,
+    3: 27,
+    4: 48
+}
