@@ -10,12 +10,11 @@ import torch
 from torch.utils.data import Dataset
 
 # C++ utils
-try:
-    import ray_utils  # type: ignore
-except ImportError:
-    from libs.ray_utils import ray_utils  # type: ignore
+import ray_utils  # type: ignore
+
 from datasets.utils import fov2focal
-from datasets.ngp_utils import load_pc_dat, nerf_ray_to_colmap, nerf_matrix_to_colmap, PointCloud
+from datasets.ngp_utils import load_pc_dat, nerf_ray_to_colmap, nerf_matrix_to_colmap
+from datasets.utils import PointCloud
 from utils import to_torch
 
 
@@ -285,7 +284,7 @@ class NGPDataset(Dataset):
                 valid_rays = np.where(lidar_dataset.lidar_frame_indices == frame_idx)[0]
                 xyz_starts.append(to_torch(lidar_dataset.rays[valid_rays, :3], device="cpu"))
                 xyz_ends.append(to_torch(lidar_dataset.rays[valid_rays, :3] + lidar_dataset.rays[valid_rays, 3:6], device="cpu"))
-        return PointCloud(xyz_start=torch.cat(xyz_starts), xyz_end=torch.cat(xyz_ends))
+        return PointCloud(xyz_start=torch.cat(xyz_starts), xyz_end=torch.cat(xyz_ends), device="cpu")
 
     def __len__(self):
         if self.split.startswith("train"):

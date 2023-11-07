@@ -1,28 +1,12 @@
 # Copyright (c) 2023 NVIDIA CORPORATION.  All rights reserved.
 
 from typing import Union, Tuple
-from dataclasses import dataclass
 
 import io
 import lzma
 import struct
 import numpy as np
-import torch
 
-@dataclass(slots=True, kw_only=True)
-class PointCloud:
-    """Represents a 3d point cloud consisting of corresponding start and end points"""
-
-    xyz_start: torch.Tensor  # [N,3]
-    xyz_end: torch.Tensor  # [N,3]
-    device: str = "cuda"
-
-    def __post_init__(self) -> None:
-        assert len(self.xyz_start) == len(self.xyz_end)
-        assert self.xyz_start.shape[1] == self.xyz_end.shape[1] == 3
-
-        self.xyz_start.to(self.device)
-        self.xyz_end.to(self.device)
 
 def nerf_matrix_to_ngp(
     pose: np.ndarray, scale: float = 0.33, offset: Union[np.ndarray, list] = [0, 0, 0]

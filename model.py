@@ -7,7 +7,7 @@ from plyfile import PlyData
 from libs import optixtracer
 from utils import to_torch, get_activation_function, inverse_sigmoid, get_scheduler, quaternion_to_so3
 from datasets.colmap_utils import read_next_bytes
-from datasets.ngp_utils import PointCloud
+from datasets.utils import PointCloud
 from geometry import nearest_neighbor_dist_cpuKD
 from utils import to_np
 
