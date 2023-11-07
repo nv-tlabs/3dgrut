@@ -553,7 +553,7 @@ OptixResult optixAccelComputeMemoryUsage( OptixDeviceContext            context,
 /// \param[in] outputBuffer             must be a multiple of OPTIX_ACCEL_BUFFER_BYTE_ALIGNMENT
 /// \param[in] outputBufferSizeInBytes
 /// \param[out] outputHandle
-/// \param[in] emittedProperties         types of requested properties and output buffers
+/// \param[out] emittedProperties        types of requested properties and output buffers
 /// \param[in] numEmittedProperties      number of post-build properties to populate (may be zero)
 OptixResult optixAccelBuild( OptixDeviceContext            context,
                              CUstream                      stream,
@@ -568,26 +568,26 @@ OptixResult optixAccelBuild( OptixDeviceContext            context,
                              const OptixAccelEmitDesc*     emittedProperties,
                              unsigned int                  numEmittedProperties );
 
-/// Obtain relocation information, stored in OptixRelocationInfo, for a given context
+/// Obtain relocation information, stored in OptixAccelRelocationInfo, for a given context
 /// and acceleration structure's traversable handle.
 ///
-/// The relocation information can be passed to optixCheckRelocationCompatibility to
+/// The relocation information can be passed to optixAccelCheckRelocationCompatibility to
 /// determine if an acceleration structure, referenced by 'handle', can be relocated to a
-/// different device's memory space (see #optixCheckRelocationCompatibility).
+/// different device's memory space (see #optixAccelCheckRelocationCompatibility).
 ///
 /// When used with optixAccelRelocate, it provides data necessary for doing the relocation.
 ///
 /// If the acceleration structure data associated with 'handle' is copied multiple times,
-/// the same OptixRelocationInfo can also be used on all copies.
+/// the same OptixAccelRelocationInfo can also be used on all copies.
 ///
 /// \param[in] context
 /// \param[in] handle
 /// \param[out] info
 /// \return OPTIX_ERROR_INVALID_VALUE will be returned for traversable handles that are not from
 /// acceleration structure builds.
-OptixResult optixAccelGetRelocationInfo( OptixDeviceContext context, OptixTraversableHandle handle, OptixRelocationInfo* info );
+OptixResult optixAccelGetRelocationInfo( OptixDeviceContext context, OptixTraversableHandle handle, OptixAccelRelocationInfo* info );
 
-/// Checks if an optix data structure built using another OptixDeviceContext (that was
+/// Checks if an acceleration structure built using another OptixDeviceContext (that was
 /// used to fill in 'info') is compatible with the OptixDeviceContext specified in the
 /// 'context' parameter.
 ///
@@ -596,20 +596,21 @@ OptixResult optixAccelGetRelocationInfo( OptixDeviceContext context, OptixTraver
 /// \param[in] context
 /// \param[in] info
 /// \param[out] compatible If OPTIX_SUCCESS is returned 'compatible' will have the value of either:
-/// - 0: This context is not compatible with the optix data structure associated with 'info'.
+/// - 0: This context is not compatible with acceleration structure data associated with 'info'.
 /// - 1: This context is compatible.
-OptixResult optixCheckRelocationCompatibility( OptixDeviceContext context, const OptixRelocationInfo* info, int* compatible );
+OptixResult optixAccelCheckRelocationCompatibility( OptixDeviceContext context, const OptixAccelRelocationInfo* info, int* compatible );
 
 /// optixAccelRelocate is called to update the acceleration structure after it has been
 /// relocated.  Relocation is necessary when the acceleration structure's location in device
 /// memory has changed.  optixAccelRelocate does not copy the memory.  This function only
-/// operates on the relocated memory whose new location is specified by 'targetAccel'.
+/// operates on the relocated memory who's new location is specified by 'targetAccel'.
 /// optixAccelRelocate also returns the new OptixTraversableHandle associated with
 /// 'targetAccel'.  The original memory (source) is not required to be valid, only the
-/// OptixRelocationInfo.
+/// OptixAccelRelocationInfo.
 ///
-/// Before calling optixAccelRelocate, optixCheckRelocationCompatibility should be 
-/// called to ensure the copy will be compatible with the destination device context.
+/// Before copying the data and calling optixAccelRelocate,
+/// optixAccelCheckRelocationCompatibility should be called to ensure the copy will be
+/// compatible with the destination device context.
 ///
 /// The memory pointed to by 'targetAccel' should be allocated with the same size as the
 /// source acceleration.  Similar to the 'outputBuffer' used in optixAccelBuild, this
@@ -617,34 +618,29 @@ OptixResult optixCheckRelocationCompatibility( OptixDeviceContext context, const
 ///
 /// The memory in 'targetAccel' must be allocated as long as the accel is in use.
 ///
-/// The instance traversables referenced by an IAS and the
-/// micromaps referenced by a triangle GAS may themselves require relocation.
-/// 'relocateInputs' and 'numRelocateInputs' should be used to specify the relocated
-/// traversables and micromaps. After relocation, the relocated accel will reference 
-/// these relocated traversables and micromaps instead of their sources.
-/// The number of relocate inputs 'numRelocateInputs' must match the number of build 
-/// inputs 'numBuildInputs' used to build the source accel. Relocation inputs 
-/// correspond with build inputs used to build the source accel and should appear in 
-/// the same order (see #optixAccelBuild).
-/// 'relocateInputs' and 'numRelocateInputs' may be zero, preserving any references
-/// to traversables and micromaps from the source accel.
+/// When relocating an accel that contains instances, 'instanceTraversableHandles' and
+/// 'numInstanceTraversableHandles' should be supplied.  These are the traversable handles
+/// of the instances.  These can be used when also relocating the instances.  No updates to
+/// the bounds are performed.  Use optixAccelBuild to update the bounds.
+/// 'instanceTraversableHandles' and 'numInstanceTraversableHandles' may be zero when
+/// relocating bottom level accel (i.e. an accel with no instances).
 ///
 /// \param[in] context
 /// \param[in] stream
 /// \param[in] info
-/// \param[in] relocateInputs
-/// \param[in] numRelocateInputs
+/// \param[in] instanceTraversableHandles
+/// \param[in] numInstanceTraversableHandles
 /// \param[in] targetAccel
 /// \param[in] targetAccelSizeInBytes
 /// \param[out] targetHandle
-OptixResult optixAccelRelocate( OptixDeviceContext         context,
-                                CUstream                   stream,
-                                const OptixRelocationInfo* info,
-                                const OptixRelocateInput*  relocateInputs,
-                                size_t                     numRelocateInputs,
-                                CUdeviceptr                targetAccel,
-                                size_t                     targetAccelSizeInBytes,
-                                OptixTraversableHandle*    targetHandle );
+OptixResult optixAccelRelocate( OptixDeviceContext              context,
+                                CUstream                        stream,
+                                const OptixAccelRelocationInfo* info,
+                                CUdeviceptr                     instanceTraversableHandles,
+                                size_t                          numInstanceTraversableHandles,
+                                CUdeviceptr                     targetAccel,
+                                size_t                          targetAccelSizeInBytes,
+                                OptixTraversableHandle*         targetHandle );
 
 /// After building an acceleration structure, it can be copied in a compacted form to reduce
 /// memory.  In order to be compacted, OPTIX_BUILD_FLAG_ALLOW_COMPACTION must be supplied in
@@ -679,93 +675,6 @@ OptixResult optixConvertPointerToTraversableHandle( OptixDeviceContext      onDe
                                                     OptixTraversableType    traversableType,
                                                     OptixTraversableHandle* traversableHandle );
 
-
-/// Determine the amount of memory necessary for a Opacity Micromap Array build.
-///
-/// \param[in] context
-/// \param[in] buildInput
-/// \param[out] bufferSizes
-OptixResult optixOpacityMicromapArrayComputeMemoryUsage( OptixDeviceContext                         context,
-                                                         const OptixOpacityMicromapArrayBuildInput* buildInput,
-                                                         OptixMicromapBufferSizes*                  bufferSizes );
-
-/// Construct an array of Opacity Micromaps.
-///
-/// Each triangle within an instance/GAS may reference one opacity micromap to give finer 
-/// control over alpha behavior. A opacity micromap consists of a set of 4^N micro-triangles 
-/// in a triangular uniform barycentric grid. Multiple opacity micromaps are collected (built) 
-/// into a opacity micromap array with this function. Each geometry in a GAS may bind a 
-/// single opacity micromap array and can use opacity micromaps from that array only.
-///
-/// Each micro-triangle within a opacity micromap can be in one of four states: Transparent, 
-/// Opaque, Unknown-Transparent or Unknown-Opaque. During traversal, if a triangle with a 
-/// opacity micromap attached is intersected, the opacity micromap is queried to categorize 
-/// the hit as either opaque, unknown (alpha) or a miss. Geometry, ray or instance flags that 
-/// modify the alpha/opaque behavior are applied _after_ this opacity micromap query.
-///
-/// The opacity micromap query may operate in 2-state mode (alpha testing) or 4-state mode (AHS culling), 
-/// depending on the opacity micromap type and ray/instance flags. When operating in 2-state 
-/// mode, alpha hits will not be reported, and transparent and opaque hits must be accurate.
-///
-/// \param[in] context
-/// \param[in] stream
-/// \param[in] buildInput             a single build input object referencing many opacity micromaps
-/// \param[in] buffers                the buffers used for build
-/// \param[in/out] emittedProperties  types of requested properties and output buffers
-/// \param[in] numEmittedProperties   number of post-build properties to populate (may be zero)
-OptixResult optixOpacityMicromapArrayBuild( OptixDeviceContext                         context,
-                                            CUstream                                   stream,
-                                            const OptixOpacityMicromapArrayBuildInput* buildInput,
-                                            const OptixMicromapBuffers*                buffers );
-
-/// Obtain relocation information, stored in OptixRelocationInfo, for a given context
-/// and opacity micromap array.
-///
-/// The relocation information can be passed to optixCheckRelocationCompatibility to
-/// determine if a opacity micromap array, referenced by buffers, can be relocated to a
-/// different device's memory space (see #optixCheckRelocationCompatibility).
-///
-/// When used with optixOpacityMicromapArrayRelocate, it provides data necessary for doing the relocation.
-///
-/// If the opacity micromap array data associated with 'opacityMicromapArray' is copied multiple times,
-/// the same OptixRelocationInfo can also be used on all copies.
-///
-/// \param[in]  context
-/// \param[in]  opacityMicromapArray
-/// \param[out] info
-OptixResult optixOpacityMicromapArrayGetRelocationInfo( OptixDeviceContext context, CUdeviceptr opacityMicromapArray, OptixRelocationInfo* info );
-
-/// optixOpacityMicromapArrayRelocate is called to update the opacity micromap array after it has been
-/// relocated.  Relocation is necessary when the opacity micromap array's location in device
-/// memory has changed.  optixOpacityMicromapArrayRelocate does not copy the memory.  This function only
-/// operates on the relocated memory whose new location is specified by 'targetOpacityMicromapArray'.
-/// The original memory (source) is not required to be valid, only the
-/// OptixRelocationInfo.
-///
-/// Before calling optixOpacityMicromapArrayRelocate, optixCheckRelocationCompatibility should be called
-/// to ensure the copy will be compatible with the destination device context.
-///
-/// The memory pointed to by 'targetOpacityMicromapArray' should be allocated with the same size as the
-/// source opacity micromap array.  Similar to the 'OptixMicromapBuffers::output' used in optixOpacityMicromapArrayBuild, 
-/// this pointer must be a multiple of OPTIX_OPACITY_MICROMAP_ARRAY_BUFFER_BYTE_ALIGNMENT.
-///
-/// The memory in 'targetOpacityMicromapArray' must be allocated as long as the opacity micromap array is in use.
-///
-/// Note that any Acceleration Structures build using the original memory (source) as input will
-/// still be associated with this original memory. To associate an existing (possibly relocated) 
-/// Acceleration Structures with the relocated opacity micromap array, use optixAccelBuild 
-/// to update the existing Acceleration Structures (See OPTIX_BUILD_OPERATION_UPDATE)
-///
-/// \param[in] context
-/// \param[in] stream
-/// \param[in] info
-/// \param[in] targetOpacityMicromapArray
-/// \param[in] targetOpacityMicromapArraySizeInBytes
-OptixResult optixOpacityMicromapArrayRelocate( OptixDeviceContext         context,
-                                               CUstream                   stream,
-                                               const OptixRelocationInfo* info,
-                                               CUdeviceptr                targetOpacityMicromapArray,
-                                               size_t                     targetOpacityMicromapArraySizeInBytes );
 
 
 

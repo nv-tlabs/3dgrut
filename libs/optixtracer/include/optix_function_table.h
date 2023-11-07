@@ -26,7 +26,7 @@
 #define __optix_optix_function_table_h__
 
 /// The OptiX ABI version.
-#define OPTIX_ABI_VERSION 68
+#define OPTIX_ABI_VERSION 60
 
 #ifndef OPTIX_DEFINE_ABI_VERSION_ONLY
 
@@ -216,23 +216,23 @@ typedef struct OptixFunctionTable
                                       unsigned int                  numEmittedProperties );
 
     /// See ::optixAccelGetRelocationInfo().
-    OptixResult ( *optixAccelGetRelocationInfo )( OptixDeviceContext context, OptixTraversableHandle handle, OptixRelocationInfo* info );
+    OptixResult ( *optixAccelGetRelocationInfo )( OptixDeviceContext context, OptixTraversableHandle handle, OptixAccelRelocationInfo* info );
 
 
-    /// See ::optixCheckRelocationCompatibility().
-    OptixResult ( *optixCheckRelocationCompatibility )( OptixDeviceContext         context,
-                                                        const OptixRelocationInfo* info,
-                                                        int*                       compatible );
+    /// See ::optixAccelCheckRelocationCompatibility().
+    OptixResult ( *optixAccelCheckRelocationCompatibility )( OptixDeviceContext              context,
+                                                             const OptixAccelRelocationInfo* info,
+                                                             int*                            compatible );
 
     /// See ::optixAccelRelocate().
-    OptixResult ( *optixAccelRelocate )( OptixDeviceContext         context,
-                                         CUstream                   stream,
-                                         const OptixRelocationInfo* info,
-                                         const OptixRelocateInput*  relocateInputs,
-                                         size_t                     numRelocateInputs,
-                                         CUdeviceptr                targetAccel,
-                                         size_t                     targetAccelSizeInBytes,
-                                         OptixTraversableHandle*    targetHandle );
+    OptixResult ( *optixAccelRelocate )( OptixDeviceContext              context,
+                                         CUstream                        stream,
+                                         const OptixAccelRelocationInfo* info,
+                                         CUdeviceptr                     instanceTraversableHandles,
+                                         size_t                          numInstanceTraversableHandles,
+                                         CUdeviceptr                     targetAccel,
+                                         size_t                          targetAccelSizeInBytes,
+                                         OptixTraversableHandle*         targetHandle );
 
 
     /// See ::optixAccelCompact().
@@ -248,29 +248,6 @@ typedef struct OptixFunctionTable
                                                              CUdeviceptr             pointer,
                                                              OptixTraversableType    traversableType,
                                                              OptixTraversableHandle* traversableHandle );
-
-    /// See ::optixOpacityMicromapArrayComputeMemoryUsage().
-    OptixResult ( *optixOpacityMicromapArrayComputeMemoryUsage )( OptixDeviceContext                         context,
-                                                                  const OptixOpacityMicromapArrayBuildInput* buildInput,
-                                                                  OptixMicromapBufferSizes*                 bufferSizes );
-
-    /// See ::optixOpacityMicromapArrayBuild().
-    OptixResult ( *optixOpacityMicromapArrayBuild )( OptixDeviceContext                         context,
-                                                     CUstream                                   stream,
-                                                     const OptixOpacityMicromapArrayBuildInput* buildInput,
-                                                     const OptixMicromapBuffers*               buffers );
-
-    /// See ::optixOpacityMicromapArrayGetRelocationInfo().
-    OptixResult ( *optixOpacityMicromapArrayGetRelocationInfo )( OptixDeviceContext   context, 
-                                                                 CUdeviceptr          opacityMicromapArray, 
-                                                                 OptixRelocationInfo* info );
-
-    /// See ::optixOpacityMicromapArrayRelocate().
-    OptixResult ( *optixOpacityMicromapArrayRelocate )( OptixDeviceContext         context,
-                                                        CUstream                   stream,
-                                                        const OptixRelocationInfo* info,
-                                                        CUdeviceptr                targetOpacityMicromapArray,
-                                                        size_t                     targetOpacityMicromapArraySizeInBytes );
 
     void ( *reserved1 )( void );
     void ( *reserved2 )( void );

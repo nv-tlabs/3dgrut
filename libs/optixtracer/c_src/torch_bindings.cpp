@@ -47,8 +47,12 @@
 
 namespace
 {
+inline uint32_t div_round_up(uint32_t val, uint32_t divisor)
+{
+    return (val + divisor - 1) / divisor;
+}
 
-inline float slabSpacingFromAABB(const OptixAabb& aabb, const uint32_t maxNumSlabs = 32)
+inline float slabSpacingFromAABB(const OptixAabb& aabb, const uint32_t maxNumSlabs)
 {
     const float aabbDiag_x = aabb.maxX - aabb.minX;
     const float aabbDiag_y = aabb.maxY - aabb.minY;
@@ -275,10 +279,12 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
     paramsHost.rayHit = packed_accessor32<float, 4>(rayHit);
     paramsHost.minTransmittance = MOGTracingDefaultMinTransmittance;
     paramsHost.aabb = stateWrapper.pState->gasAABB;
-    paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, 0);
+    paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, MOGTracingDefaultMaxNumSlabs);
     paramsHost.maxNumHits = stateWrapper.pState->maxNumHits;
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
     paramsHost.sphDegree = MOGTracingDefaultSphDegree; 
+    paramsHost.frameBounds.x = rayOri.size(2)-1;
+    paramsHost.frameBounds.y = rayOri.size(1)-1;
 
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
 
@@ -301,8 +307,11 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
     else
     {
         OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingAH, cudaStream, paramsDevice,
-                                sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingAH, rayRad.size(2),
-                                rayRad.size(1), rayRad.size(0)));
+                                sizeof(MoGTracingParams), 
+                                &stateWrapper.pState->sbtMoGTracingAH, 
+                                div_round_up(rayRad.size(2),MOGTracingPatchSize),
+                                div_round_up(rayRad.size(1), MOGTracingPatchSize),
+                                rayRad.size(0)));
     }
 
     CUDA_CHECK(cudaStreamSynchronize(cudaStream));
@@ -351,10 +360,12 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.mogSphGrd = packed_accessor32<float, 2>(mogSphGrd);
     paramsHost.minTransmittance = MOGTracingDefaultMinTransmittance;
     paramsHost.aabb = stateWrapper.pState->gasAABB;
-    paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, 0);
+    paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, MOGTracingDefaultMaxNumSlabs);
     paramsHost.maxNumHits = stateWrapper.pState->maxNumHits;
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
     paramsHost.sphDegree = MOGTracingDefaultSphDegree; 
+    paramsHost.frameBounds.x = rayOri.size(2)-1;
+    paramsHost.frameBounds.y = rayOri.size(1)-1;
 
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
 

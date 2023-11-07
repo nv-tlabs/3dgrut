@@ -55,10 +55,10 @@
 /// \param[in] rayTime
 /// \param[in] visibilityMask really only 8 bits
 /// \param[in] rayFlags       really only 8 bits, combination of OptixRayFlags
-/// \param[in] SBToffset      really only 4 bits
-/// \param[in] SBTstride      really only 4 bits
+/// \param[in] SBToffset      really only 8 bits
+/// \param[in] SBTstride      really only 8 bits
 /// \param[in] missSBTIndex   specifies the miss program invoked on a miss
-/// \param[in,out] payload    up to 32 unsigned int values that hold the payload
+/// \param[out] payload       up to 32 unsigned int values that hold the payload
 template <typename... Payload>
 static __forceinline__ __device__ void optixTrace( OptixTraversableHandle handle,
                                                    float3                 rayOrigin,
@@ -84,10 +84,10 @@ static __forceinline__ __device__ void optixTrace( OptixTraversableHandle handle
 /// \param[in] rayTime
 /// \param[in] visibilityMask really only 8 bits
 /// \param[in] rayFlags       really only 8 bits, combination of OptixRayFlags
-/// \param[in] SBToffset      really only 4 bits
-/// \param[in] SBTstride      really only 4 bits
+/// \param[in] SBToffset      really only 8 bits
+/// \param[in] SBTstride      really only 8 bits
 /// \param[in] missSBTIndex   specifies the miss program invoked on a miss
-/// \param[in,out] payload    up to 32 unsigned int values that hold the payload
+/// \param[out] payload       up to 32 unsigned int values that hold the payload
 template <typename... Payload>
 static __forceinline__ __device__ void optixTrace( OptixPayloadTypeID     type,
                                                    OptixTraversableHandle handle,
@@ -308,7 +308,6 @@ static __forceinline__ __device__ OptixTraversableHandle optixGetInstanceTravers
 /// If motion is disabled via OptixPipelineCompileOptions::usesMotionBlur, or the GAS does not contain motion, the
 /// time parameter is ignored.
 static __forceinline__ __device__ void optixGetTriangleVertexData( OptixTraversableHandle gas, unsigned int primIdx, unsigned int sbtGASIndex, float time, float3 data[3]);
-
 
 /// Return the object space curve control vertex data of a linear curve in a Geometry
 /// Acceleration Structure (GAS) at a given motion time.

@@ -75,85 +75,91 @@ extern "C" __global__ void __raygen__rg()
     float transmit = 1.0f;
     RayPayload p;
 
-    while ((startT <= minMaxT.y) && (transmit > params.minTransmittance) && (numHits < params.maxNumHits))
+    float currT = 0.f; //< starting at O and skipping samples before startT for ray coherence
+
+    while ((currT <= minMaxT.y) && (transmit > params.minTransmittance) ) //&& (numHits < params.maxNumHits))
     {
-        p.ahNumHits = 0;
-        trace(&p, rayOri, rayDir, startT + epsT, startT + slabSpacing);
-
-        if (p.ahNumHits == 0)
+        if (currT + slabSpacing > startT)
         {
-            startT += slabSpacing;
-            continue;
-        }
+            p.ahNumHits = 0;
+            trace(&p, rayOri, rayDir, currT + epsT, fminf(currT + slabSpacing, minMaxT.y));
 
-        int N = p.ahNumHits;
-        // bubble sort
-        for (int i = 0; i < N; i++)
-        {
-            for (int j = 0; j < N - i - 1; j++)
+            if (p.ahNumHits == 0)
             {
-                const float2 tmp = p.ahHitTable[i];
-                if (tmp.x < p.ahHitTable[j].x)
+                currT += slabSpacing;
+                continue;
+            }
+
+            int N = p.ahNumHits;
+            // bubble sort
+            for (int i = 0; i < N; i++)
+            {
+                for (int j = 0; j < N - i - 1; j++)
                 {
-                    p.ahHitTable[i] = p.ahHitTable[j];
-                    p.ahHitTable[j] = tmp;
+                    const float2 tmp = p.ahHitTable[i];
+                    if (tmp.x < p.ahHitTable[j].x)
+                    {
+                        p.ahHitTable[i] = p.ahHitTable[j];
+                        p.ahHitTable[j] = tmp;
+                    }
                 }
             }
+
+            // in case we got more hits than available slots, start the next ray from the last hit
+            // if (p.ahNumHits == MoGTracingAHMaxNumHitPerSlab)
+            // {
+            //     startT = p.ahHitTable[MoGTracingAHMaxNumHitPerSlab - 1].x;
+            // }
+            // else
+            // {
+            //     startT += slabSpacing;
+            // }
+
+            for (int i = 0; (i < p.ahNumHits) && (transmit > params.minTransmittance); i++)
+            {
+                const uint32_t gId = float_as_uint(p.ahHitTable[i].y);
+
+                const float gdns = params.mogDns[gId][0];
+                const float3 gpos = make_float3(params.mogPos[gId][0], params.mogPos[gId][1], params.mogPos[gId][2]);
+                const float4 grot = make_float4(
+                    params.mogRot[gId][0], params.mogRot[gId][1], params.mogRot[gId][2], params.mogRot[gId][3]);
+                const float3 gscl = make_float3(params.mogScl[gId][0], params.mogScl[gId][1], params.mogScl[gId][2]);
+
+                // project ray in the gaussian
+                float33 grotMat;
+                rotationMatrix(make_float4(grot.x, grot.y, grot.z, grot.w), grotMat);
+                const float3 giscl = make_float3(1 / gscl.x, 1 / gscl.y, 1 / gscl.z);
+                const float3 gposc = (rayOri - gpos);
+                const float3 gposcr = (gposc * grotMat);
+                const float3 gro = giscl * gposcr;
+                const float3 rayDirR = rayDir * grotMat;
+                const float3 grdu = giscl * rayDirR;
+                const float3 grd = safe_normalize(grdu);
+                const float3 gcrod = cross(grd, gro);
+                const float grayDir = dot(gcrod, gcrod);
+                const float gres = expf(-0.5 * grayDir);
+                // const float galpha = gres * gdns;
+
+                const float3 grad =
+                    SH_C0 * make_float3(params.mogSph[gId][0], params.mogSph[gId][1], params.mogSph[gId][2]) +
+                    make_float3(0.5);
+                // const float3 grad =
+                //     make_float3(gradu.x > SHRadMinBound ? gradu.x : expf(gradu.x - SHRadMinBound) * SHRadMinBound,
+                //                 gradu.y > SHRadMinBound ? gradu.y : expf(gradu.y - SHRadMinBound) * SHRadMinBound,
+                //                 gradu.z > SHRadMinBound ? gradu.z : expf(gradu.z - SHRadMinBound) * SHRadMinBound);
+
+                const float galpha = gdns;
+
+                const float weight = galpha * transmit;
+
+                radiance += grad * weight;
+                hitDistance += p.ahHitTable[i].x * weight;
+                transmit *= (1 - galpha);
+
+                numHits++;
+            }
         }
-
-        // in case we got more hits than available slots, start the next ray from the last hit
-        if (p.ahNumHits == MoGTracingAHMaxNumHitPerSlab)
-        {
-            startT = p.ahHitTable[MoGTracingAHMaxNumHitPerSlab - 1].x;
-        }
-        else
-        {
-            startT += slabSpacing;
-        }
-
-        for (int i = 0; (i < p.ahNumHits) && (transmit > params.minTransmittance); i++)
-        {
-            const uint32_t gId = float_as_uint(p.ahHitTable[i].y);
-
-            const float gdns = params.mogDns[gId][0];
-            const float3 gpos = make_float3(params.mogPos[gId][0], params.mogPos[gId][1], params.mogPos[gId][2]);
-            const float4 grot =
-                make_float4(params.mogRot[gId][0], params.mogRot[gId][1], params.mogRot[gId][2], params.mogRot[gId][3]);
-            const float3 gscl = make_float3(params.mogScl[gId][0], params.mogScl[gId][1], params.mogScl[gId][2]);
-
-            // project ray in the gaussian
-            float33 grotMat;
-            rotationMatrix(make_float4(grot.x, grot.y, grot.z, grot.w), grotMat);
-            const float3 giscl = make_float3(1 / gscl.x, 1 / gscl.y, 1 / gscl.z);
-            const float3 gposc = (rayOri - gpos);
-            const float3 gposcr = (gposc * grotMat);
-            const float3 gro = giscl * gposcr;
-            const float3 rayDirR = rayDir * grotMat;
-            const float3 grdu = giscl * rayDirR;
-            const float3 grd = safe_normalize(grdu);
-            const float3 gcrod = cross(grd, gro);
-            const float grayDir = dot(gcrod, gcrod);
-            const float gres = expf(-0.5 * grayDir);
-            //const float galpha = gres * gdns;
-
-            const float3 grad =
-                SH_C0 * make_float3(params.mogSph[gId][0], params.mogSph[gId][1], params.mogSph[gId][2]) +
-                make_float3(0.5);
-            // const float3 grad =
-            //     make_float3(gradu.x > SHRadMinBound ? gradu.x : expf(gradu.x - SHRadMinBound) * SHRadMinBound,
-            //                 gradu.y > SHRadMinBound ? gradu.y : expf(gradu.y - SHRadMinBound) * SHRadMinBound,
-            //                 gradu.z > SHRadMinBound ? gradu.z : expf(gradu.z - SHRadMinBound) * SHRadMinBound);
-
-            const float galpha = gdns;
-
-            const float weight = galpha * transmit;
-
-            radiance += grad * weight;
-            hitDistance += p.ahHitTable[i].x * weight;
-            transmit *= (1 - galpha);
-
-            numHits++;
-        }
+        currT += slabSpacing;
     }
 
     params.rayRad[idx.z][idx.y][idx.x][0] = radiance.x;
@@ -193,7 +199,7 @@ extern "C" __global__ void __intersection__is()
     // const float4 gRot =
     //     make_float4(params.mogRot[gId][0], params.mogRot[gId][1], params.mogRot[gId][2], params.mogRot[gId][3]);
     // const float3 gScl = make_float3(params.mogScl[gId][0], params.mogScl[gId][1], params.mogScl[gId][2]);
-    
+
     // float33 rot;
     // rotationMatrix(make_float4(gRot.x, gRot.y, gRot.z, gRot.w), rot);
     // const float3 giscl = make_float3(1 / gScl.x, 1 / gScl.y, 1 / gScl.z);
@@ -221,13 +227,13 @@ extern "C" __global__ void __intersection__is()
     const unsigned int gId = optixGetPrimitiveIndex();
 
     const float3 gPos = make_float3(params.mogPos[gId][0], params.mogPos[gId][1], params.mogPos[gId][2]);
-    
+
     const float t = length(gPos - ro);
     if (t > tmin && t < tmax)
     {
         const float mscl = params.mogScl[gId][0] + params.mogScl[gId][1] + params.mogScl[gId][2];
         const float3 samplePos = ro + rd * t;
-        if( length(gPos - samplePos) < mscl )
+        if (length(gPos - samplePos) < mscl)
         {
             optixReportIntersection(t, 0);
         }
@@ -260,14 +266,14 @@ extern "C" __global__ void __anyhit__ah()
     unsigned int ahNumHits = optixGetPayload_0();
     if (ahNumHits < MoGTracingAHMaxNumHitPerSlab)
     {
-            const unsigned int ahHitTablePtr0 = optixGetPayload_1();
-            const unsigned int ahHitTablePtr1 = optixGetPayload_2();
-            float2* ahHitTablePtr =
-                reinterpret_cast<float2*>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);    
-            const unsigned int gId = optixGetPrimitiveIndex();
+        const unsigned int ahHitTablePtr0 = optixGetPayload_1();
+        const unsigned int ahHitTablePtr1 = optixGetPayload_2();
+        float2* ahHitTablePtr =
+            reinterpret_cast<float2*>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
+        const unsigned int gId = optixGetPrimitiveIndex();
         const float2 ahHit = { optixGetRayTmax(), uint_as_float(gId) };
         ahHitTablePtr[ahNumHits] = ahHit;
-        optixSetPayload_0(ahNumHits+1);
+        optixSetPayload_0(ahNumHits + 1);
         optixIgnoreIntersection();
     }
 }
