@@ -14,6 +14,9 @@
 
 
 static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = 32;
+static constexpr int MOGTracingDefaultMaxNumSlabs = 0; ///< maximum number of slabs for the full volume (0 encompass the full volume)
+
+static constexpr unsigned int MOGTracingPatchSize = 3;
 
 enum MOGTracingMode
 {
@@ -60,7 +63,8 @@ struct MoGTracingParams
 
     unsigned int maxNumHits;
     float hitMinGaussianResponse;
-    unsigned int sphDegree;
-    float padd;
+    uint2 frameBounds;
     
+    unsigned int sphDegree;
+    float3 pad;
 };

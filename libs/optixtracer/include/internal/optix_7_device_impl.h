@@ -639,7 +639,6 @@ static __forceinline__ __device__ void optixGetTriangleVertexData( OptixTraversa
          : );
 }
 
-
 static __forceinline__ __device__ void optixGetLinearCurveVertexData( OptixTraversableHandle gas,
                                                                       unsigned int           primIdx,
                                                                       unsigned int           sbtGASIndex,

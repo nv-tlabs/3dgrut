@@ -56,20 +56,42 @@ extern "C" __global__ void __raygen__rg()
     const uint3 idx = optixGetLaunchIndex();
     const uint3 dim = optixGetLaunchDimensions();
 
-    const float3 rayOri = make_float3(params.rayOri[idx.z][idx.y][idx.x][0], params.rayOri[idx.z][idx.y][idx.x][1],
-                                      params.rayOri[idx.z][idx.y][idx.x][2]);
+    float3 rayOri[MOGTracingPatchSize][MOGTracingPatchSize];
+    float3 rayDir[MOGTracingPatchSize][MOGTracingPatchSize];
+    float3 rayRad[MOGTracingPatchSize][MOGTracingPatchSize];
+    float rayTrm[MOGTracingPatchSize][MOGTracingPatchSize];
+    const int startIdxX = idx.x * MOGTracingPatchSize;
+    const int startIdxY = idx.y * MOGTracingPatchSize;
 
-    const float3 rayDir = make_float3(params.rayDir[idx.z][idx.y][idx.x][0], params.rayDir[idx.z][idx.y][idx.x][1],
-                                      params.rayDir[idx.z][idx.y][idx.x][2]);
+    float2 minMaxT = make_float2(1e9, -1e9);
+
+#pragma unroll
+    for (int j = 0; j < MOGTracingPatchSize; ++j)
+    {
+        const int y = fminf(startIdxY + j, params.frameBounds.y);
+#pragma unroll
+        for (int i = 0; i < MOGTracingPatchSize; ++i)
+        {
+            const int x = fminf(startIdxX + i, params.frameBounds.x);
+            rayOri[j][i] =
+                make_float3(params.rayOri[idx.z][y][x][0], params.rayOri[idx.z][y][x][1], params.rayOri[idx.z][y][x][2]);
+            rayDir[j][i] =
+                make_float3(params.rayDir[idx.z][y][x][0], params.rayDir[idx.z][y][x][1], params.rayDir[idx.z][y][x][2]);
+            rayRad[j][i] = make_float3(0);
+            rayTrm[j][i] = 1;
+
+            const float2 sampleMinMaxT = intersectAABB(params.aabb, rayOri[j][i], rayDir[j][i]);
+            minMaxT.x = fminf(minMaxT.x, sampleMinMaxT.x);
+            minMaxT.y = fmaxf(minMaxT.y, sampleMinMaxT.y);
+        }
+    }
 
     // ray- aabb intersection to determine number of segments
-    const float2 minMaxT = intersectAABB(params.aabb, rayOri, rayDir);
     constexpr float epsT = 1e-9;
     const float slabSpacing = params.slabSpacing;
     float startT = fmaxf(0.0f, minMaxT.x - epsT);
 
     float hitDistance = 0;
-    float3 radiance = make_float3(0);
     uint32_t numHits = 0;
     float transmit = 1.0f;
     RayPayload p;
@@ -77,7 +99,9 @@ extern "C" __global__ void __raygen__rg()
     while ((startT <= minMaxT.y) && (transmit > params.minTransmittance) && (numHits < params.maxNumHits))
     {
         p.ahNumHits = 0;
-        trace(&p, rayOri, rayDir, startT + epsT, startT + slabSpacing);
+        const float3 sampleRayOri = rayOri[0][0];
+        const float3 sampleRayDir = rayDir[0][0];
+        trace(&p, sampleRayOri, sampleRayDir, startT + epsT, startT + slabSpacing);
         if (p.ahNumHits == 0)
         {
             startT += slabSpacing;
@@ -96,6 +120,8 @@ extern "C" __global__ void __raygen__rg()
 
         for (int i = 0; (i < p.ahNumHits) && (transmit > params.minTransmittance); i++)
         {
+            transmit = 0.0f;
+
             const uint32_t gId = float_as_uint(p.ahHitTable[i].y);
 
             const float gdns = params.mogDns[gId][0];
@@ -108,33 +134,57 @@ extern "C" __global__ void __raygen__rg()
             float33 grotMat;
             rotationMatrix(make_float4(grot.x, grot.y, grot.z, grot.w), grotMat);
             const float3 giscl = make_float3(1 / gscl.x, 1 / gscl.y, 1 / gscl.z);
-            const float3 gposc = (rayOri - gpos);
-            const float3 gposcr = (gposc * grotMat);
-            const float3 gro = giscl * gposcr;
-            const float3 rayDirR = rayDir * grotMat;
-            const float3 grdu = giscl * rayDirR;
-            const float3 grd = safe_normalize(grdu);
-            const float3 gcrod = cross(grd, gro);
-            const float grayDir = dot(gcrod, gcrod);
-            const float gres = expf(-0.5 * grayDir);
-            const float galpha = gres * gdns;
-            const float3 grad = computeColorFromSH(params.sphDegree, gpos, rayOri, gId, params);
 
-            const float weight = galpha * transmit;
+            // NB : this is an approximation : we are using the sampleRayOri instead of the real rayOri we factorizing
+            // the sph computation
+            const float3 grad = computeColorFromSH(params.sphDegree, gpos, sampleRayOri, gId, params);
 
-            radiance += grad * weight;
-            hitDistance += p.ahHitTable[i].x * weight;
-            transmit *= (1 - galpha);
+#pragma unroll
+            for (int j = 0; j < MOGTracingPatchSize; ++j)
+            {
+#pragma unroll
+                for (int k = 0; k < MOGTracingPatchSize; ++k)
+                {
+                    const float3 gposc = (rayOri[k][j] - gpos);
+                    const float3 gposcr = (gposc * grotMat);
+                    const float3 gro = giscl * gposcr;
+                    const float3 rayDirR = rayDir[k][j] * grotMat;
+                    const float3 grdu = giscl * rayDirR;
+                    const float3 grd = safe_normalize(grdu);
+                    const float3 gcrod = cross(grd, gro);
+                    const float grayDir = dot(gcrod, gcrod);
+                    const float gres = expf(-0.5 * grayDir);
+                    const float galpha = gres * gdns;
+
+                    const float weight = galpha * rayTrm[k][j];
+
+                    rayRad[k][j] += grad * weight;
+                    hitDistance += p.ahHitTable[i].x * weight;
+                    rayTrm[k][j] *= (1 - galpha);
+
+                    transmit = fmaxf(transmit, rayTrm[k][j]);
+                }
+            }
 
             numHits++;
         }
     }
 
-    params.rayRad[idx.z][idx.y][idx.x][0] = radiance.x;
-    params.rayRad[idx.z][idx.y][idx.x][1] = radiance.y;
-    params.rayRad[idx.z][idx.y][idx.x][2] = radiance.z;
-    params.rayDns[idx.z][idx.y][idx.x][0] = 1 - transmit;
-    params.rayHit[idx.z][idx.y][idx.x][0] = numHits;
+#pragma unroll
+    for (int j = 0; j < MOGTracingPatchSize; ++j)
+    {
+        const int y = fminf(startIdxY + j, params.frameBounds.y);
+#pragma unroll
+        for (int i = 0; i < MOGTracingPatchSize; ++i)
+        {
+            const int x = fminf(startIdxX + i, params.frameBounds.x);
+            params.rayRad[idx.z][y][x][0] = rayRad[j][i].x;
+            params.rayRad[idx.z][y][x][1] = rayRad[j][i].y;
+            params.rayRad[idx.z][y][x][2] = rayRad[j][i].z;
+            params.rayDns[idx.z][y][x][0] = 1 - rayTrm[j][i];
+            params.rayHit[idx.z][y][x][0] = numHits;
+        }
+    }
 }
 
 extern "C" __global__ void __anyhit__ah()

@@ -508,27 +508,27 @@ inline OptixResult optixAccelBuild( OptixDeviceContext            context,
 }
 
 
-inline OptixResult optixAccelGetRelocationInfo( OptixDeviceContext context, OptixTraversableHandle handle, OptixRelocationInfo* info )
+inline OptixResult optixAccelGetRelocationInfo( OptixDeviceContext context, OptixTraversableHandle handle, OptixAccelRelocationInfo* info )
 {
     return g_optixFunctionTable.optixAccelGetRelocationInfo( context, handle, info );
 }
 
 
-inline OptixResult optixCheckRelocationCompatibility( OptixDeviceContext context, const OptixRelocationInfo* info, int* compatible )
+inline OptixResult optixAccelCheckRelocationCompatibility( OptixDeviceContext context, const OptixAccelRelocationInfo* info, int* compatible )
 {
-    return g_optixFunctionTable.optixCheckRelocationCompatibility( context, info, compatible );
+    return g_optixFunctionTable.optixAccelCheckRelocationCompatibility( context, info, compatible );
 }
 
 inline OptixResult optixAccelRelocate( OptixDeviceContext              context,
                                        CUstream                        stream,
-                                       const OptixRelocationInfo*      info,
-                                       const OptixRelocateInput*       relocateInputs,
-                                       size_t                          numRelocateInputs,
+                                       const OptixAccelRelocationInfo* info,
+                                       CUdeviceptr                     instanceTraversableHandles,
+                                       size_t                          numInstanceTraversableHandles,
                                        CUdeviceptr                     targetAccel,
                                        size_t                          targetAccelSizeInBytes,
                                        OptixTraversableHandle*         targetHandle )
 {
-    return g_optixFunctionTable.optixAccelRelocate( context, stream, info, relocateInputs, numRelocateInputs,
+    return g_optixFunctionTable.optixAccelRelocate( context, stream, info, instanceTraversableHandles, numInstanceTraversableHandles,
                                                     targetAccel, targetAccelSizeInBytes, targetHandle );
 }
 
@@ -548,37 +548,6 @@ inline OptixResult optixConvertPointerToTraversableHandle( OptixDeviceContext   
                                                            OptixTraversableHandle* traversableHandle )
 {
     return g_optixFunctionTable.optixConvertPointerToTraversableHandle( onDevice, pointer, traversableType, traversableHandle );
-}
-
-inline OptixResult optixOpacityMicromapArrayComputeMemoryUsage( OptixDeviceContext                         context,
-                                                                const OptixOpacityMicromapArrayBuildInput* buildInput,
-                                                                OptixMicromapBufferSizes*                 bufferSizes )
-{
-    return g_optixFunctionTable.optixOpacityMicromapArrayComputeMemoryUsage( context, buildInput, bufferSizes );
-}
-
-inline OptixResult optixOpacityMicromapArrayBuild( OptixDeviceContext                         context,
-                                                   CUstream                                   stream,
-                                                   const OptixOpacityMicromapArrayBuildInput* buildInput,
-                                                   const OptixMicromapBuffers*               buffers )
-{
-    return g_optixFunctionTable.optixOpacityMicromapArrayBuild( context, stream, buildInput, buffers );
-}
-
-inline OptixResult optixOpacityMicromapArrayGetRelocationInfo( OptixDeviceContext   context,
-                                                               CUdeviceptr          opacityMicromapArray,
-                                                               OptixRelocationInfo* info )
-{
-    return g_optixFunctionTable.optixOpacityMicromapArrayGetRelocationInfo( context, opacityMicromapArray, info );
-}
-
-inline OptixResult optixOpacityMicromapArrayRelocate( OptixDeviceContext         context,
-                                                      CUstream                   stream,
-                                                      const OptixRelocationInfo* info,
-                                                      CUdeviceptr                targetOpacityMicromapArray,
-                                                      size_t                     targetOpacityMicromapArraySizeInBytes )
-{
-     return g_optixFunctionTable.optixOpacityMicromapArrayRelocate( context, stream, info, targetOpacityMicromapArray, targetOpacityMicromapArraySizeInBytes );
 }
 
 

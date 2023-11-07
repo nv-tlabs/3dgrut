@@ -38,6 +38,8 @@ struct MoGTracingBwdParams
 
     unsigned int maxNumHits;
     float hitMinGaussianResponse;
+    uint2 frameBounds;
+    
     unsigned int sphDegree;
-    float padd;
+    float3 pad;
 };
