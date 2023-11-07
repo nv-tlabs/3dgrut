@@ -106,7 +106,8 @@ def main(conf):
         ps.set_give_focus_on_show(True)
         
         ps.set_automatically_compute_scene_extents(False)
-        ps.set_bounding_box((0, 0, 0), (1, 1, 1))
+        scene_bboxmin, scene_bboxmax = train_dataset.get_bbox()
+        ps.set_bounding_box(to_np(scene_bboxmin), to_np(scene_bboxmax))
 
         # viz stateful parameters & options
         viz_do_train = False
