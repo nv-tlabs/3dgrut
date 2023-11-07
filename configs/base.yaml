@@ -73,8 +73,8 @@ scheduler:
     # In the 3DGS paper they additionally have a parameter lr_delay_mult, but is is not being used so I drop it here
     type: exp
     lr_init: ${optimizer.params.positions.lr}
-    lr_final: 0000016
-    max_steps: ${n_iterations} 
+    lr_final: 0.000016
+    max_steps: ${n_iterations}
 
   density:
     type: skip
