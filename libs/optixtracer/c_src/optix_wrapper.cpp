@@ -408,6 +408,9 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path, const std::string&
         OPTIX_CHECK( optixDeviceContextCreate( cuCtx, &options, &pState->context ) );
     }
 
+    pState->maxNumHits = 1024;
+    pState->gaussianSigmaThreshold = 3.0f;
+
     //
     // Create pipelines
     //
@@ -450,6 +453,19 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path, const std::string&
         &pState->pipelineMoGTracingAHBwd, 
         pState->sbtMoGTracingAHBwd);
 
+    pState->moduleMoGTracingIS = nullptr;
+    pState->pipelineMoGTracingIS = nullptr;
+    pState->sbtMoGTracingIS = {};
+    createPipeline(
+        pState->context, 
+        path, 
+        cuda_path, 
+        "mogTracingIS",
+        PipelineFlag_HasRG | PipelineFlag_HasAH | PipelineFlag_HasIS, 
+        &pState->moduleMoGTracingIS, 
+        &pState->pipelineMoGTracingIS, 
+        pState->sbtMoGTracingIS);
+
     printf("End of OptiXStateWrapper \n");
 }
 
@@ -473,8 +489,15 @@ OptiXStateWrapper::~OptiXStateWrapper(void)
     CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->sbtMoGTracingAHBwd.hitgroupRecordBase ) ) );
     OPTIX_CHECK( optixModuleDestroy( pState->moduleMoGTracingAHBwd ) );
 
+    OPTIX_CHECK( optixPipelineDestroy( pState->pipelineMoGTracingIS ) );
+    CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->sbtMoGTracingIS.raygenRecord       ) ) );
+    CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->sbtMoGTracingIS.missRecordBase     ) ) );
+    CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->sbtMoGTracingIS.hitgroupRecordBase ) ) );
+    OPTIX_CHECK( optixModuleDestroy( pState->moduleMoGTracingIS ) );
+
     CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->gPrimVrt ) ) ); 
     CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->gPrimTri ) ) ); 
+    CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->gPrimAABB ) ) ); 
 
     CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->gasBuffer ) ) );
     OPTIX_CHECK( optixDeviceContextDestroy( pState->context ) ); 

@@ -58,12 +58,12 @@ extern "C" __global__ void __raygen__rg()
     float hitDistance = 0;
     float3 radiance = make_float3(0);
     uint32_t numHits = 0;
-    float density = 0.0f;
+    float transmit = 1.0f;
 
     RayPayload p;
     p.hitT = 0;
 
-    while (density < (1 - params.minTransmittance))
+    while ((transmit > params.minTransmittance) && (numHits < params.maxNumHits))
     {
         trace(p, rayOri, rayDir, p.hitT + 1e-9, 1e16);
         if (p.hitT < 0)
@@ -72,25 +72,36 @@ extern "C" __global__ void __raygen__rg()
         }
         const uint32_t gId = p.triId / MOGPrimNumTri;
 
-        const float4 gRadAlpha = computeGRadAlpha(gId, rayOri, rayDir, p.hitT, params);
+        const float gdns = params.mogDns[gId][0];
+        const float3 gpos = make_float3(params.mogPos[gId][0], params.mogPos[gId][1], params.mogPos[gId][2]);
+        const float4 grot =
+            make_float4(params.mogRot[gId][0], params.mogRot[gId][1], params.mogRot[gId][2], params.mogRot[gId][3]);
+        const float3 gscl = make_float3(params.mogScl[gId][0], params.mogScl[gId][1], params.mogScl[gId][2]);
+
+        // project ray in the gaussian
+        float33 grotMat;
+        rotationMatrix(make_float4(grot.x, grot.y, grot.z, grot.w), grotMat);
+        const float3 giscl = make_float3(1 / gscl.x, 1 / gscl.y, 1 / gscl.z);
+        const float3 gposc = (rayOri - gpos);
+        const float3 gposcr = (gposc * grotMat);
+        const float3 gro = giscl * gposcr;
+        const float3 rayDirR = rayDir * grotMat;
+        const float3 grdu = giscl * rayDirR;
+        const float3 grd = safe_normalize(grdu);
+        const float3 gcrod = cross(grd, gro);
+        const float grayDir = dot(gcrod, gcrod);
+        const float gres = expf(-0.5 * grayDir);
+        const float galpha = gres * gdns;
+        const float3 grad = computeColorFromSH(params.sphDegree, gpos, rayOri, gId, params);
         // const float4 gRadAlpha = make_float4(params.mogSph[gId][0],params.mogSph[gId][1],params.mogSph[gId][2],1.);
         // //params.mogDns[gId][0]); const float4 gRadAlpha =
         // make_float4(p.triId&1,p.triId&2,p.triId&4,params.mogDns[gId][0]); const float4 gRadAlpha =
         // make_float4(1,1,0,0.1);
 
-        if (gRadAlpha.w <= 0.0f)
-        {
-            continue;
-        }
-
-        const float weight = gRadAlpha.w * (1.0f - density);
-        radiance = radiance + make_float3(gRadAlpha) * weight;
+        const float weight = galpha * transmit;
+        radiance = radiance + grad * weight;
         hitDistance += p.hitT * weight;
-        density += weight;
-
-        // radiance += make_float3(gRadAlpha) * gRadAlpha.w;
-        // hitDistance = p.hitT;
-        // density += gRadAlpha.w;
+        transmit *= (1 - galpha);
 
         numHits++;
     }
@@ -98,7 +109,7 @@ extern "C" __global__ void __raygen__rg()
     params.rayRad[idx.z][idx.y][idx.x][0] = radiance.x;
     params.rayRad[idx.z][idx.y][idx.x][1] = radiance.y;
     params.rayRad[idx.z][idx.y][idx.x][2] = radiance.z;
-    params.rayDns[idx.z][idx.y][idx.x][0] = density;
+    params.rayDns[idx.z][idx.y][idx.x][0] = 1 - transmit;
     params.rayHit[idx.z][idx.y][idx.x][0] = numHits;
 }
 

@@ -21,6 +21,7 @@ namespace
 constexpr float oneOverCosQuarterPi = 1.41421356237; // 1 / cos(pi/4)
 constexpr uint32_t octaHedronNumVrt = 6;
 constexpr uint32_t octaHedronNumTri = 8;
+constexpr uint32_t aabbNumVrt = 8;
 
 template <typename scalar_t>
 __global__ void computeGaussianEnclosingOctaHedronKernel(
@@ -79,6 +80,73 @@ __global__ void computeGaussianEnclosingOctaHedronKernel(
     }
 }
 
+template <typename scalar_t>
+__global__ void computeGaussianEnclosingAABBKernel(
+    const uint32_t gNum,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
+    const float sigmaSclTh,
+    OptixAabb* __restrict__ gPrimAABB,
+    OptixAabb* gAABB)
+{
+    const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < gNum)
+    {
+        float33 rot;
+        invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
+        //const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
+        const float scl = ( (gScl[idx][0] + gScl[idx][1] + gScl[idx][2]) / 3.0f ) * sigmaSclTh;
+        const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
+
+        const float3 aabbVrt[aabbNumVrt] = {
+            make_float3(-1, -1, -1), 
+            make_float3(-1, -1,  1),
+            make_float3(-1,  1, -1), 
+            make_float3(-1,  1,  1),
+            make_float3( 1, -1, -1), 
+            make_float3( 1, -1,  1),
+            make_float3( 1,  1, -1), 
+            make_float3( 1,  1,  1)
+        };
+
+        OptixAabb& aabb = gPrimAABB[idx];
+#pragma unroll
+        for (int i = 0; i < aabbNumVrt; ++i)
+        {
+            const float3 vrt = (aabbVrt[i] * scl) /** rot*/ + trans;
+            if (i==0)
+            {
+                aabb.minX = vrt.x;
+                aabb.minY = vrt.y;
+                aabb.minZ = vrt.z;
+                aabb.maxX = vrt.x;
+                aabb.maxY = vrt.y;
+                aabb.maxZ = vrt.z;
+            }
+            else
+            {
+                aabb.minX = fminf(aabb.minX,vrt.x);
+                aabb.minY = fminf(aabb.minY,vrt.y);
+                aabb.minZ = fminf(aabb.minZ,vrt.z);
+                aabb.maxX = fmaxf(aabb.maxX,vrt.x);
+                aabb.maxY = fmaxf(aabb.maxY,vrt.y);
+                aabb.maxZ = fmaxf(aabb.maxZ,vrt.z);
+            }
+        }
+
+        if (gAABB)
+        {
+            atomicMinFloat(&gAABB[0].minX, aabb.minX);
+            atomicMinFloat(&gAABB[0].minY, aabb.minY);
+            atomicMinFloat(&gAABB[0].minZ, aabb.minZ);
+            atomicMaxFloat(&gAABB[0].maxX, aabb.maxX);
+            atomicMaxFloat(&gAABB[0].maxY, aabb.maxY);
+            atomicMaxFloat(&gAABB[0].maxZ, aabb.maxZ);
+        }
+    }
+}
+
 inline __host__ uint32_t div_round_up(uint32_t val, uint32_t divisor)
 {
     return (val + divisor - 1) / divisor;
@@ -104,4 +172,24 @@ void computeGaussianEnclosingOctaHedron(uint32_t gNum,
                                                 gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                 sigmaSclTh, gPrimVrt, gPrimTri, gPrimAABB);
                                         }));
+}
+
+void computeGaussianEnclosingAABB(uint32_t gNum,
+    torch::Tensor gPos,
+    torch::Tensor gRot,
+    torch::Tensor gScl,
+    float sigmaSclTh,
+    OptixAabb* gPrimAABB,
+    OptixAabb* gAABB)
+{
+const uint32_t threads = 1024;
+const uint32_t blocks = div_round_up(static_cast<uint32_t>(gNum), threads);
+
+AT_DISPATCH_FLOATING_TYPES_AND_HALF(gPos.type(), "computeGaussianEnclosingAABB", ([&] {
+        computeGaussianEnclosingAABBKernel<scalar_t><<<blocks, threads>>>(
+            gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+            gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+            gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+            sigmaSclTh, gPrimAABB, gAABB);
+    }));
 }

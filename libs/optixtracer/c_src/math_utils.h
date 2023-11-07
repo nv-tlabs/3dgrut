@@ -452,6 +452,11 @@ static __device__ inline void bwd_reflect(float3 x, float3 n, float3& d_x, float
         d_out.x * (2 * n.x * x.z) + d_out.y * (2 * n.y * x.z) + d_out.z * (2 * (n.x * x.x + n.y * x.y + 2 * n.z * x.z));
 }
 
+static __device__ inline float length(const float3& v)
+{
+    return sqrtf(dot(v,v));
+}
+
 static __device__ inline float3 safe_normalize(float3 v)
 {
     const float l = v.x * v.x + v.y * v.y + v.z * v.z;

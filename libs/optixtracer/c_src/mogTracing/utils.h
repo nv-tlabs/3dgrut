@@ -39,7 +39,7 @@ static __device__ inline float computeGRayResponse(
 }
 
 template <typename T>
-static __device__ inline float computeGHitDistance(uint32_t gId, const float3& rayOri, const float3& rayDir, float hiT, const T& params)
+static __device__ inline float computeGHitDistance(uint32_t gId, const float3& rayOri, const float3& rayDir, const T& params)
 {
     const float3 gPos = make_float3(params.mogPos[gId][0],params.mogPos[gId][1],params.mogPos[gId][2]);
     const float4 gRot = make_float4(params.mogRot[gId][0],params.mogRot[gId][1],params.mogRot[gId][2],params.mogRot[gId][3]);
@@ -51,36 +51,8 @@ static __device__ inline float computeGHitDistance(uint32_t gId, const float3& r
     const float3 ro =  iscl*((rayOri - gPos)*rot);
     const float3 rd = safe_normalize(iscl*((rayDir*rot)));
 
-    return dot(ro,ro) / dot(rd,ro);
-}
-
-template <typename T>
-static __device__ inline float4 computeGRadAlpha(uint32_t gId, const float3& rayOri, const float3& rayDir, float hiT, const T& params)
-{
-    const float gdns = params.mogDns[gId][0];
-    const float3 gpos = make_float3(params.mogPos[gId][0],params.mogPos[gId][1],params.mogPos[gId][2]);
-    const float4 grot = make_float4(params.mogRot[gId][0],params.mogRot[gId][1],params.mogRot[gId][2],params.mogRot[gId][3]);
-    const float3 gscl = make_float3(params.mogScl[gId][0],params.mogScl[gId][1],params.mogScl[gId][2]);
-    
-    const float gres = computeGRayResponse(gpos, grot, gscl, rayOri, rayDir);
-    
-    const float galpha = gres * gdns;
-    // const float galpha = fminf(GAlphaMax, gres * gdns);
-    // if (galpha < GAlphaMin)
-    // {
-    //     return make_float4(-1);    
-    // }
-    
-    SphCoefficients<SphNumCoeffs> gSph;
-    #pragma unroll
-    for (int i=0;i<SphNumCoeffs;++i)
-    {
-        const int j=i*3;
-        gSph[i] = make_float3(params.mogSph[gId][j],params.mogSph[gId][j+1],params.mogSph[gId][j+2]);
-    }
-    const float3 grad = computeColorFromSH<SphDegree, SphNumCoeffs>(gpos, gSph, rayOri);
-
-    return make_float4(grad.x,grad.y,grad.z,galpha);
+    const float3 grds = gScl * rd * dot(rd, -1*ro);
+    return sqrtf(dot(grds,grds));
 }
 
 #endif
