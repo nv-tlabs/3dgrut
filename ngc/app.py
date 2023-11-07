@@ -45,13 +45,14 @@ def get_cmd_template(config, exp_name):
         "aceId": config["ngc"]["ace"]["id"],
         "aceName":config["ngc"]["ace"]["name"],
         "aceInstance":config["ngc"]["ace"]["instance"],
-        "dockerImageName": "{0}/{1}:latest".format(config["docker"]["team"], config["docker"]["name"]),
+        "dockerImageName": "{0}/{1}:{2}".format(config["docker"]["team"], config["docker"]["name"],config["docker"].get("tag","latest")),
         "publishedContainerPorts": config["ngc"]["open_ports"],
         "datasetMounts": [],
         "resultContainerMountPoint": config["ngc"]["result_path"],
         "runPolicy": {
             "preemptClass": "RUNONCE"
-        }
+        },
+        "team": "omniverse"
     }
 
     # Add all workspaces
@@ -97,7 +98,7 @@ class NGCToolbox:
     def build_docker(self, docker_fpath: Optional[os.PathLike] = None):
         """Build the docker container.
         """
-        cmd = 'docker build -f ./ngc/Dockerfile . -t {0} --platform {1}'.format(self._cfg["docker"]["name"], self._cfg["docker"]["platform"])
+        cmd = 'docker build -f ./ngc/Dockerfile.build . -t {0} --platform {1}'.format(self._cfg["docker"]["name"], self._cfg["docker"]["platform"])
         if docker_fpath is not None:
             cmd += f" -f {docker_fpath}"
         print(cmd)
@@ -176,7 +177,11 @@ class NGCToolbox:
         os.makedirs(tmpdir, exist_ok=True)
 
         rsync_base_cmd = "rsync -arzh --prune-empty-dirs --no-links"
-        rsync_cmds = [f"{rsync_base_cmd} -R --include=*/ --exclude=dependencies/**/* --include=*.py  --include=*.cpp  --include=*.h --include=*.cu  --exclude=* . {tmpdir}/ --delete"]
+        rsync_cmds = [f"{rsync_base_cmd} -R --include=*/ --exclude=dependencies/**/* --include=*.py --exclude=* . {tmpdir}/ --delete"]
+        rsync_cmds.append(f"{rsync_base_cmd} -R --include=*/ --include=*.cpp --exclude=* . {tmpdir}/")
+        rsync_cmds.append(f"{rsync_base_cmd} -R --include=*/ --include=*.h --exclude=* . {tmpdir}/")
+        rsync_cmds.append(f"{rsync_base_cmd} -R --include=*/ --include=*.cu --exclude=* . {tmpdir}/")
+        rsync_cmds.append(f"{rsync_base_cmd} -R --include=*/ --include=*.yaml --exclude=* . {tmpdir}/")        
         rsync_cmds.append(f"{rsync_base_cmd} -R --include=*/ --include=*.sh --exclude=* . {tmpdir}/")
         for rs_cmd in rsync_cmds:
             print(rs_cmd)
@@ -234,6 +239,7 @@ class NGCToolbox:
         """
         cmd_json = get_cmd_template(self._cfg, exp_name)
         cmd_json["command"] += command
+        cmd_json["command"] += "; . ./ngc/ngc_post_job.sh"
         dump_and_run("command.json", cmd_json, dry_run, cleanup)
 
 
@@ -271,6 +277,7 @@ class NGCToolbox:
             cmd_json = deepcopy(job_template)
             cmd_json["name"] += "." + job_id
             cmd_json["command"] += cmd
+            cmd_json["command"] += "; . ./ngc/ngc_post_job.sh"
             job_fpath = os.path.join(jobdir, "cmd_{}.json".format(job_id))
 
             with open(job_fpath , "w") as f:

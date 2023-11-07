@@ -15,3 +15,4 @@ kornia
 opencv-python
 einops
 imageio
+scikit-learn
