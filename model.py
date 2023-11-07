@@ -1,7 +1,6 @@
-import logging, sys, os, struct
+import logging, os
 
 import numpy as np
-import copy
 import torch
 from plyfile import PlyData
 
@@ -10,6 +9,7 @@ from utils import to_torch, get_activation_function, inverse_sigmoid, get_schedu
 from datasets.colmap_utils import read_next_bytes
 from datasets.ngp_utils import PointCloud
 from geometry import nearest_neighbor_dist_cpuKD
+from utils import to_np
 
 class MixtureOfGaussians(torch.nn.Module):
     def __init__(self, conf):
@@ -140,40 +140,14 @@ class MixtureOfGaussians(torch.nn.Module):
 
         self.default_initialize_from_points(file_pts, file_rgb)
             
-    @torch.no_grad()
     def init_from_lidar(self, 
                         point_cloud : PointCloud, 
-                        max_sh_degree: int = 3,
-                        dtype = torch.float32,
-                        set_optimizable_parameters: bool = True):
+                        ):
         
         logging.info(f"Initializing based on lidar point cloud ...")
        
-
-        num_points = len(point_cloud.xyz_end)
-        fused_point_cloud = point_cloud.xyz_end.clone().detach().contiguous()
-        fused_color = torch.rand((num_points, 3), dtype=dtype, device=self.device) / 255.0
-
-        features = torch.zeros((num_points, 3, (max_sh_degree + 1) ** 2), dtype=dtype, device=self.device)
-        features[:, :3, 0] = fused_color
-        features[:, 3:, 1:] = 0.0
-        features = features.transpose(1, 2).reshape(num_points, -1).contiguous()
-
-        dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(fused_point_cloud), 1e-3)
-        scales = torch.log(dist)[..., None].repeat(1, 3)
-        rots = torch.zeros((num_points, 4), device=self.device)
-        rots[:, 0] = 1
-
-        opacities = inverse_sigmoid(0.1 * torch.ones((num_points, 1), dtype=dtype, device=self.device))
-
-        self.positions = torch.nn.Parameter(fused_point_cloud.to(dtype=dtype, device=self.device))  # type: ignore
-        self.rotation = torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
-        self.scale = torch.nn.Parameter(scales.to(dtype=dtype, device=self.device))
-        self.density = torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device))
-        self.features = torch.nn.Parameter(features.to(dtype=dtype, device=self.device))
-
-        if set_optimizable_parameters:
-            self.set_optimizable_parameters()
+        # only initialize by default from points for now
+        self.default_initialize_from_points(to_np(point_cloud.xyz_end), None)
 
     def setup_optimizer(self, state_dict=None):
         params = []
