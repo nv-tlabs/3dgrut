@@ -45,7 +45,7 @@ class MixtureOfGaussians(torch.nn.Module):
         self.new_max_density = self.conf.model.reset_density.new_max_density
 
         # Check if we would like to do progressive training
-        self.feature_type = 'sh'
+        self.feature_type = self.conf.model.progressive_training.feature_type
         self.n_active_features = self.conf.model.progressive_training.init_n_features
         self.max_n_features = self.conf.model.progressive_training.max_n_features   # For SH, this is the SH degree
         self.progressive_training = False
@@ -234,7 +234,6 @@ class MixtureOfGaussians(torch.nn.Module):
         self.density = torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device))
         self.features_albedo = torch.nn.Parameter(features_albedo.to(dtype=dtype, device=self.device))
         self.features_specular = torch.nn.Parameter(features_specular.to(dtype=dtype, device=self.device))
-        self.n_active_features = 1
 
         self.set_optimizable_parameters()
         self.setup_optimizer()
