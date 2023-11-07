@@ -11,12 +11,13 @@ from utils import to_torch
 
 class ColmapDataset(Dataset):
 
-    def __init__(self, path, split='train', sample_full_image=False, batch_size=8192):
+    def __init__(self, path, split='train', sample_full_image=False, batch_size=8192, downsample_factor=1):
         self.path = path
         self.split = split
         self.llff_test_split = 8
         self.sample_full_image = sample_full_image
         self.batch_size = batch_size
+        self.downsample_factor = downsample_factor
 
         try:
             cameras_extrinsic_file = os.path.join(self.path, "sparse/0", "images.bin")
@@ -52,12 +53,16 @@ class ColmapDataset(Dataset):
         # Update the number of frames to only include the samples from the split
         self.n_frames = self.poses.shape[0]
 
+    def get_images_folder(self):
+        downsample_suffix = "" if self.downsample_factor == 1 else f'_{self.downsample_factor}'
+        return f"images{downsample_suffix}"
+
     def get_scene_info(self):
         self.image_h = 0
         self.image_w = 0
         self.n_frames = len(self.cam_extrinsics)
 
-        image_path = os.path.join(self.path, "images", os.path.basename(self.cam_extrinsics[0].name))
+        image_path = os.path.join(self.path, self.get_images_folder(), os.path.basename(self.cam_extrinsics[0].name))
         image_name = os.path.basename(image_path).split(".")[0]
         image = np.asarray(Image.open(image_path))
         self.image_h = image.shape[0]
@@ -100,7 +105,7 @@ class ColmapDataset(Dataset):
             else:
                 assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
 
-            image_path = os.path.join(self.path, "images", os.path.basename(extr.name))
+            image_path = os.path.join(self.path, self.get_images_folder(), os.path.basename(extr.name))
             image_name = os.path.basename(image_path).split(".")[0]
             self.rgb.append(np.asarray(Image.open(image_path)).astype(np.float32) / 255.0 )
 

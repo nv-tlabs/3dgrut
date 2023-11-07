@@ -53,7 +53,14 @@ def main(conf):
             conf.path, 
             split='train', 
             sample_full_image=conf.dataset.train.sample_full_image, 
-            batch_size=conf.dataset.train.batch_size
+            batch_size=conf.dataset.train.batch_size,
+            downsample_factor=conf.dataset.downsample_factor
+        )
+        val_dataset = ColmapDataset(
+            conf.path,
+            split='val',
+            sample_full_image=True,
+            downsample_factor=conf.dataset.downsample_factor
         )
         val_dataset = ColmapDataset(conf.path, split='val', sample_full_image=True)
     elif conf.dataset.type == 'ngp':
@@ -113,7 +120,7 @@ def main(conf):
                 raise e
          
         elif conf.initialization.method == 'random':
-            model.randomize_point_cloud(num_gsplat=conf.initialization.num_gaussians)
+            model.init_from_random_point_cloud(num_gsplat=conf.initialization.num_gaussians)
 
         elif conf.initialization.method == 'lidar':
             assert conf.dataset.type in ['ngp', 'ncore'], 'can only initialize from lidar with the NGPDataset / NCoreDataset'
