@@ -382,7 +382,6 @@ class MixtureOfGaussians(torch.nn.Module):
         # TODO: consider having a buffer of the contribution of Gaussians to the rendering -> this might avoid the need to reset opacity
         # TODO: we could also consider pruning away some of the large Gaussians?
         mask = self.get_density().squeeze() >= self.prune_density_threshold
-        print(mask.sum())
 
         optimizable_tensors = self.prune_optimizer_tensors(mask)
         self.update_optimizable_parameters(optimizable_tensors)
