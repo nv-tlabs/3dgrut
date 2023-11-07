@@ -102,6 +102,11 @@ extern "C" __global__ void __raygen__rg()
     while ((startT <= minMaxT.y) && (transmit > params.minTransmittance) && (numHits < params.maxNumHits))
     {
         p.ahNumHits = 0;
+        #pragma unroll
+        for (int i=0;i<MoGTracingAHMaxNumHitPerSlab;++i)
+        {
+            p.ahHitTable[i] = make_float2(1e9,1e9);
+        }
 
         // TOOD : rework this jitter scheme, it is biased toward the center of the patch
         float3 sampleRayOri = make_float3(0);
@@ -229,13 +234,16 @@ extern "C" __global__ void __anyhit__ah()
     if ((ahNumHits < MoGTracingAHMaxNumHitPerSlab) || (ahHit.x < ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x))
     {
         ahNumHits = min(ahNumHits + 1, MoGTracingAHMaxNumHitPerSlab); // increment num hit
-        int i = ahNumHits - 1; // assert(ahNumHits-1 is garbage)
-        for (; (i > 0) && (ahHit.x < ahHitTablePtr[i - 1].x); --i)
+        #pragma unroll
+        for (int i=0;i<MoGTracingAHMaxNumHitPerSlab;++i)
         {
-            ahHitTablePtr[i] = ahHitTablePtr[i - 1];
+            if(ahHit.x<ahHitTablePtr[i].x)
+            {
+                const float2 swapHit = ahHitTablePtr[i];
+                ahHitTablePtr[i] = ahHit;
+                ahHit = swapHit;
+            }
         }
-        // assert(i==0 || (ahHit.x >= ahHitTablePtr[i-1].x))
-        ahHitTablePtr[i] = ahHit;
         optixSetPayload_0(ahNumHits);
         // report the last entry
         if (ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x != hitT)
