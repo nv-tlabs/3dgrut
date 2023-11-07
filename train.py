@@ -266,8 +266,10 @@ def main(conf):
 
         with tqdm(train_dataloader) as pbar:
             for batch in pbar:
+
                 # Move data to GPU
                 rays_ori, rays_dir, rgb_gt = move_to_gpu(batch)
+                scene_updated = False
 
                 # Compute the outputs of a single batch
                 outputs = model(rays_ori, rays_dir)
@@ -293,10 +295,6 @@ def main(conf):
                 pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
                 writer.add_scalar("psnr/train", psnr, global_step)
 
-                # Update the BVH if required
-                if global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0:
-                    model.build_bvh()
-
                 # Save the checkpoint
                 if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
                     parameters = model.get_model_parameters()
@@ -306,14 +304,21 @@ def main(conf):
                 # Densify the Gaussians
                 if global_step > conf.model.densify.start_iteration and global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
                     model.densify_gaussians(1.0)
+                    scene_updated = True
 
                 # Prune the Gaussians
                 if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
                     model.prune_gaussians()
+                    scene_updated = True
 
                 # Reset the Gaussian density 
                 if global_step > conf.model.reset_density.start_iteration and global_step < conf.model.reset_density.end_iteration and global_step % conf.model.reset_density.frequency == 0:
                     model.reset_density()
+                    scene_updated = True
+
+                # Update the BVH if required
+                if scene_updated or (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
+                    model.build_bvh()
 
                 if conf.with_gui:
                     if model.get_positions.requires_grad:

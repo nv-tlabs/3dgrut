@@ -57,8 +57,7 @@ class MixtureOfGaussians(torch.nn.Module):
 
     def update_optimizable_parameters(self, optimizable_tensors: dict[str, torch.Tensor]):
         for name, value in optimizable_tensors.items():
-            module = getattr(self, name)
-            module = value
+            setattr(self, name, value)
 
     def init_from_checkpoint(self, checkpoint: dict):
         self.positions = checkpoint["positions"]
