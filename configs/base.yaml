@@ -24,8 +24,8 @@ model:
   optimize_scale: true
   bvh_update_frequency: 1
   densify:
-    frequency: 20 # densification_interval in 3DGS with default value 100
-    start_iteration: 1
+    frequency: 100 # densification_interval in 3DGS with default value 100
+    start_iteration: 500 # densify_from_iter in 3DGS default value 500
     end_iteration: 15000 # densify_until_iter in 3DGS default value 15_000
     clone_grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
     split_grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
@@ -35,14 +35,14 @@ model:
 
   # They use the same values for pruning and densification so check the above values
   prune:
-    frequency: 1 
-    start_iteration: 1
+    frequency: 100
+    start_iteration: 500
     end_iteration: 15000
     density_threshold: 0.01 # All Gaussians with the density lower than this will be pruned away
 
   # Start and end iteration are not used in 3DGS
   reset_density:
-    frequency: 1 
+    frequency: 3000 # Opacity reset interval in 3DGS default value 3000
     start_iteration: 0
     end_iteration: ${n_iterations}
     # This parameter is hardcoded in the 3DGS to 0.01
