@@ -33,7 +33,7 @@ static constexpr float MOGTracingDefaultExpectedDistanceBetweenHit = 0.1f;
 static constexpr float MOGTracingDefaultMaxNumHits = 1024;
 static constexpr float MOGTracingDefaultHitMinGaussianResponse = 0.01f;
 
-static constexpr int MOGTracingDefaultSphDegree = 0; 
+static constexpr int MOGTracingDefaultSphDegree = 3; 
 
 enum MOGTracingPipeline
 {
@@ -65,6 +65,7 @@ struct MoGTracingParams
     float hitMinGaussianResponse;
     uint2 frameBounds;
     
+    unsigned int frameNumber;
     unsigned int sphDegree;
-    float3 pad;
+    float2 pad;
 };

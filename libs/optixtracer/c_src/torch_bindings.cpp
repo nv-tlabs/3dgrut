@@ -285,6 +285,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
     paramsHost.sphDegree = MOGTracingDefaultSphDegree; 
     paramsHost.frameBounds.x = rayOri.size(2)-1;
     paramsHost.frameBounds.y = rayOri.size(1)-1;
+    paramsHost.frameNumber = 0;
 
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
 
@@ -366,6 +367,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.sphDegree = MOGTracingDefaultSphDegree; 
     paramsHost.frameBounds.x = rayOri.size(2)-1;
     paramsHost.frameBounds.y = rayOri.size(1)-1;
+    paramsHost.frameNumber = 0;
 
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
 
