@@ -16,14 +16,13 @@ RUN \
     add-apt-repository -y ppa:ubuntu-toolchain-r/test && \
     apt-get -y update -qq --fix-missing && \
     apt-get -y install --no-install-recommends \
-        build-essential git libgl1-mesa-glx wget ninja-build \
+        build-essential git libgl1-mesa-glx wget ninja-build cmake \
     && \
     rm -rf /var/lib/apt/lists/*
 
 # Install conda
 ENV CONDA_DIR=/opt/conda
 RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
-    chmod +x /tmp/miniconda.sh && \
     /bin/bash /tmp/miniconda.sh -b -p $CONDA_DIR && \
     rm -f /tmp/miniconda.sh
 
@@ -31,13 +30,14 @@ RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86
 WORKDIR /workspace/build
 ADD requirements.txt requirements.txt
 ADD thirdparty thirdparty
+ADD libs/ray_utils libs/ray_utils
 
 # Create environment and install dependencies
 ENV CONDA_ENV=3dgrt
 RUN $CONDA_DIR/bin/conda create -n $CONDA_ENV python=3.10
 RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install -r requirements.txt
-WORKDIR /workspace/build/thirdparty/simple-knn
-RUN $CONDA_DIR/envs/$CONDA_ENV/bin/python setup.py install
+RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install libs/ray_utils
+RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install thirdparty/simple-knn
 
 WORKDIR /workspace
 
