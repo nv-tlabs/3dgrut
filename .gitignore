@@ -8,3 +8,13 @@ debug_**
 
 imgui.ini
 data
+
+thirdparty/simple-knn/build
+thirdparty/simple-knn/dist
+thirdparty/simple-knn/simple_knn.egg-info
+
+libs/ray_utils/external/.cache/
+libs/ray_utils/external/
+libs/ray_utils/build/
+libs/ray_utils/ray_utils.egg-info/
+libs/ray_utils/dist/

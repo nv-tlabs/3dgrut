@@ -124,7 +124,7 @@ The first two are technically optional for NGC but are (currently) required to u
 
 This step isn't strictly necessary (you can use an existing container), but it is useful to have your own container in place in case you need to add extra dependencies in future.
 
-This folder contains a `Dockerfile` that is used to create your container. By default, this container is simply a wrapper around a maintained pytorch container hosted on NGC. This is indicated by the line `FROM nvcr.io/nvidian/pytorch:22.07-py3`. _You should modify the line `LABEL org.opencontainers.image.authors="jalucas@nvidia.com"` to label yourself as author._
+This folder contains a `Dockerfile.build` that is used to create your container. _You should modify the line `LABEL org.opencontainers.image.authors="jalucas@nvidia.com"` to label yourself as author._
 
 Any other software dependencies, particularly those that are slow to install, should be installed via this file. _For simplicity, we're not going into the details of how to do this here._
 
