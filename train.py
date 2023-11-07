@@ -120,14 +120,21 @@ def main(conf):
         
         ps.init()
 
-        ps_point_cloud = ps.register_point_cloud("centers", to_np(model.get_positions), 
+        ps_point_cloud = ps.register_point_cloud("centers", to_np(model.get_positions()), 
                                 radius=1e-3, point_render_mode='quad')
         ps_point_cloud_buffer = ps_point_cloud.get_buffer("points")
 
         
         def update_cloud_viz():
+            nonlocal ps_point_cloud, ps_point_cloud_buffer
+
+            # re-initialize the viz
+            if ps_point_cloud is None or ps_point_cloud.n_points() != model.get_positions().shape[0]:
+                ps_point_cloud = ps.register_point_cloud("centers", to_np(model.get_positions()))
+                ps_point_cloud_buffer = ps_point_cloud.get_buffer("points")
+
             # direct on-GPU update, must not have changed size
-            ps_point_cloud_buffer.update_data_from_device(model.get_positions.detach())
+            ps_point_cloud_buffer.update_data_from_device(model.get_positions().detach())
 
         def render_from_current_ps_view():
 
@@ -331,7 +338,7 @@ def main(conf):
                     model.build_bvh()
 
                 if conf.with_gui:
-                    if model.get_positions.requires_grad:
+                    if scene_updated or model.get_positions().requires_grad:
                         update_cloud_viz()
         
                     update_render_view_viz()

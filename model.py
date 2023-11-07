@@ -243,7 +243,7 @@ class MixtureOfGaussians(torch.nn.Module):
         pass
 
     def reset_density(self):
-        updated_densities = inverse_sigmoid(torch.min(self.get_density, torch.ones_like(self.density) * self.new_max_density))
+        updated_densities = inverse_sigmoid(torch.min(self.get_density(), torch.ones_like(self.density) * self.new_max_density))
         optimizable_tensors = self.replace_tensor_to_optimizer(updated_densities, "density")
         self.density = optimizable_tensors["density"]
 
@@ -312,7 +312,7 @@ class MixtureOfGaussians(torch.nn.Module):
 
     def densify_gaussians(self, scene_extent):
         assert self.optimizer is not None, "Optimizer need to be initialized before splitting and cloning the Gaussians"
-        assert self.get_positions.requires_grad, "Trying to perform split and clone but the positions are not being optimized"
+        assert self.get_positions().requires_grad, "Trying to perform split and clone but the positions are not being optimized"
 
         positional_grad_norm = None
         # TODO: we directly use the gradient of the 3D positions, whereas 3D Gaussian Splatting uses the 2D position gradient after projection (in theory this should be the same as not projecting the gradient)
@@ -329,7 +329,7 @@ class MixtureOfGaussians(torch.nn.Module):
         torch.cuda.empty_cache()
 
     def split_gaussians(self, positional_grad_norm: torch.Tensor, scene_extent: float):
-        n_init_points = self.get_positions.shape[0]
+        n_init_points = self.get_positions().shape[0]
 
         # Extract points that satisfy the gradient condition
         padded_grad = torch.zeros((n_init_points), device="cuda")
@@ -337,19 +337,19 @@ class MixtureOfGaussians(torch.nn.Module):
         # Here we already have the cloned points in the self.positions so only take the points up to size of the initial grad
         padded_grad[:positional_grad_norm.shape[0]] = positional_grad_norm.squeeze()
         mask = torch.where(padded_grad >= self.split_grad_threshold, True, False)
-        mask = torch.logical_and(mask, torch.max(self.get_scale, dim=1).values > self.relative_size_threshold * scene_extent)
+        mask = torch.logical_and(mask, torch.max(self.get_scale(), dim=1).values > self.relative_size_threshold * scene_extent)
 
 
-        stds = self.get_scale[mask].repeat(self.split_n_gaussians, 1)
+        stds = self.get_scale()[mask].repeat(self.split_n_gaussians, 1)
         means = torch.zeros((stds.size(0), 3),device="cuda")
         samples = torch.normal(mean=means, std=stds)
         rots = quaternion_to_so3(self.rotation[mask]).repeat(self.split_n_gaussians,1,1)
 
         add_gaussians = {
-                "positions": torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_positions[mask].repeat(self.split_n_gaussians, 1),
+                "positions": torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_positions()[mask].repeat(self.split_n_gaussians, 1),
                 "features":  self.features[mask].repeat(self.split_n_gaussians,1),
                 "density":  self.density[mask].repeat(self.split_n_gaussians,1),
-                "scale":  get_activation_function(self.conf.model.scale_activation, inverse=True)(self.get_scale[mask].repeat(self.split_n_gaussians,1) / (0.8*self.split_n_gaussians)),
+                "scale":  get_activation_function(self.conf.model.scale_activation, inverse=True)(self.get_scale()[mask].repeat(self.split_n_gaussians,1) / (0.8*self.split_n_gaussians)),
                 "rotation": self.rotation[mask].repeat(self.split_n_gaussians,1)
                 }
 
@@ -363,7 +363,7 @@ class MixtureOfGaussians(torch.nn.Module):
         mask = torch.where(positional_grad_norm >= self.clone_grad_threshold, True, False)
 
         # If the gaussians are larger they shouldn't be cloned, but rather split
-        mask = torch.logical_and(mask, torch.max(self.get_scale, dim=1).values <= self.relative_size_threshold * scene_extent)
+        mask = torch.logical_and(mask, torch.max(self.get_scale(), dim=1).values <= self.relative_size_threshold * scene_extent)
 
         # Use the mask to dupicate these points
         add_gaussians = {
@@ -381,7 +381,7 @@ class MixtureOfGaussians(torch.nn.Module):
         # Prune the Gaussians based on their opacity
         # TODO: consider having a buffer of the contribution of Gaussians to the rendering -> this might avoid the need to reset opacity
         # TODO: we could also consider pruning away some of the large Gaussians?
-        mask = self.get_density.squeeze() >= self.prune_density_threshold
+        mask = self.get_density().squeeze() >= self.prune_density_threshold
         print(mask.sum())
 
         optimizable_tensors = self.prune_optimizer_tensors(mask)
@@ -389,25 +389,29 @@ class MixtureOfGaussians(torch.nn.Module):
 
         torch.cuda.empty_cache()
 
-    @property
-    def get_scale(self):
-        return self.scale_activation(self.scale)
+    def get_scale(self, preactivation=False):
+        if preactivation:
+           return self.scale
+        else:
+           return self.scale_activation(self.scale)
     
-    @property
-    def get_rotation(self):
-        return self.rotation_activation(self.rotation)
-    
-    @property
-    def get_positions(self):
+    def get_rotation(self, preactivation=False):
+        if preactivation:
+           return self.rotation
+        else:
+           return self.rotation_activation(self.rotation)
+
+    def get_positions(self, preactivation=False):
         return self.positions
     
-    @property
-    def get_features(self):
+    def get_features(self, preactivation=False):
         return self.features
     
-    @property
-    def get_density(self):
-        return self.density_activation(self.density)
+    def get_density(self, preactivation=False):
+        if preactivation:
+           return self.density
+        else:
+           return self.density_activation(self.density)
     
 
     def get_model_parameters(self) -> dict:
@@ -427,8 +431,11 @@ class MixtureOfGaussians(torch.nn.Module):
         }
 
     def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
-        pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(self.optix_ctx, rays_o, rays_d, self.positions, 
-            self.rotation_activation(self.rotation), self.scale_activation(self.scale), self.density_activation(self.density), self.features)
+
+        pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(
+                self.optix_ctx, rays_o, rays_d, 
+                self.positions, self.get_rotation(), self.get_scale(), 
+                self.get_density(), self.get_features())
 
         return {
             'pred_rgb': pred_rgb,
