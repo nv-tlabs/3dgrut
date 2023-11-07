@@ -11,7 +11,6 @@ from PIL import Image
 class NeRFDataset(Dataset):
     def __init__(self, root_dir, split='train', sample_full_image=False, batch_size=8192,
                  use_white_background=False, **kwargs):
-        print(root_dir)
         self.root_dir = root_dir 
         self.split = split
         
