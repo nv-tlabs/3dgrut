@@ -6,7 +6,7 @@ import torch
 from plyfile import PlyData
 
 from libs import optixtracer
-from utils import to_torch, get_activation_function, inverse_sigmoid, get_scheduler
+from utils import to_torch, get_activation_function, inverse_sigmoid, get_scheduler, quaternion_to_so3
 from datasets.colmap_utils import read_next_bytes
 from geometry import nearest_neighbor_dist_cpuKD
 
@@ -33,7 +33,9 @@ class MixtureOfGaussians(torch.nn.Module):
         # Parameters related to densification, pruning and reset
         self.split_n_gaussians = self.conf.model.densify.split.n_gaussians
         self.relative_size_threshold = self.conf.model.densify.relative_size_threshold
-        self.density_threshold = self.conf.model.prune.density_threshold
+        self.prune_density_threshold = self.conf.model.prune.density_threshold
+        self.clone_grad_threshold = self.conf.model.densify.clone_grad_threshold
+        self.split_grad_threshold = self.conf.model.densify.split_grad_threshold
         self.new_max_density = self.conf.model.reset_density.new_max_density
 
     def set_optix_context(self):
@@ -55,8 +57,7 @@ class MixtureOfGaussians(torch.nn.Module):
 
     def update_optimizable_parameters(self, optimizable_tensors: dict[str, torch.Tensor]):
         for name, value in optimizable_tensors.items():
-            module = getattr(self, name)
-            module = value
+            setattr(self, name, value)
 
     def init_from_checkpoint(self, checkpoint: dict):
         self.positions = checkpoint["positions"]
@@ -298,12 +299,12 @@ class MixtureOfGaussians(torch.nn.Module):
                 stored_state["exp_avg_sq"] = torch.cat((stored_state["exp_avg_sq"], torch.zeros_like(extension_tensor)), dim=0)
 
                 del self.optimizer.state[group['params'][0]]
-                group["params"][0] = torch.nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(group["params"][0].required_grad))
+                group["params"][0] = torch.nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(group["params"][0].requires_grad))
                 self.optimizer.state[group['params'][0]] = stored_state
 
                 optimizable_tensors[group["name"]] = group["params"][0]
             else:
-                group["params"][0] = torch.nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(group["params"][0].required_grad))
+                group["params"][0] = torch.nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(group["params"][0].requires_grad))
                 optimizable_tensors[group["name"]] = group["params"][0]
 
         return optimizable_tensors
@@ -380,7 +381,8 @@ class MixtureOfGaussians(torch.nn.Module):
         # Prune the Gaussians based on their opacity
         # TODO: consider having a buffer of the contribution of Gaussians to the rendering -> this might avoid the need to reset opacity
         # TODO: we could also consider pruning away some of the large Gaussians?
-        mask = self.get_density.squeeze() >= self.density_threshold
+        mask = self.get_density.squeeze() >= self.prune_density_threshold
+        print(mask.sum())
 
         optimizable_tensors = self.prune_optimizer_tensors(mask)
         self.update_optimizable_parameters(optimizable_tensors)
