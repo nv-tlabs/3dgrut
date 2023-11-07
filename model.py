@@ -20,7 +20,8 @@ class MixtureOfGaussians(torch.nn.Module):
         self.rotation  = torch.empty([0,4])   # Rotation of each Gaussian represented as a unit quaternion [n_gaussians, 4]
         self.scale     = torch.empty([0,3])     # Anisotropic scale of each Gaussian [n_gaussians, 3]
         self.density   = torch.empty([0,1])    # Density of each Gaussian [n_gaussians, 1]
-        self.features  = torch.empty([0,1])  # Feature vector associated to each Gaussian (can be RGB, SH or a latent code) [n_gaussians, n_features]
+        self.features_albedo  = torch.empty([0,3])  # Feature vector of the 0th order SH coefficients [n_gaussians, 3] (We split it into two due to different learning rates)
+        self.features_specular  = torch.empty([0,1]) # Features of the higher order SH coefficients [n_gaussians, 3]
         self.device = 'cuda'
         self.optimizer = None
         self.optix_ctx = None
@@ -52,8 +53,10 @@ class MixtureOfGaussians(torch.nn.Module):
     def set_optimizable_parameters(self):
         if not self.conf.model.optimize_density:
             self.density.requires_grad = False
-        if not self.conf.model.optimize_features:
-            self.features.requires_grad = False
+        if not self.conf.model.optimize_features_albedo:
+            self.features_albedo.requires_grad = False
+        if not self.conf.model.optimize_features_specular:
+            self.features_specular.requires_grad = False
         if not self.conf.model.optimize_rotation:
             self.rotation.requires_grad = False
         if not self.conf.model.optimize_scale:
@@ -70,8 +73,10 @@ class MixtureOfGaussians(torch.nn.Module):
         self.rotation = checkpoint["rotation"]
         self.scale = checkpoint["scale"]
         self.density = checkpoint["density"]
-        self.features = checkpoint["features"]
-        self.n_active_features = checkpoint["active_features"]
+        self.features_albedo = checkpoint["features_albedo"]
+        self.features_specular = checkpoint["features_specular"]
+        self.n_active_features = checkpoint["n_active_features"]
+        self.max_n_features = checkpoint["max_n_features"]
         self.set_optimizable_parameters()
         self.setup_optimizer(state_dict=checkpoint['optimizer'])
    
@@ -108,7 +113,8 @@ class MixtureOfGaussians(torch.nn.Module):
         self.rotation = torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
         self.scale = torch.nn.Parameter(scales.to(dtype=dtype, device=self.device))
         self.density = torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device))
-        self.features = torch.nn.Parameter(features.to(dtype=dtype, device=self.device))
+        self.features_albedo = torch.nn.Parameter(features.to(dtype=dtype, device=self.device))
+        self.features_specular = torch.nn.Parameter(features.to(dtype=dtype, device=self.device))
         self.n_active_features = 1
 
         self.set_optimizable_parameters()
@@ -396,7 +402,8 @@ class MixtureOfGaussians(torch.nn.Module):
         # Use the mask to dupicate these points
         add_gaussians = {
                 "positions": self.positions[mask],
-                "features": self.features[mask],
+                "features_albedo": self.features_albedo[mask],
+                "features_specular": self.features_specular[mask],
                 "density": self.density[mask],
                 "scale": self.scale[mask],
                 "rotation": self.rotation[mask]} 
@@ -432,7 +439,7 @@ class MixtureOfGaussians(torch.nn.Module):
         return self.positions
     
     def get_features(self, preactivation=False):
-        return self.features
+        return torch.cat((self.features_albedo, self.features_specular), dim=1)
     
     def get_density(self, preactivation=False):
         if preactivation:
@@ -449,9 +456,11 @@ class MixtureOfGaussians(torch.nn.Module):
             "rotation": self.rotation,
             "scale": self.scale,
             "density": self.density,
-            "features": self.features,
+            "features_albedo": self.features_albedo,
+            "features_specular": self.features_specular,
             # Add other attributes that we need at restore
-            "active_features": self.n_active_features,
+            "n_active_features": self.n_active_features,
+            "max_n_features": self.max_n_features,
             # Add optimizer state dict
             "optimizer": self.optimizer.state_dict(),
             "config": self.conf
@@ -462,10 +471,10 @@ class MixtureOfGaussians(torch.nn.Module):
         features = self.get_features()
         if self.progressive_training:
             features *= self.get_active_feature_mask()
-            
+
         pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(
                 self.optix_ctx, rays_o, rays_d, 
-                self.positions, self.get_rotation(), self.get_scale(), 
+                self.positions, self.get_rotation(), features, 
                 self.get_density(), )
 
         return {

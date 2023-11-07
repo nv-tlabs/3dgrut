@@ -127,8 +127,8 @@ SH_DEGREE_TO_NUM_FEATURES = {
 
 
 NUM_FEATURES_TO_SH_DEGREE = {
-    1: 3,
-    2: 12,
-    3: 27,
-    4: 48
+    3:  1,
+    12: 2,
+    27: 3,
+    48: 4
 }
