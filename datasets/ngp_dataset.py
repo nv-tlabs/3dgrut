@@ -1,45 +1,26 @@
-from typing import Generator, Optional, Union
-from dataclasses import dataclass
+from typing import Generator, Optional, Union, List, Tuple
 
-import torch
 import glob
 import numpy as np
 import os
 import json
 from tqdm import tqdm
-import cv2
 from PIL import Image as PILImage
-
+import torch
 from torch.utils.data import Dataset
+
 # C++ utils
 try:
     import ray_utils  # type: ignore
 except ImportError:
     from libs.ray_utils import ray_utils  # type: ignore
-
 from datasets.utils import fov2focal
-from datasets.ngp_utils import load_pc_dat, nerf_ray_to_colmap, nerf_matrix_to_colmap
+from datasets.ngp_utils import load_pc_dat, nerf_ray_to_colmap, nerf_matrix_to_colmap, PointCloud
 from utils import to_torch
 
 
-@dataclass(slots=True, kw_only=True)
-class PointCloud:
-    """Represents a 3d point cloud consisting of corresponding start and end points"""
-
-    xyz_start: torch.Tensor  # [N,3]
-    xyz_end: torch.Tensor  # [N,3]
-    device: str = "cuda"
-
-    def __post_init__(self) -> None:
-        assert len(self.xyz_start) == len(self.xyz_end)
-        assert self.xyz_start.shape[1] == self.xyz_end.shape[1] == 3
-
-        self.xyz_start.to(self.device)
-        self.xyz_end.to(self.device)
-
-
 class NGPDataset(Dataset):
-    def __init__(self, root_dir, split="train", batch_size=8192, use_lidar=False, sample_full_image=False, val_downsample=1, max_dist_m=150, use_dynamic_masks=False):
+    def __init__(self, root_dir, split="train", batch_size=8192, use_lidar=False, sample_full_image=False, val_downsample=1, max_dist_m=150, use_dynamic_masks=False, val_frame_subsample=5):
         super().__init__()
 
         # store relevant parameters from config
@@ -49,10 +30,11 @@ class NGPDataset(Dataset):
         self.use_lidar: bool = use_lidar
         self.sample_full_image: bool = sample_full_image
         self.val_downsample: int = val_downsample
+        self.val_frame_subsample: int = val_frame_subsample
         
-        self.cameras: list[CameraDataset] = []      
+        self.cameras: List[CameraDataset] = []      
         if self.use_lidar:
-            self.lidars: list[LidarDataset] = []
+            self.lidars: List[LidarDataset] = []
 
         self.aabb_scale = None
         # If aabb_scale is None, the scene will be kept true to scale
@@ -60,7 +42,7 @@ class NGPDataset(Dataset):
         self.use_dynamic_mask: bool = use_dynamic_masks
 
 
-        self.img_wh: Optional[tuple[int, int]] = None
+        self.img_wh: Optional[Tuple[int, int]] = None
         self.xform_matrices = np.empty((0, 4), dtype=np.float32)
         self.indices_matrix = np.empty((0, 4), dtype=np.uint16)
         self.rgb = np.empty((0, 3), dtype=np.uint8)
@@ -164,6 +146,9 @@ class NGPDataset(Dataset):
             self.rolling_shutter[ind_camera] = camera.rolling_shutter[0]
 
             self.n_frames += camera.n_frames
+        
+        if self.split == 'val':
+            self.n_frames = int(np.ceil(self.n_frames / self.val_frame_subsample))
 
         self.max_w = int(np.max(self.intrinsics[:, 4]))
         self.max_h = int(np.max(self.intrinsics[:, 5]))
@@ -172,7 +157,7 @@ class NGPDataset(Dataset):
         assert "frames" in transform_json, "NGPAVDataset: 'frames' not found in json"
         return True
         
-    def set_indices_matrix(self, test_frame: Optional[int] = None):
+    def set_indices_matrix(self):
         self.rgb = np.zeros((self.n_frames * self.max_h * self.max_w, 3), dtype=np.uint8)
         self.indices_matrix = np.zeros((self.n_frames * self.max_h * self.max_w, 4), dtype=np.uint16)
 
@@ -195,7 +180,7 @@ class NGPDataset(Dataset):
             for f_ind, frame in enumerate(
                 tqdm(frames, desc=f"Preparing indices matrix for {self.split} frames from camera {cam_ind}")
             ):
-                if test_frame is None or (test_frame is not None and f_ind == test_frame):
+                if self.split == 'train' or (self.split == 'val' and f_ind % self.val_frame_subsample == 0):
                     f_path = os.path.join(cam.path, frame["file_path"])
 
                     # dynamic mask
@@ -276,21 +261,14 @@ class NGPDataset(Dataset):
 
             self.xform_matrices[3 * run_frames : 3 * run_frames + 3] = jsonmatrix[:-1, :]
 
-    def get_point_clouds(
+    def get_point_cloud(
         self,
         non_dynamic_points_only: bool = True,
         step_frame: int = 1,
-    ) -> Generator[PointCloud, None, None]:
-        """Returns a generator for all point-clouds available for point-cloud sensor (lidar / camera), transformed into NGP frame.
-
-        Point-cloud sensor are specified by either logical or unique sensor IDs.
-
-        Defaults to first logical data-set specific point-cloud sensor if no dedicated sensors are specified
-        (raises error if unsupported sensors are specified).
+    ) -> PointCloud:
+        """Returns a point-cloud for all available for point-cloud sensor (lidar / camera), transformed into NGP frame.
 
         Can be parameterized to only return non-dynamic points (default).
-
-        Default point-cloud sensor: *first* active lidar
         """
 
         if not non_dynamic_points_only:
@@ -298,32 +276,22 @@ class NGPDataset(Dataset):
                 "NGPAVDataset: dynamic points requested, but NGPAVDataset only loads non-dynamic ones by default"
             )
 
+        xyz_starts = []
+        xyz_ends = []
         for lidar_dataset in self.lidars:
             all_frame_idxs = np.unique(lidar_dataset.lidar_frame_indices)
 
             for frame_idx in all_frame_idxs[::step_frame]:
                 valid_rays = np.where(lidar_dataset.lidar_frame_indices == frame_idx)[0]
-
-                yield PointCloud(
-                    xyz_start=to_torch(
-                        lidar_dataset.rays[valid_rays, :3], device="cpu"
-                    ),
-                    xyz_end=to_torch(
-                        lidar_dataset.rays[valid_rays, :3]
-                        + lidar_dataset.rays[valid_rays, 3:6],
-                        device="cpu",
-                    ),
-                )
+                xyz_starts.append(to_torch(lidar_dataset.rays[valid_rays, :3], device="cpu"))
+                xyz_ends.append(to_torch(lidar_dataset.rays[valid_rays, :3] + lidar_dataset.rays[valid_rays, 3:6], device="cpu"))
+        return PointCloud(xyz_start=torch.cat(xyz_starts), xyz_end=torch.cat(xyz_ends))
 
     def __len__(self):
         if self.split.startswith("train"):
             return 1000
 
-        len_total = 0
-        for cam in self.cameras:
-            len_total += len(cam)
-
-        return len_total
+        return self.n_frames
 
     def __getitem__(self, idx):
         if self.split == "train":

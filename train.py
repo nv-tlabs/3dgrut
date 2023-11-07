@@ -34,7 +34,7 @@ def main(conf):
     n_iterations = 10e4
     val_period = 1
     use_ssim = False
-
+    scene_extent = 1.
     if conf.dataset.type == 'nerf':
         train_dataset = NeRFDataset(
             conf.path, 
@@ -56,14 +56,17 @@ def main(conf):
             conf.path, 
             split='train', 
             sample_full_image=conf.dataset.train.sample_full_image, 
-            batch_size=conf.dataset.train.batch_size
+            batch_size=conf.dataset.train.batch_size,
+            use_lidar=True
         )
-        val_dataset = NGPDataset(conf.path, split='val', sample_full_image=True, val_downsample=5)
+        val_dataset = NGPDataset(conf.path, split='val', sample_full_image=True, val_downsample=5, val_frame_subsample=5)
+        pc = train_dataset.get_point_cloud(step_frame=10)
+        scene_extent = ((pc.xyz_end.max(0).values - pc.xyz_end.min(0).values)**2).sum().sqrt()
     else:
         raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp]. ')
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, num_workers=8, batch_size=1, shuffle=True)
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=8, batch_size=1, shuffle=False)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, num_workers=16, batch_size=1, shuffle=True)
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=16, batch_size=1, shuffle=False)
 
     # Initialize the model and the optix context
     model = MixtureOfGaussians(conf)
@@ -92,6 +95,9 @@ def main(conf):
         elif conf.initialization.method == 'random':
             model.randomize_point_cloud(num_gsplat=conf.initialization.num_gaussians)
 
+        elif conf.initialization.method == 'lidar':
+            assert conf.dataset.type == 'ngp', 'can only initialize from lidar with the NGPDataset'
+            model.init_from_lidar(point_cloud = pc) 
         else:
            raise ValueError(f"unrecognized initialization.method {conf.initialization.method}, choose from [colmap, point_cloud, random]")
 
@@ -327,7 +333,7 @@ def main(conf):
 
                 # Densify the Gaussians
                 if global_step > conf.model.densify.start_iteration and global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
-                    model.densify_gaussians(1.0)
+                    model.densify_gaussians(scene_extent=scene_extent)
                     scene_updated = True
 
                 # Prune the Gaussians
