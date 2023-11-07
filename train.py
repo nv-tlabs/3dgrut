@@ -328,10 +328,6 @@ def main(conf):
                 rays_ori, rays_dir, rgb_gt = move_to_gpu(batch)
                 scene_updated = False
 
-                # Every 1000 its we increase the levels of SH up to a maximum degree
-                if global_step % 1000 == 0:
-                    model.sh_degs_to_calculate = max(model.sh_degs_to_calculate + 1, 3)
-
                 # Compute the outputs of a single batch
                 outputs = model(rays_ori, rays_dir)
                 
@@ -377,6 +373,8 @@ def main(conf):
                     model.reset_density()
                     scene_updated = True
 
+                # SH: Every N its we increase the levels of SH up to a maximum degree
+                # MLP: Every N we further unmask additional dimensions
                 if model.progressive_training and global_step > 0 and global_step % model.feature_dim_increase_interval == 0:
                     model.increase_num_active_features()
 
