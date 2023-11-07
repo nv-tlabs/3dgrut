@@ -7,6 +7,7 @@
 // license agreement from NVIDIA CORPORATION is strictly prohibited.
 //
 #include "../mogTracing/params.h"
+#include "../random_utils.h"
 #include "../mogTracing/utils.h"
 #include "../optix_utils.h"
 #include "../ray_data.h"
@@ -56,6 +57,8 @@ extern "C" __global__ void __raygen__rg()
     const uint3 idx = optixGetLaunchIndex();
     const uint3 dim = optixGetLaunchDimensions();
 
+    unsigned int rndSeed = tea<16>(dim.x*idx.y+idx.x, params.frameNumber);
+
     float3 rayOri[MOGTracingPatchSize][MOGTracingPatchSize];
     float3 rayDir[MOGTracingPatchSize][MOGTracingPatchSize];
     float3 rayRad[MOGTracingPatchSize][MOGTracingPatchSize];
@@ -99,8 +102,32 @@ extern "C" __global__ void __raygen__rg()
     while ((startT <= minMaxT.y) && (transmit > params.minTransmittance) && (numHits < params.maxNumHits))
     {
         p.ahNumHits = 0;
-        const float3 sampleRayOri = rayOri[0][0];
-        const float3 sampleRayDir = rayDir[0][0];
+
+        // TOOD : rework this jitter scheme, it is biased toward the center of the patch
+        float3 sampleRayOri = make_float3(0);
+        float3 sampleRayDir = make_float3(0);
+        {
+            float3 sampleRayOriWeight = make_float3(0);
+            float3 sampleRayDirWeight = make_float3(0);
+            #pragma unroll
+            for (int j = 0; j < MOGTracingPatchSize; ++j)
+            {
+                #pragma unroll
+                for (int i = 0; i < MOGTracingPatchSize; ++i)
+                {
+                    const float3 sro = rnd3(rndSeed) + 1e-6;
+                    sampleRayOri += sro * rayOri[j][i];
+                    sampleRayOriWeight += sro;
+
+                    const float3 srd = rnd3(rndSeed) + 1e-6;
+                    sampleRayDir += srd * rayDir[j][i];
+                    sampleRayDirWeight += srd;
+                }
+            }
+            sampleRayOri /= sampleRayOriWeight;
+            sampleRayDir = safe_normalize(sampleRayDir/sampleRayDirWeight); 
+        }
+
         trace(&p, sampleRayOri, sampleRayDir, startT + epsT, startT + slabSpacing);
         if (p.ahNumHits == 0)
         {
@@ -210,6 +237,10 @@ extern "C" __global__ void __anyhit__ah()
         // assert(i==0 || (ahHit.x >= ahHitTablePtr[i-1].x))
         ahHitTablePtr[i] = ahHit;
         optixSetPayload_0(ahNumHits);
-        optixIgnoreIntersection();
+        // report the last entry
+        if (ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x != hitT)
+        {
+            optixIgnoreIntersection();
+        }
     }
 }

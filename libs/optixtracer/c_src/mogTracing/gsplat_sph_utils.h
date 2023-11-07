@@ -33,7 +33,7 @@ static __device__ float3 computeColorFromSH(
     // The implementation is loosely based on code for
     // "Differentiable Point-Based Radiance Fields for
     // Efficient View Synthesis" by Zhang et al. (2022)
-    float3 rad = SH_C0 * make_float3(params.mogSph[gId][0], params.mogSph[gId][1], params.mogSph[gId][2]);
+    float3 rad = SH_C0 * getSphCoeff(params, gId , 0);
     if (deg > 0)
     {
         const float3 dir = safe_normalize(gpos - rori);
@@ -41,26 +41,26 @@ static __device__ float3 computeColorFromSH(
         const float x = dir.x;
         const float y = dir.y;
         const float z = dir.z;
-        rad = rad - SH_C1 * y * params.mogSph[gId][1] + SH_C1 * z * params.mogSph[gId][2] -
-              SH_C1 * x * params.mogSph[gId][3];
+        rad = rad - SH_C1 * y * getSphCoeff(params, gId, 1) + SH_C1 * z * getSphCoeff(params, gId, 2) -
+              SH_C1 * x * getSphCoeff(params, gId, 3);
 
         if (deg > 1)
         {
             const float xx = x * x, yy = y * y, zz = z * z;
             const float xy = x * y, yz = y * z, xz = x * z;
-            rad = rad + SH_C2[0] * xy * params.mogSph[gId][4] + SH_C2[1] * yz * params.mogSph[gId][5] +
-                  SH_C2[2] * (2.0f * zz - xx - yy) * params.mogSph[gId][6] + SH_C2[3] * xz * params.mogSph[gId][7] +
-                  SH_C2[4] * (xx - yy) * params.mogSph[gId][8];
+            rad = rad + SH_C2[0] * xy * getSphCoeff(params, gId, 4) + SH_C2[1] * yz * getSphCoeff(params, gId, 5) +
+                  SH_C2[2] * (2.0f * zz - xx - yy) * getSphCoeff(params, gId, 6) + SH_C2[3] * xz * getSphCoeff(params, gId, 7) +
+                  SH_C2[4] * (xx - yy) * getSphCoeff(params, gId, 8);
 
             if (deg > 2)
             {
-                rad = rad + SH_C3[0] * y * (3.0f * xx - yy) * params.mogSph[gId][9] +
-                      SH_C3[1] * xy * z * params.mogSph[gId][10] +
-                      SH_C3[2] * y * (4.0f * zz - xx - yy) * params.mogSph[gId][11] +
-                      SH_C3[3] * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * params.mogSph[gId][12] +
-                      SH_C3[4] * x * (4.0f * zz - xx - yy) * params.mogSph[gId][13] +
-                      SH_C3[5] * z * (xx - yy) * params.mogSph[gId][14] +
-                      SH_C3[6] * x * (xx - 3.0f * yy) * params.mogSph[gId][15];
+                rad = rad + SH_C3[0] * y * (3.0f * xx - yy) * getSphCoeff(params, gId, 9) +
+                      SH_C3[1] * xy * z * getSphCoeff(params, gId, 10) +
+                      SH_C3[2] * y * (4.0f * zz - xx - yy) * getSphCoeff(params, gId, 11) +
+                      SH_C3[3] * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * getSphCoeff(params, gId, 12) +
+                      SH_C3[4] * x * (4.0f * zz - xx - yy) * getSphCoeff(params, gId, 13) +
+                      SH_C3[5] * z * (xx - yy) * getSphCoeff(params, gId, 14) +
+                      SH_C3[6] * x * (xx - 3.0f * yy) * getSphCoeff(params, gId, 15);
             }
         }
     }
