@@ -2,10 +2,12 @@ import os
 
 import numpy as np
 from PIL import Image
+import torch
 from torch.utils.data import Dataset
 
 from datasets.colmap_utils import read_extrinsics_binary, read_intrinsics_binary, read_extrinsics_text, read_intrinsics_text,qvec2rotmat
 from datasets.utils import pinhole_camera_rays, camera_to_world_rays
+from utils import to_torch
 
 class ColmapDataset(Dataset):
 
@@ -34,7 +36,6 @@ class ColmapDataset(Dataset):
         # # Get the scene data
         self.get_scene_info()
         self.load_camera_data()
-        self.getNerfppNorm()
 
         temp_idx = np.arange(self.n_frames)
         if split == 'train':
@@ -46,19 +47,10 @@ class ColmapDataset(Dataset):
         self.rgb = self.rgb[temp_idx]
         self.intrinsic = self.intrinsic[temp_idx]
 
+        self.length_scale, self.center, self.scene_bbox = self.compute_spatial_extents()
 
         # Update the number of frames to only include the samples from the split
         self.n_frames = self.poses.shape[0]
-
-    def getNerfppNorm(self, ):
-        cam_centers = self.poses[:,:3,3].transpose()
-        avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
-        center = avg_cam_center
-        dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
-        diagonal = np.max(dist)
-
-        self.translate = -center.flatten()
-        self.radius = diagonal * 1.1
 
     def get_scene_info(self):
         self.image_h = 0
@@ -113,9 +105,38 @@ class ColmapDataset(Dataset):
             self.rgb.append(np.asarray(Image.open(image_path)).astype(np.float32) / 255.0 )
 
         
-        self.rgb = np.stack(self.rgb)
+        self.rgb = torch.FloatTensor(np.stack(self.rgb))
         self.poses = np.stack(self.poses)
         self.intrinsic = np.stack(self.intrinsic)
+    
+    def compute_spatial_extents(self):
+
+        with torch.no_grad():
+
+            # mean distance between of cameras from center
+            camera_origins = self.poses[:,:,3]
+            center = np.mean(camera_origins,axis=0)
+            dists = np.linalg.norm(camera_origins - center[None,:], axis=-1)
+            mean_dist = np.mean(dists)
+            bbox_min = np.min(camera_origins, axis=0)
+            bbox_max = np.max(camera_origins, axis=0)
+
+            center = torch.FloatTensor(center)
+            mean_dist = torch.FloatTensor([mean_dist])
+            bbox_min = torch.FloatTensor(bbox_min)
+            bbox_max = torch.FloatTensor(bbox_max)
+
+            return center, mean_dist, (bbox_min, bbox_max)
+
+    def get_length_scale(self):
+        return self.length_scale
+    
+    def get_center(self):
+        return self.center
+    
+    def get_bbox(self):
+        """Tuple of vec3 (min,max)"""
+        return self.scene_bbox
 
     def __len__(self) -> int:
         if self.split == 'train': 
@@ -145,6 +166,9 @@ class ColmapDataset(Dataset):
 
             rgb = self.rgb[frame_idx, v, u]
 
+            ray_o = torch.FloatTensor(ray_o)
+            ray_d = torch.FloatTensor(ray_d)
+
             return ray_o.reshape(out_shape), ray_d.reshape(out_shape), rgb.reshape(out_shape)
 
         elif self.split == 'val':
@@ -156,6 +180,10 @@ class ColmapDataset(Dataset):
 
             ray_o, ray_d = camera_to_world_rays(ray_o_cam, ray_d_cam, self.poses[frame_idx])
             rgb = self.rgb[frame_idx, v, u]
+
+            ray_o = torch.FloatTensor(ray_o)
+            ray_d = torch.FloatTensor(ray_d)
             
             assert self.sample_full_image, 'val mode assumes sampling full images'
+
             return ray_o.reshape(self.image_h,self.image_w,3), ray_d.reshape(self.image_h,self.image_w,3), rgb.reshape(self.image_h,self.image_w,3)

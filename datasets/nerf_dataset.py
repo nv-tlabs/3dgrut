@@ -25,6 +25,8 @@ class NeRFDataset(Dataset):
 
         if kwargs.get('read_meta', True):
             self.read_meta(split)
+    
+        self.length_scale, self.center, self.scene_bbox = self.compute_spatial_extents()
 
     def read_intrinsics(self):
         with open(os.path.join(self.root_dir, "transforms_train.json"), 'r') as f:
@@ -102,6 +104,30 @@ class NeRFDataset(Dataset):
         if len(self.rgbs)>0:
             self.rgbs = torch.FloatTensor(np.stack(self.rgbs)) # (N_images, hw, ?)
         self.poses = torch.FloatTensor(self.poses) # (N_images, 3, 4)
+
+    def compute_spatial_extents(self):
+
+        with torch.no_grad():
+
+            # mean distance between of cameras from center
+            camera_origins = self.poses[:,:,3]
+            center = camera_origins.mean(dim=0)
+            dists = torch.linalg.norm(camera_origins - center[None,:], dim=-1)
+            mean_dist = torch.mean(dists)
+            bbox_min = torch.min(camera_origins, dim=0).values
+            bbox_max = torch.max(camera_origins, dim=0).values
+
+            return center, mean_dist, (bbox_min, bbox_max)
+
+    def get_length_scale(self):
+        return self.length_scale
+    
+    def get_center(self):
+        return self.center
+    
+    def get_bbox(self):
+        """Tuple of vec3 (min,max)"""
+        return self.scene_bbox
 
     def __len__(self):
         return len(self.poses)
