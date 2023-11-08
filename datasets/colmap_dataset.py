@@ -2,7 +2,7 @@ import os
 
 import numpy as np
 from PIL import Image
-import torch
+import torch 
 from torch.utils.data import Dataset
 
 from datasets.colmap_utils import read_extrinsics_binary, read_intrinsics_binary, read_extrinsics_text, read_intrinsics_text,qvec2rotmat
@@ -165,30 +165,40 @@ class ColmapDataset(Dataset):
                 v = np.random.choice(self.image_h, self.batch_size, replace=True)
                 out_shape = (1,self.batch_size,3)
 
-            ray_o_cam, ray_d_cam = pinhole_camera_rays(u, v, self.intrinsic[frame_idx,0], self.intrinsic[frame_idx,1], self.image_w, self.image_h)
+            rays_o_cam, rays_d_cam = pinhole_camera_rays(u, v, self.intrinsic[frame_idx,0], self.intrinsic[frame_idx,1], self.image_w, self.image_h)
 
-            ray_o, ray_d = camera_to_world_rays(ray_o_cam, ray_d_cam, self.poses[frame_idx])
+            rays_o, rays_d = camera_to_world_rays(rays_o_cam, rays_d_cam, self.poses[frame_idx])
 
             rgb = self.rgb[frame_idx, v, u]
 
-            ray_o = torch.FloatTensor(ray_o)
-            ray_d = torch.FloatTensor(ray_d)
+            rays_o = torch.FloatTensor(rays_o)
+            rays_d = torch.FloatTensor(rays_d)
 
-            return ray_o.reshape(out_shape), ray_d.reshape(out_shape), rgb.reshape(out_shape)
-
+            sample = {
+                "rays_o":rays_o.reshape(out_shape), 
+                "rays_d":rays_d.reshape(out_shape), 
+                "rgbs":rgb.reshape(out_shape)
+            }
+            return sample
+        
         elif self.split == 'val':
             frame_idx = np.array((idx,))
             u = np.tile(np.arange(self.image_w), self.image_h)
             v = np.arange(self.image_h).repeat(self.image_w)
 
-            ray_o_cam, ray_d_cam = pinhole_camera_rays(u, v, self.intrinsic[frame_idx,0], self.intrinsic[frame_idx,1], self.image_w, self.image_h)
+            rays_o_cam, rays_d_cam = pinhole_camera_rays(u, v, self.intrinsic[frame_idx,0], self.intrinsic[frame_idx,1], self.image_w, self.image_h)
 
-            ray_o, ray_d = camera_to_world_rays(ray_o_cam, ray_d_cam, self.poses[frame_idx])
+            rays_o, rays_d = camera_to_world_rays(rays_o_cam, rays_d_cam, self.poses[frame_idx])
             rgb = self.rgb[frame_idx, v, u]
 
-            ray_o = torch.FloatTensor(ray_o)
-            ray_d = torch.FloatTensor(ray_d)
+            rays_o = torch.FloatTensor(rays_o)
+            rays_d = torch.FloatTensor(rays_d)
             
             assert self.sample_full_image, 'val mode assumes sampling full images'
 
-            return ray_o.reshape(self.image_h,self.image_w,3), ray_d.reshape(self.image_h,self.image_w,3), rgb.reshape(self.image_h,self.image_w,3)
+            sample = {
+                "rays_o": rays_o.reshape(self.image_h,self.image_w,3),  
+                "rays_d": rays_d.reshape(self.image_h,self.image_w,3),
+                "rgbs": rgb.reshape(self.image_h,self.image_w,3)
+            }
+            return sample

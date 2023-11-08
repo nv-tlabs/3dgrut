@@ -14,6 +14,9 @@ from datasets.ncore_utils import Batch as NCoreBatch
 DEFAULT_DEVICE = torch.device('cuda')
 
 def move_to_gpu(batch):
+    if isinstance(batch,dict):
+        batch = [batch['rays_o'], batch['rays_d'], batch['rgbs']]
+
     gpu_batch = []  # expecting rays_ori, rays_dir, rgb_gt
 
     if not isinstance(batch, NCoreBatch):

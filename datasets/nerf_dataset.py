@@ -148,8 +148,13 @@ class NeRFDataset(Dataset):
             directions = self.directions[pix_idxs]
             rays_o, rays_d = get_rays(directions, poses)
 
-            return rays_o.reshape(out_shape),rays_d.reshape(out_shape),rgb.reshape(out_shape)
-
+            sample = {
+                "rays_o":rays_o.reshape(out_shape), 
+                "rays_d":rays_d.reshape(out_shape), 
+                "rgbs":rgb.reshape(out_shape)
+            }
+            return sample
+        
         elif self.split == 'val':
             assert self.sample_full_image, 'val mode assumes sampling full images'
             if len(self.rgbs)>0: # if ground truth available
@@ -158,7 +163,13 @@ class NeRFDataset(Dataset):
                 directions = self.directions[np.arange(self.img_wh[0]*self.img_wh[1])]
                 rays_o, rays_d = get_rays(directions, pose)
 
-                return rays_o.reshape(self.image_h,self.image_w,3), rays_d.reshape(self.image_h,self.image_w,3), rgb.reshape(self.image_h,self.image_w,3)
+
+                sample = {
+                    "rays_o": rays_o.reshape(self.image_h,self.image_w,3),  
+                    "rays_d": rays_d.reshape(self.image_h,self.image_w,3),
+                    "rgbs": rgb.reshape(self.image_h,self.image_w,3)
+                }
+                return sample
 
     @property
     def image_h(self):

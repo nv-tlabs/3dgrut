@@ -1,45 +1,45 @@
 path: ???
 experiment_name: ""
 resume: ""
-out_dir: "runs"
 n_iterations: 30000
 with_gui: false
-val_frequency: 1
 
 dataset:
-  type: colmap
-  downsample_factor: 1  # for datasets that include multi-scale versions of images [colmap]
+  type: ngp
+  use_aux_data: True
   
   train:
     batch_size: 8192
     sample_full_image: False
   
 initialization:
-  method: point_cloud      # one of [colmap, point_cloud, random]
-  num_gaussians: 100_000   # method=random only: number of initial gaussians to use
+  method: lidar
 
 model:
   density_activation: sigmoid
   scale_activation: exp
   optimize_density: true
-  optimize_features_albedo: true
-  optimize_features_specular: true
+  optimize_features: true
   optimize_position: true
   optimize_rotation: true
   optimize_scale: true
   bvh_update_frequency: 1
-  progressive_training:
-    feature_type: 'sh'        # one of [sh, mlp], currently only sh supported
-    init_n_features: 0        # sh: initial sh deg | mlp: num of dims initially unmasked
-    max_n_features: 0 # 3         # sh: maximum sh deg | mlp: total num of dims finally unmasked
-    increase_frequency: 1000  # unmask more feature dimensions every N global steps
-    increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
-    
 
-  lambda_background: 0
+  lambda_background: 0.01
   background:
-    name: skip-background
-
+    name: sky-mlp
+    dir_encoding_config:
+      otype: SphericalHarmonics
+      degree: 4
+    mlp_network_config:
+      otype: FullyFusedMLP
+      activation: ReLU
+      output_activation: Sigmoid
+      n_neurons: 64
+      n_hidden_layers: 2
+    device: 'cuda'
+    composite_in_linear_space: false
+  
   densify:
     frequency: 100 # densification_interval in 3DGS with default value 100
     start_iteration: 500 # densify_from_iter in 3DGS default value 500
@@ -77,14 +77,14 @@ optimizer:
       lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.00016
     density:
       lr: 0.05 # 3DGS value: 0.05
-    features_albedo:
+    features:
       lr: 0.0025 # 3DGS value: 0.0025
-    features_specular:
-      lr: ${div:${optimizer.params.features_albedo.lr},20} # 3DGS value 20x smaller than lr of features_albedo
     rotation:
       lr: 0.001 # 3DGS value: 0.001
     scale:
       lr: 0.005 # 3DGS value: 0.005
+    background:
+      lr: 0.01
 
 scheduler:
   positions:
@@ -96,13 +96,3 @@ scheduler:
 
   density:
     type: skip
-
-render:
-  hit_mode : 0
-  max_hit_per_slab: 32
-  max_num_slabs: 64
-  topk_hits: False
-  patch_size: 1
-  sph_degree: 3
-  gaussian_sigma_threshold: 3.0
-  min_transmittance: 0.03
