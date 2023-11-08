@@ -412,6 +412,8 @@ void createPipeline(const OptixDeviceContext context,
 OptiXStateWrapper::OptiXStateWrapper(
     const std::string& path, 
     const std::string& cuda_path,
+    uint32_t pipeline,
+    uint32_t hitMode,
     uint32_t maxHitsPerSlab,
     uint32_t maxNumSlabs,
     bool topKHits,
@@ -444,6 +446,8 @@ OptiXStateWrapper::OptiXStateWrapper(
         OPTIX_CHECK( optixDeviceContextCreate( cuCtx, &options, &pState->context ) );
     }
 
+    pState->pipeline=pipeline;
+    pState->hitMode=hitMode;
     pState->maxHitsPerSlab = maxHitsPerSlab;
     pState->maxNumSlabs = maxNumSlabs;
     pState->topKHits = topKHits;
@@ -456,6 +460,7 @@ OptiXStateWrapper::OptiXStateWrapper(
     std::vector<std::string> defines;
     if (pState)
     {
+        defines.emplace_back("-DMOGTRACING_HIT_MODE=" + std::to_string(pState->hitMode));
         defines.emplace_back("-DMOGTRACING_MAXNUMHITS_PER_SLAB=" + std::to_string(pState->maxHitsPerSlab));
         defines.emplace_back("-DMOGTRACING_PATCH_SIZE=" + std::to_string(pState->patchSize));
         defines.emplace_back("-DMOGTRACING_SPH_DEGREE=" + std::to_string(pState->sphDegree));
@@ -524,6 +529,20 @@ OptiXStateWrapper::OptiXStateWrapper(
         &pState->pipelineMoGTracingIS, 
         pState->sbtMoGTracingIS);
 
+    pState->moduleMoGTracingMLAT = nullptr;
+    pState->pipelineMoGTracingMLAT = nullptr;
+    pState->sbtMoGTracingMLAT = {};
+    createPipeline(
+        pState->context, 
+        path, 
+        cuda_path, 
+        defines,
+        "mogTracingMLAT",
+        PipelineFlag_HasRG | PipelineFlag_HasAH, 
+        &pState->moduleMoGTracingMLAT, 
+        &pState->pipelineMoGTracingMLAT, 
+        pState->sbtMoGTracingMLAT);
+
     printf("End of OptiXStateWrapper \n");
 }
 
@@ -552,6 +571,12 @@ OptiXStateWrapper::~OptiXStateWrapper(void)
     CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->sbtMoGTracingIS.missRecordBase     ) ) );
     CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->sbtMoGTracingIS.hitgroupRecordBase ) ) );
     OPTIX_CHECK( optixModuleDestroy( pState->moduleMoGTracingIS ) );
+
+    OPTIX_CHECK( optixPipelineDestroy( pState->pipelineMoGTracingMLAT ) );
+    CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->sbtMoGTracingMLAT.raygenRecord       ) ) );
+    CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->sbtMoGTracingMLAT.missRecordBase     ) ) );
+    CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->sbtMoGTracingMLAT.hitgroupRecordBase ) ) );
+    OPTIX_CHECK( optixModuleDestroy( pState->moduleMoGTracingAH ) );
 
     CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->gPrimVrt ) ) ); 
     CUDA_CHECK( cudaFree( reinterpret_cast<void*>( pState->gPrimTri ) ) ); 

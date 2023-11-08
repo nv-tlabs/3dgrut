@@ -158,6 +158,8 @@ def build_mog_bvh(
 #
 @dataclass
 class OptixMogTracingParams:
+    pipeline : int=1
+    hit_mode : int=0
     max_hit_per_slab: int=32
     max_num_slabs: int=64
     topk_hits: bool=False
@@ -175,6 +177,8 @@ class OptiXContext:
         self.cpp_wrapper = _plugin.OptiXStateWrapper(
             os.path.dirname(__file__), 
             torch.utils.cpp_extension.CUDA_HOME,
+            params.pipeline,
+            params.hit_mode,
             params.max_hit_per_slab,
             params.max_num_slabs,
             params.topk_hits,

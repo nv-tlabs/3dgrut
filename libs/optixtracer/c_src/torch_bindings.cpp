@@ -281,7 +281,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
     paramsHost.aabb = stateWrapper.pState->gasAABB;
     paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, stateWrapper.pState->maxNumSlabs);
     paramsHost.sphDegree = stateWrapper.pState->sphDegree;
-    
+
     paramsHost.frameBounds.x = rayOri.size(2) - 1;
     paramsHost.frameBounds.y = rayOri.size(1) - 1;
     paramsHost.frameNumber = 0;
@@ -292,16 +292,22 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
     CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&paramsDevice), sizeof(MoGTracingParams)));
     CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(paramsDevice), &paramsHost, sizeof(paramsHost), cudaMemcpyHostToDevice));
 
-    if (MOGTracingDefaultPipeline == MOGTracingPipelineCH)
+    if (stateWrapper.pState->pipeline == MOGTracingPipelineCH)
     {
         OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingCH, cudaStream, paramsDevice,
                                 sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingCH, rayOri.size(2),
                                 rayOri.size(1), rayOri.size(0)));
     }
-    else if (MOGTracingDefaultPipeline == MOGTracingPipelineIS)
+    else if (stateWrapper.pState->pipeline == MOGTracingPipelineIS)
     {
         OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingIS, cudaStream, paramsDevice,
                                 sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingIS, rayRad.size(2),
+                                rayRad.size(1), rayRad.size(0)));
+    }
+    else if (stateWrapper.pState->pipeline == MOGTracingPipelineMLAT)
+    {
+        OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingMLAT, cudaStream, paramsDevice,
+                                sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingMLAT, rayRad.size(2),
                                 rayRad.size(1), rayRad.size(0)));
     }
     else
@@ -374,9 +380,22 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&paramsDevice), sizeof(MoGTracingBwdParams)));
     CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(paramsDevice), &paramsHost, sizeof(paramsHost), cudaMemcpyHostToDevice));
 
-    OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingAHBwd, cudaStream, paramsDevice,
-                            sizeof(MoGTracingBwdParams), &stateWrapper.pState->sbtMoGTracingAHBwd, rayOri.size(2),
-                            rayOri.size(1), rayOri.size(0)));
+    if (stateWrapper.pState->pipeline == MOGTracingPipelineCH)
+    {
+    }
+    else if (stateWrapper.pState->pipeline == MOGTracingPipelineIS)
+    {
+    }
+    else if (stateWrapper.pState->pipeline == MOGTracingPipelineMLAT)
+    {
+    }
+    else
+    {
+        OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingAHBwd, cudaStream, paramsDevice,
+                                sizeof(MoGTracingBwdParams), &stateWrapper.pState->sbtMoGTracingAHBwd,
+                                div_round_up(rayRad.size(2), stateWrapper.pState->patchSize),
+                                div_round_up(rayRad.size(1), stateWrapper.pState->patchSize), rayRad.size(0)));
+    }
 
     CUDA_CHECK(cudaStreamSynchronize(cudaStream));
 
@@ -389,8 +408,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     // State classes.
     pybind11::class_<OptiXStateWrapper>(m, "OptiXStateWrapper")
-        .def(pybind11::init<const std::string&, const std::string&, uint32_t, uint32_t, bool, uint32_t, uint32_t, float,float, float>())
-        .def("set_sph_degree", &OptiXStateWrapper::setSphDegree, R"()",py::arg("degree"));
+        .def(pybind11::init<const std::string&, const std::string&, uint32_t, uint32_t, uint32_t, uint32_t, bool,
+                            uint32_t, uint32_t, float, float, float>())
+        .def("set_sph_degree", &OptiXStateWrapper::setSphDegree, R"()", py::arg("degree"));
     m.def("build_mog_bvh", &build_mog_bvh, "build_mog_bvh");
     m.def("trace_mog", &trace_mog, "trace_mog");
     m.def("trace_mog_bwd", &trace_mog_bwd, "trace_mog_bwd");
