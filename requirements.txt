@@ -15,3 +15,6 @@ kornia
 opencv-python
 einops
 imageio
+
+# NCore wheel (tracked via LFS)
+./thirdparty/ncore/ncore-0.6.6-py3-none-any.whl

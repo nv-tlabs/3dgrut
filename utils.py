@@ -1,15 +1,29 @@
+from typing import Optional, Callable, TypeVar
+
 import torch
 import numpy as np
 import numpy.typing as npt
-from typing import Optional, Callable
-from torch.optim.lr_scheduler import ExponentialLR, StepLR
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
 
+T = TypeVar("T")
+def unpack_optional(optional: Optional[T]) -> T:
+    """Unpacks the value of an optional, raising if value is missing"""
+    if optional is None:
+        raise ValueError("Can't unpack empty optional")
+
+    return optional
+
 def to_torch(data: npt.NDArray, device: str, dtype: Optional[torch.dtype] = None) -> torch.Tensor:
     """Converts a numpy array to a torch tensor on target device with optional type-casting"""
     return torch.from_numpy(data).to(device=device, dtype=dtype)
+
+def to_torch_optional(
+    data: Optional[npt.NDArray], device: str, dtype: Optional[torch.dtype] = None
+) -> Optional[torch.Tensor]:
+    """Wrapper of 'to_torch', simply bypassing tensor creation if input is 'None'"""
+    return to_torch(data, device, dtype) if data is not None else None
 
 def to_np(x):
     """

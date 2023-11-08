@@ -16,6 +16,10 @@ from omegaconf import OmegaConf
 
 from datasets.colmap_dataset import ColmapDataset
 from datasets.nerf_dataset import NeRFDataset
+from datasets.ngp_dataset import NGPDataset
+from datasets.ncore_dataset import NCoreDataset
+from datasets.ncore_utils import Batch as NCoreBatch
+from datasets.utils import PointCloud
 from model import MixtureOfGaussians
 from datasets.utils import move_to_gpu
 from loss_utils import ssim
@@ -33,7 +37,9 @@ def main(conf):
     n_iterations = 10e4
     val_period = 1
     use_ssim = False
-
+    scene_extent = 1.
+    train_collate_fn = None
+    val_collate_fn = None
     if conf.dataset.type == 'nerf':
         train_dataset = NeRFDataset(
             conf.path, 
@@ -50,11 +56,37 @@ def main(conf):
             batch_size=conf.dataset.train.batch_size
         )
         val_dataset = ColmapDataset(conf.path, split='val', sample_full_image=True)
+    elif conf.dataset.type == 'ngp':
+        train_dataset = NGPDataset(
+            conf.path, 
+            split='train', 
+            sample_full_image=conf.dataset.train.sample_full_image, 
+            batch_size=conf.dataset.train.batch_size,
+            use_lidar=True
+        )
+        val_dataset = NGPDataset(conf.path, split='val', sample_full_image=True, val_downsample=5, val_frame_subsample=5)
+        pc = train_dataset.get_point_cloud(step_frame=10)
+        scene_extent = ((pc.xyz_end.max(0).values - pc.xyz_end.min(0).values)**2).sum().sqrt()
+    elif conf.dataset.type == 'ncore':
+        # TODO: add all of the dataset parameters to config
+        duration_sec = 2.0
+        train_dataset = NCoreDataset(
+            conf.path, 
+            split='train', 
+            duration_sec=duration_sec,
+        )
+        val_dataset = NCoreDataset(conf.path,
+                                   split='val',
+                                   duration_sec=duration_sec)
+        pc = PointCloud.from_sequence(train_dataset.get_point_clouds(step_frame=10, non_dynamic_points_only=True), device="cpu")
+        scene_extent = train_dataset.scene_extent_m
+        train_collate_fn = NCoreBatch.collate_fn
+        val_collate_fn = NCoreBatch.collate_fn
     else:
-        raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf"]. ')
+        raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp", "ncore"]. ')
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, num_workers=8, batch_size=1, shuffle=True)
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=8, batch_size=1, shuffle=False)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, num_workers=16, batch_size=1, shuffle=True, collate_fn=train_collate_fn)
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=16, batch_size=1, shuffle=False, collate_fn=val_collate_fn)
 
     # Initialize the model and the optix context
     model = MixtureOfGaussians(conf)
@@ -83,6 +115,9 @@ def main(conf):
         elif conf.initialization.method == 'random':
             model.randomize_point_cloud(num_gsplat=conf.initialization.num_gaussians)
 
+        elif conf.initialization.method == 'lidar':
+            assert conf.dataset.type in ['ngp', 'ncore'], 'can only initialize from lidar with the NGPDataset / NCoreDataset'
+            model.init_from_lidar(point_cloud = pc) 
         else:
            raise ValueError(f"unrecognized initialization.method {conf.initialization.method}, choose from [colmap, point_cloud, random]")
 
@@ -261,9 +296,6 @@ def main(conf):
                 for batch in pbar:
                     with torch.no_grad():
                         rays_ori, rays_dir, rgb_gt = move_to_gpu(batch)
-                        rays_ori = rays_ori.reshape(rays_ori.shape[0], train_dataset.image_h, train_dataset.image_w, 3)
-                        rays_dir = rays_dir.reshape(rays_ori.shape[0], train_dataset.image_h, train_dataset.image_w, 3)
-                        rgb_gt = rgb_gt.reshape(rays_ori.shape[0], train_dataset.image_h, train_dataset.image_w, 3)
 
                         # Compute the outputs of a single batch
                         outputs = model(rays_ori, rays_dir)
@@ -321,7 +353,7 @@ def main(conf):
 
                 # Densify the Gaussians
                 if global_step > conf.model.densify.start_iteration and global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
-                    model.densify_gaussians(1.0)
+                    model.densify_gaussians(scene_extent=scene_extent)
                     scene_updated = True
 
                 # Prune the Gaussians

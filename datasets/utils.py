@@ -1,16 +1,39 @@
+from __future__ import annotations
+
 import math
+
+from dataclasses import dataclass
+from typing import Sequence
 
 import torch
 import numpy as np
 from plyfile import PlyData
 
+from datasets.ncore_utils import Batch as NCoreBatch
 
 DEFAULT_DEVICE = torch.device('cuda')
 
 def move_to_gpu(batch):
-    gpu_batch = []
-    for tensor in batch:
-        gpu_batch.append(tensor.to(device=DEFAULT_DEVICE, dtype=torch.float32))
+    gpu_batch = []  # expecting rays_ori, rays_dir, rgb_gt
+
+    if not isinstance(batch, NCoreBatch):
+        for tensor in batch:
+            gpu_batch.append(tensor.to(device=DEFAULT_DEVICE, dtype=torch.float32))
+    else:
+        # Reshape NCore batch to target sizes (B x H x W x F) / (B x 1 x N x F)
+        if (h := batch.h) is not None and (w := batch.w) is not None:
+            assert len(h) == 1 and len(w) == 1
+            out_shape = (1, h[0], w[0], 3)
+        else:
+            out_shape = (1, 1, len(batch.rays_cam), 3)
+
+        gpu_batch.append(
+            batch.rays_cam[:, :3].reshape(out_shape).to(device=DEFAULT_DEVICE, dtype=torch.float32)
+        )  # rays_ori
+        gpu_batch.append(
+            batch.rays_cam[:, 3:6].reshape(out_shape).to(device=DEFAULT_DEVICE, dtype=torch.float32)
+        )  # rays_dir
+        gpu_batch.append(batch.labels.rgb.reshape(out_shape).to(device=DEFAULT_DEVICE, dtype=torch.float32))  # rgb_gt
 
     return gpu_batch
 
@@ -42,10 +65,10 @@ def load_gsplat_mog(file_path):
         torch.from_numpy(gsplat_sph).to(DEFAULT_DEVICE)
     )
 
-def fov2focal(fov, pixels):
-    return pixels / (2 * math.tan(fov / 2))
+def fov2focal(fov_radians: float, pixels: int):
+    return pixels / (2 * math.tan(fov_radians / 2))
 
-def focal2fov(focal, pixels):
+def focal2fov(focal: float, pixels: int):
     return 2*math.atan(pixels/(2*focal))
 
 def pinhole_camera_rays(x, y, f_x, f_y, w, h):
@@ -79,3 +102,27 @@ def camera_to_world_rays(ray_o, ray_d, poses):
     ray_d = np.einsum('ijk,ik->ij', poses[:,:3,:3], ray_d)
 
     return ray_o, ray_d
+
+@dataclass(slots=True, kw_only=True)
+class PointCloud:
+    """Represents a 3d point cloud consisting of corresponding start and end points"""
+
+    xyz_start: torch.Tensor  # [N,3]
+    xyz_end: torch.Tensor  # [N,3]
+    device: str
+    dtype = torch.float32
+
+    def __post_init__(self) -> None:
+        assert len(self.xyz_start) == len(self.xyz_end)
+        assert self.xyz_start.shape[1] == self.xyz_end.shape[1] == 3
+
+        self.xyz_start.to(self.device, dtype=self.dtype)
+        self.xyz_end.to(self.device, dtype=self.dtype)
+
+    @staticmethod
+    def from_sequence(point_clouds: Sequence[PointCloud], device: str) -> PointCloud:
+        point_clouds_list = list(point_clouds)
+
+        return PointCloud(xyz_start=torch.cat([pc.xyz_start for pc in point_clouds_list]),
+                          xyz_end=torch.cat([pc.xyz_end for pc in point_clouds_list]),
+                          device=device)

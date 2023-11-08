@@ -1,14 +1,15 @@
-import logging, sys, os, struct
+import logging, os
 
 import numpy as np
-import copy
 import torch
 from plyfile import PlyData
 
 from libs import optixtracer
 from utils import to_torch, get_activation_function, inverse_sigmoid, get_scheduler, quaternion_to_so3
 from datasets.colmap_utils import read_next_bytes
+from datasets.utils import PointCloud
 from geometry import nearest_neighbor_dist_cpuKD
+from utils import to_np
 
 class MixtureOfGaussians(torch.nn.Module):
     def __init__(self, conf):
@@ -53,7 +54,6 @@ class MixtureOfGaussians(torch.nn.Module):
             self.scale.requires_grad = False
         if not self.conf.model.optimize_position:
             self.positions.requires_grad = False
-
 
     def update_optimizable_parameters(self, optimizable_tensors: dict[str, torch.Tensor]):
         for name, value in optimizable_tensors.items():
@@ -140,6 +140,15 @@ class MixtureOfGaussians(torch.nn.Module):
 
         self.default_initialize_from_points(file_pts, file_rgb)
             
+    def init_from_lidar(self, 
+                        point_cloud : PointCloud, 
+                        ):
+        
+        logging.info(f"Initializing based on lidar point cloud ...")
+       
+        # only initialize by default from points for now
+        self.default_initialize_from_points(to_np(point_cloud.xyz_end), None)
+
     def setup_optimizer(self, state_dict=None):
         params = []
         for name, args in self.conf.optimizer.params.items():
