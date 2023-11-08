@@ -98,7 +98,7 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
     const uint32_t gPrimNumTri = MOGPrimNumTri;
 
     // Create enclosing geometry primitives from 3d gaussians
-    if (!(MOGTracingDefaultPipeline & MOGTracingPipelineIS))
+    if (stateWrapper.pState->pipeline != MOGTracingPipelineIS)
     {
         // TODO : reuse the same buffer if same size + async function
         CUDA_CHECK(cudaFree(reinterpret_cast<void*>(stateWrapper.pState->gPrimVrt)));
@@ -181,7 +181,7 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
 
         OptixBuildInput prim_input = {};
 
-        if (!(MOGTracingDefaultPipeline & MOGTracingPipelineIS))
+        if (stateWrapper.pState->pipeline != MOGTracingPipelineIS)
         {
             // Our build input is a simple list of non-indexed triangle vertices
             const uint32_t prim_input_flags[1] = { OPTIX_GEOMETRY_FLAG_REQUIRE_SINGLE_ANYHIT_CALL };

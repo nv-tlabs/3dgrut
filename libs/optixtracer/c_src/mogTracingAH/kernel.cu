@@ -61,7 +61,8 @@ extern "C" __global__ void __raygen__rg()
     const uint3 idx = optixGetLaunchIndex();
     const uint3 dim = optixGetLaunchDimensions();
 
-    unsigned int rndSeed = tea<16>(dim.x * idx.y + idx.x, params.frameNumber);
+    // Need for potential jittering
+    // unsigned int rndSeed = tea<16>(dim.x * idx.y + idx.x, params.frameNumber);
 
     float3 rayOri[MOGTracingPatchSize][MOGTracingPatchSize];
     float3 rayDir[MOGTracingPatchSize][MOGTracingPatchSize];
@@ -115,30 +116,9 @@ extern "C" __global__ void __raygen__rg()
             p.ahHitTable[i] = make_float2(1e9, 1e9);
         }
 
-        // TOOD : rework this jitter scheme, it is biased toward the center of the patch
-        float3 sampleRayOri = make_float3(0);
-        float3 sampleRayDir = make_float3(0);
-        {
-            float3 sampleRayOriWeight = make_float3(0);
-            float3 sampleRayDirWeight = make_float3(0);
-#pragma unroll
-            for (int j = 0; j < MOGTracingPatchSize; ++j)
-            {
-#pragma unroll
-                for (int i = 0; i < MOGTracingPatchSize; ++i)
-                {
-                    const float3 sro = rnd3(rndSeed) + 1e-6;
-                    sampleRayOri += sro * rayOri[j][i];
-                    sampleRayOriWeight += sro;
-
-                    const float3 srd = rnd3(rndSeed) + 1e-6;
-                    sampleRayDir += srd * rayDir[j][i];
-                    sampleRayDirWeight += srd;
-                }
-            }
-            sampleRayOri /= sampleRayOriWeight;
-            sampleRayDir = safe_normalize(sampleRayDir / sampleRayDirWeight);
-        }
+        // TODO : add a GOOD ray jittering scheme over the patch (not bounded by the convex hull of the rayDirs if possible)
+        const float3 sampleRayOri = rayOri[MOGTracingPatchSize/2][MOGTracingPatchSize/2];
+        const float3 sampleRayDir = rayDir[MOGTracingPatchSize/2][MOGTracingPatchSize/2];
 
         trace(&p, sampleRayOri, sampleRayDir, startT + epsT, startT + slabSpacing);
         if (p.ahNumHits == 0)
