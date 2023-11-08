@@ -44,7 +44,7 @@ def main(conf):
         # TODO
         pass
 
-    def render_image(gauss_pos, gauss_rot, gauss_den, gauss_scale, gauss_features, ray_srcs, ray_dirs):
+    def render_image(gauss_pos, gauss_rot, gauss_den, gauss_scale, gauss_features, ray_srcs, ray_dirs, return_all=False):
 
         optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, True)
 
@@ -52,36 +52,50 @@ def main(conf):
                 ray_srcs, ray_dirs,
                 gauss_pos, gauss_rot, gauss_den, gauss_scale, gauss_features)
 
-        return pred_rgb
+        if return_all:
+            return pred_rgb, pred_opacity, pred_ohit
+        else:
+            return pred_rgb
 
 
-    ## Sample data
-    gauss_pos = torch.tensor([
-            [0.10, 0.10, 0.10],
-            [0.11, 0.11, 0.11],
-            [0.12, 0.12, 0.12],
-        ], dtype=torch.float32, device=device)
-    
-    gauss_rot = torch.tensor([
-            [1.0,  0.5, -0.5,  0.6],
-            [1.0,  0.3, -0.5,  0.6],
-            [1.0, -0.4, -0.5,  0.1],
-        ], dtype=torch.float32, device=device)
-    
-    gauss_den = torch.tensor([
-            [0.4, ],
-            [0.5, ],
-            [0.8, ],
-        ], dtype=torch.float32, device=device)
-    
-    gauss_scale = torch.tensor([
-            [1.2,  ],
-            [1.8,  ],
-            [1.25, ],
-        ], dtype=torch.float32, device=device)
-
+    n_guassians = 20
     max_sh_degree = 3
-    gauss_features = 0.05 * torch.randn(3, 3, (max_sh_degree+1) ** 2, generator=rand_gen, dtype=torch.float32, device=device).reshape(3, -1)
+
+    if n_guassians == 3:
+        ## Sample data
+        gauss_pos = torch.tensor([
+                [0.10, 0.10, 0.10],
+                [0.11, 0.11, 0.11],
+                [0.12, 0.12, 0.12],
+            ], dtype=torch.float32, device=device)
+        
+        gauss_rot = torch.tensor([
+                [1.0,  0.5, -0.5,  0.6],
+                [1.0,  0.3, -0.5,  0.6],
+                [1.0, -0.4, -0.5,  0.1],
+            ], dtype=torch.float32, device=device)
+        
+        gauss_den = torch.tensor([
+                [0.4, ],
+                [0.5, ],
+                [0.8, ],
+            ], dtype=torch.float32, device=device)
+        
+        gauss_scale = torch.tensor([
+                [1.2,  ],
+                [1.8,  ],
+                [1.25, ],
+            ], dtype=torch.float32, device=device)
+    else:
+        gauss_pos = torch.rand((n_guassians,3), dtype=torch.float32, device=device)
+        gauss_rot = torch.nn.functional.normalize(torch.rand((n_guassians,4), dtype=torch.float32, device=device), dim=-1)
+        gauss_den = torch.rand((n_guassians,1), dtype=torch.float32, device=device)
+        gauss_scale = torch.rand((n_guassians,3), dtype=torch.float32, device=device)
+
+
+    gauss_features = 0.05 * torch.randn(n_guassians, 3, (max_sh_degree+1) ** 2, generator=rand_gen, dtype=torch.float32, device=device).reshape(3, -1)
+
+
 
     ## Generate rays
     image_w, image_h = 50, 30 
@@ -127,12 +141,12 @@ def main(conf):
     ray_dirs = ray_dirs[:,None,None,:]
     ray_srcs = ray_srcs[:,None,None,:]
 
-    test_val = render_image(gauss_pos, gauss_rot, gauss_den, gauss_scale, gauss_features, ray_srcs, ray_dirs)
+    test_val, opacity, hits = render_image(gauss_pos, gauss_rot, gauss_den, gauss_scale, gauss_features, ray_srcs, ray_dirs, return_all=True)
     print(f"Test ray contrib = {test_val}")
+    print(f"Test number of hits = {hits.item()}")
+
     if(torch.max(torch.abs(test_val)) == 0.):
         raise ValueError("no contribution along test ray!")
-    # plt.imshow(to_np(img_rgb[0,...]))
-    # plt.show()
 
     # Toggle these to test various grads
     gauss_pos.requires_grad = True
