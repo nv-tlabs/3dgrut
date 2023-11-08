@@ -81,7 +81,7 @@ def main(conf):
         ], dtype=torch.float32, device=device)
 
     max_sh_degree = 3
-    gauss_features = 0.05 * torch.randn(3, 3, (max_sh_degree+1) ** 2, generator=rand_gen, dtype=torch.float32, device=device)
+    gauss_features = 0.05 * torch.randn(3, 3, (max_sh_degree+1) ** 2, generator=rand_gen, dtype=torch.float32, device=device).reshape(3, -1)
 
     ## Generate rays
     image_w, image_h = 50, 30 
