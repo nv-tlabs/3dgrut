@@ -400,7 +400,7 @@ class NGPDataset(Dataset):
                 "rgbs":rgbs.reshape(out_shape),
             }
             if self.aux_data:
-                sample["sky"]= (self.semantic_masks[idxs] == self.sky_class_id).squeeze().reshape(out_shape[0],out_shape[1],1)
+                sample["sky_mask"]= (self.semantic_masks[idxs] == self.sky_class_id).squeeze().reshape(out_shape[0],out_shape[1],1)
 
             return sample
         elif self.split == 'val':

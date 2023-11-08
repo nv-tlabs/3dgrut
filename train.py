@@ -70,7 +70,7 @@ def main(conf):
             sample_full_image=conf.dataset.train.sample_full_image, 
             batch_size=conf.dataset.train.batch_size,
             use_lidar=True,
-            use_aux=conf.dataset.use_aux_data
+            use_aux=conf.dataset.get("use_aux_data", False)
         )
         val_dataset = NGPDataset(
             conf.path, 
@@ -78,7 +78,7 @@ def main(conf):
             sample_full_image=True, 
             val_downsample=5, 
             val_frame_subsample=5, 
-            use_aux=conf.dataset.use_aux_data
+            use_aux=conf.dataset.get("use_aux_data", False)
         )
         pc = train_dataset.get_point_cloud(step_frame=10)
         scene_extent = ((pc.xyz_end.max(0).values - pc.xyz_end.min(0).values)**2).sum().sqrt()
@@ -89,15 +89,11 @@ def main(conf):
             conf.path, 
             split='train', 
             duration_sec=duration_sec,
-            camera_ids=["camera_front_50fov"],
-            lidar_ids=["lidar_top"]
         )
         val_dataset = NCoreDataset(
             conf.path,
             split='val',
             duration_sec=duration_sec,
-            camera_ids=["camera_front_50fov"],
-            lidar_ids=["lidar_top"]
         )
         pc = PointCloud.from_sequence(train_dataset.get_point_clouds(step_frame=10, non_dynamic_points_only=True), device="cpu")
         scene_extent = train_dataset.scene_extent_m
@@ -317,7 +313,8 @@ def main(conf):
                 val_loss = []
                 for batch in pbar:
                     with torch.no_grad():
-                        rays_ori, rays_dir, rgb_gt = move_to_gpu(batch)
+                        gpu_batch = move_to_gpu(batch)
+                        rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
 
                         # Compute the outputs of a single batch
                         outputs = model(rays_ori, rays_dir)
@@ -334,13 +331,14 @@ def main(conf):
                         val_iteration += 1
 
                 writer.add_scalar("psnr/val", np.mean(val_psnr), global_step)
-                writer.add_scalar("Loss_l1/val", np.mean(val_loss), global_step)
+                writer.add_scalar("loss_l1/val", np.mean(val_loss), global_step)
 
         with tqdm(train_dataloader) as pbar:
             for batch in pbar:
 
                 # Move data to GPU
-                rays_ori, rays_dir, rgb_gt = move_to_gpu(batch)
+                gpu_batch = move_to_gpu(batch)
+                rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
                 scene_updated = False
 
                 # Compute the outputs of a single batch
@@ -348,19 +346,19 @@ def main(conf):
                 
                 # Compute the loss
                 loss = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
-                writer.add_scalar("Loss_l1/train", loss.item(), global_step)
+                writer.add_scalar("loss_l1/train", loss.item(), global_step)
                 if use_ssim:
                     loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
                     loss += loss_ssim
-                    writer.add_scalar("Loss_ssim/train", loss_ssim.item(), global_step)
+                    writer.add_scalar("loss_ssim/train", loss_ssim.item(), global_step)
                 if conf.model.lambda_background > 0.0:
+                    assert "sky_mask" in gpu_batch, "Sky ray mask missing for background-loss evaluation"
                     # Push all background rays to have opacity 0 and non-background rays to have opacity 1 withing the FV
                     foreground_mask = torch.ones_like(outputs["pred_opacity"])
-                    background_ray_mask = batch['sky']
-                    foreground_mask[background_ray_mask] = 0.0
+                    foreground_mask[gpu_batch['sky_mask']] = 0.0
                     loss_background = torch.nn.functional.mse_loss(outputs["pred_opacity"], foreground_mask)
                     loss += conf.model.lambda_background * loss_background
-                    writer.add_scalar("Loss_background/train", loss_background.item(), global_step)
+                    writer.add_scalar("loss_background/train", loss_background.item(), global_step)
 
                 # backpropagate the gradients and update the parameters
                 loss.backward()

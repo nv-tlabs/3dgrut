@@ -9,34 +9,30 @@ import torch
 import numpy as np
 from plyfile import PlyData
 
-from datasets.ncore_utils import Batch as NCoreBatch
+from datasets.ncore_utils import Batch as NCoreBatch, RayFlags as NCoreRayFlags
 
 DEFAULT_DEVICE = torch.device('cuda')
 
-def move_to_gpu(batch):
-    if isinstance(batch,dict):
-        batch = [batch['rays_o'], batch['rays_d'], batch['rgbs']]
+def move_to_gpu(batch : dict | NCoreBatch) -> dict[str, torch.Tensor]:
+    gpu_batch: dict[str, torch.Tensor]  # expecting 'rays_ori', 'rays_dir', 'rgb_gt', optional 'sky_mask'
 
-    gpu_batch = []  # expecting rays_ori, rays_dir, rgb_gt
-
-    if not isinstance(batch, NCoreBatch):
-        for tensor in batch:
-            gpu_batch.append(tensor.to(device=DEFAULT_DEVICE, dtype=torch.float32))
+    if isinstance(batch, dict):
+        gpu_batch = {key: tensor.to(device=DEFAULT_DEVICE) for key,tensor in batch.items()}
     else:
         # Reshape NCore batch to target sizes (B x H x W x F) / (B x 1 x N x F)
         if (h := batch.h) is not None and (w := batch.w) is not None:
             assert len(h) == 1 and len(w) == 1
-            out_shape = (1, h[0], w[0], 3)
+            out_shape3 = (1, h[0], w[0], 3)
+            out_shape1 = (1, h[0], w[0], 1)
         else:
-            out_shape = (1, 1, len(batch.rays_cam), 3)
+            out_shape3 = (1, 1, len(batch.rays_cam), 3)
+            out_shape1 = (1, 1, len(batch.rays_cam), 1)
 
-        gpu_batch.append(
-            batch.rays_cam[:, :3].reshape(out_shape).to(device=DEFAULT_DEVICE, dtype=torch.float32)
-        )  # rays_ori
-        gpu_batch.append(
-            batch.rays_cam[:, 3:6].reshape(out_shape).to(device=DEFAULT_DEVICE, dtype=torch.float32)
-        )  # rays_dir
-        gpu_batch.append(batch.labels.rgb.reshape(out_shape).to(device=DEFAULT_DEVICE, dtype=torch.float32))  # rgb_gt
+        gpu_batch = {}
+        gpu_batch["rays_ori"] = batch.rays_cam[:, :3].reshape(out_shape3).to(device=DEFAULT_DEVICE)
+        gpu_batch["rays_dir"] = batch.rays_cam[:, 3:6].reshape(out_shape3).to(device=DEFAULT_DEVICE)
+        gpu_batch["rgb_gt" ] = batch.labels.rgb.reshape(out_shape3).to(device=DEFAULT_DEVICE)
+        gpu_batch["sky_mask"] = batch.rays_cam_meta.get_mask_flags_all(NCoreRayFlags.SKY_SEMANTIC).reshape(out_shape1).to(device=DEFAULT_DEVICE)
 
     return gpu_batch
 
