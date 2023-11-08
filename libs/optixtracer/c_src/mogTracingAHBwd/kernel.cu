@@ -216,8 +216,8 @@ extern "C" __global__ void __raygen__rg()
                         // ===> d_rayRad / d_gdns = gres * transmit * grad - gres * transmit * residualRayRad
                         atomicAdd(
                             &params.mogDnsGrd[gId][0], gres * rayTrm[k][j] * (grad.x - residualRayRad.x) * rayRadGrd[k][j].x +
-                                                           gres * transmit * (grad.y - residualRayRad.y) * rayRadGrd[k][j].y +
-                                                           gres * transmit * (grad.z - residualRayRad.z) * rayRadGrd[k][j].z);
+                                                           gres * rayTrm[k][j] * (grad.y - residualRayRad.y) * rayRadGrd[k][j].y +
+                                                           gres * rayTrm[k][j] * (grad.z - residualRayRad.z) * rayRadGrd[k][j].z);
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // ---> rayRadiance = accumulatedRayRad + galpha * transmit * grad + (1 - galpha) * transmit *
