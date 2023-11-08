@@ -44,7 +44,7 @@ def main(conf):
         # TODO
         pass
 
-    def render_image(gauss_pos, gauss_rot, gauss_den, gauss_scale, gauss_features, ray_srcs, ray_dirs, return_all=False):
+    def render_image(gauss_pos, gauss_rot, gauss_den, gauss_scale, gauss_features, ray_srcs, ray_dirs, return_rendering_results=False):
 
         optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, True)
 
@@ -52,12 +52,15 @@ def main(conf):
                 ray_srcs, ray_dirs,
                 gauss_pos, gauss_rot, gauss_den, gauss_scale, gauss_features)
 
-        if return_all:
+
+        if return_rendering_results:
             return pred_rgb, pred_opacity, pred_ohit
-        else:
-            return pred_rgb
 
+        gt = torch.rand_like(pred_rgb).detach()
 
+        return 0.5*(pred_rgb - gt)**2
+
+    
     n_guassians = 20
     max_sh_degree = 3
 
@@ -141,7 +144,7 @@ def main(conf):
     ray_dirs = ray_dirs[:,None,None,:]
     ray_srcs = ray_srcs[:,None,None,:]
 
-    test_val, opacity, hits = render_image(gauss_pos, gauss_rot, gauss_den, gauss_scale, gauss_features, ray_srcs, ray_dirs, return_all=True)
+    test_val, opacity, hits = render_image(gauss_pos, gauss_rot, gauss_den, gauss_scale, gauss_features, ray_srcs, ray_dirs, return_rendering_results=True)
     print(f"Test ray contrib = {test_val}")
     print(f"Test number of hits = {hits.item()}")
 
@@ -156,6 +159,9 @@ def main(conf):
     gauss_features.requires_grad = True
 
     inputs = (gauss_pos, gauss_rot, gauss_den, gauss_scale, gauss_features, ray_srcs, ray_dirs)
+
+
+
     torch.autograd.gradcheck(render_image, inputs, **gradcheck_args)
 
 
