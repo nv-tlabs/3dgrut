@@ -70,6 +70,14 @@ public:
         float minGaussianResponse
     );
     ~OptiXStateWrapper    (void);
+
+    void setSphDegree(int degree)
+    {
+        if (pState)
+        {
+            pState->sphDegree = degree;
+        }
+    }
     
     OptiXState*           pState;
 };

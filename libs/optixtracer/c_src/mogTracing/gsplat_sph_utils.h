@@ -26,14 +26,14 @@ inline __device__ float3 getSphCoeff(TParams& params, int gId, int idx)
     return make_float3(params.mogSph[gId][off + 0], params.mogSph[gId][off + 1], params.mogSph[gId][off + 2]);
 }
 
-template <int deg, typename TParams>
-static __device__ float3 computeColorFromSH(
-    const float3& gpos, const float3& rori, uint32_t gId, TParams& params, bool clamped = true)
+template <typename TParams>
+static __device__ float3
+computeColorFromSH(int deg, const float3& gpos, const float3& rori, uint32_t gId, TParams& params, bool clamped = true)
 {
     // The implementation is loosely based on code for
     // "Differentiable Point-Based Radiance Fields for
     // Efficient View Synthesis" by Zhang et al. (2022)
-    float3 rad = SH_C0 * getSphCoeff(params, gId , 0);
+    float3 rad = SH_C0 * getSphCoeff(params, gId, 0);
     if (deg > 0)
     {
         const float3 dir = safe_normalize(gpos - rori);
@@ -49,8 +49,8 @@ static __device__ float3 computeColorFromSH(
             const float xx = x * x, yy = y * y, zz = z * z;
             const float xy = x * y, yz = y * z, xz = x * z;
             rad = rad + SH_C2[0] * xy * getSphCoeff(params, gId, 4) + SH_C2[1] * yz * getSphCoeff(params, gId, 5) +
-                  SH_C2[2] * (2.0f * zz - xx - yy) * getSphCoeff(params, gId, 6) + SH_C2[3] * xz * getSphCoeff(params, gId, 7) +
-                  SH_C2[4] * (xx - yy) * getSphCoeff(params, gId, 8);
+                  SH_C2[2] * (2.0f * zz - xx - yy) * getSphCoeff(params, gId, 6) +
+                  SH_C2[3] * xz * getSphCoeff(params, gId, 7) + SH_C2[4] * (xx - yy) * getSphCoeff(params, gId, 8);
 
             if (deg > 2)
             {
@@ -80,16 +80,12 @@ inline __device__ void addSphCoeffGrd(TParams& params, int gId, int idx, const f
     atomicAdd(&params.mogSphGrd[gId][off + 2], val.z);
 }
 
-template <int deg, typename TParams>
-__device__ float3 computeColorFromSHBwd(const float3& rori,
-                                        uint32_t gId,
-                                        const float3& gpos,
-                                        float weight,
-                                        const float3& rayRadGrd,
-                                        TParams& params)
+template <typename TParams>
+__device__ float3 computeColorFromSHBwd(
+    int deg, const float3& rori, uint32_t gId, const float3& gpos, float weight, const float3& rayRadGrd, TParams& params)
 {
     // radiance unclamped
-    const float3 gradu = computeColorFromSH<deg>(gpos, rori, gId, params, false);
+    const float3 gradu = computeColorFromSH(deg, gpos, rori, gId, params, false);
 
     // clamped radiance
     const float3 grad = make_float3(gradu.x > SHRadMinBound ? gradu.x : expf(gradu.x - SHRadMinBound) * SHRadMinBound,

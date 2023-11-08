@@ -17,9 +17,6 @@
 static constexpr float GAlphaMax = 0.99f;
 static constexpr float GAlphaMin = 0.005f;
 
-static constexpr int SphDegree = 0;
-static constexpr int SphNumCoeffs = 1;
-
 static __device__ inline float computeGRayResponse(
     const float3& gPos, 
     const float4& gRot, 

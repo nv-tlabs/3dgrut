@@ -18,7 +18,6 @@ extern "C"
 }
 
 static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = MOGTRACING_MAXNUMHITS_PER_SLAB;
-static constexpr unsigned int MOGTracingSphDegree = MOGTRACING_SPH_DEGREE;
 static constexpr unsigned int MOGTracingPatchSize = MOGTRACING_PATCH_SIZE;
 
 struct RayPayload
@@ -98,6 +97,8 @@ extern "C" __global__ void __raygen__rg()
     const float slabSpacing = params.slabSpacing;
     float startT = fmaxf(0.0f, minMaxT.x - epsT);
 
+    const int sphDegree = params.sphDegree;
+    
     float hitDistance = 0;
     uint32_t numHits = 0;
     float transmit = 1.0f;
@@ -175,7 +176,7 @@ extern "C" __global__ void __raygen__rg()
 
             // NB : this is an approximation : we are using the sampleRayOri instead of the real rayOri we factorizing
             // the sph computation
-            const float3 grad = computeColorFromSH<MOGTracingSphDegree>(gpos, sampleRayOri, gId, params);
+            const float3 grad = computeColorFromSH(sphDegree, gpos, sampleRayOri, gId, params);
 
 #pragma unroll
             for (int j = 0; j < MOGTracingPatchSize; ++j)

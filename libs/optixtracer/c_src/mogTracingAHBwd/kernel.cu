@@ -17,7 +17,6 @@ extern "C"
 }
 
 static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = MOGTRACING_MAXNUMHITS_PER_SLAB;
-static constexpr unsigned int MOGTracingSphDegree = MOGTRACING_SPH_DEGREE;
 
 struct RayPayload
 {
@@ -71,6 +70,8 @@ extern "C" __global__ void __raygen__rg()
     const float slabSpacing = params.slabSpacing;
     float startT = fmaxf(0.0f, minMaxT.x - epsT);
 
+    const int sphDegree = params.sphDegree;
+    
     uint32_t numHits = 0;
     float transmit = 1.0f;
     RayPayload p;
@@ -139,7 +140,7 @@ extern "C" __global__ void __raygen__rg()
 
             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
             // compute the gradient wrt to the sph coefficients and position (through the sph view direction)
-            const float3 grad = computeColorFromSHBwd<MOGTracingSphDegree>(rayOri, gId, gpos, weight, rayRadGrd, params);
+            const float3 grad = computeColorFromSHBwd(sphDegree, rayOri, gId, gpos, weight, rayRadGrd, params);
 
             // >>> rayRadiance = accumulatedRayRad + weigth * rayRad + (1-galpha)*transmit * residualRayRad
             const float3 rayRad = weight * grad;
