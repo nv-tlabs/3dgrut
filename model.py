@@ -184,18 +184,24 @@ class MixtureOfGaussians(torch.nn.Module):
         self.rotation = torch.nn.Parameter(to_torch(np.transpose(np.stack((data['vertex']['rot_0'], data['vertex']['rot_1'], data['vertex']['rot_2'], data['vertex']['rot_3']), dtype=np.float32)), device=self.device))  # type: ignore
         self.scale = torch.nn.Parameter(to_torch(np.transpose(np.stack((data['vertex']['scale_0'], data['vertex']['scale_1'], data['vertex']['scale_2']), dtype=np.float32)), device=self.device))  # type: ignore
         self.density = torch.nn.Parameter(to_torch(data['vertex']['opacity'].astype(np.float32).reshape(num_gsplat, 1), device=self.device))
-        self.features = torch.nn.Parameter(to_torch(np.transpose(np.stack((
-                            data['vertex']['f_dc_0'], data['vertex']['f_dc_1'], data['vertex']['f_dc_2'],
-                            data['vertex']['f_rest_0'],data['vertex']['f_rest_1'],data['vertex']['f_rest_2'],data['vertex']['f_rest_3'],data['vertex']['f_rest_4'],
-                            data['vertex']['f_rest_5'],data['vertex']['f_rest_6'],data['vertex']['f_rest_7'],data['vertex']['f_rest_8'],data['vertex']['f_rest_9'],
-                            data['vertex']['f_rest_10'],data['vertex']['f_rest_11'],data['vertex']['f_rest_12'],data['vertex']['f_rest_13'],data['vertex']['f_rest_14'],
-                            data['vertex']['f_rest_15'],data['vertex']['f_rest_16'],data['vertex']['f_rest_17'],data['vertex']['f_rest_18'],data['vertex']['f_rest_19'],
-                            data['vertex']['f_rest_20'],data['vertex']['f_rest_21'],data['vertex']['f_rest_22'],data['vertex']['f_rest_23'],data['vertex']['f_rest_24'],
-                            data['vertex']['f_rest_25'],data['vertex']['f_rest_26'],data['vertex']['f_rest_27'],data['vertex']['f_rest_28'],data['vertex']['f_rest_29'],
-                            data['vertex']['f_rest_30'],data['vertex']['f_rest_31'],data['vertex']['f_rest_32'],data['vertex']['f_rest_33'],data['vertex']['f_rest_34'],
-                            data['vertex']['f_rest_35'],data['vertex']['f_rest_36'],data['vertex']['f_rest_37'],data['vertex']['f_rest_38'],data['vertex']['f_rest_39'],
-                            data['vertex']['f_rest_40'],data['vertex']['f_rest_41'],data['vertex']['f_rest_42'],data['vertex']['f_rest_43'],data['vertex']['f_rest_44']),
-                            dtype=np.float32)), device=self.device)) # type: ignore
+
+        feat_dc = np.transpose(np.stack((data['vertex']['f_dc_0'], data['vertex']['f_dc_1'], data['vertex']['f_dc_2'])))
+        feat_sh = np.transpose(np.stack((
+                    data['vertex']['f_rest_0'],data['vertex']['f_rest_1'],data['vertex']['f_rest_2'],data['vertex']['f_rest_3'],data['vertex']['f_rest_4'],
+                    data['vertex']['f_rest_5'],data['vertex']['f_rest_6'],data['vertex']['f_rest_7'],data['vertex']['f_rest_8'],data['vertex']['f_rest_9'],
+                    data['vertex']['f_rest_10'],data['vertex']['f_rest_11'],data['vertex']['f_rest_12'],data['vertex']['f_rest_13'],data['vertex']['f_rest_14'],
+                    data['vertex']['f_rest_15'],data['vertex']['f_rest_16'],data['vertex']['f_rest_17'],data['vertex']['f_rest_18'],data['vertex']['f_rest_19'],
+                    data['vertex']['f_rest_20'],data['vertex']['f_rest_21'],data['vertex']['f_rest_22'],data['vertex']['f_rest_23'],data['vertex']['f_rest_24'],
+                    data['vertex']['f_rest_25'],data['vertex']['f_rest_26'],data['vertex']['f_rest_27'],data['vertex']['f_rest_28'],data['vertex']['f_rest_29'],
+                    data['vertex']['f_rest_30'],data['vertex']['f_rest_31'],data['vertex']['f_rest_32'],data['vertex']['f_rest_33'],data['vertex']['f_rest_34'],
+                    data['vertex']['f_rest_35'],data['vertex']['f_rest_36'],data['vertex']['f_rest_37'],data['vertex']['f_rest_38'],data['vertex']['f_rest_39'],
+                    data['vertex']['f_rest_40'],data['vertex']['f_rest_41'],data['vertex']['f_rest_42'],data['vertex']['f_rest_43'],data['vertex']['f_rest_44']
+                  )))
+
+        feat_sh = feat_sh.reshape(num_gsplat, 3, -1)
+        feat_sh = np.transpose(feat_sh, axes=(0,2,1)).reshape(num_gsplat, -1)
+        feat_combined = np.concatenate((feat_dc, feat_sh), axis=-1)
+        self.features = torch.nn.Parameter(to_torch(feat_combined.astype(np.float32), device=self.device))
 
         if set_optimizable_parameters:
             self.set_optimizable_parameters()
