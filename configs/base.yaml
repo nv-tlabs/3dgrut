@@ -36,9 +36,11 @@ model:
     increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
     
 
-  lambda_background: 0
+  lambda_background: 0.
   background:
-    name: skip-background
+    name: background-color
+    color: white
+
 
   densify:
     frequency: 100 # densification_interval in 3DGS with default value 100

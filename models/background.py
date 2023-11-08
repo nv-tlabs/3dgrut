@@ -12,11 +12,13 @@ import models
 def config_to_primitive(config, resolve=True):
     return OmegaConf.to_container(config, resolve=resolve)
 
-
+DEFAULT_DEVICE = 'cuda'
 class BaseBackground(ABC, torch.nn.Module):
     def __init__(self, config: omegaconf.dictconfig.DictConfig, **kwargs) -> None:
         super().__init__()
         self.config = config
+        self.device = DEFAULT_DEVICE
+
         self.setup(**kwargs)
 
     @abstractmethod
@@ -47,7 +49,6 @@ class SkyMlp(BaseBackground):
             network_config=config_to_primitive(self.config.mlp_network_config),
         )
 
-        self.composite_in_linear_space = self.config.composite_in_linear_space
 
     def forward(self, rays_d, rgb, opacity):
         (b,h,w,c) = rays_d.shape
@@ -63,15 +64,7 @@ class SkyMlp(BaseBackground):
         background_rgb = self.sky_mlp(input_tensor)
 
         # Compute the linear combination of the color within the volume and background
-        if self.composite_in_linear_space:
-            rgb_linear = self.srgb_to_linear(rgb)
-            background_rgb_linear = self.srgb_to_linear(background_rgb)
-            rgb = self.linear_to_srgb(
-                rgb_linear + background_rgb_linear * (1.0 - opacity)
-            )
-
-        else:
-            rgb = rgb + background_rgb * (1.0 - opacity)
+        rgb = rgb + background_rgb * (1.0 - opacity)
 
         return rearrange(rgb,'(b h w) c -> b h w c', b=b, h=h, w=w, c=c), rearrange(opacity,'(b h w) c -> b h w c', b=b, h=h, w=w, c=1)
 
@@ -80,9 +73,7 @@ class SkyMlp(BaseBackground):
 @models.register("background-color")
 class BackgroundColor(BaseBackground):
     def setup(self, **kwargs):
-        self.device = self.config.device
         self.background_color_type = self.config.color
-        self.composite_in_linear_space = self.config.composite_in_linear_space
 
         assert self.background_color_type in [
             "white",
@@ -96,25 +87,12 @@ class BackgroundColor(BaseBackground):
             self.color = torch.zeros((3,), dtype=torch.float32).to(self.device)
 
     def forward(self, rays_d, rgb, opacity):
-        (b,h,w,c) = rays_d.shape
-        rays_d = rearrange(rays_d,'b h w c -> (b h w) c')
-        rgb = rearrange(rgb,'b h w c -> (b h w) c')
-        opacity = rearrange(opacity,'b h w c -> (b h w) c')
-
         if self.background_color_type == "random":
             self.color = torch.rand((3,), dtype=torch.float32).to(rays_d)
 
-        # Compute the linear combination of the color within the volume and background
-        if self.composite_in_linear_space:
-            rgb_linear = self.srgb_to_linear(rgb)
-            bckg_linear = self.srgb_to_linear(self.color)
+        rgb = rgb + self.color * (1.0 - opacity)
 
-            rgb = self.linear_to_srgb(rgb_linear + bckg_linear * (1.0 - opacity))
-
-        else:
-            rgb = rgb + self.color * (1.0 - opacity)
-
-        return rearrange(rgb,'(b h w) c -> b h w c', b=b, h=h, w=w, c=c), rearrange(opacity,'(b h w) c -> b h w c', b=b, h=h, w=w, c=1)
+        return rgb, opacity
 
 
 @models.register("skip-background")

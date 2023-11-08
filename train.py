@@ -21,6 +21,7 @@ from datasets.ncore_dataset import NCoreDataset
 from datasets.ncore_utils import Batch as NCoreBatch
 from datasets.utils import PointCloud
 from models.model import MixtureOfGaussians
+from models.background import BackgroundColor
 from datasets.utils import move_to_gpu
 from loss_utils import ssim
 from utils import to_np
@@ -45,9 +46,15 @@ def main(conf):
             conf.path, 
             split='train', 
             sample_full_image=conf.dataset.train.sample_full_image, 
-            batch_size=conf.dataset.train.batch_size
+            batch_size=conf.dataset.train.batch_size,
+            return_alphas=True
         )
-        val_dataset = NeRFDataset(conf.path, split='val', sample_full_image=True)
+        val_dataset = NeRFDataset(
+            conf.path, 
+            split='val', 
+            sample_full_image=True,
+            return_alphas=False
+        )
     elif conf.dataset.type == 'colmap':
         train_dataset = ColmapDataset(
             conf.path, 
@@ -344,6 +351,11 @@ def main(conf):
                 # Compute the outputs of a single batch
                 outputs = model(rays_ori, rays_dir)
                 
+                # Check if alphas are given and if the background is a fix color
+                if isinstance(model.background, BackgroundColor) and "alphas" in gpu_batch:
+                    alphas = gpu_batch["alphas"]
+                    rgb_gt = rgb_gt * alphas + model.background.color * (1 - alphas)
+
                 # Compute the loss
                 loss = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
                 writer.add_scalar("loss_l1/train", loss.item(), global_step)

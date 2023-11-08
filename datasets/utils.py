@@ -14,7 +14,7 @@ from datasets.ncore_utils import Batch as NCoreBatch, RayFlags as NCoreRayFlags
 DEFAULT_DEVICE = torch.device('cuda')
 
 def move_to_gpu(batch : dict | NCoreBatch) -> dict[str, torch.Tensor]:
-    gpu_batch: dict[str, torch.Tensor]  # expecting 'rays_ori', 'rays_dir', 'rgb_gt', optional 'sky_mask'
+    gpu_batch: dict[str, torch.Tensor]  # expecting 'rays_ori', 'rays_dir', 'rgb_gt', optional 'sky_mask', 'alphas'
 
     if isinstance(batch, dict):
         gpu_batch = {key: tensor.to(device=DEFAULT_DEVICE) for key,tensor in batch.items()}
@@ -28,11 +28,13 @@ def move_to_gpu(batch : dict | NCoreBatch) -> dict[str, torch.Tensor]:
             out_shape3 = (1, 1, len(batch.rays_cam), 3)
             out_shape1 = (1, 1, len(batch.rays_cam), 1)
 
-        gpu_batch = {}
-        gpu_batch["rays_ori"] = batch.rays_cam[:, :3].reshape(out_shape3).to(device=DEFAULT_DEVICE)
-        gpu_batch["rays_dir"] = batch.rays_cam[:, 3:6].reshape(out_shape3).to(device=DEFAULT_DEVICE)
-        gpu_batch["rgb_gt" ] = batch.labels.rgb.reshape(out_shape3).to(device=DEFAULT_DEVICE)
-        gpu_batch["sky_mask"] = batch.rays_cam_meta.get_mask_flags_all(NCoreRayFlags.SKY_SEMANTIC).reshape(out_shape1).to(device=DEFAULT_DEVICE)
+        gpu_batch = {
+             "rays_ori": batch.rays_cam[:, :3].reshape(out_shape3).to(device=DEFAULT_DEVICE),
+             "rays_dir": batch.rays_cam[:, 3:6].reshape(out_shape3).to(device=DEFAULT_DEVICE),
+             "rgb_gt": batch.labels.rgb.reshape(out_shape3).to(device=DEFAULT_DEVICE),
+             "sky_mask": batch.rays_cam_meta.get_mask_flags_all(NCoreRayFlags.SKY_SEMANTIC).reshape(out_shape1).to(device=DEFAULT_DEVICE),
+            # NCore doesn't support 'alpha' channels
+        }
 
     return gpu_batch
 
