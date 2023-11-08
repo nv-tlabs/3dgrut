@@ -50,7 +50,7 @@ def get_cmd_template(config, exp_name):
         "datasetMounts": [],
         "resultContainerMountPoint": config["ngc"]["result_path"],
         "runPolicy": {
-            "preemptClass": "RUNONCE"
+            "preemptClass": "RESUMABLE"
         },
         "team": "omniverse"
     }

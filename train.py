@@ -279,10 +279,10 @@ def main(conf):
     criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda")}
 
     # Initialize the tensorboard writer
-    if conf.experiment_name and os.path.exists(f'runs/{conf.experiment_name}'):
+    if conf.experiment_name and os.path.exists(f'{conf.out_dir}/{conf.experiment_name}'):
         logging.warning("The selected experiment name already exists and the checkpoints could be overwritten!")
 
-    writer = SummaryWriter(log_dir=f'runs/{conf.experiment_name}' if conf.experiment_name else None)
+    writer = SummaryWriter(log_dir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None)
 
     assert model.optimizer is not None, "Optimizer needs to be initialized before the training can start!"
     

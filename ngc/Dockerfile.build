@@ -16,7 +16,7 @@ RUN \
     add-apt-repository -y ppa:ubuntu-toolchain-r/test && \
     apt-get -y update -qq --fix-missing && \
     apt-get -y install --no-install-recommends \
-        build-essential git libgl1-mesa-glx wget ninja-build cmake \
+        build-essential git libgl1-mesa-glx wget ninja-build cmake screen nano vim mc htop tmux \
     && \
     rm -rf /var/lib/apt/lists/*
 
