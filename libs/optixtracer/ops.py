@@ -104,8 +104,9 @@ class _trace_mog_func(torch.autograd.Function):
             mog_sph,
             ray_radiance_grd,
             ray_density_grd,
-            ray_hit_distance_grd)
-        return None, None, None, mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, None
+            ray_hit_distance_grd
+        )
+        return None, None, None, mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd
 
 def trace_mog(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph):
     ray_radiance, ray_density, ray_hit_distance = _trace_mog_func.apply(
@@ -116,7 +117,8 @@ def trace_mog(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, m
         mog_rot,
         mog_scl,
         mog_dns,
-        mog_sph)
+        mog_sph
+    )
     return ray_radiance, ray_density, ray_hit_distance
 
 def trace_mog_grad(optix_ctx, ray_ori, ray_dir, ray_radiance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd):
@@ -132,7 +134,8 @@ def trace_mog_grad(optix_ctx, ray_ori, ray_dir, ray_radiance, mog_pos, mog_rot, 
         mog_sph,
         ray_radiance_grd,
         ray_density_grd,
-        ray_hit_distance_grd)
+        ray_hit_distance_grd
+    )
 
 #----------------------------------------------------------------------------
 #
@@ -159,7 +162,7 @@ class OptixMogTracingParams:
     max_num_slabs: int=64
     topk_hits: bool=False
     patch_size: int=1
-    sph_degree: int=3
+    sph_degree: int=0
     gaussian_sigma_threshold: float=3.0
     min_transmittance: float=0.03
     min__gaussian_response: float=0.01
