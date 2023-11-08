@@ -158,7 +158,7 @@ extern "C" __global__ void __raygen__rg()
 
             // NB : this is an approximation : we are using the sampleRayOri instead of the real rayOri we factorizing
             // the sph computation
-            const float3 grad = computeColorFromSH(sphDegree, gpos, sampleRayOri, gId, params);
+            // const float3 grad = computeColorFromSH(sphDegree, gpos, sampleRayOri, gId, params);
 
 #pragma unroll
             for (int j = 0; j < MOGTracingPatchSize; ++j)
@@ -169,6 +169,8 @@ extern "C" __global__ void __raygen__rg()
 
                     if (rayTrm[k][j] > minTransmittance)
                     {
+                        const float3 grad = computeColorFromSH(sphDegree, gpos, rayOri[k][j], gId, params);
+
                         const float3 gposc = (rayOri[k][j] - gpos);
                         const float3 gposcr = (gposc * grotMat);
                         const float3 gro = giscl * gposcr;
