@@ -206,6 +206,7 @@ class MixtureOfGaussians(torch.nn.Module):
         self.features_specular = checkpoint["features_specular"]
         self.n_active_features = checkpoint["n_active_features"]
         self.max_n_features = checkpoint["max_n_features"]
+        self.background.load_state_dict(checkpoint["background"])
         self.set_optimizable_parameters()
         self.setup_optimizer(state_dict=checkpoint['optimizer'])
         self.validate_fields()
@@ -517,6 +518,7 @@ class MixtureOfGaussians(torch.nn.Module):
             "rotation": self.rotation,
             "scale": self.scale,
             "density": self.density,
+            "background": self.background.state_dict(),
             # Add other attributes that we need at restore
             "n_active_features": self.n_active_features,
             "max_n_features": self.max_n_features,
