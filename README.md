@@ -34,7 +34,7 @@ The latter two packages `cuda-python` and `cupy` may very slow to install and/or
 
 ## NGC utils
 
-Based on [ngc-toolbox](https://gitlab-master.nvidia.com/jalucas/ngc-toolbox/-/tree/main?ref_type=heads) see more detailed REAME in `./ngc/README.md`
+Based on [ngc-toolbox](https://gitlab-master.nvidia.com/jalucas/ngc-toolbox/-/tree/main?ref_type=heads) see more detailed README in `./ngc/README.md`
 
 ### Prerequisites
 
