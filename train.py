@@ -294,7 +294,7 @@ def main(conf):
     assert model.optimizer is not None, "Optimizer needs to be initialized before the training can start!"
     
     for epoch_idx in range(n_epochs):
-        if epoch_idx % val_period == 0:
+        if epoch_idx > 0 and epoch_idx % val_period == 0:
             val_iteration = 0
             with tqdm(val_dataloader) as pbar:
                 pbar.set_description("Validation:" )
