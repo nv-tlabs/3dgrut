@@ -38,7 +38,23 @@ The latter two packages `cuda-python` and `cupy` may very slow to install and/or
 
 Based on [ngc-toolbox](https://gitlab-master.nvidia.com/jalucas/ngc-toolbox/-/tree/main?ref_type=heads) see more detailed REAME in `./ngc/README.md`
 
-### Updating Docker container
+### Prerequisites
+
+- [Request access to your NGC team](https://goo.gl/forms/IjKBiZRt4RYZcF3h1) (`omniverse` for the ovx A40 instances on OVC)
+    - Once approved, you will receive a sign-in link to set your password
+- [Download and install the NGC CLI](https://ngc.nvidia.com/setup/installers/cli)
+- [Install docker](https://docs.docker.com/get-docker/)
+
+### Setting up
+
+- [Generate an NGC API key](https://ngc.nvidia.com/configuration/api-key) (and keep it somewhere safe)
+- Set key in docker: `docker login -u \$oauthtoken -p <YOUR_API_KEY> nvcr.io `
+- Configure NGC CLI: `ngc config set`
+    - Input your API key when requested, choose the team `omniverse` and ace `nv-us-west-2`
+
+**You're ready to go!**
+
+### Updating Docker container (only if needed)
 ```bash
 python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml build_docker
 python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml push_docker
@@ -56,13 +72,13 @@ python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml unmount_workspace
 
 Syncing current version of code to workspace:
 ```bash
-python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml sync_workspace my_experiment_name
+python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml sync_workspace experiment_name
 ```
-This will create a copy of the code in the workspace, in the directory `experiments`.
+This will create a copy of the code in the workspace, in the directory `experiments/experiment_name`.
 
 ### Jobs
-Before any job, the command will execute `./ngc/ngc_prepare.sh`.
-
+Before any job, the command will execute `./ngc/ngc_pre_job.sh`.
+After any job, the command will execute `./ngc/ngc_post_job.sh`.
 
 Start an interactive job:
 ```bash
@@ -76,6 +92,11 @@ Runnig a normal job:
 python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml run_job "python train.py --arg1 value1 --arg2 value2" experiment_name
 ```
 
+The job will spin up on ngc, and should be visible on the [NGC dashboard](https://ngc.nvidia.com/dashboard).
+
+Note that syncing a workspace and running a normal job can be combined using the `submit_job` method:
+
+`python ./ngc/app.py --config ngc_config/3dgrt.toml submit_job "python train.py --arg1 value1 --arg2 value2" experiment_name`
 
 **A large batch of jobs**
 
