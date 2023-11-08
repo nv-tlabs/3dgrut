@@ -162,7 +162,7 @@ class OptixMogTracingParams:
     max_num_slabs: int=64
     topk_hits: bool=False
     patch_size: int=1
-    sph_degree: int=3
+    sph_degree: int=0
     gaussian_sigma_threshold: float=3.0
     min_transmittance: float=0.03
     min__gaussian_response: float=0.01
