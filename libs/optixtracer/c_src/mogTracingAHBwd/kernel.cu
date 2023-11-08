@@ -99,7 +99,7 @@ extern "C" __global__ void __raygen__rg()
             totalRayRad[j][i] =
                 make_float3(params.rayRad[idx.z][y][x][0], params.rayRad[idx.z][y][x][1], params.rayRad[idx.z][y][x][2]);
             rayRadGrd[j][i] =
-                make_float3(params.rayRad[idx.z][y][x][0], params.rayRad[idx.z][y][x][1], params.rayRad[idx.z][y][x][2]);
+                make_float3(params.rayRadGrd[idx.z][y][x][0], params.rayRadGrd[idx.z][y][x][1], params.rayRadGrd[idx.z][y][x][2]);
             accumulatedRayRad[j][i] = make_float3(0);
 
             rayDnsGrd[j][i] = params.rayDnsGrd[idx.z][y][x][0];
