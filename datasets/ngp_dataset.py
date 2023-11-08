@@ -395,9 +395,9 @@ class NGPDataset(Dataset):
             rgbs = self.rgb[idxs].astype(np.float32) / 255
 
             sample = {
-                "rays_o":rays_o.reshape(out_shape), 
-                "rays_d":rays_d.reshape(out_shape), 
-                "rgbs":rgbs.reshape(out_shape),
+                "rays_ori":rays_o.reshape(out_shape), 
+                "rays_dir":rays_d.reshape(out_shape), 
+                "rgb_gt":rgbs.reshape(out_shape),
             }
             if self.aux_data:
                 sample["sky_mask"]= (self.semantic_masks[idxs] == self.sky_class_id).squeeze().reshape(out_shape[0],out_shape[1],1)
@@ -431,9 +431,9 @@ class NGPDataset(Dataset):
 
 
             sample = {
-                "rays_o":rays_o, 
-                "rays_d":rays_d, 
-                "rgbs":rgbs
+                "rays_ori":rays_o, 
+                "rays_dir":rays_d, 
+                "rgb_gt":rgbs
             }
             return sample
 

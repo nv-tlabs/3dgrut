@@ -175,9 +175,9 @@ class ColmapDataset(Dataset):
             rays_d = torch.FloatTensor(rays_d)
 
             sample = {
-                "rays_o":rays_o.reshape(out_shape), 
-                "rays_d":rays_d.reshape(out_shape), 
-                "rgbs":rgb.reshape(out_shape)
+                "rays_ori":rays_o.reshape(out_shape), 
+                "rays_dir":rays_d.reshape(out_shape), 
+                "rgb_gt":rgb.reshape(out_shape)
             }
             return sample
         
@@ -197,8 +197,8 @@ class ColmapDataset(Dataset):
             assert self.sample_full_image, 'val mode assumes sampling full images'
 
             sample = {
-                "rays_o": rays_o.reshape(self.image_h,self.image_w,3),  
-                "rays_d": rays_d.reshape(self.image_h,self.image_w,3),
-                "rgbs": rgb.reshape(self.image_h,self.image_w,3)
+                "rays_ori": rays_o.reshape(self.image_h,self.image_w,3),  
+                "rays_dir": rays_d.reshape(self.image_h,self.image_w,3),
+                "rgb_gt": rgb.reshape(self.image_h,self.image_w,3)
             }
             return sample

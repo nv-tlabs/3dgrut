@@ -149,9 +149,9 @@ class NeRFDataset(Dataset):
             rays_o, rays_d = get_rays(directions, poses)
 
             sample = {
-                "rays_o":rays_o.reshape(out_shape), 
-                "rays_d":rays_d.reshape(out_shape), 
-                "rgbs":rgb.reshape(out_shape)
+                "rays_ori":rays_o.reshape(out_shape), 
+                "rays_dir":rays_d.reshape(out_shape), 
+                "rgb_gt":rgb.reshape(out_shape)
             }
             return sample
         
@@ -165,9 +165,9 @@ class NeRFDataset(Dataset):
 
 
                 sample = {
-                    "rays_o": rays_o.reshape(self.image_h,self.image_w,3),  
-                    "rays_d": rays_d.reshape(self.image_h,self.image_w,3),
-                    "rgbs": rgb.reshape(self.image_h,self.image_w,3)
+                    "rays_ori": rays_o.reshape(self.image_h,self.image_w,3),  
+                    "rays_dir": rays_d.reshape(self.image_h,self.image_w,3),
+                    "rgb_gt": rgb.reshape(self.image_h,self.image_w,3)
                 }
                 return sample
 
