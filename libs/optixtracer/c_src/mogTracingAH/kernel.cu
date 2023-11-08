@@ -7,15 +7,19 @@
 // license agreement from NVIDIA CORPORATION is strictly prohibited.
 //
 #include "../mogTracing/params.h"
-#include "../random_utils.h"
 #include "../mogTracing/utils.h"
 #include "../optix_utils.h"
+#include "../random_utils.h"
 #include "../ray_data.h"
 
 extern "C"
 {
     __constant__ MoGTracingParams params;
 }
+
+static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = MOGTRACING_MAXNUMHITS_PER_SLAB;
+static constexpr unsigned int MOGTracingSphDegree = MOGTRACING_SPH_DEGREE;
+static constexpr unsigned int MOGTracingPatchSize = MOGTRACING_PATCH_SIZE;
 
 struct RayPayload
 {
@@ -57,7 +61,7 @@ extern "C" __global__ void __raygen__rg()
     const uint3 idx = optixGetLaunchIndex();
     const uint3 dim = optixGetLaunchDimensions();
 
-    unsigned int rndSeed = tea<16>(dim.x*idx.y+idx.x, params.frameNumber);
+    unsigned int rndSeed = tea<16>(dim.x * idx.y + idx.x, params.frameNumber);
 
     float3 rayOri[MOGTracingPatchSize][MOGTracingPatchSize];
     float3 rayDir[MOGTracingPatchSize][MOGTracingPatchSize];
@@ -99,13 +103,13 @@ extern "C" __global__ void __raygen__rg()
     float transmit = 1.0f;
     RayPayload p;
 
-    while ((startT <= minMaxT.y) && (transmit > params.minTransmittance) && (numHits < params.maxNumHits))
+    while ((startT <= minMaxT.y) && (transmit > params.minTransmittance))
     {
         p.ahNumHits = 0;
-        #pragma unroll
-        for (int i=0;i<MoGTracingAHMaxNumHitPerSlab;++i)
+#pragma unroll
+        for (int i = 0; i < MoGTracingAHMaxNumHitPerSlab; ++i)
         {
-            p.ahHitTable[i] = make_float2(1e9,1e9);
+            p.ahHitTable[i] = make_float2(1e9, 1e9);
         }
 
         // TOOD : rework this jitter scheme, it is biased toward the center of the patch
@@ -114,10 +118,10 @@ extern "C" __global__ void __raygen__rg()
         {
             float3 sampleRayOriWeight = make_float3(0);
             float3 sampleRayDirWeight = make_float3(0);
-            #pragma unroll
+#pragma unroll
             for (int j = 0; j < MOGTracingPatchSize; ++j)
             {
-                #pragma unroll
+#pragma unroll
                 for (int i = 0; i < MOGTracingPatchSize; ++i)
                 {
                     const float3 sro = rnd3(rndSeed) + 1e-6;
@@ -130,7 +134,7 @@ extern "C" __global__ void __raygen__rg()
                 }
             }
             sampleRayOri /= sampleRayOriWeight;
-            sampleRayDir = safe_normalize(sampleRayDir/sampleRayDirWeight); 
+            sampleRayDir = safe_normalize(sampleRayDir / sampleRayDirWeight);
         }
 
         trace(&p, sampleRayOri, sampleRayDir, startT + epsT, startT + slabSpacing);
@@ -140,12 +144,14 @@ extern "C" __global__ void __raygen__rg()
             continue;
         }
 
+#ifndef MOGTRACING_TOPK_HITS
         // in case we got more hits than available slots, start the next ray from the last hit
         if (p.ahNumHits == MoGTracingAHMaxNumHitPerSlab)
         {
             startT = p.ahHitTable[p.ahNumHits - 1].x;
         }
         else
+#endif
         {
             startT += slabSpacing;
         }
@@ -169,7 +175,7 @@ extern "C" __global__ void __raygen__rg()
 
             // NB : this is an approximation : we are using the sampleRayOri instead of the real rayOri we factorizing
             // the sph computation
-            const float3 grad = computeColorFromSH(params.sphDegree, gpos, sampleRayOri, gId, params);
+            const float3 grad = computeColorFromSH<MOGTracingSphDegree>(gpos, sampleRayOri, gId, params);
 
 #pragma unroll
             for (int j = 0; j < MOGTracingPatchSize; ++j)
@@ -230,21 +236,23 @@ extern "C" __global__ void __anyhit__ah()
     const float hitT = MOGTracingDefaultMode & MOGTracingGaussianHit ?
                            computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params) :
                            optixGetRayTmax();
-    float2 ahHit = { hitT, uint_as_float(gId) };
-    if ((ahNumHits < MoGTracingAHMaxNumHitPerSlab) || (ahHit.x < ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x))
+    if (hitT < ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x)
     {
-        ahNumHits = min(ahNumHits + 1, MoGTracingAHMaxNumHitPerSlab); // increment num hit
-        #pragma unroll
-        for (int i=0;i<MoGTracingAHMaxNumHitPerSlab;++i)
+        float2 ahHit = { hitT, uint_as_float(gId) };
+#pragma unroll
+        for (int i = 0; i < MoGTracingAHMaxNumHitPerSlab; ++i)
         {
-            if(ahHit.x<ahHitTablePtr[i].x)
+            if (ahHit.x < ahHitTablePtr[i].x)
             {
                 const float2 swapHit = ahHitTablePtr[i];
                 ahHitTablePtr[i] = ahHit;
                 ahHit = swapHit;
             }
         }
-        optixSetPayload_0(ahNumHits);
+        if (ahNumHits < MoGTracingAHMaxNumHitPerSlab)
+        {
+            optixSetPayload_0(ahNumHits + 1);
+        }
         // report the last entry
         if (ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x != hitT)
         {

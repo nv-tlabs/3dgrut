@@ -243,7 +243,7 @@ class MixtureOfGaussians(torch.nn.Module):
             self.set_optimizable_parameters()
 
     def build_bvh(self):
-        optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), 3, True)
+        optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), True)
 
     def init_from_point_cloud(self, pc_path: str):
         pass

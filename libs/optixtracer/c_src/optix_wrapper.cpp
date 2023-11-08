@@ -74,8 +74,15 @@ static void getCuStringFromFile( std::string& cu, const char* filename )
     throw std::runtime_error( "Couldn't open source file " + std::string( filename ) );
 }
 
-static void getPtxFromCuString( std::string& ptx, const char* include_dir, const char* optix_include_dir, const char* cuda_include_dir, const char* cu_source, 
-    const char* name, const char** log_string )
+static void getPtxFromCuString( 
+    std::string& ptx, 
+    const char* include_dir, 
+    const char* optix_include_dir, 
+    const char* cuda_include_dir, 
+    const char* cu_source, 
+    const char* name, 
+    const std::vector<std::string>& defines,
+    const char** log_string )
 {
     // Create program
     nvrtcProgram prog = 0;
@@ -97,6 +104,11 @@ static void getPtxFromCuString( std::string& ptx, const char* include_dir, const
     for( const std::string& dir : include_dirs)
     {
         options.push_back( dir.c_str() );
+    }
+
+    for( const std::string& def : defines)
+    {
+        options.push_back( def.c_str() );
     }
 
     // Collect NVRTC options
@@ -130,17 +142,23 @@ static void getPtxFromCuString( std::string& ptx, const char* include_dir, const
     NVRTC_CHECK_ERROR( nvrtcDestroyProgram( &prog ) );
 }
 
-const char* getInputData( const char* filename, const char* include_dir, const char* optix_include_dir, 
-                          const char* cuda_include_dir, const char* name, size_t& dataSize, const char** log)
+const char* getInputData(const char* filename,
+                         const char* include_dir,
+                         const char* optix_include_dir,
+                         const char* cuda_include_dir,
+                         const char* name,
+                         size_t& dataSize,
+                         const std::vector<std::string>& defines,
+                         const char** log)
 {
-    if( log )
+    if (log)
         *log = NULL;
 
     std::string * ptx, cu;
     ptx = new std::string();
 
     getCuStringFromFile( cu, filename );
-    getPtxFromCuString( *ptx, include_dir, optix_include_dir, cuda_include_dir, cu.c_str(), name, log );
+    getPtxFromCuString( *ptx, include_dir, optix_include_dir, cuda_include_dir, cu.c_str(), name, defines, log );
     //getPtxFromCuString( *ptx, "", cu.c_str(), name, log );
 
     dataSize = ptx->size();
@@ -168,8 +186,15 @@ enum CreatePipelineFlags
     PipelineFlag_HasRG = 1<<4,
 };
 
-void createPipeline(const OptixDeviceContext context, const std::string& path, const std::string& cuda_path, 
-                const std::string& kernel_name, uint32_t flags, OptixModule* module, OptixPipeline* pipeline, OptixShaderBindingTable& sbt)
+void createPipeline(const OptixDeviceContext context,
+                    const std::string& path,
+                    const std::string& cuda_path,
+                    const std::vector<std::string>& defines,
+                    const std::string& kernel_name,
+                    uint32_t flags,
+                    OptixModule* module,
+                    OptixPipeline* pipeline,
+                    OptixShaderBindingTable& sbt)
 {
     char log[2048];
 
@@ -195,7 +220,7 @@ void createPipeline(const OptixDeviceContext context, const std::string& path, c
         std::string cuda_include_dir = cuda_path + "/include";
 
         const char* input = getInputData(shaderFile.c_str(), includeDir.c_str(), optix_include_dir.c_str(),
-                                         cuda_include_dir.c_str(), "kernel", inputSize, (const char**)&log);
+                                         cuda_include_dir.c_str(), "kernel", inputSize, defines, (const char**)&log);
         size_t sizeof_log = sizeof( log );
 
         OPTIX_CHECK_LOG( optixModuleCreateFromPTX(
@@ -381,10 +406,21 @@ void createPipeline(const OptixDeviceContext context, const std::string& path, c
         sbt.hitgroupRecordBase          = hitgroup_record;
         sbt.hitgroupRecordStrideInBytes = sizeof( HitGroupSbtRecord );
         sbt.hitgroupRecordCount         = 1;
-    }    
+    }
 }
 
-OptiXStateWrapper::OptiXStateWrapper(const std::string& path, const std::string& cuda_path)
+OptiXStateWrapper::OptiXStateWrapper(
+    const std::string& path, 
+    const std::string& cuda_path,
+    uint32_t maxHitsPerSlab,
+    uint32_t maxNumSlabs,
+    bool topKHits,
+    uint32_t patchSize,
+    uint32_t sphDegree,
+    float gaussianSigmaThreshold,
+    float minTransmittance,
+    float minGaussianResponse
+)
 {
     pState = new OptiXState();
     memset(pState, 0, sizeof(OptiXState));
@@ -408,8 +444,26 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path, const std::string&
         OPTIX_CHECK( optixDeviceContextCreate( cuCtx, &options, &pState->context ) );
     }
 
-    pState->maxNumHits = 1024;
-    pState->gaussianSigmaThreshold = 3.0f;
+    pState->maxHitsPerSlab = maxHitsPerSlab;
+    pState->maxNumSlabs = maxNumSlabs;
+    pState->topKHits = topKHits;
+    pState->patchSize = patchSize;
+    pState->sphDegree = sphDegree;
+    pState->gaussianSigmaThreshold = gaussianSigmaThreshold;
+    pState->minTransmittance = minTransmittance;
+    pState->minGaussianResponse = minGaussianResponse;
+
+    std::vector<std::string> defines;
+    if (pState)
+    {
+        defines.emplace_back("-DMOGTRACING_MAXNUMHITS_PER_SLAB=" + std::to_string(pState->maxHitsPerSlab));
+        defines.emplace_back("-DMOGTRACING_PATCH_SIZE=" + std::to_string(pState->patchSize));
+        defines.emplace_back("-DMOGTRACING_SPH_DEGREE=" + std::to_string(pState->sphDegree));
+        if (pState->topKHits)
+        {
+            defines.emplace_back("-DMOGTRACING_TOPK_HITS");
+        }
+    }
 
     //
     // Create pipelines
@@ -421,6 +475,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path, const std::string&
         pState->context, 
         path, 
         cuda_path, 
+        defines,
         "mogTracingCH",
         PipelineFlag_HasRG | PipelineFlag_HasMS | PipelineFlag_HasCH, 
         &pState->moduleMoGTracingCH, 
@@ -434,6 +489,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path, const std::string&
         pState->context, 
         path, 
         cuda_path, 
+        defines,
         "mogTracingAH",
         PipelineFlag_HasRG | PipelineFlag_HasAH, 
         &pState->moduleMoGTracingAH, 
@@ -447,6 +503,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path, const std::string&
         pState->context, 
         path, 
         cuda_path, 
+        defines,
         "mogTracingAHBwd",
         PipelineFlag_HasRG | PipelineFlag_HasAH, 
         &pState->moduleMoGTracingAHBwd, 
@@ -460,6 +517,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path, const std::string&
         pState->context, 
         path, 
         cuda_path, 
+        defines,
         "mogTracingIS",
         PipelineFlag_HasRG | PipelineFlag_HasAH | PipelineFlag_HasIS, 
         &pState->moduleMoGTracingIS, 

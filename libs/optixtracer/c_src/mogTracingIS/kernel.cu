@@ -16,6 +16,12 @@ extern "C"
     __constant__ MoGTracingParams params;
 }
 
+#ifdef MOGTRACING_MAXNUMHITS_PER_SLAB 
+static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = MOGTRACING_MAXNUMHITS_PER_SLAB;
+#else
+static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = 32;
+#endif
+
 struct RayPayload
 {
     unsigned int ahNumHits; // number of valid hits in ahHitTable
@@ -77,7 +83,7 @@ extern "C" __global__ void __raygen__rg()
 
     float currT = 0.f; //< starting at O and skipping samples before startT for ray coherence
 
-    while ((currT <= minMaxT.y) && (transmit > params.minTransmittance) ) //&& (numHits < params.maxNumHits))
+    while ((currT <= minMaxT.y) && (transmit > params.minTransmittance) ) 
     {
         if (currT + slabSpacing > startT)
         {

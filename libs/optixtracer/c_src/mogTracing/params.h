@@ -12,12 +12,6 @@
 
 #include <optix.h>
 
-
-static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = 32;
-static constexpr int MOGTracingDefaultMaxNumSlabs = 0; ///< maximum number of slabs for the full volume (0 encompass the full volume)
-
-static constexpr unsigned int MOGTracingPatchSize = 3;
-
 enum MOGTracingMode
 {
     MOGTracingModeNone = 0,
@@ -27,13 +21,6 @@ enum MOGTracingMode
 
 static constexpr int MOGPrimNumVert = 6; ///< octaHedron have 6 vertices
 static constexpr int MOGPrimNumTri = 8; ///< octaHedron have 8 triangles
-
-static constexpr float MOGTracingDefaultMinTransmittance = 0.03f;
-static constexpr float MOGTracingDefaultExpectedDistanceBetweenHit = 0.1f;
-static constexpr float MOGTracingDefaultMaxNumHits = 1024;
-static constexpr float MOGTracingDefaultHitMinGaussianResponse = 0.01f;
-
-static constexpr int MOGTracingDefaultSphDegree = 3; 
 
 enum MOGTracingPipeline
 {
@@ -60,12 +47,7 @@ struct MoGTracingParams
     OptixAabb aabb;
     float minTransmittance;
     float slabSpacing;
-
-    unsigned int maxNumHits;
     float hitMinGaussianResponse;
     uint2 frameBounds;
-    
     unsigned int frameNumber;
-    unsigned int sphDegree;
-    float2 pad;
 };

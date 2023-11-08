@@ -26,9 +26,9 @@ inline __device__ float3 getSphCoeff(TParams& params, int gId, int idx)
     return make_float3(params.mogSph[gId][off + 0], params.mogSph[gId][off + 1], params.mogSph[gId][off + 2]);
 }
 
-template <typename TParams>
+template <int deg, typename TParams>
 static __device__ float3 computeColorFromSH(
-    unsigned int deg, const float3& gpos, const float3& rori, uint32_t gId, TParams& params, bool clamped = true)
+    const float3& gpos, const float3& rori, uint32_t gId, TParams& params, bool clamped = true)
 {
     // The implementation is loosely based on code for
     // "Differentiable Point-Based Radiance Fields for
@@ -80,9 +80,8 @@ inline __device__ void addSphCoeffGrd(TParams& params, int gId, int idx, const f
     atomicAdd(&params.mogSphGrd[gId][off + 2], val.z);
 }
 
-template <typename TParams>
-__device__ float3 computeColorFromSHBwd(unsigned int deg,
-                                        const float3& rori,
+template <int deg, typename TParams>
+__device__ float3 computeColorFromSHBwd(const float3& rori,
                                         uint32_t gId,
                                         const float3& gpos,
                                         float weight,
@@ -90,7 +89,7 @@ __device__ float3 computeColorFromSHBwd(unsigned int deg,
                                         TParams& params)
 {
     // radiance unclamped
-    const float3 gradu = computeColorFromSH(deg, gpos, rori, gId, params, false);
+    const float3 gradu = computeColorFromSH<deg>(gpos, rori, gId, params, false);
 
     // clamped radiance
     const float3 grad = make_float3(gradu.x > SHRadMinBound ? gradu.x : expf(gradu.x - SHRadMinBound) * SHRadMinBound,
