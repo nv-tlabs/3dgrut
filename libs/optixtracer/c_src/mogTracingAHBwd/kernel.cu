@@ -16,6 +16,9 @@ extern "C"
     __constant__ MoGTracingBwdParams params;
 }
 
+static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = MOGTRACING_MAXNUMHITS_PER_SLAB;
+static constexpr unsigned int MOGTracingSphDegree = MOGTRACING_SPH_DEGREE;
+
 struct RayPayload
 {
     unsigned int ahNumHits; // number of valid hits in ahHitTable
@@ -83,7 +86,7 @@ extern "C" __global__ void __raygen__rg()
 
     float3 accumulatedRayRad = make_float3(0);
 
-    while ((startT <= minMaxT.y) && (transmit > params.minTransmittance) && (numHits < params.maxNumHits))
+    while ((startT <= minMaxT.y) && (transmit > params.minTransmittance))
     {
         p.ahNumHits = 0;
         trace(&p, rayOri, rayDir, startT + epsT, startT + slabSpacing);
@@ -127,24 +130,16 @@ extern "C" __global__ void __raygen__rg()
             const float grayDist = dot(gcrod, gcrod);
             const float gres = expf(-0.5f * grayDist);
             const float galpha = gres * gdns;
-            
+
             const float weight = galpha * transmit;
 
             // NB : no gradient wrt d_rayDns assert(rayDnsGrd==0)
-            
+
             // gradient computation wrt rayRad
 
             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
             // compute the gradient wrt to the sph coefficients and position (through the sph view direction)
-            const float3 grad = computeColorFromSHBwd(
-                params.sphDegree,
-                rayOri,
-                gId,
-                gpos,
-                weight,
-                rayRadGrd,
-                params
-            );
+            const float3 grad = computeColorFromSHBwd<MOGTracingSphDegree>(rayOri, gId, gpos, weight, rayRadGrd, params);
 
             // >>> rayRadiance = accumulatedRayRad + weigth * rayRad + (1-galpha)*transmit * residualRayRad
             const float3 rayRad = weight * grad;
@@ -245,7 +240,7 @@ extern "C" __global__ void __raygen__rg()
             atomicAdd(&params.mogRotGrd[gId][3], grotGrdPoscr.w + grotGrdRayDirR.w);
 
             transmit = nextTransmit;
-            
+
             numHits++;
         }
     }

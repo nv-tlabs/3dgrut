@@ -6,5 +6,5 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
-from .ops import OptiXContext, build_mog_bvh, trace_mog, trace_mog_grad
-__all__ = ["OptiXContext", "build_mog_bvh", "trace_mog", "trace_mog_grad"]
+from .ops import OptixMogTracingParams, OptiXContext, build_mog_bvh, trace_mog, trace_mog_grad
+__all__ = ["OptixMogTracingParams", "OptiXContext", "build_mog_bvh", "trace_mog", "trace_mog_grad"]

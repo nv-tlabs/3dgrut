@@ -8,6 +8,7 @@
 #
 
 import os
+from dataclasses import dataclass
 import torch
 import torch.utils.cpp_extension
 
@@ -139,31 +140,47 @@ def trace_mog_grad(optix_ctx, ray_ori, ray_dir, ray_radiance, mog_pos, mog_rot, 
 #----------------------------------------------------------------------------
 #
 def build_mog_bvh(
-        optix_ctx, 
-        mog_pos, 
-        mog_rot, 
-        mog_scl, 
-        enclosing_sigma_factor_threshold, 
-        rebuild, 
-        max_num_hits=1024
+        optix_ctx,
+        mog_pos,
+        mog_rot,
+        mog_scl,
+        rebuild
 ):
     _plugin.build_mog_bvh(
         optix_ctx.cpp_wrapper,
         mog_pos.view(-1, 3),
         mog_rot.view(-1, 4),
         mog_scl.view(-1, 3),
-        enclosing_sigma_factor_threshold,
-        rebuild,
-        max_num_hits
+        rebuild
     )
 
 #----------------------------------------------------------------------------
 #
+@dataclass
+class OptixMogTracingParams:
+    max_hit_per_slab: int=32
+    max_num_slabs: int=64
+    topk_hits: bool=False
+    patch_size: int=3
+    sph_degree: int=3
+    gaussian_sigma_threshold: float=3.0
+    min_transmittance: float=0.03
+    min__gaussian_response: float=0.01
+
+
 class OptiXContext:
-    def __init__(self):
+    def __init__(self,params:OptixMogTracingParams=OptixMogTracingParams()):
         print("Cuda path", torch.utils.cpp_extension.CUDA_HOME)
         torch.zeros(1, device='cuda') # Create a dummy tensor to force cuda context init
         self.cpp_wrapper = _plugin.OptiXStateWrapper(
             os.path.dirname(__file__), 
-            torch.utils.cpp_extension.CUDA_HOME
+            torch.utils.cpp_extension.CUDA_HOME,
+            params.max_hit_per_slab,
+            params.max_num_slabs,
+            params.topk_hits,
+            params.patch_size,
+            params.sph_degree,
+            params.gaussian_sigma_threshold,
+            params.min_transmittance,
+            params.min__gaussian_response
         )

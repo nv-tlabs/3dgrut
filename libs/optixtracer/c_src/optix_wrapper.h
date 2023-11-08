@@ -17,8 +17,15 @@ struct OptiXState
     OptixTraversableHandle gasHandle;
     CUdeviceptr            gasBuffer;
     OptixAabb gasAABB;
-    uint32_t maxNumHits;
+
+    uint32_t maxHitsPerSlab;
+    uint32_t maxNumSlabs;
+    bool topKHits;
+    uint32_t patchSize;
+    uint32_t sphDegree;
     float gaussianSigmaThreshold;
+    float minTransmittance;
+    float minGaussianResponse;
     
     uint32_t gPrimNumTri; ///< number of triangles per gaussian primitive
     CUdeviceptr gPrimVrt; ///< buffer containing the vertices of the gaussian primitive
@@ -50,7 +57,18 @@ struct OptiXState
 class OptiXStateWrapper
 {
 public:
-    OptiXStateWrapper     (const std::string& path, const std::string& cuda_path);
+    OptiXStateWrapper     (
+        const std::string& path, 
+        const std::string& cuda_path,
+        uint32_t maxHitsPerSlab,
+        uint32_t maxNumSlabs,
+        bool topKHits,
+        uint32_t patchSize,
+        uint32_t sphDegree,
+        float gaussianSigmaThreshold,
+        float minTransmittance,
+        float minGaussianResponse
+    );
     ~OptiXStateWrapper    (void);
     
     OptiXState*           pState;
