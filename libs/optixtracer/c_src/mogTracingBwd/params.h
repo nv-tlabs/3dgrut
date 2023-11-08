@@ -35,7 +35,11 @@ struct MoGTracingBwdParams
     OptixAabb aabb;
     float minTransmittance;
     float slabSpacing;
+
     float hitMinGaussianResponse;
+    float sphDegree;
     uint2 frameBounds;
+    
     unsigned int frameNumber;
+    float3 padding;
 };

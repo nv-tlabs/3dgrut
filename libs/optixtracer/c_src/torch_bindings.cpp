@@ -280,7 +280,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
 
     paramsHost.aabb = stateWrapper.pState->gasAABB;
     paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, stateWrapper.pState->maxNumSlabs);
-
+    paramsHost.sphDegree = stateWrapper.pState->sphDegree;
+    
     paramsHost.frameBounds.x = rayOri.size(2) - 1;
     paramsHost.frameBounds.y = rayOri.size(1) - 1;
     paramsHost.frameNumber = 0;
@@ -361,6 +362,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 
     paramsHost.aabb = stateWrapper.pState->gasAABB;
     paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, stateWrapper.pState->maxNumSlabs);
+    paramsHost.sphDegree = stateWrapper.pState->sphDegree;
 
     paramsHost.frameBounds.x = rayOri.size(2) - 1;
     paramsHost.frameBounds.y = rayOri.size(1) - 1;
@@ -387,8 +389,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     // State classes.
     pybind11::class_<OptiXStateWrapper>(m, "OptiXStateWrapper")
-        .def(pybind11::init<const std::string&, const std::string&, uint32_t, uint32_t, bool, uint32_t, uint32_t, float,
-                            float, float>());
+        .def(pybind11::init<const std::string&, const std::string&, uint32_t, uint32_t, bool, uint32_t, uint32_t, float,float, float>())
+        .def("set_sph_degree", &OptiXStateWrapper::setSphDegree, R"()",py::arg("degree"));
     m.def("build_mog_bvh", &build_mog_bvh, "build_mog_bvh");
     m.def("trace_mog", &trace_mog, "trace_mog");
     m.def("trace_mog_bwd", &trace_mog_bwd, "trace_mog_bwd");

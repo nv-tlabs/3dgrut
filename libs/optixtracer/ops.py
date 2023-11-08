@@ -184,3 +184,7 @@ class OptiXContext:
             params.min_transmittance,
             params.min__gaussian_response
         )
+    
+    def set_sph_degree(self, degree:int):
+        self.cpp_wrapper.set_sph_degree(degree)
+

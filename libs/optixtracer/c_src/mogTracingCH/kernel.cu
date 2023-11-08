@@ -16,8 +16,6 @@ extern "C"
     __constant__ MoGTracingParams params;
 }
 
-static constexpr unsigned int MOGTracingSphDegree = MOGTRACING_SPH_DEGREE;
-
 struct RayPayload
 {
     float hitT;
@@ -57,6 +55,8 @@ extern "C" __global__ void __raygen__rg()
     const float3 rayDir = make_float3(params.rayDir[idx.z][idx.y][idx.x][0], params.rayDir[idx.z][idx.y][idx.x][1],
                                       params.rayDir[idx.z][idx.y][idx.x][2]);
 
+    const int sphDegree = params.sphDegree;
+
     float hitDistance = 0;
     float3 radiance = make_float3(0);
     uint32_t numHits = 0;
@@ -94,7 +94,7 @@ extern "C" __global__ void __raygen__rg()
         const float grayDir = dot(gcrod, gcrod);
         const float gres = expf(-0.5 * grayDir);
         const float galpha = gres * gdns;
-        const float3 grad = computeColorFromSH<MOGTracingSphDegree>(gpos, rayOri, gId, params);
+        const float3 grad = computeColorFromSH(sphDegree, gpos, rayOri, gId, params);
         
         const float weight = galpha * transmit;
         radiance = radiance + grad * weight;
