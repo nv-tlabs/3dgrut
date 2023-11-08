@@ -56,7 +56,7 @@ def main(conf):
         if return_rendering_results:
             return pred_rgb, pred_opacity, pred_ohit
 
-        gt = torch.rand_like(pred_rgb).detach()
+        gt = torch.ones_like(pred_rgb).detach()
 
         return 0.5*(pred_rgb - gt)**2
 
