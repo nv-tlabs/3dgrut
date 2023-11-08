@@ -1,1 +1,2 @@
 thirdparty/ncore/ncore-0.6.6-py3-none-any.whl filter=lfs diff=lfs merge=lfs -text
+thirdparty/tinycudann/tinycudann-1.7+cu118-cp311-cp311-linux_x86_64.whl filter=lfs diff=lfs merge=lfs -text
