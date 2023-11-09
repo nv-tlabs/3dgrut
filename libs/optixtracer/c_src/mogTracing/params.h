@@ -27,7 +27,9 @@ enum MOGTracingPipeline
     MOGTracingPipelineCH = 0,
     MOGTracingPipelineAH = 1,
     MOGTracingPipelineIS = 2,
-    MOGTracingPipelineMLAT = 3
+    MOGTracingPipelineMLAT = 3,
+    MOGTracingPipelineMBOIT = 4,
+    MOGTracingPipelineHC = 5
 };
 
 struct MoGTracingParams
@@ -42,6 +44,7 @@ struct MoGTracingParams
     PackedTensorAccessor32<float, 4> rayRad; ///< output integrated ray radiance
     PackedTensorAccessor32<float, 4> rayDns; ///< output integrated ray density
     PackedTensorAccessor32<float, 4> rayHit; ///< output estimated ray hit distance
+    PackedTensorAccessor32<float, 2> mogHitCount; ///< output (only in HC pipeline) number of ray hits per mog
     OptixTraversableHandle handle;
 
     OptixAabb aabb;

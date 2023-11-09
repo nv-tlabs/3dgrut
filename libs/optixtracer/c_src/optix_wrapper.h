@@ -58,6 +58,16 @@ struct OptiXState
     OptixShaderBindingTable sbtMoGTracingMLAT;
     OptixModule moduleMoGTracingMLAT;
 
+    // any hit mboit pipeline
+    OptixPipeline pipelineMoGTracingMBOIT;
+    OptixShaderBindingTable sbtMoGTracingMBOIT;
+    OptixModule moduleMoGTracingMBOIT;
+
+    // any hit count pipeline
+    OptixPipeline pipelineMoGTracingHC;
+    OptixShaderBindingTable sbtMoGTracingHC;
+    OptixModule moduleMoGTracingHC;
+
 };
 
 class OptiXStateWrapper
@@ -83,6 +93,14 @@ public:
         if (pState)
         {
             pState->sphDegree = degree;
+        }
+    }
+
+    void setPipeline(int pipeline)
+    {
+        if (pState)
+        {
+            pState->pipeline = pipeline;
         }
     }
     
