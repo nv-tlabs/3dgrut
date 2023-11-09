@@ -4,18 +4,18 @@ resume: ""
 out_dir: "runs"
 n_iterations: 30000
 with_gui: false
-val_frequency: 1
+val_frequency: 100
 
 dataset:
-  type: colmap
+  type: nerf
   downsample_factor: 1  # for datasets that include multi-scale versions of images [colmap]
   
   train:
     batch_size: 8192
-    sample_full_image: False
+    sample_full_image: True
   
 initialization:
-  method: point_cloud      # one of [colmap, point_cloud, random]
+  method: random      # one of [colmap, point_cloud, random]
   num_gaussians: 100_000   # method=random only: number of initial gaussians to use
 
 model:
@@ -31,7 +31,7 @@ model:
   progressive_training:
     feature_type: 'sh'        # one of [sh, mlp], currently only sh supported
     init_n_features: 0        # sh: initial sh deg | mlp: num of dims initially unmasked
-    max_n_features: 0 # 3         # sh: maximum sh deg | mlp: total num of dims finally unmasked
+    max_n_features: 3 # 3         # sh: maximum sh deg | mlp: total num of dims finally unmasked
     increase_frequency: 1000  # unmask more feature dimensions every N global steps
     increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
     

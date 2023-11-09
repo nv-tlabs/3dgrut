@@ -35,7 +35,7 @@ logging.addLevelName( logging.ERROR, "\033[1;41m%s\033[1;0m" % logging.getLevelN
 def main(conf):
     # Run the training process
     n_iterations = 10e4
-    val_period = 1
+    val_frequency = conf.val_frequency
     use_ssim = False
     scene_extent = 1.
     train_collate_fn = None
@@ -294,7 +294,7 @@ def main(conf):
     assert model.optimizer is not None, "Optimizer needs to be initialized before the training can start!"
     
     for epoch_idx in range(n_epochs):
-        if epoch_idx > 0 and epoch_idx % val_period == 0:
+        if epoch_idx > 0 and epoch_idx % val_frequency == 0:
             val_iteration = 0
             with tqdm(val_dataloader) as pbar:
                 pbar.set_description("Validation:" )
