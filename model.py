@@ -538,6 +538,19 @@ class MixtureOfGaussians(torch.nn.Module):
 
         return model_params
 
+    @torch.no_grad()
+    def get_hit_counts(self, rays_o: torch.Tensor, rays_d: torch.Tensor):
+        mog_counts = optixtracer.count_mog_hits(
+            self.optix_ctx, 
+            rays_o, 
+            rays_d, 
+            self.positions, 
+            self.get_rotation(), 
+            self.get_scale(),
+            self.get_density()
+        )
+        return mog_counts 
+    
     def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
 
         # The feature mask zeros out feature dims the model shouldn't use yet.

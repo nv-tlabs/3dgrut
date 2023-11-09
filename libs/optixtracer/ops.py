@@ -138,16 +138,15 @@ def trace_mog_grad(optix_ctx, ray_ori, ray_dir, ray_radiance, mog_pos, mog_rot, 
         ray_hit_distance_grd
     )
 
-def count_mog_hits(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph):
-    mog_hit_counts = _trace_mog_func.apply(
-        optix_ctx,
+def count_mog_hits(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns):
+    mog_hit_counts = _plugin.count_mog_hits(
+        optix_ctx.cpp_wrapper,
         ray_ori,
         ray_dir,
         mog_pos,
         mog_rot,
         mog_scl,
-        mog_dns,
-        mog_sph
+        mog_dns
     )
     return mog_hit_counts
 

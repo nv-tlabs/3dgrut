@@ -415,8 +415,7 @@ torch::Tensor count_mog_hits(OptiXStateWrapper& stateWrapper,
                              torch::Tensor mogPos,
                              torch::Tensor mogRot,
                              torch::Tensor mogScl,
-                             torch::Tensor mogDns,
-                             torch::Tensor mogSph)
+                             torch::Tensor mogDns)
 {
     const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
     torch::Tensor mogHitCount = torch::zeros({ mogDns.size(0), mogDns.size(1) }, opts);
@@ -429,7 +428,6 @@ torch::Tensor count_mog_hits(OptiXStateWrapper& stateWrapper,
     paramsHost.mogRot = packed_accessor32<float, 2>(mogRot);
     paramsHost.mogScl = packed_accessor32<float, 2>(mogScl);
     paramsHost.mogDns = packed_accessor32<float, 2>(mogDns);
-    paramsHost.mogSph = packed_accessor32<float, 2>(mogSph);
     paramsHost.mogHitCount = packed_accessor32<float, 2>(mogHitCount);
 
     paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
@@ -470,4 +468,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     m.def("build_mog_bvh", &build_mog_bvh, "build_mog_bvh");
     m.def("trace_mog", &trace_mog, "trace_mog");
     m.def("trace_mog_bwd", &trace_mog_bwd, "trace_mog_bwd");
+    m.def("count_mog_hits", &count_mog_hits, "count_mog_hits");
 }
