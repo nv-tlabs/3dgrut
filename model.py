@@ -203,6 +203,9 @@ class MixtureOfGaussians(torch.nn.Module):
         self.features_specular = checkpoint["features_specular"]
         self.n_active_features = checkpoint["n_active_features"]
         self.max_n_features = checkpoint["max_n_features"]
+        if self.progressive_training:
+            self.feature_dim_increase_interval = checkpoint["feature_dim_increase_interval"]
+            self.feature_dim_increase_step = checkpoint["feature_dim_increase_step"]
         self.background.load_state_dict(checkpoint["background"])
         self.set_optimizable_parameters()
         self.setup_optimizer(state_dict=checkpoint['optimizer'])
@@ -519,13 +522,20 @@ class MixtureOfGaussians(torch.nn.Module):
             # Add other attributes that we need at restore
             "n_active_features": self.n_active_features,
             "max_n_features": self.max_n_features,
+            "progressive_training": self.progressive_training,
             # Add optimizer state dict
             "optimizer": self.optimizer.state_dict(),
             "config": self.conf
         }
+
+        if self.progressive_training:
+            model_params["feature_dim_increase_interval"] = self.feature_dim_increase_interval
+            model_params["feature_dim_increase_step"] = self.feature_dim_increase_step
+
         if self.feature_type == 'sh':
             model_params["features_albedo"] = self.features_albedo
             model_params["features_specular"] = self.features_specular
+
         return model_params
 
     def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
