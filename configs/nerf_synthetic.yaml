@@ -86,6 +86,8 @@ optimizer:
       lr: 0.001 # 3DGS value: 0.001
     scale:
       lr: 0.005 # 3DGS value: 0.005
+    background:
+      lr: 0.01
 
 scheduler:
   positions:

@@ -1,9 +1,10 @@
 path: ???
 experiment_name: ""
 resume: ""
+out_dir: "runs"
 n_iterations: 30000
 with_gui: false
-val_frequency: 10
+val_frequency: 1
 num_workers: 8
 
 dataset:
@@ -30,12 +31,12 @@ model:
   progressive_training:
     feature_type: 'sh'        # one of [sh, mlp], currently only sh supported
     init_n_features: 0        # sh: initial sh deg | mlp: num of dims initially unmasked
-    max_n_features: 3 # 3         # sh: maximum sh deg | mlp: total num of dims finally unmasked
+    max_n_features: 0 # 3         # sh: maximum sh deg | mlp: total num of dims finally unmasked
     increase_frequency: 1000  # unmask more feature dimensions every N global steps
     increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
 
 
-  lambda_background: 0.01
+  lambda_background: 0.05 # NRE uses 0.05
   background:
     name: sky-mlp
     dir_encoding_config:
@@ -84,7 +85,7 @@ optimizer:
   eps: 1.e-15
   params:
     positions:
-      lr: 0.01 # 3DGS value: 0.00016 initial and decayed to 0.00016
+      lr: 0.01 # 3DGS value: 0.01 initial and decayed to 0.00016
     density:
       lr: 0.05 # 3DGS value: 0.05
     features_albedo:
