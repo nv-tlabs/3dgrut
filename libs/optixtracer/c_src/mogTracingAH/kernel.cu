@@ -17,13 +17,14 @@ extern "C"
     __constant__ MoGTracingParams params;
 }
 
+static constexpr unsigned int MoGTracingHitMode = MOGTRACING_HIT_MODE;
 static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = MOGTRACING_MAXNUMHITS_PER_SLAB;
 static constexpr unsigned int MOGTracingPatchSize = MOGTRACING_PATCH_SIZE;
 
 struct RayPayload
 {
     unsigned int ahNumHits; // number of valid hits in ahHitTable
-    float2 ahHitTable[MoGTracingAHMaxNumHitPerSlab]; // hit data : x = hitT, y = triId
+    float2 ahHitTable[MoGTracingAHMaxNumHitPerSlab]; // hit data : x = hitT, y = gId
 };
 
 static __device__ __inline__ float2 intersectAABB(const OptixAabb& aabb, const float3& rayOri, const float3& rayDir)
@@ -60,7 +61,8 @@ extern "C" __global__ void __raygen__rg()
     const uint3 idx = optixGetLaunchIndex();
     const uint3 dim = optixGetLaunchDimensions();
 
-    unsigned int rndSeed = tea<16>(dim.x * idx.y + idx.x, params.frameNumber);
+    // Need for potential jittering
+    // unsigned int rndSeed = tea<16>(dim.x * idx.y + idx.x, params.frameNumber);
 
     float3 rayOri[MOGTracingPatchSize][MOGTracingPatchSize];
     float3 rayDir[MOGTracingPatchSize][MOGTracingPatchSize];
@@ -97,14 +99,15 @@ extern "C" __global__ void __raygen__rg()
     const float slabSpacing = params.slabSpacing;
     float startT = fmaxf(0.0f, minMaxT.x - epsT);
 
+    const float minTransmittance = params.minTransmittance;
     const int sphDegree = params.sphDegree;
-    
+
     float hitDistance = 0;
     uint32_t numHits = 0;
     float transmit = 1.0f;
     RayPayload p;
 
-    while ((startT <= minMaxT.y) && (transmit > params.minTransmittance))
+    while ((startT <= minMaxT.y) && (transmit > minTransmittance))
     {
         p.ahNumHits = 0;
 #pragma unroll
@@ -113,30 +116,9 @@ extern "C" __global__ void __raygen__rg()
             p.ahHitTable[i] = make_float2(1e9, 1e9);
         }
 
-        // TOOD : rework this jitter scheme, it is biased toward the center of the patch
-        float3 sampleRayOri = make_float3(0);
-        float3 sampleRayDir = make_float3(0);
-        {
-            float3 sampleRayOriWeight = make_float3(0);
-            float3 sampleRayDirWeight = make_float3(0);
-#pragma unroll
-            for (int j = 0; j < MOGTracingPatchSize; ++j)
-            {
-#pragma unroll
-                for (int i = 0; i < MOGTracingPatchSize; ++i)
-                {
-                    const float3 sro = rnd3(rndSeed) + 1e-6;
-                    sampleRayOri += sro * rayOri[j][i];
-                    sampleRayOriWeight += sro;
-
-                    const float3 srd = rnd3(rndSeed) + 1e-6;
-                    sampleRayDir += srd * rayDir[j][i];
-                    sampleRayDirWeight += srd;
-                }
-            }
-            sampleRayOri /= sampleRayOriWeight;
-            sampleRayDir = safe_normalize(sampleRayDir / sampleRayDirWeight);
-        }
+        // TODO : add a GOOD ray jittering scheme over the patch (not bounded by the convex hull of the rayDirs if possible)
+        const float3 sampleRayOri = rayOri[MOGTracingPatchSize/2][MOGTracingPatchSize/2];
+        const float3 sampleRayDir = rayDir[MOGTracingPatchSize/2][MOGTracingPatchSize/2];
 
         trace(&p, sampleRayOri, sampleRayDir, startT + epsT, startT + slabSpacing);
         if (p.ahNumHits == 0)
@@ -157,7 +139,7 @@ extern "C" __global__ void __raygen__rg()
             startT += slabSpacing;
         }
 
-        for (int i = 0; (i < p.ahNumHits) && (transmit > params.minTransmittance); i++)
+        for (int i = 0; (i < p.ahNumHits) && (transmit > minTransmittance); i++)
         {
             transmit = 0.0f;
 
@@ -176,7 +158,7 @@ extern "C" __global__ void __raygen__rg()
 
             // NB : this is an approximation : we are using the sampleRayOri instead of the real rayOri we factorizing
             // the sph computation
-            const float3 grad = computeColorFromSH(sphDegree, gpos, sampleRayOri, gId, params);
+            // const float3 grad = computeColorFromSH(sphDegree, gpos, sampleRayOri, gId, params);
 
 #pragma unroll
             for (int j = 0; j < MOGTracingPatchSize; ++j)
@@ -184,28 +166,34 @@ extern "C" __global__ void __raygen__rg()
 #pragma unroll
                 for (int k = 0; k < MOGTracingPatchSize; ++k)
                 {
-                    const float3 gposc = (rayOri[k][j] - gpos);
-                    const float3 gposcr = (gposc * grotMat);
-                    const float3 gro = giscl * gposcr;
-                    const float3 rayDirR = rayDir[k][j] * grotMat;
-                    const float3 grdu = giscl * rayDirR;
-                    const float3 grd = safe_normalize(grdu);
-                    const float3 gcrod = cross(grd, gro);
-                    const float grayDir = dot(gcrod, gcrod);
-                    const float gres = expf(-0.5 * grayDir);
-                    const float galpha = gres * gdns;
 
-                    const float weight = galpha * rayTrm[k][j];
+                    if (rayTrm[k][j] > minTransmittance)
+                    {
+                        const float3 grad = computeColorFromSH(sphDegree, gpos, rayOri[k][j], gId, params);
 
-                    rayRad[k][j] += grad * weight;
-                    hitDistance += p.ahHitTable[i].x * weight;
-                    rayTrm[k][j] *= (1 - galpha);
+                        const float3 gposc = (rayOri[k][j] - gpos);
+                        const float3 gposcr = (gposc * grotMat);
+                        const float3 gro = giscl * gposcr;
+                        const float3 rayDirR = rayDir[k][j] * grotMat;
+                        const float3 grdu = giscl * rayDirR;
+                        const float3 grd = safe_normalize(grdu);
+                        const float3 gcrod = cross(grd, gro);
+                        const float grayDir = dot(gcrod, gcrod);
+                        const float gres = expf(-0.5 * grayDir);
+                        const float galpha = gres * gdns;
 
-                    transmit = fmaxf(transmit, rayTrm[k][j]);
+                        const float weight = galpha * rayTrm[k][j];
+
+                        rayRad[k][j] += grad * weight;
+                        hitDistance += p.ahHitTable[i].x * weight;
+                        rayTrm[k][j] *= (1 - galpha);
+
+                        transmit = fmaxf(transmit, rayTrm[k][j]);
+                    }
                 }
-            }
 
-            numHits++;
+                numHits++;
+            }
         }
     }
 
@@ -234,7 +222,7 @@ extern "C" __global__ void __anyhit__ah()
         reinterpret_cast<float2*>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
     unsigned int ahNumHits = optixGetPayload_0();
     const unsigned int gId = optixGetPrimitiveIndex() / MOGPrimNumTri;
-    const float hitT = MOGTracingDefaultMode & MOGTracingGaussianHit ?
+    const float hitT = MoGTracingHitMode == MOGTracingGaussianHit ?
                            computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params) :
                            optixGetRayTmax();
     if (hitT < ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x)

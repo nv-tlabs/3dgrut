@@ -18,6 +18,8 @@ struct OptiXState
     CUdeviceptr            gasBuffer;
     OptixAabb gasAABB;
 
+    uint32_t pipeline;
+    uint32_t hitMode;
     uint32_t maxHitsPerSlab;
     uint32_t maxNumSlabs;
     bool topKHits;
@@ -25,7 +27,6 @@ struct OptiXState
     uint32_t sphDegree;
     float gaussianSigmaThreshold;
     float minTransmittance;
-    float minGaussianResponse;
     
     uint32_t gPrimNumTri; ///< number of triangles per gaussian primitive
     CUdeviceptr gPrimVrt; ///< buffer containing the vertices of the gaussian primitive
@@ -47,10 +48,15 @@ struct OptiXState
     OptixShaderBindingTable sbtMoGTracingAHBwd;
     OptixModule moduleMoGTracingAHBwd;
 
-    // any hit forward pipeline : the scene is iteratively traced for any hit on ray stabs. The candidate hits are sorted and accumulated in the raygen shader.
+    // any hit intersection shader pipeline 
     OptixPipeline pipelineMoGTracingIS;
     OptixShaderBindingTable sbtMoGTracingIS;
     OptixModule moduleMoGTracingIS;
+
+    // any hit multi-layer alpha tracing pipeline
+    OptixPipeline pipelineMoGTracingMLAT;
+    OptixShaderBindingTable sbtMoGTracingMLAT;
+    OptixModule moduleMoGTracingMLAT;
 
 };
 
@@ -60,14 +66,15 @@ public:
     OptiXStateWrapper     (
         const std::string& path, 
         const std::string& cuda_path,
+        uint32_t hitMode,
+        uint32_t pipeline,
         uint32_t maxHitsPerSlab,
         uint32_t maxNumSlabs,
         bool topKHits,
         uint32_t patchSize,
         uint32_t sphDegree,
         float gaussianSigmaThreshold,
-        float minTransmittance,
-        float minGaussianResponse
+        float minTransmittance
     );
     ~OptiXStateWrapper    (void);
 
