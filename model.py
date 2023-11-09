@@ -33,9 +33,6 @@ class MixtureOfGaussians(torch.nn.Module):
         self.scale_activation_inv =  get_activation_function(self.conf.model.scale_activation, inverse=True)
         self.rotation_activation =   get_activation_function("normalize") # The default value of the dim parameter is 1
 
-        # How many degrees of spherical harmonics to use.
-        # features tensor must contain matching number of sh weights
-        self.sh_degs_to_calculate = 0
         self.background = background.make(self.conf.model.background.name, self.conf.model.background)
 
         # Parameters related to densification, pruning and reset
