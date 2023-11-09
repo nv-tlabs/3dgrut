@@ -32,7 +32,7 @@ model:
   progressive_training:
     feature_type: 'sh'        # one of [sh, mlp], currently only sh supported
     init_n_features: 0        # sh: initial sh deg | mlp: num of dims initially unmasked
-    max_n_features: 0 # 3         # sh: maximum sh deg | mlp: total num of dims finally unmasked
+    max_n_features: 3         # sh: maximum sh deg | mlp: total num of dims finally unmasked
     increase_frequency: 1000  # unmask more feature dimensions every N global steps
     increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
     
@@ -106,6 +106,5 @@ render:
   max_num_slabs: 64
   topk_hits: False
   patch_size: 1
-  sph_degree: 3
   gaussian_sigma_threshold: 3.0
   min_transmittance: 0.03

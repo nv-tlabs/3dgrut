@@ -69,7 +69,6 @@ def main(conf):
             sample_full_image=True,
             downsample_factor=conf.dataset.downsample_factor
         )
-        val_dataset = ColmapDataset(conf.path, split='val', sample_full_image=True)
     elif conf.dataset.type == 'ngp':
         train_dataset = NGPDataset(
             conf.path, 
@@ -163,8 +162,9 @@ def main(conf):
             ps.set_up_dir("z_up")
             ps.set_front_dir("neg_y_front")
             ps.set_navigation_style("turntable")
-        else:
-            ps.set_up_dir("y_up")
+        else:                           # Colmap scenes use a cartesian coordinate-system
+            ps.set_up_dir("neg_y_up")
+            ps.set_front_dir("neg_z_front")
             ps.set_navigation_style("free")
         ps.set_enable_vsync(False)
         ps.set_max_fps(-1)
