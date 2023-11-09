@@ -189,8 +189,9 @@ extern "C" __global__ void __raygen__rg()
 
                         const float weight = galpha * rayTrm[k][j];
 
-                        // NB : no gradient wrt d_rayDns assert(rayDnsGrd==0)
-
+                        // gradient wrt d_rayDns
+                        atomicAdd(&params.mogDnsGrd[gId][0], rayDnsGrd[k][j]);
+            
                         // gradient computation wrt rayRad
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
