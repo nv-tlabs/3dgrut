@@ -70,7 +70,18 @@ class MixtureOfGaussians(torch.nn.Module):
 
     def set_optix_context(self):
         torch.zeros(1, device=self.device) # Create a dummy tensor to force cuda context init
-        self.optix_ctx = optixtracer.OptiXContext()
+        self.optix_ctx = optixtracer.OptiXContext(
+            params = optixtracer.OptixMogTracingParams(
+                hit_mode = self.conf.render.hit_mode,
+                max_hit_per_slab = self.conf.render.max_hit_per_slab,
+                max_num_slabs = self.conf.render.max_num_slabs,
+                topk_hits = self.conf.render.topk_hits,
+                patch_size = self.conf.render.patch_size,
+                sph_degree = self.conf.render.sph_degree,
+                gaussian_sigma_threshold = self.conf.render.gaussian_sigma_threshold,
+                min_transmittance = self.conf.render.min_transmittance,
+            )
+        )
 
     def init_from_colmap(self, root_path: str):
         # TODO this reads from the binary format, also implement the nearly-identical plaintext version?
