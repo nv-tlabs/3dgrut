@@ -158,17 +158,15 @@ def build_mog_bvh(
 #
 @dataclass
 class OptixMogTracingParams:
-    pipeline : int=1
-    hit_mode : int=0
-    max_hit_per_slab: int=32
-    max_num_slabs: int=64
-    topk_hits: bool=False
-    patch_size: int=1
-    sph_degree: int=3
-    gaussian_sigma_threshold: float=3.0
-    min_transmittance: float=0.03
-    min__gaussian_response: float=0.01
-
+    pipeline : int=1            # Rendering algo : 0 = closest-hit, 1 = any-hit (the one you really want), 2 = intersection-shader, 3 = mlat
+    hit_mode : int=0            # Intersection distance : 0 = distance to the first hit triangle, 1 = distance to the projection of aussian center on the ray 
+    max_hit_per_slab: int=32    # Size of the array of sorted gaussian per-slabs
+    max_num_slabs: int=64       # Number of slabs along the diagonal of the scene AABB
+    topk_hits: bool=False       # If true do not respawn rays, just keep the first max_hit_per_slab gaussians
+    patch_size: int=1           # tile size (best performances achieve with 3 but need COHERENT rays inputs)
+    sph_degree: int=3           # spherical harmonics degree
+    gaussian_sigma_threshold: float=3.0 # sigma factor to decide the size of the octahedron enveloppe
+    min_transmittance: float=0.03       # minimum transmittance at which we stop gathering gaussians
 
 class OptiXContext:
     def __init__(self,params:OptixMogTracingParams=OptixMogTracingParams()):
@@ -185,8 +183,7 @@ class OptiXContext:
             params.patch_size,
             params.sph_degree,
             params.gaussian_sigma_threshold,
-            params.min_transmittance,
-            params.min__gaussian_response
+            params.min_transmittance
         )
     
     def set_sph_degree(self, degree:int):

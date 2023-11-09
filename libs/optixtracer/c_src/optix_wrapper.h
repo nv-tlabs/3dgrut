@@ -27,7 +27,6 @@ struct OptiXState
     uint32_t sphDegree;
     float gaussianSigmaThreshold;
     float minTransmittance;
-    float minGaussianResponse;
     
     uint32_t gPrimNumTri; ///< number of triangles per gaussian primitive
     CUdeviceptr gPrimVrt; ///< buffer containing the vertices of the gaussian primitive
@@ -75,8 +74,7 @@ public:
         uint32_t patchSize,
         uint32_t sphDegree,
         float gaussianSigmaThreshold,
-        float minTransmittance,
-        float minGaussianResponse
+        float minTransmittance
     );
     ~OptiXStateWrapper    (void);
 

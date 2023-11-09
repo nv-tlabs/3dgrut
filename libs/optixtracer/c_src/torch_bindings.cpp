@@ -409,7 +409,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     // State classes.
     pybind11::class_<OptiXStateWrapper>(m, "OptiXStateWrapper")
         .def(pybind11::init<const std::string&, const std::string&, uint32_t, uint32_t, uint32_t, uint32_t, bool,
-                            uint32_t, uint32_t, float, float, float>())
+                            uint32_t, uint32_t, float, float>())
         .def("set_sph_degree", &OptiXStateWrapper::setSphDegree, R"()", py::arg("degree"));
     m.def("build_mog_bvh", &build_mog_bvh, "build_mog_bvh");
     m.def("trace_mog", &trace_mog, "trace_mog");

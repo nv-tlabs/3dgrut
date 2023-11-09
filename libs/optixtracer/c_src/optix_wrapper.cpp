@@ -420,8 +420,7 @@ OptiXStateWrapper::OptiXStateWrapper(
     uint32_t patchSize,
     uint32_t sphDegree,
     float gaussianSigmaThreshold,
-    float minTransmittance,
-    float minGaussianResponse
+    float minTransmittance
 )
 {
     pState = new OptiXState();
@@ -455,8 +454,7 @@ OptiXStateWrapper::OptiXStateWrapper(
     pState->sphDegree = sphDegree;
     pState->gaussianSigmaThreshold = gaussianSigmaThreshold;
     pState->minTransmittance = minTransmittance;
-    pState->minGaussianResponse = minGaussianResponse;
-
+    
     std::vector<std::string> defines;
     if (pState)
     {
