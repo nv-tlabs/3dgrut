@@ -9,6 +9,7 @@ tqdm
 fire
 toml
 omegaconf
+hydra-core
 scikit-learn
 # NeRF Dataset requirements
 kornia
