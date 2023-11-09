@@ -79,7 +79,7 @@ class MixtureOfGaussians(torch.nn.Module):
                 max_num_slabs = self.conf.render.max_num_slabs,
                 topk_hits = self.conf.render.topk_hits,
                 patch_size = self.conf.render.patch_size,
-                sph_degree = self.conf.render.sph_degree,
+                sph_degree = 0, # Dummy, dynamically controlled
                 gaussian_sigma_threshold = self.conf.render.gaussian_sigma_threshold,
                 min_transmittance = self.conf.render.min_transmittance,
             )
@@ -532,10 +532,17 @@ class MixtureOfGaussians(torch.nn.Module):
         return model_params
 
     def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
-        
+
+        # The feature mask zeros out feature dims the model shouldn't use yet.
+        # That introduces a curriculum way of optimizing the model
         features = self.get_features()
         if self.progressive_training:
             features *= self.get_active_feature_mask()
+
+        # For spherical harmonics, for optimal performance we set the kernel
+        # to avoid computing sh degrees which are not yet used by the model
+        if self.feature_type == 'sh':
+            self.optix_ctx.set_sph_degree(self.n_active_features)
 
         pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(
                 self.optix_ctx, rays_o, rays_d, 

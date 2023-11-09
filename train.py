@@ -50,8 +50,8 @@ def main(conf):
             return_alphas=True
         )
         val_dataset = NeRFDataset(
-            conf.path, 
-            split='val', 
+            conf.path,
+            split='val',
             sample_full_image=True,
             return_alphas=False
         )
@@ -69,7 +69,6 @@ def main(conf):
             sample_full_image=True,
             downsample_factor=conf.dataset.downsample_factor
         )
-        val_dataset = ColmapDataset(conf.path, split='val', sample_full_image=True)
     elif conf.dataset.type == 'ngp':
         train_dataset = NGPDataset(
             conf.path, 
@@ -81,11 +80,11 @@ def main(conf):
             use_aux=conf.dataset.get("use_aux_data", False)
         )
         val_dataset = NGPDataset(
-            conf.path, 
-            split='val', 
-            sample_full_image=True, 
-            val_downsample=5, 
-            val_frame_subsample=5, 
+            conf.path,
+            split='val',
+            sample_full_image=True,
+            val_downsample=5,
+            val_frame_subsample=5,
             use_aux=conf.dataset.get("use_aux_data", False)
         )
         pc = train_dataset.get_point_cloud(step_frame=10)
@@ -108,7 +107,7 @@ def main(conf):
         )
         pc = PointCloud.from_sequence(train_dataset.get_point_clouds(step_frame=10, non_dynamic_points_only=True), device="cpu")
         scene_extent = train_dataset.scene_extent_m
-       
+
         train_collate_fn = NCoreBatch.collate_fn
         val_collate_fn = NCoreBatch.collate_fn
     else:
@@ -159,8 +158,21 @@ def main(conf):
         import polyscope.imgui as psim
 
         ps.set_use_prefs_file(False)
-        ps.set_up_dir("y_up")
-        ps.set_navigation_style("free")
+        if conf.dataset.type == 'nerf': # NeRF synthetic uses the blender coordinate-system
+            ps.set_up_dir("z_up")
+            ps.set_front_dir("neg_y_front")
+            ps.set_navigation_style("turntable")
+        else:
+            ps.set_up_dir("y_up")
+            ps.set_navigation_style("free")
+        if conf.dataset.type == 'nerf': # NeRF synthetic uses the blender coordinate-system
+            ps.set_up_dir("z_up")
+            ps.set_front_dir("neg_y_front")
+            ps.set_navigation_style("turntable")
+        else:                           # Colmap scenes use a cartesian coordinate-system
+            ps.set_up_dir("neg_y_up")
+            ps.set_front_dir("neg_z_front")
+            ps.set_navigation_style("free")
         ps.set_enable_vsync(False)
         ps.set_max_fps(-1)
         ps.set_background_color((0., 0., 0.))
