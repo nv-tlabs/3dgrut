@@ -10,6 +10,8 @@ num_workers: 8
 use_wandb: false
 record_training: true
 test_last: false
+validate_first: False
+log_frequency: 1
 
 model:
   density_activation: sigmoid

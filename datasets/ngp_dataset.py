@@ -1,4 +1,4 @@
-from typing import Optional, Union, List, Tuple
+from typing import Optional, Union, List, Tuple, Generator
 
 import glob
 import numpy as np
@@ -304,8 +304,8 @@ class NGPDataset(Dataset):
         non_dynamic_points_only: bool = True,
         step_frame: int = 1,
         device: str = 'cpu'
-    ) -> PointCloud:
-        """Returns a point-cloud for all available for point-cloud sensor (lidar / camera), transformed into NGP frame.
+    ) -> Generator[PointCloud,None,None]:
+        """Returns a point-cloud generator for all available for point-cloud sensor (lidar / camera), transformed into NGP frame.
 
         Can be parameterized to only return non-dynamic points (default).
         """
@@ -324,15 +324,15 @@ class NGPDataset(Dataset):
                 valid_rays = np.where(lidar_dataset.lidar_frame_indices == frame_idx)[0]
                 xyz_starts.append(to_torch(lidar_dataset.rays[valid_rays, :3], device=device))
                 xyz_ends.append(to_torch(lidar_dataset.rays[valid_rays, :3] + lidar_dataset.rays[valid_rays, 3:6], device=device))
-        return PointCloud(xyz_start=torch.cat(xyz_starts), xyz_end=torch.cat(xyz_ends), device=device)
+                yield PointCloud(xyz_start=torch.cat(xyz_starts), xyz_end=torch.cat(xyz_ends), device=device)
     
     def get_sky_rays(
         self,
         camera_idx: Optional[int] = None,
         step_frame: int = 1,
         step_pixel: int = 1,
-    ) -> torch.Tensor:
-        """Returns all camera rays (Nx6) belonging to a given semantic class.
+    ) -> Generator[torch.Tensor,None,None]:
+        """Returns a generator for all camera rays (Nx6) belonging to a given semantic class.
 
         Camera sensor are specified by by either logical or unique sensor IDs.
 
@@ -368,8 +368,7 @@ class NGPDataset(Dataset):
                 self.camera_distortion_mode,
             )
 
-            rays_out.append(rays[::step_pixel])
-        return torch.cat(rays_out)
+            yield torch.FloatTensor(rays[::step_pixel])
 
     def __len__(self):
         if self.split.startswith("train"):
