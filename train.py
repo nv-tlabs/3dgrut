@@ -77,6 +77,7 @@ def main(conf):
             sample_full_image=conf.dataset.train.sample_full_image, 
             batch_size=conf.dataset.train.batch_size,
             use_lidar=True,
+            use_dynamic_masks=True,
             use_aux=conf.dataset.get("use_aux_data", False)
         )
         val_dataset = NGPDataset(

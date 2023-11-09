@@ -41,6 +41,7 @@ class NGPDataset(Dataset):
         self.max_dist_m: float = max_dist_m
         self.use_dynamic_mask: bool = use_dynamic_masks
 
+        assert self.use_dynamic_mask == False if self.sample_full_image else True, "Can't sample full images consistently if dynamic masks are enabled"
 
         self.img_wh: Optional[Tuple[int, int]] = None
         self.xform_matrices = np.empty((0, 4), dtype=np.float32)
