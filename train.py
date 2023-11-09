@@ -159,8 +159,13 @@ def main(conf):
         import polyscope.imgui as psim
 
         ps.set_use_prefs_file(False)
-        ps.set_up_dir("y_up")
-        ps.set_navigation_style("free")
+        if conf.dataset.type == 'nerf': # NeRF synthetic uses the blender coordinate-system
+            ps.set_up_dir("z_up")
+            ps.set_front_dir("neg_y_front")
+            ps.set_navigation_style("turntable")
+        else:
+            ps.set_up_dir("y_up")
+            ps.set_navigation_style("free")
         ps.set_enable_vsync(False)
         ps.set_max_fps(-1)
         ps.set_background_color((0., 0., 0.))
