@@ -35,7 +35,7 @@ logging.addLevelName( logging.ERROR, "\033[1;41m%s\033[1;0m" % logging.getLevelN
 def main(conf):
     # Run the training process
     n_iterations = 10e4
-    val_period = 1
+    val_frequency = conf.val_frequency
     use_ssim = False
     scene_extent = 1.
     train_collate_fn = None
@@ -53,7 +53,14 @@ def main(conf):
             conf.path, 
             split='train', 
             sample_full_image=conf.dataset.train.sample_full_image, 
-            batch_size=conf.dataset.train.batch_size
+            batch_size=conf.dataset.train.batch_size,
+            downsample_factor=conf.dataset.downsample_factor
+        )
+        val_dataset = ColmapDataset(
+            conf.path,
+            split='val',
+            sample_full_image=True,
+            downsample_factor=conf.dataset.downsample_factor
         )
         val_dataset = ColmapDataset(conf.path, split='val', sample_full_image=True)
     elif conf.dataset.type == 'ngp':
@@ -113,7 +120,7 @@ def main(conf):
                 raise e
          
         elif conf.initialization.method == 'random':
-            model.randomize_point_cloud(num_gsplat=conf.initialization.num_gaussians)
+            model.init_from_random_point_cloud(num_gsplat=conf.initialization.num_gaussians)
 
         elif conf.initialization.method == 'lidar':
             assert conf.dataset.type in ['ngp', 'ncore'], 'can only initialize from lidar with the NGPDataset / NCoreDataset'
@@ -287,7 +294,7 @@ def main(conf):
     assert model.optimizer is not None, "Optimizer needs to be initialized before the training can start!"
     
     for epoch_idx in range(n_epochs):
-        if epoch_idx % val_period == 0:
+        if epoch_idx > 0 and epoch_idx % val_frequency == 0:
             val_iteration = 0
             with tqdm(val_dataloader) as pbar:
                 pbar.set_description("Validation:" )
@@ -365,6 +372,11 @@ def main(conf):
                 if global_step > conf.model.reset_density.start_iteration and global_step < conf.model.reset_density.end_iteration and global_step % conf.model.reset_density.frequency == 0:
                     model.reset_density()
                     scene_updated = True
+
+                # SH: Every N its we increase the levels of SH up to a maximum degree
+                # MLP: Every N we further unmask additional dimensions
+                if model.progressive_training and global_step > 0 and global_step % model.feature_dim_increase_interval == 0:
+                    model.increase_num_active_features()
 
                 # Update the BVH if required
                 if scene_updated or (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
