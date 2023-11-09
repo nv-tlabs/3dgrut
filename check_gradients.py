@@ -18,7 +18,7 @@ from omegaconf import OmegaConf
 
 from datasets.colmap_dataset import ColmapDataset
 from datasets.nerf_dataset import NeRFDataset
-from models.model import MixtureOfGaussians
+from model import MixtureOfGaussians
 from datasets.utils import move_to_gpu, pinhole_camera_rays
 from utils import to_np
 from libs import optixtracer

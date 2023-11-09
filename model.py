@@ -9,9 +9,9 @@ from utils import to_torch, get_activation_function, inverse_sigmoid, get_schedu
     sh_degree_to_num_features, sh_degree_to_specular_dim
 from datasets.colmap_utils import read_next_bytes
 from datasets.utils import PointCloud
-from models.geometry import nearest_neighbor_dist_cpuKD
+from geometry import nearest_neighbor_dist_cpuKD
 from utils import to_np
-import models
+import background
 
 class MixtureOfGaussians(torch.nn.Module):
     def __init__(self, conf):
@@ -36,7 +36,7 @@ class MixtureOfGaussians(torch.nn.Module):
         # How many degrees of spherical harmonics to use.
         # features tensor must contain matching number of sh weights
         self.sh_degs_to_calculate = 0
-        self.background = models.make(self.conf.model.background.name, self.conf.model.background)
+        self.background = background.make(self.conf.model.background.name, self.conf.model.background)
 
         # Parameters related to densification, pruning and reset
         self.split_n_gaussians = self.conf.model.densify.split.n_gaussians

@@ -2,15 +2,25 @@ from abc import ABC, abstractmethod
 from typing import Union
 
 import torch 
-import tinycudann as tcnn
 import omegaconf
 from omegaconf import OmegaConf
 from einops import rearrange
 
-import models
 
 def config_to_primitive(config, resolve=True):
     return OmegaConf.to_container(config, resolve=resolve)
+
+def make(name:str, config):
+    match name:
+        case "sky-mlp":
+            return SkyMlp(config=config)
+        case "background-color":
+            return BackgroundColor(config=config)
+        case "skip-background":
+            return SkipBackground(config=config)
+        case _  : 
+            raise NotImplementedError(f"background {name} not implemented, choice must be in [sky-mlp, background-color, skip-background]")
+
 
 DEFAULT_DEVICE = 'cuda'
 class BaseBackground(ABC, torch.nn.Module):
@@ -36,9 +46,10 @@ class BaseBackground(ABC, torch.nn.Module):
         return torch.where(x < 0.04045, x / 12.92, ((x + 0.055) / 1.055) ** 2.4)
 
 
-@models.register("sky-mlp")
 class SkyMlp(BaseBackground):
     def setup(self, **kwargs):
+        import tinycudann as tcnn
+
         self.dir_encoding = tcnn.Encoding(
             n_input_dims=3, encoding_config=config_to_primitive(self.config.dir_encoding_config)
         )
@@ -69,8 +80,6 @@ class SkyMlp(BaseBackground):
         return rearrange(rgb,'(b h w) c -> b h w c', b=b, h=h, w=w, c=c), rearrange(opacity,'(b h w) c -> b h w c', b=b, h=h, w=w, c=1)
 
 
-
-@models.register("background-color")
 class BackgroundColor(BaseBackground):
     def setup(self, **kwargs):
         self.background_color_type = self.config.color
@@ -94,8 +103,6 @@ class BackgroundColor(BaseBackground):
 
         return rgb, opacity
 
-
-@models.register("skip-background")
 class SkipBackground(BaseBackground):
     def setup(self, **kwargs):
         pass

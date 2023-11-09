@@ -20,8 +20,8 @@ from datasets.ngp_dataset import NGPDataset
 from datasets.ncore_dataset import NCoreDataset
 from datasets.ncore_utils import Batch as NCoreBatch
 from datasets.utils import PointCloud
-from models.model import MixtureOfGaussians
-from models.background import BackgroundColor
+from model import MixtureOfGaussians
+from background import BackgroundColor
 from datasets.utils import move_to_gpu
 from loss_utils import ssim
 from utils import to_np
