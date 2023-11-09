@@ -75,12 +75,9 @@ def get_rays(directions, c2w):
 def read_image(img_path, img_wh, return_alpha=False):
     img = imageio.imread(img_path).astype(np.float32)/255.0
     # img[..., :3] = srgb_to_linear(img[..., :3])
-    if return_alpha:
-        alpha = np.zeros_like(img[:,:,0],dtype=np.bool_)
-
     if img.shape[2] == 4: # blend A to RGB
         if return_alpha:
-            alpha[img[:,:,-1]==0] = 1
+            alpha= img[:,:,-1]
             img = img[..., :3]
         else:
             img = img[..., :3]*img[..., -1:]

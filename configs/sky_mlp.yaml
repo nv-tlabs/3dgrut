@@ -3,13 +3,15 @@ experiment_name: ""
 resume: ""
 n_iterations: 30000
 with_gui: false
+val_frequency: 10
+num_workers: 8
 
 dataset:
   type: ngp
   use_aux_data: True
   
   train:
-    batch_size: 8192
+    batch_size: 100000
     sample_full_image: False
   
 initialization:
@@ -19,11 +21,19 @@ model:
   density_activation: sigmoid
   scale_activation: exp
   optimize_density: true
-  optimize_features: true
+  optimize_features_albedo: true
+  optimize_features_specular: true
   optimize_position: true
   optimize_rotation: true
   optimize_scale: true
   bvh_update_frequency: 1
+  progressive_training:
+    feature_type: 'sh'        # one of [sh, mlp], currently only sh supported
+    init_n_features: 0        # sh: initial sh deg | mlp: num of dims initially unmasked
+    max_n_features: 3 # 3         # sh: maximum sh deg | mlp: total num of dims finally unmasked
+    increase_frequency: 1000  # unmask more feature dimensions every N global steps
+    increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
+
 
   lambda_background: 0.01
   background:
@@ -74,11 +84,13 @@ optimizer:
   eps: 1.e-15
   params:
     positions:
-      lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.00016
+      lr: 0.01 # 3DGS value: 0.00016 initial and decayed to 0.00016
     density:
       lr: 0.05 # 3DGS value: 0.05
-    features:
+    features_albedo:
       lr: 0.0025 # 3DGS value: 0.0025
+    features_specular:
+      lr: ${div:${optimizer.params.features_albedo.lr},20} # 3DGS value 20x smaller than lr of features_albedo
     rotation:
       lr: 0.001 # 3DGS value: 0.001
     scale:

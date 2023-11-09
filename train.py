@@ -110,8 +110,8 @@ def main(conf):
     else:
         raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp", "ncore"]. ')
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, num_workers=16, batch_size=1, shuffle=True, collate_fn=train_collate_fn)
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=16, batch_size=1, shuffle=False, collate_fn=val_collate_fn)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, num_workers=conf.num_workers, batch_size=1, shuffle=True, collate_fn=train_collate_fn)
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=conf.num_workers, batch_size=1, shuffle=False, collate_fn=val_collate_fn)
 
     # Initialize the model and the optix context
     model = MixtureOfGaussians(conf)
@@ -352,9 +352,10 @@ def main(conf):
                 outputs = model(rays_ori, rays_dir)
                 
                 # Check if alphas are given and if the background is a fix color
-                if isinstance(model.background, BackgroundColor) and "alphas" in gpu_batch:
-                    alphas = gpu_batch["alphas"]
-                    rgb_gt = rgb_gt * alphas + model.background.color * (1 - alphas)
+                if isinstance(model.background, BackgroundColor):
+                    assert "alpha" in gpu_batch
+                    alpha = gpu_batch["alpha"]
+                    rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
 
                 # Compute the loss
                 loss = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()

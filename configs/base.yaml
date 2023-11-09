@@ -5,6 +5,7 @@ out_dir: "runs"
 n_iterations: 30000
 with_gui: false
 val_frequency: 1
+num_workers: 8
 
 dataset:
   type: colmap
@@ -38,9 +39,7 @@ model:
 
   lambda_background: 0.
   background:
-    name: background-color
-    color: white
-
+    name: skip-background
 
   densify:
     frequency: 100 # densification_interval in 3DGS with default value 100
