@@ -152,7 +152,7 @@ class ColmapDataset(Dataset):
     def __getitem__(self, idx):
         if self.split == 'train':
             if self.sample_full_image:
-                # Sample random frame
+                # Sample specific frame
                 frame_idx = np.array((idx,))
                 u = np.tile(np.arange(self.image_w), self.image_h)
                 v = np.arange(self.image_h).repeat(self.image_w)

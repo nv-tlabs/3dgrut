@@ -288,14 +288,15 @@ class NGPDataset(Dataset):
 
     def __len__(self):
         if self.split.startswith("train"):
-            return 1000
+            return self.n_frames if self.sample_full_image else 1000
 
         return self.n_frames
 
     def __getitem__(self, idx):
         if self.split == "train":
             if self.sample_full_image:
-                idxs = np.random.choice(np.where(self.indices_matrix[:, 1] == idx)[0], self.batch_size, replace = True)
+                # Sample specific frame
+                idxs = np.where(self.indices_matrix[:, 1] == idx)[0]
                 out_shape = (self.image_h,self.image_w,3)
             else:
                 # only sample from valid RGB rays
