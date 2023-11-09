@@ -135,7 +135,10 @@ class NeRFDataset(Dataset):
         return self.scene_bbox
 
     def __len__(self):
-        return len(self.poses)
+        if self.split == 'train': 
+            return len(self.poses) if self.sample_full_image else 1000
+        else:
+            return len(self.poses)
 
     def __getitem__(self, idx):
         if self.split == 'train':          
