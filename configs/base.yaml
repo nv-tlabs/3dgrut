@@ -5,6 +5,7 @@ out_dir: "runs"
 n_iterations: 30000
 with_gui: false
 val_frequency: 1
+num_workers: 8
 
 dataset:
   type: colmap
@@ -35,6 +36,11 @@ model:
     increase_frequency: 1000  # unmask more feature dimensions every N global steps
     increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
     
+
+  lambda_background: 0.
+  background:
+    name: skip-background
+
   densify:
     frequency: 100 # densification_interval in 3DGS with default value 100
     start_iteration: 500 # densify_from_iter in 3DGS default value 500
@@ -80,6 +86,8 @@ optimizer:
       lr: 0.001 # 3DGS value: 0.001
     scale:
       lr: 0.005 # 3DGS value: 0.005
+    background:
+      lr: 0.01
 
 scheduler:
   positions:

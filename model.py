@@ -11,6 +11,7 @@ from datasets.colmap_utils import read_next_bytes
 from datasets.utils import PointCloud
 from geometry import nearest_neighbor_dist_cpuKD
 from utils import to_np
+import background
 
 class MixtureOfGaussians(torch.nn.Module):
     def __init__(self, conf):
@@ -35,6 +36,7 @@ class MixtureOfGaussians(torch.nn.Module):
         # How many degrees of spherical harmonics to use.
         # features tensor must contain matching number of sh weights
         self.sh_degs_to_calculate = 0
+        self.background = background.make(self.conf.model.background.name, self.conf.model.background)
 
         # Parameters related to densification, pruning and reset
         self.split_n_gaussians = self.conf.model.densify.split.n_gaussians
@@ -204,6 +206,7 @@ class MixtureOfGaussians(torch.nn.Module):
         self.features_specular = checkpoint["features_specular"]
         self.n_active_features = checkpoint["n_active_features"]
         self.max_n_features = checkpoint["max_n_features"]
+        self.background.load_state_dict(checkpoint["background"])
         self.set_optimizable_parameters()
         self.setup_optimizer(state_dict=checkpoint['optimizer'])
         self.validate_fields()
@@ -264,7 +267,7 @@ class MixtureOfGaussians(torch.nn.Module):
         for name, args in self.conf.optimizer.params.items():
             module =  getattr(self, name)
             if isinstance(module, torch.nn.Module):
-                module_parameters = filter(lambda p: p.requires_grad, module.parameters())
+                module_parameters = filter(lambda p: p.requires_grad and len(p)>0, module.parameters())
                 n_params = sum([np.prod(p.size(), dtype=int) for p in module_parameters])
 
                 if n_params > 0:
@@ -359,19 +362,20 @@ class MixtureOfGaussians(torch.nn.Module):
         assert self.optimizer is not None, "Optimizer need to be initialized before concatenating the values"
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
-            stored_state = self.optimizer.state.get(group['params'][0], None)
-            if stored_state is not None:
-                stored_state["exp_avg"] = stored_state["exp_avg"][mask]
-                stored_state["exp_avg_sq"] = stored_state["exp_avg_sq"][mask]
+            if group["name"] != "background":
+                stored_state = self.optimizer.state.get(group['params'][0], None)
+                if stored_state is not None:
+                    stored_state["exp_avg"] = stored_state["exp_avg"][mask]
+                    stored_state["exp_avg_sq"] = stored_state["exp_avg_sq"][mask]
 
-                del self.optimizer.state[group['params'][0]]
-                group["params"][0] = torch.nn.Parameter((group["params"][0][mask].requires_grad_(True)))
-                self.optimizer.state[group['params'][0]] = stored_state
+                    del self.optimizer.state[group['params'][0]]
+                    group["params"][0] = torch.nn.Parameter((group["params"][0][mask].requires_grad_(True)))
+                    self.optimizer.state[group['params'][0]] = stored_state
 
-                optimizable_tensors[group["name"]] = group["params"][0]
-            else:
-                group["params"][0] = torch.nn.Parameter(group["params"][0][mask].requires_grad_(True))
-                optimizable_tensors[group["name"]] = group["params"][0]
+                    optimizable_tensors[group["name"]] = group["params"][0]
+                else:
+                    group["params"][0] = torch.nn.Parameter(group["params"][0][mask].requires_grad_(True))
+                    optimizable_tensors[group["name"]] = group["params"][0]
 
         return optimizable_tensors
     
@@ -381,22 +385,22 @@ class MixtureOfGaussians(torch.nn.Module):
 
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
-            extension_tensor = tensors_dict[group["name"]]
-            stored_state = self.optimizer.state.get(group['params'][0], None)
-            if stored_state is not None:
+            if group["name"] in tensors_dict:
+                extension_tensor = tensors_dict[group["name"]]
+                stored_state = self.optimizer.state.get(group['params'][0], None)
+                if stored_state is not None:
 
-                stored_state["exp_avg"] = torch.cat((stored_state["exp_avg"], torch.zeros_like(extension_tensor)), dim=0)
-                stored_state["exp_avg_sq"] = torch.cat((stored_state["exp_avg_sq"], torch.zeros_like(extension_tensor)), dim=0)
+                    stored_state["exp_avg"] = torch.cat((stored_state["exp_avg"], torch.zeros_like(extension_tensor)), dim=0)
+                    stored_state["exp_avg_sq"] = torch.cat((stored_state["exp_avg_sq"], torch.zeros_like(extension_tensor)), dim=0)
 
-                del self.optimizer.state[group['params'][0]]
-                group["params"][0] = torch.nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(group["params"][0].requires_grad))
-                self.optimizer.state[group['params'][0]] = stored_state
+                    del self.optimizer.state[group['params'][0]]
+                    group["params"][0] = torch.nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(group["params"][0].requires_grad))
+                    self.optimizer.state[group['params'][0]] = stored_state
 
-                optimizable_tensors[group["name"]] = group["params"][0]
-            else:
-                group["params"][0] = torch.nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(group["params"][0].requires_grad))
-                optimizable_tensors[group["name"]] = group["params"][0]
-
+                    optimizable_tensors[group["name"]] = group["params"][0]
+                else:
+                    group["params"][0] = torch.nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(group["params"][0].requires_grad))
+                    optimizable_tensors[group["name"]] = group["params"][0]
         return optimizable_tensors
 
 
@@ -514,6 +518,7 @@ class MixtureOfGaussians(torch.nn.Module):
             "rotation": self.rotation,
             "scale": self.scale,
             "density": self.density,
+            "background": self.background.state_dict(),
             # Add other attributes that we need at restore
             "n_active_features": self.n_active_features,
             "max_n_features": self.max_n_features,
@@ -536,6 +541,8 @@ class MixtureOfGaussians(torch.nn.Module):
                 self.optix_ctx, rays_o, rays_d, 
                 self.positions, self.get_rotation(), self.get_scale(),
                 self.get_density(), features)
+
+        pred_rgb, pred_opacity = self.background(rays_d, pred_rgb, pred_opacity)
 
         return {
             'pred_rgb': pred_rgb,

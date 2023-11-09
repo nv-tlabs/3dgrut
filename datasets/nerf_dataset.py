@@ -9,22 +9,17 @@ from PIL import Image
 
 
 class NeRFDataset(Dataset):
-    def __init__(self, root_dir, split='train', sample_full_image=False, batch_size=8192,
-                 use_white_background=False, **kwargs):
+    def __init__(self, root_dir, split='train', sample_full_image=False, batch_size=8192, return_alphas=False, **kwargs):
         self.root_dir = root_dir 
         self.split = split
         
         self.sample_full_image = sample_full_image
         self.batch_size = batch_size
 
-        # True: Transparent pixels with non-saturated alpha values will be blended with white
-        # False: Transparent pixels with non-saturated alpha values will be blended with black
-        self.use_white_background = use_white_background
+        self.return_alphas = return_alphas
 
         self.read_intrinsics()
-
-        if kwargs.get('read_meta', True):
-            self.read_meta(split)
+        self.read_meta(split)
     
         self.length_scale, self.center, self.scene_bbox = self.compute_spatial_extents()
 
@@ -53,6 +48,8 @@ class NeRFDataset(Dataset):
     def read_meta(self, split):
         self.rgbs = []
         self.poses = []
+        if self.return_alphas:
+            self.alphas = []
 
         if split == 'trainval':
             with open(os.path.join(self.root_dir, "transforms_train.json"), 'r') as f:
@@ -97,12 +94,20 @@ class NeRFDataset(Dataset):
 
             try:
                 img_path = os.path.join(self.root_dir, f"{frame['file_path']}.png")
-                img = read_image(img_path, self.img_wh, blend_a=self.use_white_background)
+                if self.return_alphas:
+                    img, alpha = read_image(img_path, self.img_wh, return_alpha=True)
+                    self.alphas.append(alpha)
+                else:
+                    img = read_image(img_path, self.img_wh, return_alpha=False)
+
+
                 self.rgbs += [img]
             except: pass
 
         if len(self.rgbs)>0:
             self.rgbs = torch.FloatTensor(np.stack(self.rgbs)) # (N_images, hw, ?)
+        if self.return_alphas and len(self.alphas)>0:
+            self.alphas = torch.FloatTensor(np.stack(self.alphas))
         self.poses = torch.FloatTensor(self.poses) # (N_images, 3, 4)
 
     def compute_spatial_extents(self):
@@ -130,7 +135,10 @@ class NeRFDataset(Dataset):
         return self.scene_bbox
 
     def __len__(self):
-        return len(self.poses)
+        if self.split == 'train': 
+            return len(self.poses) if self.sample_full_image else 1000
+        else:
+            return len(self.poses)
 
     def __getitem__(self, idx):
         if self.split == 'train':          
@@ -148,8 +156,16 @@ class NeRFDataset(Dataset):
             directions = self.directions[pix_idxs]
             rays_o, rays_d = get_rays(directions, poses)
 
-            return rays_o.reshape(out_shape),rays_d.reshape(out_shape),rgb.reshape(out_shape)
+            sample = {
+                "rays_ori":rays_o.reshape(out_shape), 
+                "rays_dir":rays_d.reshape(out_shape), 
+                "rgb_gt":rgb.reshape(out_shape)
+            }
 
+            if self.return_alphas:
+                sample["alpha"] = self.alphas[img_idxs,pix_idxs].reshape(out_shape[0],out_shape[1],1)
+            return sample
+        
         elif self.split == 'val':
             assert self.sample_full_image, 'val mode assumes sampling full images'
             if len(self.rgbs)>0: # if ground truth available
@@ -158,7 +174,17 @@ class NeRFDataset(Dataset):
                 directions = self.directions[np.arange(self.img_wh[0]*self.img_wh[1])]
                 rays_o, rays_d = get_rays(directions, pose)
 
-                return rays_o.reshape(self.image_h,self.image_w,3), rays_d.reshape(self.image_h,self.image_w,3), rgb.reshape(self.image_h,self.image_w,3)
+
+                sample = {
+                    "rays_ori": rays_o.reshape(self.image_h,self.image_w,3),  
+                    "rays_dir": rays_d.reshape(self.image_h,self.image_w,3),
+                    "rgb_gt": rgb.reshape(self.image_h,self.image_w,3)
+                }
+
+
+                if self.return_alphas:
+                    sample["alpha"] = self.alphas[idx].reshape(self.image_h,self.image_w,1)
+                return sample
 
     @property
     def image_h(self):

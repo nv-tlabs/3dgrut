@@ -4,20 +4,19 @@ resume: ""
 out_dir: "runs"
 n_iterations: 30000
 with_gui: false
-val_frequency: 100
-num_workers: 8
+val_frequency: 1
+num_workers: 16
 
 dataset:
-  type: nerf
-  downsample_factor: 1  # for datasets that include multi-scale versions of images [colmap]
+  type: ngp
+  use_aux_data: True
   
   train:
-    batch_size: 8192
-    sample_full_image: True
+    batch_size: 100000
+    sample_full_image: False
   
 initialization:
-  method: random      # one of [colmap, point_cloud, random]
-  num_gaussians: 100_000   # method=random only: number of initial gaussians to use
+  method: lidar
 
 model:
   density_activation: sigmoid
@@ -32,15 +31,26 @@ model:
   progressive_training:
     feature_type: 'sh'        # one of [sh, mlp], currently only sh supported
     init_n_features: 0        # sh: initial sh deg | mlp: num of dims initially unmasked
-    max_n_features: 3 # 3         # sh: maximum sh deg | mlp: total num of dims finally unmasked
+    max_n_features: 0 # 3         # sh: maximum sh deg | mlp: total num of dims finally unmasked
     increase_frequency: 1000  # unmask more feature dimensions every N global steps
     increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
 
-  lambda_background: 0.
-  background:
-    name: background-color
-    color: black
 
+  lambda_background: 0.01 # NRE uses 0.05
+  background:
+    name: sky-mlp
+    dir_encoding_config:
+      otype: SphericalHarmonics
+      degree: 4
+    mlp_network_config:
+      otype: FullyFusedMLP
+      activation: ReLU
+      output_activation: Sigmoid
+      n_neurons: 64
+      n_hidden_layers: 2
+    device: 'cuda'
+    composite_in_linear_space: false
+  
   densify:
     frequency: 100 # densification_interval in 3DGS with default value 100
     start_iteration: 500 # densify_from_iter in 3DGS default value 500
@@ -75,7 +85,7 @@ optimizer:
   eps: 1.e-15
   params:
     positions:
-      lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.00016
+      lr: 0.01 # 3DGS value: 0.01 initial and decayed to 0.00016
     density:
       lr: 0.05 # 3DGS value: 0.05
     features_albedo:

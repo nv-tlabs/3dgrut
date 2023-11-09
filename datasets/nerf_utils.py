@@ -72,16 +72,21 @@ def get_rays(directions, c2w):
     return rays_o, rays_d
 
 
-def read_image(img_path, img_wh, blend_a=True):
+def read_image(img_path, img_wh, return_alpha=False):
     img = imageio.imread(img_path).astype(np.float32)/255.0
     # img[..., :3] = srgb_to_linear(img[..., :3])
     if img.shape[2] == 4: # blend A to RGB
-        if blend_a:
-            img = img[..., :3]*img[..., -1:]+(1-img[..., -1:])
+        if return_alpha:
+            alpha= img[:,:,-1]
+            img = img[..., :3]
         else:
             img = img[..., :3]*img[..., -1:]
 
     img = cv2.resize(img, img_wh)
     img = rearrange(img, 'h w c -> (h w) c')
 
-    return img
+    if return_alpha:
+        alpha = rearrange(alpha, 'h w -> (h w)')
+        return img, alpha
+    else:
+        return img

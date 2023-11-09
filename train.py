@@ -21,6 +21,7 @@ from datasets.ncore_dataset import NCoreDataset
 from datasets.ncore_utils import Batch as NCoreBatch
 from datasets.utils import PointCloud
 from model import MixtureOfGaussians
+from background import BackgroundColor
 from datasets.utils import move_to_gpu
 from loss_utils import ssim
 from utils import to_np
@@ -45,9 +46,15 @@ def main(conf):
             conf.path, 
             split='train', 
             sample_full_image=conf.dataset.train.sample_full_image, 
-            batch_size=conf.dataset.train.batch_size
+            batch_size=conf.dataset.train.batch_size,
+            return_alphas=True
         )
-        val_dataset = NeRFDataset(conf.path, split='val', sample_full_image=True)
+        val_dataset = NeRFDataset(
+            conf.path, 
+            split='val', 
+            sample_full_image=True,
+            return_alphas=False
+        )
     elif conf.dataset.type == 'colmap':
         train_dataset = ColmapDataset(
             conf.path, 
@@ -69,31 +76,46 @@ def main(conf):
             split='train', 
             sample_full_image=conf.dataset.train.sample_full_image, 
             batch_size=conf.dataset.train.batch_size,
-            use_lidar=True
+            use_lidar=True,
+            use_dynamic_masks=True,
+            use_aux=conf.dataset.get("use_aux_data", False)
         )
-        val_dataset = NGPDataset(conf.path, split='val', sample_full_image=True, val_downsample=5, val_frame_subsample=5)
+        val_dataset = NGPDataset(
+            conf.path, 
+            split='val', 
+            sample_full_image=True, 
+            val_downsample=5, 
+            val_frame_subsample=5, 
+            use_aux=conf.dataset.get("use_aux_data", False)
+        )
         pc = train_dataset.get_point_cloud(step_frame=10)
         scene_extent = ((pc.xyz_end.max(0).values - pc.xyz_end.min(0).values)**2).sum().sqrt()
     elif conf.dataset.type == 'ncore':
         # TODO: add all of the dataset parameters to config
         duration_sec = 2.0
+        n_train_sample_timepoints = 5
+
         train_dataset = NCoreDataset(
             conf.path, 
             split='train', 
             duration_sec=duration_sec,
+            n_train_sample_timepoints=n_train_sample_timepoints,
         )
-        val_dataset = NCoreDataset(conf.path,
-                                   split='val',
-                                   duration_sec=duration_sec)
+        val_dataset = NCoreDataset(
+            conf.path,
+            split='val',
+            duration_sec=duration_sec,
+        )
         pc = PointCloud.from_sequence(train_dataset.get_point_clouds(step_frame=10, non_dynamic_points_only=True), device="cpu")
         scene_extent = train_dataset.scene_extent_m
+       
         train_collate_fn = NCoreBatch.collate_fn
         val_collate_fn = NCoreBatch.collate_fn
     else:
         raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp", "ncore"]. ')
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, num_workers=16, batch_size=1, shuffle=True, collate_fn=train_collate_fn)
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=16, batch_size=1, shuffle=False, collate_fn=val_collate_fn)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, num_workers=conf.num_workers, batch_size=1, shuffle=True, collate_fn=train_collate_fn)
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=conf.num_workers, batch_size=1, shuffle=False, collate_fn=val_collate_fn)
 
     # Initialize the model and the optix context
     model = MixtureOfGaussians(conf)
@@ -302,7 +324,8 @@ def main(conf):
                 val_loss = []
                 for batch in pbar:
                     with torch.no_grad():
-                        rays_ori, rays_dir, rgb_gt = move_to_gpu(batch)
+                        gpu_batch = move_to_gpu(batch)
+                        rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
 
                         # Compute the outputs of a single batch
                         outputs = model(rays_ori, rays_dir)
@@ -325,19 +348,34 @@ def main(conf):
             for batch in pbar:
 
                 # Move data to GPU
-                rays_ori, rays_dir, rgb_gt = move_to_gpu(batch)
+                gpu_batch = move_to_gpu(batch)
+                rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
                 scene_updated = False
 
                 # Compute the outputs of a single batch
                 outputs = model(rays_ori, rays_dir)
                 
+                # Check if alphas are given and if the background is a fix color
+                if isinstance(model.background, BackgroundColor):
+                    assert "alpha" in gpu_batch
+                    alpha = gpu_batch["alpha"]
+                    rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
+
                 # Compute the loss
                 loss = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
-                writer.add_scalar("Loss_l1/train", loss.item(), global_step)
+                writer.add_scalar("loss_l1/train", loss.item(), global_step)
                 if use_ssim:
                     loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
                     loss += loss_ssim
-                    writer.add_scalar("Loss_ssim/train", loss_ssim.item(), global_step)
+                    writer.add_scalar("loss_ssim/train", loss_ssim.item(), global_step)
+                if conf.model.lambda_background > 0.0:
+                    assert "sky_mask" in gpu_batch, "Sky ray mask missing for background-loss evaluation"
+                    # Push all background rays to have opacity 0 and non-background rays to have opacity 1 withing the FV
+                    foreground_mask = torch.ones_like(outputs["pred_opacity"])
+                    foreground_mask[gpu_batch['sky_mask']] = 0.0
+                    loss_background = torch.nn.functional.mse_loss(outputs["pred_opacity"], foreground_mask)
+                    loss += conf.model.lambda_background * loss_background
+                    writer.add_scalar("loss_background/train", loss_background.item(), global_step)
 
                 # backpropagate the gradients and update the parameters
                 loss.backward()

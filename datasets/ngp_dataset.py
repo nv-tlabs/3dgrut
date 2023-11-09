@@ -1,4 +1,4 @@
-from typing import Generator, Optional, Union, List, Tuple
+from typing import Optional, Union, List, Tuple
 
 import glob
 import numpy as np
@@ -19,7 +19,7 @@ from utils import to_torch
 
 
 class NGPDataset(Dataset):
-    def __init__(self, root_dir, split="train", batch_size=8192, use_lidar=False, sample_full_image=False, val_downsample=1, max_dist_m=150, use_dynamic_masks=False, val_frame_subsample=5):
+    def __init__(self, root_dir, split="train", batch_size=8192, use_lidar=False, sample_full_image=False, val_downsample=1, max_dist_m=150, use_dynamic_masks=False, val_frame_subsample=5, use_aux=False):
         super().__init__()
 
         # store relevant parameters from config
@@ -30,7 +30,8 @@ class NGPDataset(Dataset):
         self.sample_full_image: bool = sample_full_image
         self.val_downsample: int = val_downsample
         self.val_frame_subsample: int = val_frame_subsample
-        
+        self.aux_data: bool = use_aux
+
         self.cameras: List[CameraDataset] = []      
         if self.use_lidar:
             self.lidars: List[LidarDataset] = []
@@ -40,17 +41,21 @@ class NGPDataset(Dataset):
         self.max_dist_m: float = max_dist_m
         self.use_dynamic_mask: bool = use_dynamic_masks
 
+        assert self.use_dynamic_mask == False if self.sample_full_image else True, "Can't sample full images consistently if dynamic masks are enabled"
 
         self.img_wh: Optional[Tuple[int, int]] = None
         self.xform_matrices = np.empty((0, 4), dtype=np.float32)
         self.indices_matrix = np.empty((0, 4), dtype=np.uint16)
         self.rgb = np.empty((0, 3), dtype=np.uint8)
 
+        if self.aux_data:
+            self.semantic_masks = np.empty((0, 1), dtype=np.uint8)
 
         self.n_cameras = len(self.cameras)
         self.load_transforms()
         self.set_camera_matrices()
         self.set_indices_matrix()
+
 
     def load_transforms(self) -> None:
         ls_dir = glob.glob(os.path.join(self.path, "*.json"))
@@ -154,11 +159,21 @@ class NGPDataset(Dataset):
 
     def check_valid_json(self, transform_json: dict) -> bool:
         assert "frames" in transform_json, "NGPAVDataset: 'frames' not found in json"
+        
+        if self.aux_data:
+            assert "semantic" in transform_json, "NGPAVDataset: aux_data set but 'semantic' not found in json"
+            assert "semantic_meta" in transform_json, "NGPAVDataset: aux_data set but 'semantic_meta' not found in json"
+            self.semantic_meta = transform_json["semantic_meta"]
+            self.sky_class_id = self.semantic_meta["stuff_classes"].index("sky")
+            
         return True
         
     def set_indices_matrix(self):
         self.rgb = np.zeros((self.n_frames * self.max_h * self.max_w, 3), dtype=np.uint8)
         self.indices_matrix = np.zeros((self.n_frames * self.max_h * self.max_w, 4), dtype=np.uint16)
+
+        if self.aux_data:
+            self.semantic_masks = np.zeros((self.n_frames * self.max_h * self.max_w, 1), dtype=np.uint8)
 
         rolling_shutter_flag = np.any(self.rolling_shutter)  # test if all 0s
         if not rolling_shutter_flag:
@@ -221,6 +236,20 @@ class NGPDataset(Dataset):
                         dynamic_mask.flatten() == 0
                     ]
 
+                    # semantic mask
+                    if self.aux_data:
+                        f_path_semantic = os.path.join(cam.path, transform_json["semantic"][f_ind]["file_path"])
+                        assert os.path.exists(
+                            f_path_semantic
+                        ), f"NGPAVDataset: aux_data flag is set but semantic mask not found at {f_path_semantic}"
+                        semantic_mask = PILImage.open(f_path_semantic)
+                        if semantic_mask.size[1] != cam.h or semantic_mask.size[0] != cam.w:
+                            semantic_mask = semantic_mask.resize((cam.w, cam.h), PILImage.Resampling.NEAREST)
+                        semantic_mask = np.asarray(semantic_mask)
+                        self.semantic_masks[run_valid_rays : run_valid_rays + n_valid_rays] = semantic_mask.reshape(
+                            -1, 1
+                        )[dynamic_mask.flatten() == 0]
+
                     run_frames += 1
                     run_valid_rays += n_valid_rays
 
@@ -228,6 +257,8 @@ class NGPDataset(Dataset):
         self.n_frames = run_frames
         assert len(self.rgb) == len(self.indices_matrix)
 
+        if self.aux_data:
+            assert len(self.semantic_masks) == len(self.indices_matrix)
 
     def set_xform_matrix(
         self, frame: dict, rolling_shutter_flag: Union[bool, np.bool_], run_frames: int, offset: np.ndarray
@@ -264,6 +295,7 @@ class NGPDataset(Dataset):
         self,
         non_dynamic_points_only: bool = True,
         step_frame: int = 1,
+        device: str = 'cpu'
     ) -> PointCloud:
         """Returns a point-cloud for all available for point-cloud sensor (lidar / camera), transformed into NGP frame.
 
@@ -282,9 +314,54 @@ class NGPDataset(Dataset):
 
             for frame_idx in all_frame_idxs[::step_frame]:
                 valid_rays = np.where(lidar_dataset.lidar_frame_indices == frame_idx)[0]
-                xyz_starts.append(to_torch(lidar_dataset.rays[valid_rays, :3], device="cpu"))
-                xyz_ends.append(to_torch(lidar_dataset.rays[valid_rays, :3] + lidar_dataset.rays[valid_rays, 3:6], device="cpu"))
-        return PointCloud(xyz_start=torch.cat(xyz_starts), xyz_end=torch.cat(xyz_ends), device="cpu")
+                xyz_starts.append(to_torch(lidar_dataset.rays[valid_rays, :3], device=device))
+                xyz_ends.append(to_torch(lidar_dataset.rays[valid_rays, :3] + lidar_dataset.rays[valid_rays, 3:6], device=device))
+        return PointCloud(xyz_start=torch.cat(xyz_starts), xyz_end=torch.cat(xyz_ends), device=device)
+    
+    def get_sky_rays(
+        self,
+        camera_idx: Optional[int] = None,
+        step_frame: int = 1,
+        step_pixel: int = 1,
+    ) -> torch.Tensor:
+        """Returns all camera rays (Nx6) belonging to a given semantic class.
+
+        Camera sensor are specified by by either logical or unique sensor IDs.
+
+        Each generated sample represents a different frame."""
+
+        assert len(self.cameras), "[NGPAVDataset]: no camera sensors loaded"
+        assert self.aux_data, "[NGPAVDataset]: Auxiliary data was not loaded"
+        assert self.indices_matrix is not None, "[NGPAVDataset] indices_matrix needs to be set"
+
+        # map sensor IDs to indices
+        camera_idx = camera_idx if camera_idx is not None else 0 
+
+        assert camera_idx < len(
+            self.cameras
+        ), f"Only {len(self.cameras)} camera sensors are available, but {camera_idx} was selected."
+
+        camera_id_mask = self.indices_matrix[:, 0] == camera_idx
+        camera_id_indices_matrix = self.indices_matrix[camera_id_mask]
+        camera_id_semantics = self.semantic_masks[camera_id_mask]
+        all_frame_idxs = np.unique(camera_id_indices_matrix[:, 1])  # returned indices are sorted
+
+        rays_out = []
+        for frame_idx in all_frame_idxs[::step_frame]:
+
+            valid_pixels = np.where(camera_id_indices_matrix[:, 1] == frame_idx)[0]
+            semantic_mask = camera_id_semantics[valid_pixels, 0] == self.sky_class_id
+            rays = ray_utils._batchPix2WorldRays(
+                camera_id_indices_matrix[valid_pixels[semantic_mask]].astype(np.int32),
+                self.intrinsics,
+                self.camera_distortion_params,
+                self.rolling_shutter,
+                self.xform_matrices,
+                self.camera_distortion_mode,
+            )
+
+            rays_out.append(rays[::step_pixel])
+        return torch.cat(rays_out)
 
     def __len__(self):
         if self.split.startswith("train"):
@@ -318,7 +395,15 @@ class NGPDataset(Dataset):
 
             rgbs = self.rgb[idxs].astype(np.float32) / 255
 
-            return rays_o.reshape(out_shape),rays_d.reshape(out_shape),rgbs.reshape(out_shape)
+            sample = {
+                "rays_ori":rays_o.reshape(out_shape), 
+                "rays_dir":rays_d.reshape(out_shape), 
+                "rgb_gt":rgbs.reshape(out_shape),
+            }
+            if self.aux_data:
+                sample["sky_mask"]= (self.semantic_masks[idxs] == self.sky_class_id).squeeze().reshape(out_shape[0],out_shape[1],1)
+
+            return sample
         elif self.split == 'val':
             # choose indices for specific test image
 
@@ -346,8 +431,12 @@ class NGPDataset(Dataset):
             rgbs = rgbs[:: self.val_downsample, :: self.val_downsample]
 
 
-
-            return rays_o, rays_d, rgbs
+            sample = {
+                "rays_ori":rays_o, 
+                "rays_dir":rays_d, 
+                "rgb_gt":rgbs
+            }
+            return sample
 
 
 class CameraDataset(Dataset):
