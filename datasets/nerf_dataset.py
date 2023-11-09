@@ -166,7 +166,7 @@ class NeRFDataset(Dataset):
                 sample["alpha"] = self.alphas[img_idxs,pix_idxs].reshape(out_shape[0],out_shape[1],1)
             return sample
         
-        elif self.split == 'val':
+        elif self.split == 'val' or self.split == "test":
             assert self.sample_full_image, 'val mode assumes sampling full images'
             if len(self.rgbs)>0: # if ground truth available
                 rgb = self.rgbs[idx]
@@ -185,7 +185,7 @@ class NeRFDataset(Dataset):
                 if self.return_alphas:
                     sample["alpha"] = self.alphas[idx].reshape(self.image_h,self.image_w,1)
                 return sample
-
+        
     @property
     def image_h(self):
         return self.img_wh[1]
