@@ -93,11 +93,11 @@ scheduler:
     type: skip
 
 render:
+  hit_mode : 0
   max_hit_per_slab: 32
   max_num_slabs: 64
   topk_hits: False
   patch_size: 1
-  sph_degree: 0
-  gaussian_sigma_threshold: 2.0
+  sph_degree: 3
+  gaussian_sigma_threshold: 3.0
   min_transmittance: 0.03
-  min_gaussian_response: 0.01

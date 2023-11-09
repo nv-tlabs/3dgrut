@@ -72,6 +72,7 @@ class MixtureOfGaussians(torch.nn.Module):
         torch.zeros(1, device=self.device) # Create a dummy tensor to force cuda context init
         self.optix_ctx = optixtracer.OptiXContext(
             params = optixtracer.OptixMogTracingParams(
+                hit_mode = self.conf.render.hit_mode,
                 max_hit_per_slab = self.conf.render.max_hit_per_slab,
                 max_num_slabs = self.conf.render.max_num_slabs,
                 topk_hits = self.conf.render.topk_hits,
@@ -79,7 +80,6 @@ class MixtureOfGaussians(torch.nn.Module):
                 sph_degree = self.conf.render.sph_degree,
                 gaussian_sigma_threshold = self.conf.render.gaussian_sigma_threshold,
                 min_transmittance = self.conf.render.min_transmittance,
-                min__gaussian_response = self.conf.render.min_gaussian_response
             )
         )
 
