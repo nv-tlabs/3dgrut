@@ -93,10 +93,13 @@ def main(conf):
     elif conf.dataset.type == 'ncore':
         # TODO: add all of the dataset parameters to config
         duration_sec = 2.0
+        n_train_sample_timepoints = 5
+
         train_dataset = NCoreDataset(
             conf.path, 
             split='train', 
             duration_sec=duration_sec,
+            n_train_sample_timepoints=n_train_sample_timepoints,
         )
         val_dataset = NCoreDataset(
             conf.path,

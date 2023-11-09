@@ -5,7 +5,7 @@ out_dir: "runs"
 n_iterations: 30000
 with_gui: false
 val_frequency: 1
-num_workers: 8
+num_workers: 16
 
 dataset:
   type: ngp
@@ -36,7 +36,7 @@ model:
     increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
 
 
-  lambda_background: 0.05 # NRE uses 0.05
+  lambda_background: 0.01 # NRE uses 0.05
   background:
     name: sky-mlp
     dir_encoding_config:
