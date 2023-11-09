@@ -34,14 +34,14 @@ if __name__ == "__main__":
         dataset = NeRFDataset(
             conf.path, 
             split='test', 
-            sample_full_image=conf.dataset.train.sample_full_image, 
-            batch_size=conf.dataset.train.batch_size,
+            sample_full_image=True, 
+            batch_size=1,
             return_alphas=True
         )
     else:
         raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp", "ncore"]. ')
     
-    dataloader = torch.utils.data.DataLoader(dataset, num_workers=1, batch_size=1, shuffle=False, collate_fn=val_collate_fn)
+    dataloader = torch.utils.data.DataLoader(dataset, num_workers=8 batch_size=1, shuffle=False, collate_fn=val_collate_fn)
 
     # Initialize the model and the optix context
     model = MixtureOfGaussians(conf)
