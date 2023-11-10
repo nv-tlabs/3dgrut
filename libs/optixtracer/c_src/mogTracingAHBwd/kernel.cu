@@ -196,7 +196,7 @@ extern "C" __global__ void __raygen__rg()
                         //             = 1 - (1-galpha) * prevTrm * nextTrm
                         // ===> d_rayDns / d_galpha = -prevTrm * nextTrm = -residualTrm
                         const float residualTrm = galpha < 0.999999 ? accumulatedRayDns[k][j] / (1 - galpha) : rayTrm[k][j];
-                        const float galphaRayDnsGrd = -1.0f * residualTrm * rayDnsGrd[k][j];
+                        const float galphaRayDnsGrd = residualTrm * rayDnsGrd[k][j];
             
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // compute the gradient wrt to the sph coefficients and position (through the sph view
@@ -216,7 +216,7 @@ extern "C" __global__ void __raygen__rg()
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // ---> rayDns = 1 - prevTrm * (1-galpha) * nextTrm
                         //             = 1 - (1-galpha) * prevTrm * nextTrm
-                        // ===> d_rayDns / d_gdns = -residualTrm * gres
+                        // ===> d_rayDns / d_gdns = residualTrm * gres
                         //
                         // ---> rayRadiance = accumulatedRayRad + galpha * transmit * grad + (1-galpha) * transmit *
                         // residualRayRad
@@ -232,7 +232,7 @@ extern "C" __global__ void __raygen__rg()
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // ---> rayDns = 1 - prevTrm * (1-galpha) * nextTrm
                         //             = 1 - (1-galpha) * prevTrm * nextTrm
-                        // ===> d_rayDns / d_gres = -residualTrm * gdns
+                        // ===> d_rayDns / d_gres = residualTrm * gdns
                         //
                         // ---> rayRadiance = accumulatedRayRad + galpha * transmit * grad + (1 - galpha) * transmit *
                         // residualRayRad
