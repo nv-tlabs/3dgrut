@@ -403,7 +403,7 @@ class MixtureOfGaussians(torch.nn.Module):
                     optimizable_tensors[group["name"]] = group["params"][0]
         return optimizable_tensors
 
-
+    @torch.cuda.nvtx.range("densify_gaussians")
     def densify_gaussians(self, scene_extent):
         assert self.optimizer is not None, "Optimizer need to be initialized before splitting and cloning the Gaussians"
         assert self.get_positions().requires_grad, "Trying to perform split and clone but the positions are not being optimized"
@@ -422,6 +422,7 @@ class MixtureOfGaussians(torch.nn.Module):
 
         torch.cuda.empty_cache()
 
+    @torch.cuda.nvtx.range("split_gaussians")
     def split_gaussians(self, positional_grad_norm: torch.Tensor, scene_extent: float):
         n_init_points = self.get_positions().shape[0]
 
@@ -453,6 +454,7 @@ class MixtureOfGaussians(torch.nn.Module):
         optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
         self.update_optimizable_parameters(optimizable_tensors)
 
+    @torch.cuda.nvtx.range("clone_gaussians")
     def clone_gaussians(self, positional_grad_norm: torch.Tensor, scene_extent: float):
         assert positional_grad_norm is not None, "Positional gradients must be available in order to clone the Gaussians"
         # Extract points that satisfy the gradient condition
@@ -474,6 +476,7 @@ class MixtureOfGaussians(torch.nn.Module):
         optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
         self.update_optimizable_parameters(optimizable_tensors)
 
+    @torch.cuda.nvtx.range("prune_gaussians")
     def prune_gaussians(self):
 
         # Prune the Gaussians based on their opacity
@@ -549,27 +552,29 @@ class MixtureOfGaussians(torch.nn.Module):
             self.get_scale(),
             self.get_density()
         )
-        return mog_counts 
-    
+        return mog_counts
+
     def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
 
-        # The feature mask zeros out feature dims the model shouldn't use yet.
-        # That introduces a curriculum way of optimizing the model
-        features = self.get_features()
-        if self.progressive_training:
-            features *= self.get_active_feature_mask()
+        num_gsplats = self.positions.shape[0]
+        with torch.cuda.nvtx.range(f"model.forward({num_gsplats} gaussians)"):
+            # The feature mask zeros out feature dims the model shouldn't use yet.
+            # That introduces a curriculum way of optimizing the model
+            features = self.get_features()
+            if self.progressive_training:
+                features *= self.get_active_feature_mask()
 
-        # For spherical harmonics, for optimal performance we set the kernel
-        # to avoid computing sh degrees which are not yet used by the model
-        if self.feature_type == 'sh':
-            self.optix_ctx.set_sph_degree(self.n_active_features)
+            # For spherical harmonics, for optimal performance we set the kernel
+            # to avoid computing sh degrees which are not yet used by the model
+            if self.feature_type == 'sh':
+                self.optix_ctx.set_sph_degree(self.n_active_features)
 
-        pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(
-                self.optix_ctx, rays_o, rays_d, 
-                self.positions, self.get_rotation(), self.get_scale(),
-                self.get_density(), features)
+            pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(
+                    self.optix_ctx, rays_o, rays_d,
+                    self.positions, self.get_rotation(), self.get_scale(),
+                    self.get_density(), features)
 
-        pred_rgb, pred_opacity = self.background(rays_d, pred_rgb, pred_opacity)
+            pred_rgb, pred_opacity = self.background(rays_d, pred_rgb, pred_opacity)
 
         return {
             'pred_rgb': pred_rgb,

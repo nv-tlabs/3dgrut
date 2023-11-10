@@ -110,6 +110,7 @@ class _trace_mog_func(torch.autograd.Function):
         )
         return None, None, None, mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd
 
+@torch.cuda.nvtx.range("trace_mog")
 def trace_mog(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph):
     ray_radiance, ray_density, ray_hit_distance = _trace_mog_func.apply(
         optix_ctx,
@@ -123,6 +124,7 @@ def trace_mog(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, m
     )
     return ray_radiance, ray_density, ray_hit_distance
 
+@torch.cuda.nvtx.range("trace_mog_grad")
 def trace_mog_grad(optix_ctx, ray_ori, ray_dir, ray_radiance, ray_density, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd):
     return _plugin.trace_mog_bwd(
         optix_ctx.cpp_wrapper,
@@ -140,6 +142,7 @@ def trace_mog_grad(optix_ctx, ray_ori, ray_dir, ray_radiance, ray_density, mog_p
         ray_hit_distance_grd
     )
 
+@torch.cuda.nvtx.range("count_mog_hits")
 def count_mog_hits(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns):
     mog_hit_counts = _plugin.count_mog_hits(
         optix_ctx.cpp_wrapper,
@@ -154,6 +157,7 @@ def count_mog_hits(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_d
 
 #----------------------------------------------------------------------------
 #
+@torch.cuda.nvtx.range("build_mog_bvh")
 def build_mog_bvh(
         optix_ctx,
         mog_pos,
