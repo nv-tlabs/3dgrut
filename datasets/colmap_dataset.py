@@ -208,14 +208,12 @@ class ColmapDataset(Dataset):
     def create_dataset_camera_visualization(self):
 
         # just one global intrinsic mat for now
-        intrinsics = to_np(self.K)
 
         cam_list = []
 
         for i_cam, pose in enumerate(self.poses):
-
-            trans_mat = np.eye(4)
-            trans_mat[:3,:4] = pose
+        
+            trans_mat = pose
             trans_mat_world_to_camera = np.linalg.inv(trans_mat)
 
             # these cameras follow the opposite convention from polyscope
@@ -227,13 +225,13 @@ class ColmapDataset(Dataset):
 
             w = self.image_w
             h = self.image_h
-            f_w = intrinsics[0,0]
-            f_h = intrinsics[1,1]
+            f_w = self.intrinsic[i_cam,0]
+            f_h = self.intrinsic[i_cam,1]
 
             fov_w = 2. * np.arctan(0.5 * w / f_w)
             fov_h = 2. * np.arctan(0.5 * h / f_h)
             
-            rgb = to_np(self.rgbs[i_cam,:]).reshape(h,w,3)
+            rgb = to_np(self.rgb[i_cam,:]).reshape(h,w,3)
 
             cam_list.append({
                 'ext_mat' : trans_mat_world_to_camera,
