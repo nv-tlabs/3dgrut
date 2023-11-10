@@ -39,7 +39,6 @@
 
 #include "common.h"
 #include "mogTracing/params.h"
-#include "mogTracingBwd/params.h"
 #include "optix_utils.h"
 #include "optix_wrapper.h"
 
@@ -334,6 +333,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     torch::Tensor rayOri,
     torch::Tensor rayDir,
     torch::Tensor rayRad,
+    torch::Tensor rayDns,
     torch::Tensor mogPos,
     torch::Tensor mogRot,
     torch::Tensor mogScl,
@@ -355,6 +355,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.rayOri = packed_accessor32<float, 4>(rayOri);
     paramsHost.rayDir = packed_accessor32<float, 4>(rayDir);
     paramsHost.rayRad = packed_accessor32<float, 4>(rayRad);
+    paramsHost.rayDns = packed_accessor32<float, 4>(rayDns);
     paramsHost.mogPos = packed_accessor32<float, 2>(mogPos);
     paramsHost.mogRot = packed_accessor32<float, 2>(mogRot);
     paramsHost.mogScl = packed_accessor32<float, 2>(mogScl);

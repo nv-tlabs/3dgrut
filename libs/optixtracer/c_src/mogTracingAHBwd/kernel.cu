@@ -7,7 +7,7 @@
 // license agreement from NVIDIA CORPORATION is strictly prohibited.
 //
 #include "../mogTracing/utils.h"
-#include "../mogTracingBwd/params.h"
+#include "../mogTracing/params.h"
 #include "../optix_utils.h"
 #include "../random_utils.h"
 #include "../ray_data.h"
@@ -72,6 +72,7 @@ extern "C" __global__ void __raygen__rg()
     float3 accumulatedRayRad[MOGTracingPatchSize][MOGTracingPatchSize];
 
     float rayDnsGrd[MOGTracingPatchSize][MOGTracingPatchSize];
+    float accumulatedRayDns[MOGTracingPatchSize][MOGTracingPatchSize];
 
     const int startIdxX = idx.x * MOGTracingPatchSize;
     const int startIdxY = idx.y * MOGTracingPatchSize;
@@ -103,6 +104,7 @@ extern "C" __global__ void __raygen__rg()
             accumulatedRayRad[j][i] = make_float3(0);
 
             rayDnsGrd[j][i] = params.rayDnsGrd[idx.z][y][x][0];
+            accumulatedRayDns[j][i] = params.rayDns[idx.z][y][x][0];
         }
     }
 
@@ -188,12 +190,14 @@ extern "C" __global__ void __raygen__rg()
                         const float galpha = gres * gdns;
 
                         const float weight = galpha * rayTrm[k][j];
-
-                        // gradient wrt d_rayDns
-                        atomicAdd(&params.mogDnsGrd[gId][0], rayDnsGrd[k][j]);
+                                    
+                        // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                        // ---> rayDns = 1 - prevTrm * (1-galpha) * nextTrm
+                        //             = 1 - (1-galpha) * prevTrm * nextTrm
+                        // ===> d_rayDns / d_galpha = -prevTrm * nextTrm = -residualTrm
+                        const float residualTrm = galpha < 0.999999 ? accumulatedRayDns[k][j] / (1 - galpha) : rayTrm[k][j];
+                        const float galphaRayDnsGrd = -1.0f * residualTrm * rayDnsGrd[k][j];
             
-                        // gradient computation wrt rayRad
-
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // compute the gradient wrt to the sph coefficients and position (through the sph view
                         // direction)
@@ -210,25 +214,35 @@ extern "C" __global__ void __raygen__rg()
                                                             make_float3(0));
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                        // ---> rayDns = 1 - prevTrm * (1-galpha) * nextTrm
+                        //             = 1 - (1-galpha) * prevTrm * nextTrm
+                        // ===> d_rayDns / d_gdns = -residualTrm * gres
+                        //
                         // ---> rayRadiance = accumulatedRayRad + galpha * transmit * grad + (1-galpha) * transmit *
                         // residualRayRad
                         //                  = accumulatedRayRad + gdns * gres * transmit * grad + (1-gdns*gres) *
                         //                  transmit * residualRayRad
                         // ===> d_rayRad / d_gdns = gres * transmit * grad - gres * transmit * residualRayRad
                         atomicAdd(
-                            &params.mogDnsGrd[gId][0], gres * rayTrm[k][j] * (grad.x - residualRayRad.x) * rayRadGrd[k][j].x +
-                                                           gres * rayTrm[k][j] * (grad.y - residualRayRad.y) * rayRadGrd[k][j].y +
-                                                           gres * rayTrm[k][j] * (grad.z - residualRayRad.z) * rayRadGrd[k][j].z);
+                            &params.mogDnsGrd[gId][0],
+                            gres * (galphaRayDnsGrd + rayTrm[k][j] * (grad.x - residualRayRad.x) * rayRadGrd[k][j].x +
+                                    rayTrm[k][j] * (grad.y - residualRayRad.y) * rayRadGrd[k][j].y +
+                                    rayTrm[k][j] * (grad.z - residualRayRad.z) * rayRadGrd[k][j].z));
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                        // ---> rayDns = 1 - prevTrm * (1-galpha) * nextTrm
+                        //             = 1 - (1-galpha) * prevTrm * nextTrm
+                        // ===> d_rayDns / d_gres = -residualTrm * gdns
+                        //
                         // ---> rayRadiance = accumulatedRayRad + galpha * transmit * grad + (1 - galpha) * transmit *
                         // residualRayRad
                         //                  = accumulatedRayRad + gdns * gres * transmit * grad + (1 - gdns * gres) *
                         //                  transmit * residualRayRad
                         // ===> d_rayRad / d_gres = gdns * transmit * grad - gdns * transmit * residualRayRad
-                        const float gresGrd = gdns * rayTrm[k][j] * (grad.x - residualRayRad.x) * rayRadGrd[k][j].x +
-                                              gdns * rayTrm[k][j] * (grad.y - residualRayRad.y) * rayRadGrd[k][j].y +
-                                              gdns * rayTrm[k][j] * (grad.z - residualRayRad.z) * rayRadGrd[k][j].z;
+                        const float gresGrd =
+                            gdns * (galphaRayDnsGrd + rayTrm[k][j] * (grad.x - residualRayRad.x) * rayRadGrd[k][j].x +
+                                    rayTrm[k][j] * (grad.y - residualRayRad.y) * rayRadGrd[k][j].y +
+                                    rayTrm[k][j] * (grad.z - residualRayRad.z) * rayRadGrd[k][j].z);
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // ---> gres = exp(-0.5 * grayDist)
@@ -298,8 +312,8 @@ extern "C" __global__ void __raygen__rg()
                         atomicAdd(&params.mogRotGrd[gId][0], grotGrdPoscr.x + grotGrdRayDirR.x);
                         atomicAdd(&params.mogRotGrd[gId][1], grotGrdPoscr.y + grotGrdRayDirR.y);
                         atomicAdd(&params.mogRotGrd[gId][2], grotGrdPoscr.z + grotGrdRayDirR.z);
-                        atomicAdd(&params.mogRotGrd[gId][3], grotGrdPoscr.w + grotGrdRayDirR.w);
-
+                        atomicAdd(&params.mogRotGrd[gId][3], grotGrdPoscr.w + grotGrdRayDirR.w);                       
+                        
                         rayTrm[k][j] = nextTransmit;
                         transmit = fmaxf(transmit, rayTrm[k][j]);
                     }
