@@ -199,6 +199,7 @@ def main(conf) -> None:
 
         # viz stateful parameters & options
         viz_do_train = False
+        viz_skip_update = False  # if enabled, will skip rendering updates to accelerate background training loop
         viz_render_styles = ['color', 'density']
         viz_render_style_ind = 0
         viz_curr_render_size = None
@@ -313,14 +314,16 @@ def main(conf) -> None:
 
 
         def ps_ui_callback():
-            nonlocal viz_do_train, viz_render_style_ind
+            nonlocal viz_do_train, viz_skip_update, viz_render_style_ind
 
             # Create a little ImGUI UI
             _, viz_do_train = psim.Checkbox("Train", viz_do_train)
+            _, viz_skip_update = psim.Checkbox("Skip Render Update", viz_skip_update)
 
             _, viz_render_style_ind = psim.Combo("Render Display", viz_render_style_ind, viz_render_styles)
 
-            update_render_view_viz()
+            if not viz_skip_update:
+                update_render_view_viz()
 
         ps.set_user_callback(ps_ui_callback)
 
@@ -445,10 +448,11 @@ def main(conf) -> None:
                     model.build_bvh()
 
                 if conf.with_gui:
-                    if scene_updated or model.get_positions().requires_grad:
-                        update_cloud_viz()
-        
-                    update_render_view_viz()
+                    if not viz_skip_update:
+                        if scene_updated or model.get_positions().requires_grad:
+                            update_cloud_viz()
+            
+                        update_render_view_viz()
 
                     ps.frame_tick()
                     while not viz_do_train:
