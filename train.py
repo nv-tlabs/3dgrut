@@ -395,7 +395,7 @@ def main(conf: DictConfig) -> None:
                 loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
                 writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
 
-                if conf.loss.use_ssim and conf.dataset.train.sample_full_image:
+                if conf.loss.use_ssim and conf.dataset.train.get("sample_full_image", False):
                     loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
                     loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
                     writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
