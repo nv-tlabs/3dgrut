@@ -310,6 +310,12 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
                                 sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingMLAT, rayRad.size(2),
                                 rayRad.size(1), rayRad.size(0)));
     }
+    else if (stateWrapper.pState->pipeline == MOGTracingPipelineMBOIT)
+    {
+        OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingMBOIT, cudaStream, paramsDevice,
+                                sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingMBOIT, rayRad.size(2),
+                                rayRad.size(1), rayRad.size(0)));
+    }
     else
     {
         OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingAH, cudaStream, paramsDevice,
@@ -403,6 +409,53 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
         mogPosGrd, mogRotGrd, mogSclGrd, mogDnsGrd, mogSphGrd);
 }
 
+torch::Tensor count_mog_hits(OptiXStateWrapper& stateWrapper,
+                             torch::Tensor rayOri,
+                             torch::Tensor rayDir,
+                             torch::Tensor mogPos,
+                             torch::Tensor mogRot,
+                             torch::Tensor mogScl,
+                             torch::Tensor mogDns)
+{
+    const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
+    torch::Tensor mogHitCount = torch::zeros({ mogDns.size(0), mogDns.size(1) }, opts);
+
+    MoGTracingParams paramsHost;
+    paramsHost.handle = stateWrapper.pState->gasHandle;
+    paramsHost.rayOri = packed_accessor32<float, 4>(rayOri);
+    paramsHost.rayDir = packed_accessor32<float, 4>(rayDir);
+    paramsHost.mogPos = packed_accessor32<float, 2>(mogPos);
+    paramsHost.mogRot = packed_accessor32<float, 2>(mogRot);
+    paramsHost.mogScl = packed_accessor32<float, 2>(mogScl);
+    paramsHost.mogDns = packed_accessor32<float, 2>(mogDns);
+    paramsHost.mogHitCount = packed_accessor32<float, 2>(mogHitCount);
+
+    paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
+    paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
+
+    paramsHost.aabb = stateWrapper.pState->gasAABB;
+    paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, stateWrapper.pState->maxNumSlabs);
+    paramsHost.sphDegree = stateWrapper.pState->sphDegree;
+
+    paramsHost.frameBounds.x = rayOri.size(2) - 1;
+    paramsHost.frameBounds.y = rayOri.size(1) - 1;
+    paramsHost.frameNumber = 0;
+
+    cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
+
+    CUdeviceptr paramsDevice;
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&paramsDevice), sizeof(MoGTracingParams)));
+    CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(paramsDevice), &paramsHost, sizeof(paramsHost), cudaMemcpyHostToDevice));
+
+    OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingHC, cudaStream, paramsDevice,
+                            sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingHC,
+                            div_round_up(rayOri.size(2), stateWrapper.pState->patchSize),
+                            div_round_up(rayOri.size(1), stateWrapper.pState->patchSize), rayOri.size(0)));
+
+    CUDA_CHECK(cudaStreamSynchronize(cudaStream));
+
+    return mogHitCount;
+}
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
@@ -410,8 +463,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     pybind11::class_<OptiXStateWrapper>(m, "OptiXStateWrapper")
         .def(pybind11::init<const std::string&, const std::string&, uint32_t, uint32_t, uint32_t, uint32_t, bool,
                             uint32_t, uint32_t, float, float>())
-        .def("set_sph_degree", &OptiXStateWrapper::setSphDegree, R"()", py::arg("degree"));
+        .def("set_sph_degree", &OptiXStateWrapper::setSphDegree, R"()", py::arg("degree"))
+        .def("set_pipeline", &OptiXStateWrapper::setPipeline, R"()", py::arg("pipeline"));
     m.def("build_mog_bvh", &build_mog_bvh, "build_mog_bvh");
     m.def("trace_mog", &trace_mog, "trace_mog");
     m.def("trace_mog_bwd", &trace_mog_bwd, "trace_mog_bwd");
+    m.def("count_mog_hits", &count_mog_hits, "count_mog_hits");
 }

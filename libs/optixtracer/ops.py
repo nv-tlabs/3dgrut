@@ -8,6 +8,7 @@
 #
 
 import os
+from enum import IntEnum
 from dataclasses import dataclass
 import torch
 import torch.utils.cpp_extension
@@ -137,6 +138,18 @@ def trace_mog_grad(optix_ctx, ray_ori, ray_dir, ray_radiance, mog_pos, mog_rot, 
         ray_hit_distance_grd
     )
 
+def count_mog_hits(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns):
+    mog_hit_counts = _plugin.count_mog_hits(
+        optix_ctx.cpp_wrapper,
+        ray_ori,
+        ray_dir,
+        mog_pos,
+        mog_rot,
+        mog_scl,
+        mog_dns
+    )
+    return mog_hit_counts
+
 #----------------------------------------------------------------------------
 #
 def build_mog_bvh(
@@ -156,9 +169,15 @@ def build_mog_bvh(
 
 #----------------------------------------------------------------------------
 #
+class OptixMogPipeline(IntEnum):
+    TRACING_BASELINE = 0
+    TRACING_DEFAULT = 1
+    TRACING_MLAT = 2
+    TRACING_MBOIT = 4
+ 
 @dataclass
 class OptixMogTracingParams:
-    pipeline : int=1            # Rendering algo : 0 = closest-hit, 1 = any-hit (the one you really want), 2 = intersection-shader, 3 = mlat
+    pipeline : int=OptixMogPipeline.TRACING_DEFAULT # Tracing algo
     hit_mode : int=0            # Intersection distance : 0 = distance to the first hit triangle, 1 = distance to the projection of aussian center on the ray 
     max_hit_per_slab: int=32    # Size of the array of sorted gaussian per-slabs
     max_num_slabs: int=64       # Number of slabs along the diagonal of the scene AABB
@@ -175,7 +194,7 @@ class OptiXContext:
         self.cpp_wrapper = _plugin.OptiXStateWrapper(
             os.path.dirname(__file__), 
             torch.utils.cpp_extension.CUDA_HOME,
-            params.pipeline,
+            int(params.pipeline),
             params.hit_mode,
             params.max_hit_per_slab,
             params.max_num_slabs,
@@ -188,4 +207,7 @@ class OptiXContext:
     
     def set_sph_degree(self, degree:int):
         self.cpp_wrapper.set_sph_degree(degree)
+
+    def set_pipeline(self, pipeline:int):
+        self.cpp_wrapper.set_pipeline(pipeline)
 
