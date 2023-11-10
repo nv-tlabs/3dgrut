@@ -214,6 +214,8 @@ def main(conf: DictConfig) -> None:
                                 radius=1e-3, point_render_mode='quad')
         ps_point_cloud_buffer = ps_point_cloud.get_buffer("points")
 
+        train_dataset.create_dataset_camera_visualization()
+        val_dataset.create_dataset_camera_visualization()
         
         def update_cloud_viz():
             nonlocal ps_point_cloud, ps_point_cloud_buffer
@@ -326,7 +328,6 @@ def main(conf: DictConfig) -> None:
                 update_render_view_viz()
 
         ps.set_user_callback(ps_ui_callback)
-
 
     n_epochs = int(n_iterations/train_dataset.__len__())
 
