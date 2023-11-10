@@ -172,21 +172,20 @@ def main(conf) -> None:
         import polyscope.imgui as psim
 
         ps.set_use_prefs_file(False)
+
         if conf.dataset.type == 'nerf': # NeRF synthetic uses the blender coordinate-system
             ps.set_up_dir("z_up")
             ps.set_front_dir("neg_y_front")
             ps.set_navigation_style("turntable")
-        else:
-            ps.set_up_dir("y_up")
-            ps.set_navigation_style("free")
-        if conf.dataset.type == 'nerf': # NeRF synthetic uses the blender coordinate-system
-            ps.set_up_dir("z_up")
-            ps.set_front_dir("neg_y_front")
-            ps.set_navigation_style("turntable")
-        else:                           # Colmap scenes use a cartesian coordinate-system
+        elif conf.dataset.type == 'colmap': # Colmap scenes use a cartesian coordinate-system
             ps.set_up_dir("neg_y_up")
             ps.set_front_dir("neg_z_front")
             ps.set_navigation_style("free")
+        else:                              # AV use cartesian coordinate-system with z-up
+            ps.set_up_dir("z_up")
+            ps.set_front_dir("x_front")
+            ps.set_navigation_style("free")
+
         ps.set_enable_vsync(False)
         ps.set_max_fps(-1)
         ps.set_background_color((0., 0., 0.))
