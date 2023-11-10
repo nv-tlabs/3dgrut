@@ -5,3 +5,6 @@ defaults:
   - /apps/ngp
   - /background@_global_: sky_mlp
   - _self_
+
+dataset:
+  use_aux_data: true
