@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 
 from tqdm import tqdm
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from datasets.colmap_dataset import ColmapDataset
 from datasets.nerf_dataset import NeRFDataset
@@ -330,7 +330,6 @@ def main(conf: DictConfig) -> None:
 
     n_epochs = int(n_iterations/train_dataset.__len__())
 
-
     # Criterions that we log during training
     criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda")}
 
@@ -339,6 +338,10 @@ def main(conf: DictConfig) -> None:
         logging.warning("The selected experiment name already exists and the checkpoints could be overwritten!")
 
     writer = SummaryWriter(log_dir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None)
+
+    # Store parsed config for reference
+    with open(os.path.join(writer.get_logdir(), "parsed.yaml"), "w") as fp:
+        OmegaConf.save(config=conf, f=fp)
 
     assert model.optimizer is not None, "Optimizer needs to be initialized before the training can start!"
     
