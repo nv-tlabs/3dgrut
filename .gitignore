@@ -3,6 +3,7 @@
 
 external/
 runs/
+wandb/
 outputs/
 eval/
 

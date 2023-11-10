@@ -98,7 +98,7 @@ class NGCToolbox:
     def build_docker(self, docker_fpath: Optional[os.PathLike] = None):
         """Build the docker container.
         """
-        cmd = 'docker build -f ./ngc/Dockerfile.build . -t {0} --platform {1}'.format(self._cfg["docker"]["name"], self._cfg["docker"]["platform"])
+        cmd = 'docker build -f ./ngc/Dockerfile.build . -t {0}'.format(self._cfg["docker"]["name"])
         if docker_fpath is not None:
             cmd += f" -f {docker_fpath}"
         print(cmd)

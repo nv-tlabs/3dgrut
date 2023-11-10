@@ -37,7 +37,7 @@ ENV CONDA_ENV=3dgrt
 RUN $CONDA_DIR/bin/conda create -n $CONDA_ENV python=3.11
 RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install -r requirements.txt
 RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install libs/ray_utils
-RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install thirdparty/simple-knn
+# RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install thirdparty/simple-knn
 
 WORKDIR /workspace
 

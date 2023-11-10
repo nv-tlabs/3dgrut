@@ -337,6 +337,11 @@ def main(conf: DictConfig) -> None:
     if conf.experiment_name and os.path.exists(f'{conf.out_dir}/{conf.experiment_name}'):
         logging.warning("The selected experiment name already exists and the checkpoints could be overwritten!")
 
+    if conf.use_wandb:
+        import wandb
+        wandb.init(config=dict(conf),project='3dgrt')
+        wandb.tensorboard.patch(root_logdir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None, save=False)
+
     writer = SummaryWriter(log_dir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None)
 
     # Store parsed config for reference

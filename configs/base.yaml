@@ -6,6 +6,7 @@ n_iterations: 30000
 with_gui: false
 val_frequency: 1
 num_workers: 8
+use_wandb: false
 
 model:
   density_activation: sigmoid
