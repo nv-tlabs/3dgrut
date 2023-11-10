@@ -139,7 +139,7 @@ class ColmapDataset(Dataset):
     def get_center(self):
         return self.center
     
-    def get_bbox(self):
+    def get_bbox(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Tuple of vec3 (min,max)"""
         return self.scene_bbox
 
