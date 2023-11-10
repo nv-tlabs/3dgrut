@@ -3,6 +3,7 @@
 
 external/
 runs/
+eval/
 
 debug_**
 
