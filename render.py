@@ -15,6 +15,8 @@ from datasets.ncore_dataset import NCoreDataset
 
 from torchmetrics import PeakSignalNoiseRatio
 
+BACKGROUND_COLOR = torch.zeros((3,), dtype=torch.float32, device='cuda')
+
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = argparse.ArgumentParser()
@@ -41,7 +43,7 @@ if __name__ == "__main__":
     else:
         raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp", "ncore"]. ')
     
-    dataloader = torch.utils.data.DataLoader(dataset, num_workers=8 batch_size=1, shuffle=False, collate_fn=val_collate_fn)
+    dataloader = torch.utils.data.DataLoader(dataset, num_workers=8, batch_size=1, shuffle=False, collate_fn=val_collate_fn)
 
     # Initialize the model and the optix context
     model = MixtureOfGaussians(conf)
@@ -50,7 +52,6 @@ if __name__ == "__main__":
     # Initialize the parameters from checkpoint
     model.init_from_checkpoint(checkpoint)
     model.build_bvh()
-
     # Criterions that we log during training
     criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda")}
 
@@ -70,24 +71,19 @@ if __name__ == "__main__":
                 rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
                 # Compute the outputs of a single batch
                 outputs = model(rays_ori, rays_dir)
-                # Compute the loss
-                psnr.append(criterions["psnr"](outputs['pred_rgb'], rgb_gt).item())
-                pbar.set_postfix({'iteration': iteration, 'psnr': psnr[-1]})
                 
-                # Store the images
+                # The values are already alpha composited with the background
                 rgb_pred = outputs['pred_rgb']
-                if "alphas" in gpu_batch:
-                    rgb_pred = torch.cat([rgb_pred, outputs['pred_opacity']], dim=-1)
-
                 torchvision.utils.save_image(rgb_pred.squeeze(0).permute(2,0,1), os.path.join(output_path_renders, '{0:05d}'.format(iteration) + ".png"))
-                if args.save_gt:
-                    if "alphas" in gpu_batch: 
-                        rgb_gt = torch.cat([rgb_gt, gpu_batch["alpha"]], dim=-1)
 
-                    gt_data = torch.cat([rgb_gt, gpu_batch["alpha"]], dim=-1)
+                if args.save_gt:
+                    if "alpha" in gpu_batch: 
+                        rgb_gt = rgb_gt * gpu_batch["alpha"] + BACKGROUND_COLOR * (1 - gpu_batch["alpha"])
                     torchvision.utils.save_image(rgb_gt.squeeze(0).permute(2,0,1), os.path.join(output_path_gt, '{0:05d}'.format(iteration) + ".png"))
 
-
+                # Compute the loss
+                psnr.append(criterions["psnr"](rgb_pred, rgb_gt).item())
+                pbar.set_postfix({'iteration': iteration, 'psnr': psnr[-1]})
                 iteration += 1
 
         print(f"PSNR : {np.mean(psnr)}, std: f{np.std(psnr)}")

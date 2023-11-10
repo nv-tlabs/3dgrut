@@ -21,7 +21,7 @@ class NeRFDataset(Dataset):
         self.read_intrinsics()
         self.read_meta(split)
     
-        self.length_scale, self.center, self.scene_bbox = self.compute_spatial_extents()
+        self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
 
     def read_intrinsics(self):
         with open(os.path.join(self.root_dir, "transforms_train.json"), 'r') as f:
@@ -170,7 +170,7 @@ class NeRFDataset(Dataset):
             assert self.sample_full_image, 'val mode assumes sampling full images'
             if len(self.rgbs)>0: # if ground truth available
                 rgb = self.rgbs[idx]
-                pose =self.poses[idx]
+                pose = self.poses[idx]
                 directions = self.directions[np.arange(self.img_wh[0]*self.img_wh[1])]
                 rays_o, rays_d = get_rays(directions, pose)
 
