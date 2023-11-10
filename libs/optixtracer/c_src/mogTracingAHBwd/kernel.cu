@@ -72,7 +72,7 @@ extern "C" __global__ void __raygen__rg()
     float3 accumulatedRayRad[MOGTracingPatchSize][MOGTracingPatchSize];
 
     float rayDnsGrd[MOGTracingPatchSize][MOGTracingPatchSize];
-    float accumulatedRayDns[MOGTracingPatchSize][MOGTracingPatchSize];
+    float accumulatedRayTrm[MOGTracingPatchSize][MOGTracingPatchSize];
 
     const int startIdxX = idx.x * MOGTracingPatchSize;
     const int startIdxY = idx.y * MOGTracingPatchSize;
@@ -104,7 +104,7 @@ extern "C" __global__ void __raygen__rg()
             accumulatedRayRad[j][i] = make_float3(0);
 
             rayDnsGrd[j][i] = params.rayDnsGrd[idx.z][y][x][0];
-            accumulatedRayDns[j][i] = params.rayDns[idx.z][y][x][0];
+            accumulatedRayTrm[j][i] = 1 - params.rayDns[idx.z][y][x][0];
         }
     }
 
@@ -194,8 +194,8 @@ extern "C" __global__ void __raygen__rg()
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // ---> rayDns = 1 - prevTrm * (1-galpha) * nextTrm
                         //             = 1 - (1-galpha) * prevTrm * nextTrm
-                        // ===> d_rayDns / d_galpha = -prevTrm * nextTrm = -residualTrm
-                        const float residualTrm = galpha < 0.999999 ? accumulatedRayDns[k][j] / (1 - galpha) : rayTrm[k][j];
+                        // ===> d_rayDns / d_galpha = prevTrm * nextTrm = residualTrm
+                        const float residualTrm = galpha < 0.999999 ? accumulatedRayTrm[k][j] / (1 - galpha) : rayTrm[k][j];
                         const float galphaRayDnsGrd = residualTrm * rayDnsGrd[k][j];
             
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
