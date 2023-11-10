@@ -153,10 +153,6 @@ extern "C" __global__ void __raygen__rg()
             rotationMatrix(make_float4(grot.x, grot.y, grot.z, grot.w), grotMat);
             const float3 giscl = make_float3(1 / gscl.x, 1 / gscl.y, 1 / gscl.z);
 
-            // NB : this is an approximation : we are using the sampleRayOri instead of the real rayOri we factorizing
-            // the sph computation
-            // const float3 grad = computeColorFromSH(sphDegree, gpos, sampleRayOri, gId, params);
-
 #pragma unroll
             for (int j = 0; j < MOGTracingPatchSize; ++j)
             {

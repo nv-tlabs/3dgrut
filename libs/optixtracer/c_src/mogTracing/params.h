@@ -52,7 +52,7 @@ struct MoGTracingParams
     float slabSpacing;
 
     float hitMinGaussianResponse;
-    float sphDegree;
+    unsigned int sphDegree;
     uint2 frameBounds;
     
     unsigned int frameNumber;
