@@ -2,9 +2,9 @@ import os
 import sys
 import logging
 import torch 
-import argparse
 import logging
 import torch.utils.data
+import hydra
 
 from torchmetrics import PeakSignalNoiseRatio
 from torch.utils.tensorboard import SummaryWriter
@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 
 from tqdm import tqdm
-from omegaconf import OmegaConf
+from omegaconf import DictConfig
 
 from datasets.colmap_dataset import ColmapDataset
 from datasets.nerf_dataset import NeRFDataset
@@ -33,7 +33,8 @@ DEFAULT_DEVICE = torch.device('cuda')
 logging.addLevelName( logging.WARNING, "\033[1;31m%s\033[1;0m" % logging.getLevelName(logging.WARNING))
 logging.addLevelName( logging.ERROR, "\033[1;41m%s\033[1;0m" % logging.getLevelName(logging.ERROR))
 
-def main(conf) -> None:
+@hydra.main(config_path="configs", version_base=None)
+def main(conf: DictConfig) -> None:
     # Run the training process
     n_iterations = 10e4
     val_frequency = conf.val_frequency
@@ -463,12 +464,4 @@ def main(conf) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, required=True, help="Path to the config file")
-    args, remainder = parser.parse_known_args()
-
-    base_conf = OmegaConf.load(args.config)
-    cli_conf = OmegaConf.from_cli(remainder)
-    conf = OmegaConf.merge(base_conf, cli_conf)
-
-    main(conf)
+    main()
