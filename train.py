@@ -33,12 +33,15 @@ DEFAULT_DEVICE = torch.device('cuda')
 logging.addLevelName( logging.WARNING, "\033[1;31m%s\033[1;0m" % logging.getLevelName(logging.WARNING))
 logging.addLevelName( logging.ERROR, "\033[1;41m%s\033[1;0m" % logging.getLevelName(logging.ERROR))
 
-def main(conf):
+def main(conf) -> None:
     # Run the training process
     n_iterations = 10e4
     val_frequency = conf.val_frequency
     use_ssim = False
-    scene_extent = 1.
+    scene_extent: float = 1.
+    scene_bbox: tuple[torch.Tensor, torch.Tensor] # Tuple of vec3 (min,max)
+    train_dataset: torch.utils.data.Dataset
+    val_dataset: torch.utils.data.Dataset
     train_collate_fn = None
     val_collate_fn = None
     if conf.dataset.type == 'nerf':
@@ -55,6 +58,8 @@ def main(conf):
             sample_full_image=True,
             return_alphas=False
         )
+        # Scene extend from bbox poses
+        scene_bbox = train_dataset.get_bbox()
     elif conf.dataset.type == 'colmap':
         train_dataset = ColmapDataset(
             conf.path, 
@@ -69,6 +74,8 @@ def main(conf):
             sample_full_image=True,
             downsample_factor=conf.dataset.downsample_factor
         )
+        # Scene extend from bbox poses
+        scene_bbox = train_dataset.get_bbox()
     elif conf.dataset.type == 'ngp':
         train_dataset = NGPDataset(
             conf.path, 
@@ -88,7 +95,10 @@ def main(conf):
             use_aux=conf.dataset.get("use_aux_data", False)
         )
         pc = train_dataset.get_point_cloud(step_frame=10)
-        scene_extent = ((pc.xyz_end.max(0).values - pc.xyz_end.min(0).values)**2).sum().sqrt()
+
+        # Scene extend from bbox of point-cloud
+        scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
+        scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0])
     elif conf.dataset.type == 'ncore':
         # TODO: add all of the dataset parameters to config
         duration_sec = 2.0
@@ -105,9 +115,13 @@ def main(conf):
             split='val',
             duration_sec=duration_sec,
         )
-        pc = PointCloud.from_sequence(train_dataset.get_point_clouds(step_frame=10, non_dynamic_points_only=True), device="cpu")
-        scene_extent = train_dataset.scene_extent_m
+        pc = PointCloud.from_sequence(list(train_dataset.get_point_clouds(step_frame=10, non_dynamic_points_only=True)), device="cpu")
+        
+        # Scene extend from bbox of point-cloud
+        scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
+        scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0])
 
+        # Dataset produces NCoreBatch requiring dedicated collate_fns
         train_collate_fn = NCoreBatch.collate_fn
         val_collate_fn = NCoreBatch.collate_fn
     else:
@@ -158,21 +172,20 @@ def main(conf):
         import polyscope.imgui as psim
 
         ps.set_use_prefs_file(False)
+
         if conf.dataset.type == 'nerf': # NeRF synthetic uses the blender coordinate-system
             ps.set_up_dir("z_up")
             ps.set_front_dir("neg_y_front")
             ps.set_navigation_style("turntable")
-        else:
-            ps.set_up_dir("y_up")
-            ps.set_navigation_style("free")
-        if conf.dataset.type == 'nerf': # NeRF synthetic uses the blender coordinate-system
-            ps.set_up_dir("z_up")
-            ps.set_front_dir("neg_y_front")
-            ps.set_navigation_style("turntable")
-        else:                           # Colmap scenes use a cartesian coordinate-system
+        elif conf.dataset.type == 'colmap': # Colmap scenes use a cartesian coordinate-system
             ps.set_up_dir("neg_y_up")
             ps.set_front_dir("neg_z_front")
             ps.set_navigation_style("free")
+        else:                              # AV use cartesian coordinate-system with z-up
+            ps.set_up_dir("z_up")
+            ps.set_front_dir("x_front")
+            ps.set_navigation_style("free")
+
         ps.set_enable_vsync(False)
         ps.set_max_fps(-1)
         ps.set_background_color((0., 0., 0.))
@@ -182,11 +195,11 @@ def main(conf):
         ps.set_give_focus_on_show(True)
         
         ps.set_automatically_compute_scene_extents(False)
-        scene_bboxmin, scene_bboxmax = train_dataset.get_bbox()
-        ps.set_bounding_box(to_np(scene_bboxmin), to_np(scene_bboxmax))
+        ps.set_bounding_box(to_np(scene_bbox[0]), to_np(scene_bbox[1]))
 
         # viz stateful parameters & options
         viz_do_train = False
+        viz_skip_update = False  # if enabled, will skip rendering updates to accelerate background training loop
         viz_render_styles = ['color', 'density']
         viz_render_style_ind = 0
         viz_curr_render_size = None
@@ -301,14 +314,16 @@ def main(conf):
 
 
         def ps_ui_callback():
-            nonlocal viz_do_train, viz_render_style_ind
+            nonlocal viz_do_train, viz_skip_update, viz_render_style_ind
 
             # Create a little ImGUI UI
             _, viz_do_train = psim.Checkbox("Train", viz_do_train)
+            _, viz_skip_update = psim.Checkbox("Skip Render Update", viz_skip_update)
 
             _, viz_render_style_ind = psim.Combo("Render Display", viz_render_style_ind, viz_render_styles)
 
-            update_render_view_viz()
+            if not viz_skip_update:
+                update_render_view_viz()
 
         ps.set_user_callback(ps_ui_callback)
 
@@ -433,10 +448,11 @@ def main(conf):
                     model.build_bvh()
 
                 if conf.with_gui:
-                    if scene_updated or model.get_positions().requires_grad:
-                        update_cloud_viz()
-        
-                    update_render_view_viz()
+                    if not viz_skip_update:
+                        if scene_updated or model.get_positions().requires_grad:
+                            update_cloud_viz()
+            
+                        update_render_view_viz()
 
                     ps.frame_tick()
                     while not viz_do_train:
