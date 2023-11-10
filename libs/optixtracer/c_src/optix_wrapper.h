@@ -27,6 +27,7 @@ struct OptiXState
     uint32_t sphDegree;
     float gaussianSigmaThreshold;
     float minTransmittance;
+    uint32_t maxHitsReturned;
     
     uint32_t gPrimNumTri; ///< number of triangles per gaussian primitive
     CUdeviceptr gPrimVrt; ///< buffer containing the vertices of the gaussian primitive
@@ -67,6 +68,11 @@ struct OptiXState
     OptixPipeline pipelineMoGTracingHC;
     OptixShaderBindingTable sbtMoGTracingHC;
     OptixModule moduleMoGTracingHC;
+    
+    // any hit hit record inds pipeline
+    OptixPipeline pipelineMoGTracingInd;
+    OptixShaderBindingTable sbtMoGTracingInd;
+    OptixModule moduleMoGTracingInd;
 
 };
 
@@ -84,7 +90,8 @@ public:
         uint32_t patchSize,
         uint32_t sphDegree,
         float gaussianSigmaThreshold,
-        float minTransmittance
+        float minTransmittance,
+        uint32_t maxHitsReturned
     );
     ~OptiXStateWrapper    (void);
 

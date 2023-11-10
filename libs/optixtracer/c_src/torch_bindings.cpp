@@ -39,6 +39,8 @@
 
 #include "common.h"
 #include "mogTracing/params.h"
+#include "mogTracingBwd/params.h"
+#include "mogTracingInd/params.h"
 #include "optix_utils.h"
 #include "optix_wrapper.h"
 
@@ -313,7 +315,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
     else
     {
         OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingAH, cudaStream, paramsDevice,
-                                sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingAH,
+                                sizeof(MoGIndTracingParams), &stateWrapper.pState->sbtMoGTracingAH,
                                 div_round_up(rayRad.size(2), stateWrapper.pState->patchSize),
                                 div_round_up(rayRad.size(1), stateWrapper.pState->patchSize), rayRad.size(0)));
     }
@@ -401,6 +403,54 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
         mogPosGrd, mogRotGrd, mogSclGrd, mogDnsGrd, mogSphGrd);
 }
 
+std::tuple<torch::Tensor> trace_mog_inds(OptiXStateWrapper& stateWrapper,
+                                        torch::Tensor rayOri,
+                                        torch::Tensor rayDir,
+                                        torch::Tensor mogPos,
+                                        torch::Tensor mogRot,
+                                        torch::Tensor mogScl,
+                                        torch::Tensor mogDns
+                                        )
+{
+    const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kInt32).device(torch::kCUDA);
+    torch::Tensor rayHitInd = torch::empty({ rayOri.size(0), rayOri.size(1), rayOri.size(2), 3 }, opts);
+
+    MoGIndTracingParams paramsHost;
+    paramsHost.handle = stateWrapper.pState->gasHandle;
+    paramsHost.rayOri = packed_accessor32<float, 4>(rayOri);
+    paramsHost.rayDir = packed_accessor32<float, 4>(rayDir);
+    paramsHost.mogPos = packed_accessor32<float, 2>(mogPos);
+    paramsHost.mogRot = packed_accessor32<float, 2>(mogRot);
+    paramsHost.mogScl = packed_accessor32<float, 2>(mogScl);
+    paramsHost.mogDns = packed_accessor32<float, 2>(mogDns);
+    paramsHost.rayHitInd = packed_accessor32<float, 4>(rayHitInd);
+
+    paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
+    paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
+
+    paramsHost.aabb = stateWrapper.pState->gasAABB;
+    paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, stateWrapper.pState->maxNumSlabs);
+    paramsHost.sphDegree = stateWrapper.pState->sphDegree;
+
+    paramsHost.frameBounds.x = rayOri.size(2) - 1;
+    paramsHost.frameBounds.y = rayOri.size(1) - 1;
+    paramsHost.frameNumber = 0;
+
+    cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
+
+    CUdeviceptr paramsDevice;
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&paramsDevice), sizeof(MoGTracingParams)));
+    CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(paramsDevice), &paramsHost, sizeof(paramsHost), cudaMemcpyHostToDevice));
+
+      OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingInd, cudaStream, paramsDevice,
+                              sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingInd, rayHitInd.size(2),
+                              rayHitInd.size(1), rayHitInd.size(0)));
+
+    CUDA_CHECK(cudaStreamSynchronize(cudaStream));
+
+    return std::tuple<torch::Tensor>(rayHitInd);
+}
+
 torch::Tensor count_mog_hits(OptiXStateWrapper& stateWrapper,
                              torch::Tensor rayOri,
                              torch::Tensor rayDir,
@@ -452,11 +502,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     // State classes.
     pybind11::class_<OptiXStateWrapper>(m, "OptiXStateWrapper")
         .def(pybind11::init<const std::string&, const std::string&, uint32_t, uint32_t, uint32_t, uint32_t, bool,
-                            uint32_t, uint32_t, float, float>())
+                            uint32_t, uint32_t, float, float, uint32_t>())
         .def("set_sph_degree", &OptiXStateWrapper::setSphDegree, R"()", py::arg("degree"))
         .def("set_pipeline", &OptiXStateWrapper::setPipeline, R"()", py::arg("pipeline"));
     m.def("build_mog_bvh", &build_mog_bvh, "build_mog_bvh");
     m.def("trace_mog", &trace_mog, "trace_mog");
     m.def("trace_mog_bwd", &trace_mog_bwd, "trace_mog_bwd");
+    m.def("trace_mog_inds", &trace_mog_inds, "trace_mog_inds");
     m.def("count_mog_hits", &count_mog_hits, "count_mog_hits");
 }

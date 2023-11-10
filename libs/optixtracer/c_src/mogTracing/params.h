@@ -29,7 +29,8 @@ enum MOGTracingPipeline
     MOGTracingPipelineIS = 2,
     MOGTracingPipelineMLAT = 3,
     MOGTracingPipelineMBOIT = 4,
-    MOGTracingPipelineHC = 5
+    MOGTracingPipelineHC = 5,
+    MOGTracingPipelineInd = 6,
 };
 
 struct MoGTracingParams
