@@ -1,0 +1,11 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base.yaml
+  - /dataset: ncore
+  - /initialization: lidar
+  - _self_
+
+# overwrite of default parameters
+num_workers: 16

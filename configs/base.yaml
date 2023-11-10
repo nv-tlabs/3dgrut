@@ -7,18 +7,6 @@ with_gui: false
 val_frequency: 1
 num_workers: 8
 
-dataset:
-  type: colmap
-  downsample_factor: 1  # for datasets that include multi-scale versions of images [colmap]
-  
-  train:
-    batch_size: 8192
-    sample_full_image: False
-  
-initialization:
-  method: point_cloud      # one of [colmap, point_cloud, random]
-  num_gaussians: 100_000   # method=random only: number of initial gaussians to use
-
 model:
   density_activation: sigmoid
   scale_activation: exp
@@ -36,7 +24,6 @@ model:
     increase_frequency: 1000  # unmask more feature dimensions every N global steps
     increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
     
-
   lambda_background: 0.
   background:
     name: skip-background

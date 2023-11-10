@@ -1,0 +1,8 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base.yaml
+  - /dataset: ngp
+  - /initialization: lidar
+  - _self_

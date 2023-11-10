@@ -1,0 +1,4 @@
+type: ncore
+
+train:
+  batch_size: 1000000

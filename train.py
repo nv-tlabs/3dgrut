@@ -2,9 +2,9 @@ import os
 import sys
 import logging
 import torch 
-import argparse
 import logging
 import torch.utils.data
+import hydra
 
 from torchmetrics import PeakSignalNoiseRatio
 from torch.utils.tensorboard import SummaryWriter
@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 
 from tqdm import tqdm
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from datasets.colmap_dataset import ColmapDataset
 from datasets.nerf_dataset import NeRFDataset
@@ -33,7 +33,8 @@ DEFAULT_DEVICE = torch.device('cuda')
 logging.addLevelName( logging.WARNING, "\033[1;31m%s\033[1;0m" % logging.getLevelName(logging.WARNING))
 logging.addLevelName( logging.ERROR, "\033[1;41m%s\033[1;0m" % logging.getLevelName(logging.ERROR))
 
-def main(conf) -> None:
+@hydra.main(config_path="configs", version_base=None)
+def main(conf: DictConfig) -> None:
     # Run the training process
     n_iterations = 10e4
     val_frequency = conf.val_frequency
@@ -329,7 +330,6 @@ def main(conf) -> None:
 
     n_epochs = int(n_iterations/train_dataset.__len__())
 
-
     # Criterions that we log during training
     criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda")}
 
@@ -338,6 +338,10 @@ def main(conf) -> None:
         logging.warning("The selected experiment name already exists and the checkpoints could be overwritten!")
 
     writer = SummaryWriter(log_dir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None)
+
+    # Store parsed config for reference
+    with open(os.path.join(writer.get_logdir(), "parsed.yaml"), "w") as fp:
+        OmegaConf.save(config=conf, f=fp)
 
     assert model.optimizer is not None, "Optimizer needs to be initialized before the training can start!"
     
@@ -391,7 +395,7 @@ def main(conf) -> None:
                 loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
                 writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
 
-                if conf.loss.use_ssim and conf.dataset.train.sample_full_image:
+                if conf.loss.use_ssim and conf.dataset.train.get("sample_full_image", False):
                     loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
                     loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
                     writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
@@ -463,12 +467,4 @@ def main(conf) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, required=True, help="Path to the config file")
-    args, remainder = parser.parse_known_args()
-
-    base_conf = OmegaConf.load(args.config)
-    cli_conf = OmegaConf.from_cli(remainder)
-    conf = OmegaConf.merge(base_conf, cli_conf)
-
-    main(conf)
+    main()

@@ -1,0 +1,2 @@
+method: random
+num_gaussians: 100_000
