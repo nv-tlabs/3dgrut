@@ -90,3 +90,33 @@ def read_image(img_path, img_wh, return_alpha=False):
         return img, alpha
     else:
         return img
+
+
+def create_camera_visualization(cam_list):
+    '''
+    Given a list-of-dicts of camera & image info, register them in polyscope
+    to create a visualization
+    '''
+
+    import polyscope as ps
+
+    for i_cam, cam in enumerate(cam_list):
+            
+        ps_cam_param = ps.CameraParameters(
+                    ps.CameraIntrinsics(
+                        fov_vertical_deg=np.degrees(cam['fov_h']), 
+                        fov_horizontal_deg=np.degrees(cam['fov_w'])
+                    ),
+                    ps.CameraExtrinsics(mat=cam['ext_mat'])
+                )
+
+        cam_color = (1., 1., 1.)
+        if cam['split'] == 'train':
+            cam_color = (1., .7, .7)
+        elif cam['split'] == 'val':
+            cam_color = (.7, .1, .7)
+
+        
+        ps_cam = ps.register_camera_view(f"{cam['split']}_view_{i_cam:03d}", ps_cam_param, widget_color=cam_color)
+
+        ps_cam.add_color_image_quantity("target image", cam['rgb_img'][:,:,:3], enabled=True)
