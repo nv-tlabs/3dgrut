@@ -37,7 +37,6 @@ def main(conf) -> None:
     # Run the training process
     n_iterations = 10e4
     val_frequency = conf.val_frequency
-    use_ssim = False
     scene_extent: float = 1.
     scene_bbox: tuple[torch.Tensor, torch.Tensor] # Tuple of vec3 (min,max)
     train_dataset: torch.utils.data.Dataset
@@ -54,7 +53,7 @@ def main(conf) -> None:
         )
         val_dataset = NeRFDataset(
             conf.path,
-            split='val',
+            split='test', # TODO : change back to val, but ww can directly monitor what we will get :)
             sample_full_image=True,
             return_alphas=False
         )
@@ -389,12 +388,16 @@ def main(conf) -> None:
                     rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
 
                 # Compute the loss
-                loss = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
-                writer.add_scalar("loss_l1/train", loss.item(), global_step)
-                if use_ssim:
+                loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
+                writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
+
+                if conf.loss.use_ssim and conf.dataset.train.sample_full_image:
                     loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
-                    loss += loss_ssim
-                    writer.add_scalar("loss_ssim/train", loss_ssim.item(), global_step)
+                    loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
+                    writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
+                else:
+                    loss = loss_l1
+
                 if conf.model.lambda_background > 0.0:
                     assert "sky_mask" in gpu_batch, "Sky ray mask missing for background-loss evaluation"
                     # Push all background rays to have opacity 0 and non-background rays to have opacity 1 withing the FV

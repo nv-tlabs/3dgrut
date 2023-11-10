@@ -108,3 +108,7 @@ render:
   patch_size: 1
   gaussian_sigma_threshold: 3.0
   min_transmittance: 0.03
+
+loss:
+  use_ssim: True
+  lambda_ssim: 0.2
