@@ -1,0 +1,31 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base.yaml
+  - /dataset: ngp
+  - /initialization: lidar
+  - _self_
+
+# overwrite of default parameters
+num_workers: 16
+
+model:
+  progressive_training:
+    max_n_features: 0         # sh: maximum sh deg | mlp: total num of dims finally unmasked
+
+  prune:
+    frequency: 500
+    start_iteration: 1000
+
+  densify:
+    frequency: 500
+    start_iteration: 1000
+
+  reset_density:
+    end_iteration: 0 
+
+optimizer:
+  params:
+    positions:
+      lr: .01
