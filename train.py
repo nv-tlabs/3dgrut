@@ -354,7 +354,8 @@ def main(conf: DictConfig) -> None:
                             out_dir=writer.get_logdir(),
                             path=conf.path,
                             save_gt=False,
-                            writer=writer)
+                            writer=writer,
+                            model = model)
         renderer.render_all()
 
 if __name__ == "__main__":

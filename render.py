@@ -19,7 +19,7 @@ BACKGROUND_COLOR = torch.zeros((3,), dtype=torch.float32, device='cuda')
 
 
 class Renderer:
-    def __init__(self, checkpoint_path, out_dir, path="", save_gt=True, writer=None) -> None:
+    def __init__(self, checkpoint_path, out_dir, path="", save_gt=True, writer=None, model=None) -> None:
         self.out_dir = out_dir
         self.path = path
         self.save_gt = save_gt
@@ -48,14 +48,19 @@ class Renderer:
         
         self.dataloader = torch.utils.data.DataLoader(dataset, num_workers=8, batch_size=1, shuffle=False, collate_fn=val_collate_fn)
 
-        # Initialize the model and the optix context
-        self.model = MixtureOfGaussians(self.conf)
-        self.model.set_optix_context()
+        
+        if model is None:
+            # Initialize the model and the optix context
+            self.model = MixtureOfGaussians(self.conf)
+            self.model.set_optix_context()
 
 
-        # Initialize the parameters from checkpoint
-        self.model.init_from_checkpoint(self.checkpoint)
-        self.model.build_bvh()
+            # Initialize the parameters from checkpoint
+            self.model.init_from_checkpoint(self.checkpoint)
+            self.model.build_bvh()
+        else:
+            self.model = model
+            self.model.build_bvh()
 
         self.writer = writer
         
