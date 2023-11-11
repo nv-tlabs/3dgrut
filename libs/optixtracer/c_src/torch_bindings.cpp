@@ -445,8 +445,6 @@ std::tuple<torch::Tensor> trace_mog_inds(OptiXStateWrapper& stateWrapper,
                             sizeof(MoGIndTracingParams), &stateWrapper.pState->sbtMoGTracingInd, rayHitInd.size(2),
                             rayHitInd.size(1), rayHitInd.size(0)));
 
-    CUDA_CHECK(cudaStreamSynchronize(cudaStream));
-
     return std::tuple<torch::Tensor>(rayHitInd);
 }
 
