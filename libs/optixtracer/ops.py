@@ -155,6 +155,19 @@ def count_mog_hits(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_d
     )
     return mog_hit_counts
 
+def trace_mog_inds(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns):
+
+    ray_hits = _plugin.trace_mog_inds(
+        optix_ctx.cpp_wrapper,
+        ray_ori,
+        ray_dir,
+        mog_pos,
+        mog_rot,
+        mog_scl,
+        mog_dns
+    )
+    return ray_hits
+
 #----------------------------------------------------------------------------
 #
 @torch.cuda.nvtx.range("build_mog_bvh")
@@ -192,6 +205,7 @@ class OptixMogTracingParams:
     sph_degree: int=3           # spherical harmonics degree
     gaussian_sigma_threshold: float=3.0 # sigma factor to decide the size of the octahedron enveloppe
     min_transmittance: float=0.03       # minimum transmittance at which we stop gathering gaussians
+    max_hits_returned : int=64       # total number of hits returned
 
 class OptiXContext:
     def __init__(self,params:OptixMogTracingParams=OptixMogTracingParams()):
@@ -208,7 +222,8 @@ class OptiXContext:
             params.patch_size,
             params.sph_degree,
             params.gaussian_sigma_threshold,
-            params.min_transmittance
+            params.min_transmittance,
+            params.max_hits_returned
         )
     
     def set_sph_degree(self, degree:int):
