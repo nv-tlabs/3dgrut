@@ -1,7 +1,7 @@
 import os
 import sys
 import logging
-import torch 
+import torch
 import logging
 import torch.utils.data
 import hydra
@@ -36,7 +36,7 @@ logging.addLevelName( logging.ERROR, "\033[1;41m%s\033[1;0m" % logging.getLevelN
 @hydra.main(config_path="configs", version_base=None)
 def main(conf: DictConfig) -> None:
     # Run the training process
-    n_iterations = 10e4
+    n_iterations = conf.n_iterations
     val_frequency = conf.val_frequency
     scene_extent: float = 1.
     scene_bbox: tuple[torch.Tensor, torch.Tensor] # Tuple of vec3 (min,max)
@@ -352,74 +352,77 @@ def main(conf: DictConfig) -> None:
     
     for epoch_idx in range(n_epochs):
         if epoch_idx > 0 and epoch_idx % val_frequency == 0:
-            val_iteration = 0
-            with tqdm(val_dataloader) as pbar:
-                pbar.set_description("Validation:" )
-                val_psnr = []
-                val_loss = []
-                for batch in pbar:
-                    with torch.no_grad():
-                        gpu_batch = move_to_gpu(batch)
-                        rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
+                val_iteration = 0
+                with tqdm(val_dataloader) as pbar:
+                    pbar.set_description("Validation:" )
+                    val_psnr = []
+                    val_loss = []
+                    for batch in pbar:
+                        with torch.cuda.nvtx.range(f"train.validation_step_{global_step}"):
+                            with torch.no_grad():
+                                gpu_batch = move_to_gpu(batch)
+                                rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
 
-                        # Compute the outputs of a single batch
-                        outputs = model(rays_ori, rays_dir)
+                                # Compute the outputs of a single batch
+                                outputs = model(rays_ori, rays_dir)
 
-                        # Compute the loss
-                        val_loss.append(torch.abs(outputs['pred_rgb'] - rgb_gt).mean().item())
-                        val_psnr.append(criterions["psnr"](outputs['pred_rgb'], rgb_gt).item())
+                                # Compute the loss
+                                val_loss.append(torch.abs(outputs['pred_rgb'] - rgb_gt).mean().item())
+                                val_psnr.append(criterions["psnr"](outputs['pred_rgb'], rgb_gt).item())
 
-                        pbar.set_postfix({'iteration': val_iteration, 'psnr': val_psnr[-1], 'loss': val_loss[-1]})
+                                pbar.set_postfix({'iteration': val_iteration, 'psnr': val_psnr[-1], 'loss': val_loss[-1]})
 
-                        if val_iteration == 0:
-                            writer.add_image('image/val', outputs['pred_rgb'][-1].clip(0,1.0), global_step, dataformats='HWC')
-                            writer.add_image('image/gt', rgb_gt[-1].clip(0,1.0), global_step, dataformats='HWC')
-                        val_iteration += 1
+                                if val_iteration == 0:
+                                    writer.add_image('image/val', outputs['pred_rgb'][-1].clip(0,1.0), global_step, dataformats='HWC')
+                                    writer.add_image('image/gt', rgb_gt[-1].clip(0,1.0), global_step, dataformats='HWC')
+                                val_iteration += 1
 
-                writer.add_scalar("psnr/val", np.mean(val_psnr), global_step)
-                writer.add_scalar("loss_l1/val", np.mean(val_loss), global_step)
+                    writer.add_scalar("psnr/val", np.mean(val_psnr), global_step)
+                    writer.add_scalar("loss_l1/val", np.mean(val_loss), global_step)
 
         with tqdm(train_dataloader) as pbar:
             for batch in pbar:
+                with torch.cuda.nvtx.range(f"train.train_step_{global_step}"):
+                    # Move data to GPU
+                    gpu_batch = move_to_gpu(batch)
+                    rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
+                    scene_updated = False
 
-                # Move data to GPU
-                gpu_batch = move_to_gpu(batch)
-                rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
-                scene_updated = False
+                    # Compute the outputs of a single batch
+                    outputs = model(rays_ori, rays_dir)
 
-                # Compute the outputs of a single batch
-                outputs = model(rays_ori, rays_dir)
-                
-                # Check if alphas are given and if the background is a fix color
-                if isinstance(model.background, BackgroundColor):
-                    assert "alpha" in gpu_batch
-                    alpha = gpu_batch["alpha"]
-                    rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
+                    # Check if alphas are given and if the background is a fix color
+                    if isinstance(model.background, BackgroundColor):
+                        assert "alpha" in gpu_batch
+                        alpha = gpu_batch["alpha"]
+                        rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
 
-                # Compute the loss
-                loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
-                writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
+                    # Compute the loss
+                    loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
+                    writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
 
-                if conf.loss.use_ssim and conf.dataset.train.get("sample_full_image", False):
-                    loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
-                    loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
-                    writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
-                else:
-                    loss = loss_l1
+                    if conf.loss.use_ssim and conf.dataset.train.get("sample_full_image", False):
+                        loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
+                        loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
+                        writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
+                    else:
+                        loss = loss_l1
 
-                if conf.model.lambda_background > 0.0:
-                    assert "sky_mask" in gpu_batch, "Sky ray mask missing for background-loss evaluation"
-                    # Push all background rays to have opacity 0 and non-background rays to have opacity 1 withing the FV
-                    foreground_mask = torch.ones_like(outputs["pred_opacity"])
-                    foreground_mask[gpu_batch['sky_mask']] = 0.0
-                    loss_background = torch.nn.functional.mse_loss(outputs["pred_opacity"], foreground_mask)
-                    loss += conf.model.lambda_background * loss_background
-                    writer.add_scalar("loss_background/train", loss_background.item(), global_step)
+                    if conf.model.lambda_background > 0.0:
+                        assert "sky_mask" in gpu_batch, "Sky ray mask missing for background-loss evaluation"
+                        # Push all background rays to have opacity 0 and non-background rays to have opacity 1 withing the FV
+                        foreground_mask = torch.ones_like(outputs["pred_opacity"])
+                        foreground_mask[gpu_batch['sky_mask']] = 0.0
+                        loss_background = torch.nn.functional.mse_loss(outputs["pred_opacity"], foreground_mask)
+                        loss += conf.model.lambda_background * loss_background
+                        writer.add_scalar("loss_background/train", loss_background.item(), global_step)
 
                 # backpropagate the gradients and update the parameters
-                loss.backward()
-                model.optimizer.step()
-                model.optimizer.zero_grad()
+                with torch.cuda.nvtx.range("backward"):
+                    loss.backward()
+                with torch.cuda.nvtx.range("backpropagation"):
+                    model.optimizer.step()
+                    model.optimizer.zero_grad()
 
                 # Make a scheduler step
                 model.scheduler_step(global_step)

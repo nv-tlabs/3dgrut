@@ -60,7 +60,7 @@ class SkyMlp(BaseBackground):
             network_config=config_to_primitive(self.config.mlp_network_config),
         )
 
-
+    @torch.cuda.nvtx.range("sky_background.forward")
     def forward(self, rays_d, rgb, opacity):
         (b,h,w,c) = rays_d.shape
         rays_d = rearrange(rays_d,'b h w c -> (b h w) c')
@@ -95,6 +95,7 @@ class BackgroundColor(BaseBackground):
         elif self.background_color_type == "black":
             self.color = torch.zeros((3,), dtype=torch.float32).to(self.device)
 
+    @torch.cuda.nvtx.range("background_color.forward")
     def forward(self, rays_d, rgb, opacity):
         if self.background_color_type == "random":
             self.color = torch.rand((3,), dtype=torch.float32).to(rays_d)
@@ -107,5 +108,6 @@ class SkipBackground(BaseBackground):
     def setup(self, **kwargs):
         pass
 
+    @torch.cuda.nvtx.range("skip_background.forward")
     def forward(self, rays_d, rgb, opacity) -> None:
         return rgb, opacity

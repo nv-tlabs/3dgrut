@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, Callable, TypeVar
 
 import torch
@@ -9,6 +10,7 @@ from omegaconf import OmegaConf
 import torch.nn.functional as F
 from torch.autograd import Variable
 from math import exp
+
 
 OmegaConf.register_new_resolver("div", lambda a, b: a / b)
 
@@ -179,3 +181,19 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
 def psnr(img1, img2):
     mse = (((img1 - img2)) ** 2).view(img1.shape[0], -1).mean(1, keepdim=True)
     return 20 * torch.log10(1.0 / torch.sqrt(mse))
+
+
+def get_git_commit():
+    import git
+    """ Get the version of the code running, useful for tracking history of experiments. """
+    try:
+        repo = git.Repo(search_parent_directories=True)
+        sha = repo.head.object.hexsha
+    except git.InvalidGitRepositoryError as e:
+        sha = 'version info n/a'
+        logging.warning('Could not fetch current git commit, this is normal for deployed / copied code.\n'
+                        'You can get your git information by deploying the .git folder which may be ignored '
+                        'by your IDE.')
+    except Exception as e:
+        sha = 'version info n/a'
+    return sha

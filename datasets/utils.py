@@ -13,6 +13,7 @@ from datasets.ncore_utils import Batch as NCoreBatch, RayFlags as NCoreRayFlags
 
 DEFAULT_DEVICE = torch.device('cuda')
 
+@torch.cuda.nvtx.range("move_to_gpu")
 def move_to_gpu(batch : dict | NCoreBatch) -> dict[str, torch.Tensor]:
     gpu_batch: dict[str, torch.Tensor]  # expecting 'rays_ori', 'rays_dir', 'rgb_gt', optional 'sky_mask', 'alphas'
 

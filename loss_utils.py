@@ -14,12 +14,15 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from math import exp
 
+@torch.cuda.nvtx.range("l1_loss")
 def l1_loss(network_output, gt):
     return torch.abs((network_output - gt)).mean()
 
+@torch.cuda.nvtx.range("l2_loss")
 def l2_loss(network_output, gt):
     return ((network_output - gt) ** 2).mean()
 
+@torch.cuda.nvtx.range("gaussian")
 def gaussian(window_size, sigma):
     gauss = torch.Tensor([exp(-(x - window_size // 2) ** 2 / float(2 * sigma ** 2)) for x in range(window_size)])
     return gauss / gauss.sum()
@@ -30,6 +33,7 @@ def create_window(window_size, channel):
     window = Variable(_2D_window.expand(channel, 1, window_size, window_size).contiguous())
     return window
 
+@torch.cuda.nvtx.range("ssim")
 def ssim(img1, img2, window_size=11, size_average=True):
     channel = img1.size(-3)
     window = create_window(window_size, channel)
