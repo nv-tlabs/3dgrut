@@ -60,6 +60,7 @@ def main(conf: DictConfig) -> None:
             sample_full_image=True,
             return_alphas=False
         )
+        scene_extent = train_dataset.cameras_extent # taken from gsplat code
         # Scene extend from bbox poses
         scene_bbox = train_dataset.get_bbox()
     elif conf.dataset.type == 'colmap':
@@ -76,6 +77,7 @@ def main(conf: DictConfig) -> None:
             sample_full_image=True,
             downsample_factor=conf.dataset.downsample_factor
         )
+        scene_extent = train_dataset.cameras_extent # taken from gsplat code
         # Scene extend from bbox poses
         scene_bbox = train_dataset.get_bbox()
     elif conf.dataset.type == 'ngp':
@@ -100,7 +102,7 @@ def main(conf: DictConfig) -> None:
 
         # Scene extend from bbox of point-cloud
         scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
-        scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0])
+        scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0]) #TODO implement as in colmap dataset and nerf dataset
     elif conf.dataset.type == 'ncore':
         # TODO: add all of the dataset parameters to config
         duration_sec = 2.0
@@ -121,7 +123,7 @@ def main(conf: DictConfig) -> None:
         
         # Scene extend from bbox of point-cloud
         scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
-        scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0])
+        scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0]) #TODO implement as in colmap dataset and nerf dataset
 
         # Dataset produces NCoreBatch requiring dedicated collate_fns
         train_collate_fn = NCoreBatch.collate_fn
@@ -133,7 +135,7 @@ def main(conf: DictConfig) -> None:
     val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=conf.num_workers, batch_size=1, shuffle=False, collate_fn=val_collate_fn)
 
     # Initialize the model and the optix context
-    model = MixtureOfGaussians(conf)
+    model = MixtureOfGaussians(conf, scene_extent=scene_extent)
     model.set_optix_context()
 
     if conf.resume: # Load a checkpoint
