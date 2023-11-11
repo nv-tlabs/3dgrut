@@ -176,7 +176,7 @@ class NGCToolbox:
         tmpdir = os.path.join('/tmp', exp_name)
         os.makedirs(tmpdir, exist_ok=True)
 
-        rsync_base_cmd = "rsync -arzh --prune-empty-dirs --no-links -R --include=*/ --exclude=runs/** --exclude=outputs/** --exclude=wandb/** --exclude=thirdparty/**"
+        rsync_base_cmd = "rsync -arzh --prune-empty-dirs --no-links -R --include=*/ --exclude=runs/** --exclude=outputs/** --exclude=wandb/** "
         rsync_cmds = [f"{rsync_base_cmd}  --include=*.py --exclude=* . {tmpdir}/ --delete"]
         rsync_cmds.append(f"{rsync_base_cmd} --include=*.cpp --exclude=* . {tmpdir}/")
         rsync_cmds.append(f"{rsync_base_cmd} --include=*.h --exclude=* . {tmpdir}/")
@@ -239,7 +239,7 @@ class NGCToolbox:
         """
         cmd_json = get_cmd_template(self._cfg, exp_name)
         cmd_json["command"] += command
-        cmd_json["command"] += "; . ./ngc/ngc_post_job.sh"
+        cmd_json["command"] += " ; . ./ngc/ngc_post_job.sh"
         dump_and_run("command.json", cmd_json, dry_run, cleanup)
 
 
