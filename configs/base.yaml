@@ -7,7 +7,7 @@ with_gui: false
 val_frequency: 1
 num_workers: 8
 use_wandb: false
-record_training: false
+record_training: true
 
 model:
   density_activation: sigmoid
