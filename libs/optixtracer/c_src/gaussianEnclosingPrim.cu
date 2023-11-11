@@ -159,13 +159,14 @@ void computeGaussianEnclosingOctaHedron(uint32_t gNum,
                                         float sigmaSclTh,
                                         float3* gPrimVrt,
                                         int3* gPrimTri,
-                                        OptixAabb* gPrimAABB)
+                                        OptixAabb* gPrimAABB,
+                                        cudaStream_t stream)
 {
     const uint32_t threads = 1024;
     const uint32_t blocks = div_round_up(static_cast<uint32_t>(gNum), threads);
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(gPos.type(), "computeGaussianEnclosingOctaHedron", ([&] {
-                                            computeGaussianEnclosingOctaHedronKernel<scalar_t><<<blocks, threads>>>(
+                                            computeGaussianEnclosingOctaHedronKernel<scalar_t><<<blocks, threads, 0, stream>>>(
                                                 gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                 gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                 gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
@@ -179,13 +180,14 @@ void computeGaussianEnclosingAABB(uint32_t gNum,
     torch::Tensor gScl,
     float sigmaSclTh,
     OptixAabb* gPrimAABB,
-    OptixAabb* gAABB)
+    OptixAabb* gAABB,
+    cudaStream_t stream)
 {
 const uint32_t threads = 1024;
 const uint32_t blocks = div_round_up(static_cast<uint32_t>(gNum), threads);
 
 AT_DISPATCH_FLOATING_TYPES_AND_HALF(gPos.type(), "computeGaussianEnclosingAABB", ([&] {
-        computeGaussianEnclosingAABBKernel<scalar_t><<<blocks, threads>>>(
+        computeGaussianEnclosingAABBKernel<scalar_t><<<blocks, threads, 0, stream>>>(
             gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
             gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
             gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),

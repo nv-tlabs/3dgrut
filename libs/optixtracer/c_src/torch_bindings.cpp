@@ -76,7 +76,8 @@ void computeGaussianEnclosingOctaHedron(uint32_t gNum,
                                         float sigmaSclTh,
                                         float3* gPrimVrt,
                                         int3* gPrimTri,
-                                        OptixAabb* gPrimAABB);
+                                        OptixAabb* gPrimAABB,
+                                        cudaStream_t stream);
 
 void computeGaussianEnclosingAABB(uint32_t gNum,
                                   torch::Tensor gPos,
@@ -84,7 +85,8 @@ void computeGaussianEnclosingAABB(uint32_t gNum,
                                   torch::Tensor gScl,
                                   float sigmaSclTh,
                                   OptixAabb* gPrimAABB,
-                                  OptixAabb* gAABB);
+                                  OptixAabb* gAABB,
+                                  cudaStream_t stream);
 
 void build_mog_bvh(OptiXStateWrapper& stateWrapper,
                    torch::Tensor mogPos,
@@ -96,31 +98,34 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
     const uint32_t gPrimNumVert = MOGPrimNumVert;
     const uint32_t gPrimNumTri = MOGPrimNumTri;
 
+    cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
+
     // Create enclosing geometry primitives from 3d gaussians
     if (stateWrapper.pState->pipeline != MOGTracingPipelineIS)
     {
         // TODO : reuse the same buffer if same size + async function
-        CUDA_CHECK(cudaFree(reinterpret_cast<void*>(stateWrapper.pState->gPrimVrt)));
-        CUDA_CHECK(cudaFree(reinterpret_cast<void*>(stateWrapper.pState->gPrimTri)));
+        CUDA_CHECK(cudaFreeAsync(reinterpret_cast<void*>(stateWrapper.pState->gPrimVrt),cudaStream));
+        CUDA_CHECK(cudaFreeAsync(reinterpret_cast<void*>(stateWrapper.pState->gPrimTri),cudaStream));
 
         CUDA_CHECK(
-            cudaMalloc(reinterpret_cast<void**>(&stateWrapper.pState->gPrimVrt), sizeof(float3) * gPrimNumVert * gNum));
+            cudaMallocAsync(reinterpret_cast<void**>(&stateWrapper.pState->gPrimVrt), sizeof(float3) * gPrimNumVert * gNum,cudaStream));
         CUDA_CHECK(
-            cudaMalloc(reinterpret_cast<void**>(&stateWrapper.pState->gPrimTri), sizeof(int3) * gPrimNumTri * gNum));
+            cudaMallocAsync(reinterpret_cast<void**>(&stateWrapper.pState->gPrimTri), sizeof(int3) * gPrimNumTri * gNum,cudaStream));
 
         CUdeviceptr optixAabbPtr = 0;
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&optixAabbPtr), sizeof(OptixAabb)));
+        CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&optixAabbPtr), sizeof(OptixAabb),cudaStream));
 
         stateWrapper.pState->gPrimNumTri = gPrimNumTri;
 
         computeGaussianEnclosingOctaHedron(gNum, mogPos, mogRot, mogScl, stateWrapper.pState->gaussianSigmaThreshold,
                                            reinterpret_cast<float3*>(stateWrapper.pState->gPrimVrt),
                                            reinterpret_cast<int3*>(stateWrapper.pState->gPrimTri),
-                                           reinterpret_cast<OptixAabb*>(optixAabbPtr));
+                                           reinterpret_cast<OptixAabb*>(optixAabbPtr),
+                                           cudaStream);
 
-        CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(&stateWrapper.pState->gasAABB),
-                              reinterpret_cast<void*>(optixAabbPtr), sizeof(OptixAabb), cudaMemcpyDeviceToHost));
-        CUDA_CHECK(cudaFree(reinterpret_cast<void*>(optixAabbPtr)));
+        CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(&stateWrapper.pState->gasAABB),
+                              reinterpret_cast<void*>(optixAabbPtr), sizeof(OptixAabb), cudaMemcpyDeviceToHost,cudaStream));
+        CUDA_CHECK(cudaFreeAsync(reinterpret_cast<void*>(optixAabbPtr),cudaStream));
 
         // std::cout << "AABB = [ (" << stateWrapper.pState->gasAABB.minX << " , " << stateWrapper.pState->gasAABB.minY
         //           << " , " << stateWrapper.pState->gasAABB.minZ << " ) ( " << stateWrapper.pState->gasAABB.maxX << "
@@ -131,8 +136,8 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
     else
     {
         // TODO : reuse the same buffer if same size + async function
-        CUDA_CHECK(cudaFree(reinterpret_cast<void*>(stateWrapper.pState->gPrimAABB)));
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&stateWrapper.pState->gPrimAABB), sizeof(OptixAabb) * gNum));
+        CUDA_CHECK(cudaFreeAsync(reinterpret_cast<void*>(stateWrapper.pState->gPrimAABB),cudaStream));
+        CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&stateWrapper.pState->gPrimAABB), sizeof(OptixAabb) * gNum,cudaStream));
 
         CUdeviceptr optixAabbPtr = 0;
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&optixAabbPtr), sizeof(OptixAabb)));
@@ -141,11 +146,11 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
 
         computeGaussianEnclosingAABB(gNum, mogPos, mogRot, mogScl, stateWrapper.pState->gaussianSigmaThreshold,
                                      reinterpret_cast<OptixAabb*>(stateWrapper.pState->gPrimAABB),
-                                     reinterpret_cast<OptixAabb*>(optixAabbPtr));
+                                     reinterpret_cast<OptixAabb*>(optixAabbPtr), cudaStream);
 
-        CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(&stateWrapper.pState->gasAABB),
-                              reinterpret_cast<void*>(optixAabbPtr), sizeof(OptixAabb), cudaMemcpyDeviceToHost));
-        CUDA_CHECK(cudaFree(reinterpret_cast<void*>(optixAabbPtr)));
+        CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(&stateWrapper.pState->gasAABB),
+                              reinterpret_cast<void*>(optixAabbPtr), sizeof(OptixAabb), cudaMemcpyDeviceToHost,cudaStream));
+        CUDA_CHECK(cudaFreeAsync(reinterpret_cast<void*>(optixAabbPtr),cudaStream));
 
         // std::cout << "AABB = [ (" << stateWrapper.pState->gasAABB.minX << " , " << stateWrapper.pState->gasAABB.minY
         //           << " , " << stateWrapper.pState->gasAABB.minZ << " ) ( " << stateWrapper.pState->gasAABB.maxX << "
@@ -164,19 +169,13 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
 
         if (rebuild > 0)
         {
-            CUDA_CHECK(cudaFree(reinterpret_cast<void*>(stateWrapper.pState->gasBuffer)));
+            CUDA_CHECK(cudaFreeAsync(reinterpret_cast<void*>(stateWrapper.pState->gasBuffer),cudaStream));
             accel_options.operation = OPTIX_BUILD_OPERATION_BUILD;
         }
         else
         {
             accel_options.operation = OPTIX_BUILD_OPERATION_UPDATE;
         }
-
-        const uint32_t sbt_index[] = { 0, 1 };
-        CUdeviceptr d_sbt_index;
-
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_sbt_index), sizeof(sbt_index)));
-        CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_sbt_index), sbt_index, sizeof(sbt_index), cudaMemcpyHostToDevice));
 
         OptixBuildInput prim_input = {};
 
@@ -193,10 +192,6 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
             prim_input.triangleArray.indexBuffer = stateWrapper.pState->gPrimTri;
             prim_input.triangleArray.flags = prim_input_flags;
             prim_input.triangleArray.numSbtRecords = 1;
-            // prim_input.triangleArray.numSbtRecords = 2;
-            // prim_input.triangleArray.sbtIndexOffsetBuffer        = d_sbt_index;
-            // prim_input.triangleArray.sbtIndexOffsetSizeInBytes   = sizeof( uint32_t );
-            // prim_input.triangleArray.sbtIndexOffsetStrideInBytes = sizeof( uint32_t );
         }
         else
         {
@@ -214,16 +209,16 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
                                                  1, // Number of build inputs
                                                  &gas_buffer_sizes));
         CUdeviceptr d_temp_buffer_gas;
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_temp_buffer_gas), gas_buffer_sizes.tempSizeInBytes));
+        CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&d_temp_buffer_gas), gas_buffer_sizes.tempSizeInBytes,cudaStream));
 
         if (rebuild > 0)
         {
-            CUDA_CHECK(cudaMalloc(
-                reinterpret_cast<void**>(&stateWrapper.pState->gasBuffer), gas_buffer_sizes.outputSizeInBytes));
+            CUDA_CHECK(cudaMallocAsync(
+                reinterpret_cast<void**>(&stateWrapper.pState->gasBuffer), gas_buffer_sizes.outputSizeInBytes,cudaStream));
         }
 
         OPTIX_CHECK(optixAccelBuild(stateWrapper.pState->context,
-                                    0, // CUDA stream
+                                    cudaStream, // CUDA stream
                                     &accel_options, &prim_input,
                                     1, // num build inputs
                                     d_temp_buffer_gas, gas_buffer_sizes.tempSizeInBytes, stateWrapper.pState->gasBuffer,
@@ -234,7 +229,7 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
 
         // We can now free the scratch space buffer used during build and the vertex
         // inputs, since they are not needed by our trivial shading method
-        CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_temp_buffer_gas)));
+        CUDA_CHECK(cudaFreeAsync(reinterpret_cast<void*>(d_temp_buffer_gas),cudaStream));
 
         // printf("Built OptiX BVH\n");
     }
@@ -288,8 +283,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
 
     CUdeviceptr paramsDevice;
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&paramsDevice), sizeof(MoGTracingParams)));
-    CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(paramsDevice), &paramsHost, sizeof(paramsHost), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&paramsDevice), sizeof(MoGTracingParams),cudaStream));
+    CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(paramsDevice), &paramsHost, sizeof(paramsHost), cudaMemcpyHostToDevice,cudaStream));
 
     if (stateWrapper.pState->pipeline == MOGTracingPipelineCH)
     {
@@ -322,8 +317,6 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
                                 div_round_up(rayRad.size(2), stateWrapper.pState->patchSize),
                                 div_round_up(rayRad.size(1), stateWrapper.pState->patchSize), rayRad.size(0)));
     }
-
-    CUDA_CHECK(cudaStreamSynchronize(cudaStream));
 
     return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>(rayRad, rayDns, rayHit);
 }
@@ -384,8 +377,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
 
     CUdeviceptr paramsDevice;
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&paramsDevice), sizeof(MoGTracingBwdParams)));
-    CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(paramsDevice), &paramsHost, sizeof(paramsHost), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&paramsDevice), sizeof(MoGTracingBwdParams),cudaStream));
+    CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(paramsDevice), &paramsHost, sizeof(paramsHost), cudaMemcpyHostToDevice,cudaStream));
 
     if (stateWrapper.pState->pipeline == MOGTracingPipelineCH)
     {
@@ -403,8 +396,6 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
                                 div_round_up(rayRad.size(2), stateWrapper.pState->patchSize),
                                 div_round_up(rayRad.size(1), stateWrapper.pState->patchSize), rayRad.size(0)));
     }
-
-    CUDA_CHECK(cudaStreamSynchronize(cudaStream));
 
     return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(
         mogPosGrd, mogRotGrd, mogSclGrd, mogDnsGrd, mogSphGrd);
@@ -452,8 +443,6 @@ torch::Tensor count_mog_hits(OptiXStateWrapper& stateWrapper,
                             sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingHC,
                             div_round_up(rayOri.size(2), stateWrapper.pState->patchSize),
                             div_round_up(rayOri.size(1), stateWrapper.pState->patchSize), rayOri.size(0)));
-
-    CUDA_CHECK(cudaStreamSynchronize(cudaStream));
 
     return mogHitCount;
 }
