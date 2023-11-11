@@ -184,7 +184,7 @@ def main(conf: DictConfig) -> None:
 
     if conf.use_wandb:
         import wandb
-        wandb.init(config=OmegaConf.to_container(conf), project='3dgrt')
+        wandb.init(config=OmegaConf.to_container(conf), project='3dgrt', name=conf.experiment_name)
         wandb.tensorboard.patch(root_logdir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None, save=False)
 
     writer = SummaryWriter(log_dir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None)
