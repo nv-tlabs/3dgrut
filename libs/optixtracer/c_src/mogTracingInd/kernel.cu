@@ -200,8 +200,8 @@ extern "C" __global__ void __raygen__rg()
                         transmit = fmaxf(transmit, rayTrm[k][j]);
                        
                         // store the only output we actually care about
-                        if(i < MoGTracingMaxHitsReturned) {
-                          params.rayHitInd[idx.z][y][x][i] = gId;
+                        if(numHits < MoGTracingMaxHitsReturned) {
+                          params.rayHitInd[idx.z][y][x][numHits] = gId;
                         }
                     }
                 }
