@@ -281,7 +281,7 @@ class NGCToolbox:
             cmd_json = deepcopy(job_template)
             cmd_json["name"] += "." + job_id
             cmd_json["command"] += cmd.format(exp_name=exp_name)
-            cmd_json["command"] += "; . ./ngc/ngc_post_job.sh"
+            cmd_json["command"] += " ; . ./ngc/ngc_post_job.sh"
             job_fpath = os.path.join(jobdir, "cmd_{}.json".format(job_id))
 
             with open(job_fpath , "w") as f:
