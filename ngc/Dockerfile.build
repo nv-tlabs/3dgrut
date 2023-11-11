@@ -16,7 +16,7 @@ RUN \
     add-apt-repository -y ppa:ubuntu-toolchain-r/test && \
     apt-get -y update -qq --fix-missing && \
     apt-get -y install --no-install-recommends \
-        build-essential git libgl1-mesa-glx wget ninja-build cmake screen nano vim mc htop tmux \
+        build-essential git libgl1-mesa-glx libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl-dev wget ninja-build cmake screen nano vim mc htop tmux \
     && \
     rm -rf /var/lib/apt/lists/*
 
@@ -37,7 +37,9 @@ ENV CONDA_ENV=3dgrt
 RUN $CONDA_DIR/bin/conda create -n $CONDA_ENV python=3.11
 RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install -r requirements.txt
 RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install libs/ray_utils
-# RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install thirdparty/simple-knn
+RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install thirdparty/simple-knn
+RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install git+https://github.com/nmwsharp/polyscope-py.git@v2
+RUN $CONDA_DIR/envs/$CONDA_ENV/bin/pip install cuda-python cupy
 
 WORKDIR /workspace
 
