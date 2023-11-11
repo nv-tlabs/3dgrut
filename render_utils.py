@@ -182,10 +182,9 @@ def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg):
     giscl = 1. / gscl
 
     gdir = safe_normalize(gpos - rays_o) # this sign is weird... for consistency?
-    # gsh_reshape = gsh.reshape(gsh.shape[0], 3, -1).transpose(-1, -2)
-    gsh_reshape = gsh.reshape(gsh.shape[0], -1, 3)
+    sh_dim = (sph_deg+1) ** 2
+    gsh_reshape = gsh.reshape(gsh.shape[0], sh_dim, 3)
     grad = eval_sh(sph_deg, gsh_reshape, gdir) + 0.5
-    # grad = torch.zeros_like(rays_o) + 0.5 # TODO
 
     gposc = rays_o - gpos
     gdist = torch.sqrt(torch.linalg.vecdot(gposc, rays_d, dim=-1)[:,None])

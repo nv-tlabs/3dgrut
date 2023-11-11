@@ -36,7 +36,7 @@ class MixtureOfGaussians(torch.nn.Module):
         self.rotation_activation =   get_activation_function("normalize") # The default value of the dim parameter is 1
 
         # Rendering parameters
-        self.render_method = 'optix'
+        self.render_method = 'torch' # TODO add to conf
 
         self.background = background.make(self.conf.model.background.name, self.conf.model.background)
 
@@ -623,7 +623,7 @@ class MixtureOfGaussians(torch.nn.Module):
         ## Evaluate the render pass
         with torch.cuda.nvtx.range(f"model.forward_rendereval({num_gsplats} gaussians)"):
 
-            ray_rgb, ray_opacity, ray_ohit, ray_dist = evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, self.n_active_features)
+            ray_rgb, ray_opacity, ray_ohit, ray_dist = evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, self.max_n_features)
 
             ray_rgb, ray_opacity = self.background(rays_d, ray_rgb, ray_opacity)
 
