@@ -36,7 +36,7 @@ class MixtureOfGaussians(torch.nn.Module):
         self.rotation_activation =   get_activation_function("normalize") # The default value of the dim parameter is 1
 
         # Rendering parameters
-        self.render_method = 'torch' # TODO add to conf
+        self.render_method = 'torch' # [torch,optix] TODO add to conf
 
         self.background = background.make(self.conf.model.background.name, self.conf.model.background)
 
