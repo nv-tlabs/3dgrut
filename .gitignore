@@ -8,6 +8,7 @@ wandb/
 outputs/
 extra_info/
 eval/
+extra_info/
 
 debug_**
 
