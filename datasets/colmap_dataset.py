@@ -6,8 +6,9 @@ import torch
 from torch.utils.data import Dataset
 
 from datasets.colmap_utils import read_extrinsics_binary, read_intrinsics_binary, read_extrinsics_text, read_intrinsics_text,qvec2rotmat
+from datasets.nerf_utils import create_camera_visualization
 from datasets.utils import pinhole_camera_rays, camera_to_world_rays
-from utils import to_torch
+from utils import to_torch, to_np
 
 class ColmapDataset(Dataset):
 
@@ -202,3 +203,44 @@ class ColmapDataset(Dataset):
                 "rgb_gt": rgb.reshape(self.image_h,self.image_w,3)
             }
             return sample
+    
+
+    def create_dataset_camera_visualization(self):
+
+        # just one global intrinsic mat for now
+
+        cam_list = []
+
+        for i_cam, pose in enumerate(self.poses):
+        
+            trans_mat = pose
+            trans_mat_world_to_camera = np.linalg.inv(trans_mat)
+
+            # these cameras follow the opposite convention from polyscope
+            camera_convention_rot = np.array([[1., 0., 0., 0.,],
+                                              [0., -1., 0., 0.,],
+                                              [0., 0.,-1., 0.,],
+                                              [0., 0., 0., 1.,]])
+            trans_mat_world_to_camera = camera_convention_rot @ trans_mat_world_to_camera
+
+            w = self.image_w
+            h = self.image_h
+            f_w = self.intrinsic[i_cam,0]
+            f_h = self.intrinsic[i_cam,1]
+
+            fov_w = 2. * np.arctan(0.5 * w / f_w)
+            fov_h = 2. * np.arctan(0.5 * h / f_h)
+            
+            rgb = to_np(self.rgb[i_cam,:]).reshape(h,w,3)
+
+            cam_list.append({
+                'ext_mat' : trans_mat_world_to_camera,
+                'w' : w,
+                'h' : h,
+                'fov_w' : fov_w,
+                'fov_h' : fov_h,
+                'rgb_img' : rgb,
+                'split' : self.split,
+            })
+
+        create_camera_visualization(cam_list) 

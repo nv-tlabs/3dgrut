@@ -4,8 +4,10 @@ import json
 import numpy as np
 import os
 from tqdm import tqdm
-from datasets.nerf_utils import get_ray_directions, read_image, get_rays
 from PIL import Image
+
+from datasets.nerf_utils import get_ray_directions, read_image, get_rays, create_camera_visualization
+from utils import to_np
 
 
 class NeRFDataset(Dataset):
@@ -193,3 +195,45 @@ class NeRFDataset(Dataset):
     @property
     def image_w(self):
         return self.img_wh[0]
+
+    def create_dataset_camera_visualization(self):
+
+        # just one global intrinsic mat for now
+        intrinsics = to_np(self.K)
+
+        cam_list = []
+
+        for i_cam, pose in enumerate(self.poses):
+
+            trans_mat = np.eye(4)
+            trans_mat[:3,:4] = pose
+            trans_mat_world_to_camera = np.linalg.inv(trans_mat)
+
+            # these cameras follow the opposite convention from polyscope
+            camera_convention_rot = np.array([[1., 0., 0., 0.,],
+                                              [0., -1., 0., 0.,],
+                                              [0., 0.,-1., 0.,],
+                                              [0., 0., 0., 1.,]])
+            trans_mat_world_to_camera = camera_convention_rot @ trans_mat_world_to_camera
+
+            w = self.image_w
+            h = self.image_h
+            f_w = intrinsics[0,0]
+            f_h = intrinsics[1,1]
+
+            fov_w = 2. * np.arctan(0.5 * w / f_w)
+            fov_h = 2. * np.arctan(0.5 * h / f_h)
+            
+            rgb = to_np(self.rgbs[i_cam,:]).reshape(h,w,3)
+
+            cam_list.append({
+                'ext_mat' : trans_mat_world_to_camera,
+                'w' : w,
+                'h' : h,
+                'fov_w' : fov_w,
+                'fov_h' : fov_h,
+                'rgb_img' : rgb,
+                'split' : self.split,
+            })
+
+        create_camera_visualization(cam_list) 
