@@ -1,8 +1,5 @@
 import torch 
-
 import numpy as np
-import polyscope as ps
-import polyscope.imgui as psim
 
 from utils import to_np
 from datasets.colmap_dataset import ColmapDataset
@@ -13,6 +10,8 @@ DEFAULT_DEVICE = torch.device('cuda')
 
 class GUI:
     def __init__(self, conf, model, train_dataset, val_dataset):
+        import polyscope as ps # moving here as the NGC container doesn't have this
+        import polyscope.imgui as psim
         ps.set_use_prefs_file(False)
 
         if conf.dataset.type == 'nerf': # NeRF synthetic uses the blender coordinate-system

@@ -23,7 +23,6 @@ import logging
 from typing import Optional
 from copy import deepcopy
 
-
 def load_config(path):
     config = None
     try:
@@ -187,6 +186,10 @@ class NGCToolbox:
             print(rs_cmd)
             os.system(rs_cmd)
 
+        # Store current commit hash and time in the workspace
+        os.system(f"date +\"%A, %m %d %Y %H:%M\" >> {tmpdir}/commit.txt")
+        os.system(f"git rev-parse HEAD >> {tmpdir}/commit.txt")
+
         cmd = f"ngc workspace upload --destination experiments/{exp_name} --source {tmpdir} {ws_id}"
         print(cmd)
         if not dry_run:
@@ -278,7 +281,7 @@ class NGCToolbox:
             cmd_json = deepcopy(job_template)
             cmd_json["name"] += "." + job_id
             cmd_json["command"] += cmd.format(exp_name=exp_name)
-            cmd_json["command"] += "; . ./ngc/ngc_post_job.sh"
+            cmd_json["command"] += " ; . ./ngc/ngc_post_job.sh"
             job_fpath = os.path.join(jobdir, "cmd_{}.json".format(job_id))
 
             with open(job_fpath , "w") as f:

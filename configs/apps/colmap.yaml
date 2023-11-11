@@ -4,5 +4,5 @@
 defaults:
   - /base.yaml
   - /dataset: colmap
-  - /initialization: point_cloud
+  - /initialization: colmap
   - _self_
