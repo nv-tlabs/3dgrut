@@ -176,13 +176,13 @@ class NGCToolbox:
         tmpdir = os.path.join('/tmp', exp_name)
         os.makedirs(tmpdir, exist_ok=True)
 
-        rsync_base_cmd = "rsync -arzh --prune-empty-dirs --no-links"
-        rsync_cmds = [f"{rsync_base_cmd} -R --include=*/ --exclude=dependencies/**/* --include=*.py --exclude=* . {tmpdir}/ --delete"]
-        rsync_cmds.append(f"{rsync_base_cmd} -R --include=*/ --include=*.cpp --exclude=* . {tmpdir}/")
-        rsync_cmds.append(f"{rsync_base_cmd} -R --include=*/ --include=*.h --exclude=* . {tmpdir}/")
-        rsync_cmds.append(f"{rsync_base_cmd} -R --include=*/ --include=*.cu --exclude=* . {tmpdir}/")
-        rsync_cmds.append(f"{rsync_base_cmd} -R --include=*/ --include=*.yaml --exclude=* . {tmpdir}/")        
-        rsync_cmds.append(f"{rsync_base_cmd} -R --include=*/ --include=*.sh --exclude=* . {tmpdir}/")
+        rsync_base_cmd = "rsync -arzh --prune-empty-dirs --no-links -R --include=*/ --exclude=runs/** --exclude=outputs/** --exclude=wandb/** --exclude=thirdparty/**"
+        rsync_cmds = [f"{rsync_base_cmd}  --include=*.py --exclude=* . {tmpdir}/ --delete"]
+        rsync_cmds.append(f"{rsync_base_cmd} --include=*.cpp --exclude=* . {tmpdir}/")
+        rsync_cmds.append(f"{rsync_base_cmd} --include=*.h --exclude=* . {tmpdir}/")
+        rsync_cmds.append(f"{rsync_base_cmd} --include=*.cu --exclude=* . {tmpdir}/")
+        rsync_cmds.append(f"{rsync_base_cmd} --include=*.yaml --exclude=* . {tmpdir}/")        
+        rsync_cmds.append(f"{rsync_base_cmd} --include=*.sh --exclude=* . {tmpdir}/")
         for rs_cmd in rsync_cmds:
             print(rs_cmd)
             os.system(rs_cmd)
