@@ -26,6 +26,7 @@ from datasets.utils import move_to_gpu
 from loss_utils import ssim
 from gui import GUI
 from recorder import TrainingRecorder
+from render import Renderer
 sys.path.append(os.path.dirname(os.path.dirname(os.getcwd())))
 
 
@@ -348,6 +349,14 @@ def main(conf: DictConfig) -> None:
         model=model
     )
 
+    if conf.test_last:
+        renderer = Renderer(checkpoint_path = os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"),
+                            out_dir=writer.get_logdir(),
+                            path=conf.path,
+                            save_gt=False,
+                            writer=writer,
+                            model = model)
+        renderer.render_all()
 
 if __name__ == "__main__":
     main()

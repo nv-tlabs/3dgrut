@@ -8,6 +8,7 @@ val_frequency: 1
 num_workers: 8
 use_wandb: false
 record_training: true
+test_last: false
 
 model:
   density_activation: sigmoid
@@ -56,7 +57,7 @@ model:
     new_max_density: 0.01 # The density of the all the Gaussians will be set to min(density, this) 
 
 checkpoint:
-  frequency: 1000
+  frequency: 10000
 
 optimizer:
   type: adam # We only support adam for now
