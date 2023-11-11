@@ -8,6 +8,9 @@ defaults:
   - _self_
 
 # overwrite of default parameters
+
+val_frequency: 1000
+
 dataset:
   train:
     sample_full_image: True
