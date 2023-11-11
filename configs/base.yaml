@@ -101,3 +101,7 @@ render:
 loss:
   use_ssim: True
   lambda_ssim: 0.2
+
+  # Scale-regularization, preventing needle-like geometries
+  use_scalereg: False
+  lambda_scalereg: 1e-3

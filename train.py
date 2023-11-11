@@ -260,6 +260,16 @@ def main(conf: DictConfig) -> None:
                         loss_ssim = 0.
                         loss = loss_l1
 
+                    if conf.loss.use_scalereg and conf.loss.lambda_scalereg > 0.0:
+                        # Regularization to prevent needle-like degenerate geometries (excessive ratio of largest to smallest scale)
+                        scale = model.get_scale()
+                        min_scales = torch.min(scale, dim=-1).values
+                        max_scales = torch.max(scale, dim=-1).values
+                        scale_ratio = torch.log(max_scales) - torch.log(min_scales) # positive value, larger means bigger ratio
+                        loss_scalereg = torch.mean(torch.square(scale_ratio))
+                        loss += conf.loss.lambda_scalereg * loss_scalereg
+                        writer.add_scalar("loss_scalereg/train", loss_scalereg.item(), global_step)
+
                     if conf.model.lambda_background > 0.0:
                         assert "sky_mask" in gpu_batch, "Sky ray mask missing for background-loss evaluation"
                         # Push all background rays to have opacity 0 and non-background rays to have opacity 1 withing the FV
