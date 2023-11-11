@@ -11,7 +11,6 @@ from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
 
-from collections import defaultdict
 from tqdm import tqdm
 from omegaconf import DictConfig, OmegaConf
 
@@ -26,7 +25,7 @@ from background import BackgroundColor
 from datasets.utils import move_to_gpu
 from loss_utils import ssim
 from utils import to_np
-from eval_utils import record_train_step, submit_extra_output
+from recorder import TrainingRecorder
 sys.path.append(os.path.dirname(os.path.dirname(os.getcwd())))
 
 
@@ -358,7 +357,7 @@ def main(conf: DictConfig) -> None:
         wandb.tensorboard.patch(root_logdir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None, save=False)
 
     writer = SummaryWriter(log_dir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None)
-    recorded_info = defaultdict(list)
+    recorder = TrainingRecorder()
     it_start = torch.cuda.Event(enable_timing=True)
     it_end = torch.cuda.Event(enable_timing=True)
 
@@ -397,6 +396,8 @@ def main(conf: DictConfig) -> None:
 
                     writer.add_scalar("psnr/val", np.mean(val_psnr), global_step)
                     writer.add_scalar("loss_l1/val", np.mean(val_loss), global_step)
+
+                    recorder.record_metrics(iteration=global_step, psnr=val_psnr, loss=val_loss)
 
         with tqdm(train_dataloader) as pbar:
             for batch in pbar:
@@ -452,7 +453,8 @@ def main(conf: DictConfig) -> None:
                 pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
                 writer.add_scalar("psnr/train", psnr, global_step)
 
-                record_train_step(recorded_info, model, global_step, it_start.elapsed_time(it_end), loss_l1, loss_ssim, loss, psnr)
+                recorder.record_train_step(model, global_step, it_start.elapsed_time(it_end),
+                                           loss_l1, loss_ssim, loss, psnr)
 
                 # Save the checkpoint
                 if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
@@ -495,13 +497,12 @@ def main(conf: DictConfig) -> None:
                     while not viz_do_train:
                         ps.frame_tick()
 
-    submit_extra_output(
-        recorded_info,
+    recorder.submit_recording(
         dataset=train_dataset,
         scene_extent=scene_bbox,
         train_path=conf.path,
         model=model
-)
+    )
 
 
 if __name__ == "__main__":
