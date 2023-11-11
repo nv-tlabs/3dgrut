@@ -191,9 +191,7 @@ extern "C" __global__ void __raygen__rg()
                         const float weight = galpha * rayTrm[k][j];
                         
                         // Distance to the gaussian center projection on the ray
-                        // when in MOGTracingGaussianHit the hit table already has it
-                        const float hitT = 
-                            MoGTracingHitMode == MOGTracingGaussianHit ? p.ahHitTable[i].x  : getRayGaussianHit(gro,grd,gscl);
+                        const float hitT = getRayGaussianHit(gro,grd,gscl);
                         
                         rayRad[k][j] += grad * weight;
                         rayHit[k][j] += hitT * weight;
