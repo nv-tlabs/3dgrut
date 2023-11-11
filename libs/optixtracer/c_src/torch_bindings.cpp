@@ -39,7 +39,6 @@
 
 #include "common.h"
 #include "mogTracing/params.h"
-#include "mogTracingBwd/params.h"
 #include "mogTracingInd/params.h"
 #include "optix_utils.h"
 #include "optix_wrapper.h"
