@@ -3,7 +3,6 @@ import logging, os
 import numpy as np
 import torch
 from plyfile import PlyData
-import arrgh
 
 from libs import optixtracer
 from utils import to_torch, get_activation_function, inverse_sigmoid, get_scheduler, quaternion_to_so3, \
@@ -37,7 +36,7 @@ class MixtureOfGaussians(torch.nn.Module):
         self.rotation_activation =   get_activation_function("normalize") # The default value of the dim parameter is 1
 
         # Rendering parameters
-        self.render_method = 'torch'
+        self.render_method = 'optix'
 
         self.background = background.make(self.conf.model.background.name, self.conf.model.background)
 
@@ -85,6 +84,7 @@ class MixtureOfGaussians(torch.nn.Module):
                 sph_degree = 0, # Dummy, dynamically controlled
                 gaussian_sigma_threshold = self.conf.render.gaussian_sigma_threshold,
                 min_transmittance = self.conf.render.min_transmittance,
+                max_hits_returned=128,
             )
         )
 
@@ -623,29 +623,7 @@ class MixtureOfGaussians(torch.nn.Module):
         ## Evaluate the render pass
         with torch.cuda.nvtx.range(f"model.forward_rendereval({num_gsplats} gaussians)"):
 
-            ## Mask out only the used elements
-            D = dense_hit_gIds.shape[-1] # max number of hits per ray
-            dense_hit_mask = (dense_hit_gIds != -1)
-            hit_gIds = dense_hit_gIds[dense_hit_mask]
-
-            arrgh.arrgh(dense_hit_gIds, hit_gIds, rays_o, rays_d, self.positions)
-
-            ## Gather all of the values associated with each hit
-
-            # Ray source/dir for each hit
-            hit_rays_o_dense = rays_o[...,None,:].expand(-1,-1,-1,D,-1)
-            hit_rays_o = hit_rays_o_dense[dense_hit_mask[...,None].expand(-1,-1,-1,-1,3)]
-            hit_rays_d_dense = rays_d[...,None,:].expand(-1,-1,-1,D,-1)
-            hit_rays_d = hit_rays_d_dense[dense_hit_mask[...,None].expand(-1,-1,-1,-1,3)]
-            
-            # Gassian params
-            hit_gpos = gpos[hit_gIds,:]
-            hit_grot = grot[hit_gIds,:]
-            hit_gscl = gscl[hit_gIds,:]
-            hit_gdns = gdns[hit_gIds,:]
-            hit_gsh  =  gsh[hit_gIds,:]
-
-            ray_rgb, ray_opacity, ray_ohit, ray_dist = evaluate_rays(dense_hit_gIds, hit_rays_o, hit_rays_d, hit_gpos, hit_grot, hit_gscl, hit_gdns, hit_gsh)
+            ray_rgb, ray_opacity, ray_ohit, ray_dist = evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, self.n_active_features)
 
             ray_rgb, ray_opacity = self.background(rays_d, ray_rgb, ray_opacity)
 
@@ -658,12 +636,15 @@ class MixtureOfGaussians(torch.nn.Module):
         }
 
     
-    def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor, force_method=None) -> dict[str, torch.Tensor]:
 
-        if self.render_method == 'optix':
+        if force_method is None:
+            force_method = self.render_method
+
+        if force_method == 'optix':
             return self.forward_optix_render(rays_o, rays_d)
 
-        elif self.render_method == 'torch':
+        elif force_method == 'torch':
             return self.forward_torch_render(rays_o, rays_d)
 
         else:
