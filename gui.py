@@ -42,7 +42,7 @@ class GUI:
         # viz stateful parameters & options
         self.viz_do_train = False
         self.viz_bbox = False
-        self.viz_skip_update = False  # if enabled, will skip rendering updates to accelerate background training loop
+        self.live_update = True # if disabled , will skip rendering updates to accelerate background training loop
         self.viz_render_styles = ['color', 'density']
         self.viz_render_style_ind = 0
         self.viz_curr_render_size = None
@@ -50,6 +50,7 @@ class GUI:
         self.viz_render_color_buffer = None
         self.viz_render_scalar_buffer = None
         self.viz_render_name = 'render'
+        self.viz_render_enabled = True
 
         self.train_dataset = train_dataset
         self.model = model
@@ -63,7 +64,20 @@ class GUI:
             train_dataset.create_dataset_camera_visualization()
             val_dataset.create_dataset_camera_visualization()
 
+        if hasattr(train_dataset, 'scene_bbox'): 
+            bbox_min, bbox_max = self.train_dataset.scene_bbox
+            nodes = np.array([[bbox_min[0], bbox_min[1], bbox_min[2]], [bbox_max[0], bbox_min[1], bbox_min[2]], [bbox_min[0], bbox_max[1], bbox_min[2]], 
+                                [bbox_min[0], bbox_min[1], bbox_max[2]], [bbox_max[0], bbox_max[1], bbox_min[2]], [bbox_max[0], bbox_min[1], bbox_max[2]], 
+                                [bbox_min[0], bbox_max[1], bbox_max[2]], [bbox_max[0], bbox_max[1], bbox_max[2]]])
+            edges = np.array(
+                [[0, 1], [0, 2], [0, 3], [1, 4], [1, 5], [2, 6], [2, 4], [3, 5], [3, 6], [4, 7], [5, 7], [6, 7]])
+            ps.register_curve_network("bbox", nodes, edges)
+
+
         ps.set_user_callback(self.ps_ui_callback)
+   
+        # Update once to popualte lazily-created structures
+        self.update_render_view_viz(force=True)
 
     def update_cloud_viz(self):
 
@@ -101,13 +115,13 @@ class GUI:
 
         return outputs['pred_rgb'], outputs['pred_opacity'], outputs['pred_ohit']
 
-    def update_render_view_viz(self):
+    def update_render_view_viz(self, force=False):
 
         window_w, window_h = ps.get_window_size()
 
         # re-initialize if needed
         style = self.viz_render_styles[self.viz_render_style_ind]
-        if  self.viz_curr_render_style_ind !=  self.viz_render_style_ind or  self.viz_curr_render_size != (window_w, window_h):
+        if force or self.viz_curr_render_style_ind !=  self.viz_render_style_ind or  self.viz_curr_render_size != (window_w, window_h):
             self.viz_curr_render_style_ind = self.viz_render_style_ind
             self.viz_curr_render_size = (window_w, window_h)
 
@@ -118,7 +132,7 @@ class GUI:
                 ps.add_color_alpha_image_quantity(
                      self.viz_render_name,
                     dummy_image,
-                    enabled=True,
+                    enabled=self.viz_render_enabled,
                     image_origin="upper_left",
                     show_fullscreen=True,
                     show_in_imgui_window=False,
@@ -132,10 +146,10 @@ class GUI:
                 dummy_vals = np.zeros((window_h, window_w), dtype=np.float32)
                 dummy_vals[0] = 1.0  # hack so the default polyscope scale gets set more nicely
 
-                ps.add_scalar_image_quantity(
+                self.viz_main_image = ps.add_scalar_image_quantity(
                     self.viz_render_name,
                     dummy_vals,
-                    enabled=True,
+                    enabled=self.viz_render_enabled,
                     image_origin="upper_left",
                     show_fullscreen=True,
                     show_in_imgui_window=False,
@@ -147,14 +161,6 @@ class GUI:
                 self.viz_render_scalar_buffer = ps.get_quantity_buffer(self.viz_render_name, "values")
 
 
-        if self.viz_bbox: 
-            bbox_min, bbox_max = self.train_dataset.scene_bbox
-            nodes = np.array([[bbox_min[0], bbox_min[1], bbox_min[2]], [bbox_max[0], bbox_min[1], bbox_min[2]], [bbox_min[0], bbox_max[1], bbox_min[2]], 
-                                [bbox_min[0], bbox_min[1], bbox_max[2]], [bbox_max[0], bbox_max[1], bbox_min[2]], [bbox_max[0], bbox_min[1], bbox_max[2]], 
-                                [bbox_min[0], bbox_max[1], bbox_max[2]], [bbox_max[0], bbox_max[1], bbox_max[2]]])
-            edges = np.array(
-                [[0, 1], [0, 2], [0, 3], [1, 4], [1, 5], [2, 6], [2, 4], [3, 5], [3, 6], [4, 7], [5, 7], [6, 7]])
-            ps.register_curve_network("bbox", nodes, edges)
 
         # do the actual rendering
         sple_orad, sple_odns, sple_ohit = self.render_from_current_ps_view()
@@ -171,13 +177,34 @@ class GUI:
 
     def ps_ui_callback(self):
         # Create a little ImGUI UI
-        _, self.viz_do_train = psim.Checkbox("Train", self.viz_do_train)
-        _, self.viz_skip_update = psim.Checkbox("Skip Render Update", self.viz_skip_update)
-        if isinstance(self.train_dataset, (NeRFDataset, ColmapDataset)):
-            _, self.viz_bbox = psim.Checkbox("Visualize the bbox", self.viz_bbox)
-        _, self.viz_render_style_ind = psim.Combo("Render Display", self.viz_render_style_ind, self.viz_render_styles)
 
-        if not self.viz_skip_update:
+        psim.SetNextItemOpen(True, psim.ImGuiCond_FirstUseEver)
+        if psim.TreeNode("Training"):
+            _, self.viz_do_train = psim.Checkbox("Train", self.viz_do_train)
+            psim.SameLine()
+            _, self.live_update = psim.Checkbox("Update View", self.live_update)
+
+            psim.TreePop()
+
+        psim.SetNextItemOpen(True, psim.ImGuiCond_FirstUseEver)
+        if psim.TreeNode("Render"):
+            psim.PushItemWidth(150)
+
+            if(psim.Button("Show")):
+                self.viz_render_enabled = True
+                self.update_render_view_viz(force=True)
+            psim.SameLine()
+            if(psim.Button("Hide")):
+                self.viz_render_enabled = False
+                self.update_render_view_viz(force=True)
+
+
+            _, self.viz_render_style_ind = psim.Combo("Style", self.viz_render_style_ind, self.viz_render_styles)
+            psim.PopItemWidth()
+
+            psim.TreePop()
+
+        if self.live_update:
             self.update_render_view_viz()
 
 

@@ -257,6 +257,7 @@ def main(conf: DictConfig) -> None:
                         loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
                         writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
                     else:
+                        loss_ssim = 0.
                         loss = loss_l1
 
                     if conf.model.lambda_background > 0.0:
@@ -318,7 +319,7 @@ def main(conf: DictConfig) -> None:
                     model.build_bvh()
 
                 if gui is not None:
-                    if not gui.viz_skip_update:
+                    if gui.live_update:
                         if scene_updated or model.get_positions().requires_grad:
                             gui.update_cloud_viz()
             
