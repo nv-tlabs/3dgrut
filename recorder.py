@@ -11,12 +11,17 @@ class TrainingRecorder:
 
     RECORDINGS_FOLDER = 'extra_info'
 
-    def __init__(self):
+    def __init__(self, enabled):
+        self.enabled = enabled
         self.train_info_dict = defaultdict(list)
         self.valid_info_dict = defaultdict(list)
-        os.makedirs(TrainingRecorder.RECORDINGS_FOLDER, exist_ok=True)
+        self.train_recording_frequency = 100    # Record training state every N steps
+        if enabled:
+            os.makedirs(TrainingRecorder.RECORDINGS_FOLDER, exist_ok=True)
 
     def record_metrics(self, iteration: int, psnr, loss):
+        if not self.enabled:
+            return  # nop
         self.valid_info_dict['iteration'].append(iteration)
         self.valid_info_dict['psnr'].append(psnr)
         self.valid_info_dict['psnr_mean'].append(np.mean(psnr))
@@ -25,7 +30,9 @@ class TrainingRecorder:
 
     def record_train_step(self, model, iteration: int, iteration_time: int,
                           l1_loss: torch.Tensor, ssim_loss: torch.Tensor, total_loss: torch.Tensor, psnr: int):
-        if not (iteration > 0 and iteration % 100 == 0):
+        if not self.enabled:
+            return  # nop
+        if not (iteration > 0 and iteration % self.train_recording_frequency == 0):
             return
         num_gaussians = model.positions.shape[0]
 
@@ -84,7 +91,7 @@ class TrainingRecorder:
         self.train_info_dict['rot_z_std'].append(model.get_rotation().std(dim=0)[2].item())
         self.train_info_dict['rot_w_std'].append(model.get_rotation().std(dim=0)[3].item())
 
-    def get_gaussians_info(self, gaussians):
+    def _get_gaussians_info(self, gaussians):
         num_gaussians = gaussians.get_positions().shape[0]
         features = gaussians.get_features().reshape(num_gaussians, -1, 3)
         with torch.no_grad():
@@ -101,7 +108,7 @@ class TrainingRecorder:
             )
         return data
 
-    def get_scene_info(self, dataset, scene_extent):
+    def _get_scene_info(self, dataset, scene_extent):
         num_of_cameras = None
         try:
             num_of_cameras = dataset.poses.shape[0]
@@ -121,9 +128,11 @@ class TrainingRecorder:
         return scene_info
 
     def submit_recording(self, dataset, scene_extent, train_path: str, model):
+        if not self.enabled:
+            return  # nop
         recorded_output = dict(
-            scene_info = self.get_scene_info(dataset, scene_extent),
-            gaussians=self.get_gaussians_info(model),
+            scene_info = self._get_scene_info(dataset, scene_extent),
+            gaussians=self._get_gaussians_info(model),
             extra_dict=self.train_info_dict
         )
         object_name = Path(train_path).stem

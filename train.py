@@ -357,7 +357,7 @@ def main(conf: DictConfig) -> None:
         wandb.tensorboard.patch(root_logdir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None, save=False)
 
     writer = SummaryWriter(log_dir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None)
-    recorder = TrainingRecorder()
+    recorder = TrainingRecorder(enabled=conf.record_training)
     it_start = torch.cuda.Event(enable_timing=True)
     it_end = torch.cuda.Event(enable_timing=True)
 
