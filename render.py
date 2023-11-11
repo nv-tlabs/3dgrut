@@ -21,6 +21,7 @@ if __name__ == "__main__":
     # Set up command line argument parser
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True, type=str, help="path to the pretrained checkpoint")
+    parser.add_argument("--path", type=str, default="", help="Path to the training data, if not provided taken from ckpt")
     parser.add_argument("--out-dir", required=True, type=str, help="Output path")
     parser.add_argument("--save-gt", action="store_false", help="If set, the GT images will not be saved [True by default]")
     args = parser.parse_args()
@@ -29,6 +30,10 @@ if __name__ == "__main__":
     checkpoint = torch.load(args.checkpoint)
     conf = checkpoint["config"]
     global_step = checkpoint['global_step']
+
+    # Replace the path to the test data
+    if args.path: 
+        conf.path = args.path
 
     val_collate_fn = None
     # Create the dataset
