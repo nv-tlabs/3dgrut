@@ -262,6 +262,7 @@ class NGCToolbox:
         """
         # Create the job directory to store the commands
         try:
+            jobdir = os.path.join('./ngc/grid_search_configs/',jobdir)
             os.makedirs(jobdir, exist_ok=keep_dir)
         except FileExistsError:
             print("Job directory already exists. Please delete it (or provide --keep_dir flag)")
@@ -276,7 +277,7 @@ class NGCToolbox:
             job_id = str(i)
             cmd_json = deepcopy(job_template)
             cmd_json["name"] += "." + job_id
-            cmd_json["command"] += cmd
+            cmd_json["command"] += cmd.format(exp_name=exp_name)
             cmd_json["command"] += "; . ./ngc/ngc_post_job.sh"
             job_fpath = os.path.join(jobdir, "cmd_{}.json".format(job_id))
 
@@ -285,7 +286,7 @@ class NGCToolbox:
 
         if run:
             self.run_job_array(jobdir)
-
+        
     def run_job_array(self, jobdir):
         """Run an array of jobs on NGC
 
