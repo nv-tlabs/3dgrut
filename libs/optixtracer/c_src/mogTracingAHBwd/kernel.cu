@@ -192,7 +192,8 @@ extern "C" __global__ void __raygen__rg()
                         const float gres = expf(-0.5f * grayDist);
                         const float galpha = gres * gdns;
 
-                        const float3 grds = gscl * grd * dot(grd, -1 * gro);
+                        const float3 grdd = grd * dot(grd, -1 * gro);
+                        const float3 grds = gscl * grdd;
                         const float gsqdist = dot(grds, grds);
                         const float gdist = sqrtf(gsqdist);
 
@@ -213,6 +214,7 @@ extern "C" __global__ void __raygen__rg()
                         // ---> grds = gscl * grd * dot(grd, -1 * gro)
                         //
                         // ===> d_grds / d_gscl =  grd * dot(grd, -1 * gro)
+                        const float3 gsclRayHitGrd = grdd * grdsRayHitGrd;
                         // ===> d_grds / d_grd =  - gscl * grd * (2 dot(grd, -1 * gro)
                         const float3 grdRayHitGrd =  -gscl * make_float3(
                             2 * grd.x * gro.x + grd.y * gro.y + grd.z * gro.z,  
@@ -332,9 +334,9 @@ extern "C" __global__ void __raygen__rg()
                         // ---> grdu = (1/gscl)*rayDirR
                         // ===> d_grdu / d_gscl = -rayDirR/(gscl*gscl)
                         // ===> d_grdu / d_rayDirR = (1/gscl)
-                        atomicAdd(&params.mogSclGrd[gId][0], gsclGrdGro.x + (-rayDirR.x / (gscl.x * gscl.x)) * grduGrd.x);
-                        atomicAdd(&params.mogSclGrd[gId][1], gsclGrdGro.y + (-rayDirR.y / (gscl.y * gscl.y)) * grduGrd.y);
-                        atomicAdd(&params.mogSclGrd[gId][2], gsclGrdGro.z + (-rayDirR.z / (gscl.z * gscl.z)) * grduGrd.z);
+                        atomicAdd(&params.mogSclGrd[gId][0], gsclRayHitGrd.x + gsclGrdGro.x + (-rayDirR.x / (gscl.x * gscl.x)) * grduGrd.x);
+                        atomicAdd(&params.mogSclGrd[gId][1], gsclRayHitGrd.y + gsclGrdGro.y + (-rayDirR.y / (gscl.y * gscl.y)) * grduGrd.y);
+                        atomicAdd(&params.mogSclGrd[gId][2], gsclRayHitGrd.z + gsclGrdGro.z + (-rayDirR.z / (gscl.z * gscl.z)) * grduGrd.z);
                         const float3 rayDirRGrd = giscl * grduGrd;
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
