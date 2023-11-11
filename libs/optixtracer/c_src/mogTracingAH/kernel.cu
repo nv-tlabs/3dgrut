@@ -27,6 +27,12 @@ struct RayPayload
     float2 ahHitTable[MoGTracingAHMaxNumHitPerSlab]; // hit data : x = hitT, y = gId
 };
 
+static __device__ __inline__ float getRayGaussianHit(const float3& gro, const float3& grd, const float3& gscl)
+{
+    const float3 grds = gscl * grd * dot(grd, -1 * gro);
+    return sqrtf(dot(grds, grds));
+}
+
 static __device__ __inline__ float2 intersectAABB(const OptixAabb& aabb, const float3& rayOri, const float3& rayDir)
 {
     const float3 t0 = (make_float3(aabb.minX, aabb.minY, aabb.minZ) - rayOri) / rayDir;
@@ -68,6 +74,7 @@ extern "C" __global__ void __raygen__rg()
     float3 rayDir[MOGTracingPatchSize][MOGTracingPatchSize];
     float3 rayRad[MOGTracingPatchSize][MOGTracingPatchSize];
     float rayTrm[MOGTracingPatchSize][MOGTracingPatchSize];
+    float rayHit[MOGTracingPatchSize][MOGTracingPatchSize];
     const int startIdxX = idx.x * MOGTracingPatchSize;
     const int startIdxY = idx.y * MOGTracingPatchSize;
 
@@ -87,6 +94,7 @@ extern "C" __global__ void __raygen__rg()
                 make_float3(params.rayDir[idx.z][y][x][0], params.rayDir[idx.z][y][x][1], params.rayDir[idx.z][y][x][2]);
             rayRad[j][i] = make_float3(0);
             rayTrm[j][i] = 1;
+            rayHit[j][i] = 0;
 
             const float2 sampleMinMaxT = intersectAABB(params.aabb, rayOri[j][i], rayDir[j][i]);
             minMaxT.x = fminf(minMaxT.x, sampleMinMaxT.x);
@@ -102,8 +110,6 @@ extern "C" __global__ void __raygen__rg()
     const float minTransmittance = params.minTransmittance;
     const int sphDegree = params.sphDegree;
 
-    float hitDistance = 0;
-    uint32_t numHits = 0;
     float transmit = 1.0f;
     RayPayload p;
 
@@ -183,16 +189,19 @@ extern "C" __global__ void __raygen__rg()
                         const float galpha = gres * gdns;
 
                         const float weight = galpha * rayTrm[k][j];
-
+                        
+                        // Distance to the gaussian center projection on the ray
+                        // when in MOGTracingGaussianHit the hit table already has it
+                        const float hitT = 
+                            MoGTracingHitMode == MOGTracingGaussianHit ? p.ahHitTable[i].x  : getRayGaussianHit(gro,grd,gscl);
+                        
                         rayRad[k][j] += grad * weight;
-                        hitDistance += p.ahHitTable[i].x * weight;
+                        rayHit[k][j] += hitT * weight;
                         rayTrm[k][j] *= (1 - galpha);
 
                         transmit = fmaxf(transmit, rayTrm[k][j]);
                     }
                 }
-
-                numHits++;
             }
         }
     }
@@ -209,7 +218,7 @@ extern "C" __global__ void __raygen__rg()
             params.rayRad[idx.z][y][x][1] = rayRad[j][i].y;
             params.rayRad[idx.z][y][x][2] = rayRad[j][i].z;
             params.rayDns[idx.z][y][x][0] = 1 - rayTrm[j][i];
-            params.rayHit[idx.z][y][x][0] = numHits;
+            params.rayHit[idx.z][y][x][0] = rayHit[j][i];
         }
     }
 }
