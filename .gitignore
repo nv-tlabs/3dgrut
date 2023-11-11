@@ -9,6 +9,8 @@ eval/
 
 debug_**
 
+ngc/grid_search_configs
+
 imgui.ini
 data
 
