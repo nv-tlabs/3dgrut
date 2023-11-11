@@ -5,13 +5,14 @@ from utils import to_np
 from datasets.colmap_dataset import ColmapDataset
 from datasets.nerf_dataset import NeRFDataset
 
+import polyscope as ps # moving here as the NGC container doesn't have this
+import polyscope.imgui as psim
 
 DEFAULT_DEVICE = torch.device('cuda')
 
 class GUI:
-    def __init__(self, conf, model, train_dataset, val_dataset):
-        import polyscope as ps # moving here as the NGC container doesn't have this
-        import polyscope.imgui as psim
+    def __init__(self, conf, model, train_dataset, val_dataset, scene_bbox):
+
         ps.set_use_prefs_file(False)
 
         if conf.dataset.type == 'nerf': # NeRF synthetic uses the blender coordinate-system
@@ -36,7 +37,7 @@ class GUI:
         ps.set_give_focus_on_show(True)
 
         ps.set_automatically_compute_scene_extents(False)
-        ps.set_bounding_box(to_np(train_dataset.scene_bbox[0]), to_np(train_dataset.scene_bbox[1]))
+        ps.set_bounding_box(to_np(scene_bbox[0]), to_np(scene_bbox[1]))
 
         # viz stateful parameters & options
         self.viz_do_train = False
@@ -61,17 +62,16 @@ class GUI:
         # Only implemented for NeRF and Colmap dataset
         if isinstance(train_dataset, (NeRFDataset, ColmapDataset)):
             train_dataset.create_dataset_camera_visualization()
+        if isinstance(val_dataset, (NeRFDataset, ColmapDataset)):
             val_dataset.create_dataset_camera_visualization()
 
-        if hasattr(train_dataset, 'scene_bbox'): 
-            bbox_min, bbox_max = self.train_dataset.scene_bbox
-            nodes = np.array([[bbox_min[0], bbox_min[1], bbox_min[2]], [bbox_max[0], bbox_min[1], bbox_min[2]], [bbox_min[0], bbox_max[1], bbox_min[2]], 
-                                [bbox_min[0], bbox_min[1], bbox_max[2]], [bbox_max[0], bbox_max[1], bbox_min[2]], [bbox_max[0], bbox_min[1], bbox_max[2]], 
-                                [bbox_min[0], bbox_max[1], bbox_max[2]], [bbox_max[0], bbox_max[1], bbox_max[2]]])
-            edges = np.array(
-                [[0, 1], [0, 2], [0, 3], [1, 4], [1, 5], [2, 6], [2, 4], [3, 5], [3, 6], [4, 7], [5, 7], [6, 7]])
-            ps.register_curve_network("bbox", nodes, edges)
-
+        bbox_min, bbox_max = scene_bbox
+        nodes = np.array([[bbox_min[0], bbox_min[1], bbox_min[2]], [bbox_max[0], bbox_min[1], bbox_min[2]], [bbox_min[0], bbox_max[1], bbox_min[2]], 
+                            [bbox_min[0], bbox_min[1], bbox_max[2]], [bbox_max[0], bbox_max[1], bbox_min[2]], [bbox_max[0], bbox_min[1], bbox_max[2]], 
+                            [bbox_min[0], bbox_max[1], bbox_max[2]], [bbox_max[0], bbox_max[1], bbox_max[2]]])
+        edges = np.array(
+            [[0, 1], [0, 2], [0, 3], [1, 4], [1, 5], [2, 6], [2, 4], [3, 5], [3, 6], [4, 7], [5, 7], [6, 7]])
+        ps.register_curve_network("bbox", nodes, edges)
 
         ps.set_user_callback(self.ps_ui_callback)
    

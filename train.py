@@ -171,7 +171,7 @@ def main(conf: DictConfig) -> None:
     gui = None
     if conf.with_gui:
         import polyscope as ps
-        gui = GUI(conf, model, train_dataset, val_dataset)
+        gui = GUI(conf, model, train_dataset, val_dataset, scene_bbox)
 
     n_epochs = int(n_iterations/train_dataset.__len__())
 
