@@ -25,7 +25,8 @@ from background import BackgroundColor
 from datasets.utils import move_to_gpu
 from loss_utils import ssim
 from utils import to_np
-sys.path.append(os.path.dirname(os.path.dirname(os.getcwd()))) 
+from recorder import TrainingRecorder
+sys.path.append(os.path.dirname(os.path.dirname(os.getcwd())))
 
 
 DEFAULT_DEVICE = torch.device('cuda')
@@ -356,6 +357,9 @@ def main(conf: DictConfig) -> None:
         wandb.tensorboard.patch(root_logdir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None, save=False)
 
     writer = SummaryWriter(log_dir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None)
+    recorder = TrainingRecorder(enabled=conf.record_training)
+    it_start = torch.cuda.Event(enable_timing=True)
+    it_end = torch.cuda.Event(enable_timing=True)
 
     # Store parsed config for reference
     with open(os.path.join(writer.get_logdir(), "parsed.yaml"), "w") as fp:
@@ -393,9 +397,12 @@ def main(conf: DictConfig) -> None:
                     writer.add_scalar("psnr/val", np.mean(val_psnr), global_step)
                     writer.add_scalar("loss_l1/val", np.mean(val_loss), global_step)
 
+                    recorder.record_metrics(iteration=global_step, psnr=val_psnr, loss=val_loss)
+
         with tqdm(train_dataloader) as pbar:
             for batch in pbar:
                 with torch.cuda.nvtx.range(f"train.train_step_{global_step}"):
+                    it_start.record()
                     # Move data to GPU
                     gpu_batch = move_to_gpu(batch)
                     rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
@@ -436,6 +443,7 @@ def main(conf: DictConfig) -> None:
                 with torch.cuda.nvtx.range("backpropagation"):
                     model.optimizer.step()
                     model.optimizer.zero_grad()
+                it_end.record()
 
                 # Make a scheduler step
                 model.scheduler_step(global_step)
@@ -444,6 +452,9 @@ def main(conf: DictConfig) -> None:
                 global_step += 1
                 pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
                 writer.add_scalar("psnr/train", psnr, global_step)
+
+                recorder.record_train_step(model, global_step, it_start.elapsed_time(it_end),
+                                           loss_l1, loss_ssim, loss, psnr)
 
                 # Save the checkpoint
                 if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
@@ -485,6 +496,13 @@ def main(conf: DictConfig) -> None:
                     ps.frame_tick()
                     while not viz_do_train:
                         ps.frame_tick()
+
+    recorder.submit_recording(
+        dataset=train_dataset,
+        scene_extent=scene_bbox,
+        train_path=conf.path,
+        model=model
+    )
 
 
 if __name__ == "__main__":
