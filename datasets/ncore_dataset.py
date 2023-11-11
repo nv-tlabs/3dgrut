@@ -1320,7 +1320,7 @@ class NCoreDataset(torch.utils.data.Dataset):
                 if len(rays_dist):
                     lidar_rays = np.vstack(rays_lidar)
                     lidar_rays_meta = RaysLidarMeta.collate_fn(rays_lidar_meta)
-                    labels.lidar = to_torch(np.vstack(rays_dist).flatten(), device="cpu")
+                    labels.lidar = to_torch(np.concatenate(rays_dist), device="cpu")
 
             sample |= {
                 "rays_cam": to_torch(camera_rays, device="cpu"),

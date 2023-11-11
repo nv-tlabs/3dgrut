@@ -118,3 +118,7 @@ loss:
   # Scale-regularization, preventing needle-like geometries
   use_scalereg: False
   lambda_scalereg: 1e-3
+
+  # Lidar-based distance supervision
+  use_lidardistance: False
+  lambda_lidardistance: 0.01

@@ -136,6 +136,7 @@ def main(conf: DictConfig) -> None:
             split='train', 
             duration_sec=duration_sec,
             n_train_sample_timepoints=n_train_sample_timepoints,
+            n_train_sample_lidar_rays=1024 if conf.loss.use_lidardistance else 0
         )
         val_dataset = NCoreDataset(
             conf.path,
@@ -296,6 +297,20 @@ def main(conf: DictConfig) -> None:
                     else:
                         loss_ssim = None
                         loss = loss_l1
+
+                    if conf.loss.use_lidardistance and conf.loss.lambda_lidardistance > 0.0:
+                        lidar_rays_ori = gpu_batch["lidar_rays_ori"]
+                        lidar_rays_dir = gpu_batch["lidar_rays_dir"]
+                        lidar_dist_gt = gpu_batch["lidar_dist_gt"]
+
+                        # Compute the outputs of the lidar rays
+                        outputs_lidar = model(lidar_rays_ori, lidar_rays_dir)
+
+                        # Compute distance loss
+                        loss_lidar = torch.nn.L1Loss(reduction="mean")(outputs_lidar['pred_dist'], lidar_dist_gt) 
+                        loss += conf.loss.lambda_lidardistance * loss_lidar
+                        
+                        writer.add_scalar("loss_lidar/train", loss_lidar.item(), global_step)
 
                     if conf.loss.use_scalereg and conf.loss.lambda_scalereg > 0.0:
                         # Regularization to prevent needle-like degenerate geometries (excessive ratio of largest to smallest scale)
