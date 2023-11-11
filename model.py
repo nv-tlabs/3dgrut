@@ -14,10 +14,11 @@ from utils import to_np
 import background
 
 class MixtureOfGaussians(torch.nn.Module):
-    def __init__(self, conf):
+    def __init__(self, conf, scene_extent):
         super().__init__()
 
         self.conf = conf
+        self.scene_extent = scene_extent        
         self.positions = torch.empty([0,3])  # Positions of the 3D Gaussians (x, y, z) [n_gaussians, 3]
         self.rotation  = torch.empty([0,4])   # Rotation of each Gaussian represented as a unit quaternion [n_gaussians, 4]
         self.scale     = torch.empty([0,3])     # Anisotropic scale of each Gaussian [n_gaussians, 3]
@@ -289,7 +290,14 @@ class MixtureOfGaussians(torch.nn.Module):
         self.schedulers = {}
         for name, args in self.conf.scheduler.items():
             if args.type is not None and getattr(self, name).requires_grad:
-                self.schedulers[name] = (get_scheduler(args.type)(**args))
+                if name == "positions":
+                    self.schedulers[name] = get_scheduler(args.type)(            
+                        lr_init=args.lr_init * self.scene_extent,
+                        lr_final=args.lr_final * self.scene_extent,
+                        max_steps=args.max_steps
+                    ) 
+                else:
+                    self.schedulers[name] = (get_scheduler(args.type)(**args))
 
     def scheduler_step(self, step):
         for param_group in self.optimizer.param_groups:

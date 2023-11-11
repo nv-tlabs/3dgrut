@@ -7,6 +7,7 @@ from tqdm import tqdm
 from PIL import Image
 
 from datasets.nerf_utils import get_ray_directions, read_image, get_rays, create_camera_visualization
+from datasets.utils import get_center_and_diag
 from utils import to_np
 
 
@@ -47,6 +48,7 @@ class NeRFDataset(Dataset):
         self.directions = get_ray_directions(h, w, self.K)
         self.img_wh = (w, h)
 
+
     def read_meta(self, split):
         self.rgbs = []
         self.poses = []
@@ -62,10 +64,12 @@ class NeRFDataset(Dataset):
             with open(os.path.join(self.root_dir, f"transforms_{split}.json"), 'r') as f:
                 frames = json.load(f)["frames"]
 
+        cam_centers = []
         print(f'Loading {len(frames)} {split} images ...')
         for frame in tqdm(frames):
             c2w = np.array(frame['transform_matrix'])[:3, :4]
             c2w[:, 1:3] *= -1 # [right up back] to [right down front]
+            cam_centers.append(c2w[:3, 3:4])
             self.poses += [c2w]
 
             try:
@@ -79,6 +83,10 @@ class NeRFDataset(Dataset):
 
                 self.rgbs += [img]
             except: pass
+
+        # https://github.com/graphdeco-inria/gaussian-splatting/blob/main/scene/__init__.py#L69
+        _, diagonal = get_center_and_diag(cam_centers)
+        self.cameras_extent = diagonal * 1.1
 
         if len(self.rgbs)>0:
             self.rgbs = torch.FloatTensor(np.stack(self.rgbs)) # (N_images, hw, ?)

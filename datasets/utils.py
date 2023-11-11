@@ -128,3 +128,13 @@ class PointCloud:
         return PointCloud(xyz_start=torch.cat([pc.xyz_start for pc in point_clouds_list]),
                           xyz_end=torch.cat([pc.xyz_end for pc in point_clouds_list]),
                           device=device)
+
+
+# from gsplat code https://github.com/graphdeco-inria/gaussian-splatting/blob/main/scene/dataset_readers.py#L46
+def get_center_and_diag(cam_centers):
+    cam_centers = np.hstack(cam_centers)
+    avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
+    center = avg_cam_center
+    dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
+    diagonal = np.max(dist)
+    return center.flatten(), diagonal

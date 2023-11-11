@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 
 from datasets.colmap_utils import read_extrinsics_binary, read_intrinsics_binary, read_extrinsics_text, read_intrinsics_text,qvec2rotmat
 from datasets.nerf_utils import create_camera_visualization
-from datasets.utils import pinhole_camera_rays, camera_to_world_rays
+from datasets.utils import pinhole_camera_rays, camera_to_world_rays, get_center_and_diag
 from utils import to_torch, to_np
 
 class ColmapDataset(Dataset):
@@ -76,6 +76,7 @@ class ColmapDataset(Dataset):
         self.rgb = []
         self.indices_matrix = []
 
+        cam_centers = []
         for idx, extr in enumerate(self.cam_extrinsics):
             intr = self.cam_intrinsics[extr.camera_id - 1]
             
@@ -95,6 +96,7 @@ class ColmapDataset(Dataset):
             W2C[3, 3] = 1.0
             C2W = np.linalg.inv(W2C)
             self.poses.append(C2W)
+            cam_centers.append(C2W[:3, 3:4])
 
             if intr.model=="SIMPLE_PINHOLE":
                 focal_length_x = intr.params[0]
@@ -110,7 +112,10 @@ class ColmapDataset(Dataset):
             image_name = os.path.basename(image_path).split(".")[0]
             self.rgb.append(np.asarray(Image.open(image_path)).astype(np.float32) / 255.0 )
 
-        
+        # https://github.com/graphdeco-inria/gaussian-splatting/blob/main/scene/__init__.py#L69
+        _, diagonal = get_center_and_diag(cam_centers)
+        self.cameras_extent = diagonal * 1.1
+
         self.rgb = torch.FloatTensor(np.stack(self.rgb))
         self.poses = np.stack(self.poses)
         self.intrinsic = np.stack(self.intrinsic)
