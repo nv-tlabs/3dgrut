@@ -22,7 +22,6 @@ import toml
 import logging
 from typing import Optional
 from copy import deepcopy
-from datetime import datetime
 
 def load_config(path):
     config = None
@@ -188,7 +187,7 @@ class NGCToolbox:
             os.system(rs_cmd)
 
         # Store current commit hash and time in the workspace
-        os.system("date +”%A, %m %d %Y %H:%M” >>{tmpdir}/commit.txt")
+        os.system(f"date +\"%A, %m %d %Y %H:%M\" >> {tmpdir}/commit.txt")
         os.system(f"git rev-parse HEAD >> {tmpdir}/commit.txt")
 
         cmd = f"ngc workspace upload --destination experiments/{exp_name} --source {tmpdir} {ws_id}"
