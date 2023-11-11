@@ -158,7 +158,7 @@ def count_mog_hits(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_d
 def trace_mog_inds(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns):
 
     ray_hits = _plugin.trace_mog_inds(
-        optix_ctx,
+        optix_ctx.cpp_wrapper,
         ray_ori,
         ray_dir,
         mog_pos,

@@ -20,7 +20,7 @@ struct MoGIndTracingParams
     PackedTensorAccessor32<float, 2> mogRot;    ///< gaussians rotation (quaternions)
     PackedTensorAccessor32<float, 2> mogScl;    ///< gaussians scale
     PackedTensorAccessor32<float, 2> mogDns;    ///< gaussians density (opacity)
-    PackedTensorAccessor32<float, 4> rayHitInd; ///< hits for the ray
+    PackedTensorAccessor32<int, 4> rayHitInd; ///< hits for the ray
     OptixTraversableHandle handle;
 
     OptixAabb aabb;

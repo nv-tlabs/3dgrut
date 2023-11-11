@@ -22,7 +22,7 @@ extern "C"
 static constexpr unsigned int MoGTracingHitMode = MOGTRACING_HIT_MODE;
 static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = MOGTRACING_MAXNUMHITS_PER_SLAB;
 static constexpr unsigned int MOGTracingPatchSize = MOGTRACING_PATCH_SIZE;
-static constexpr unsigned int MoGTracingIndMaxNumHitPerSlab = MOGTRACING_MAX_HITS_RETURNED;
+static constexpr unsigned int MoGTracingMaxHitsReturned = MOGTRACING_MAX_HITS_RETURNED;
 
 struct RayPayload
 {
@@ -75,7 +75,7 @@ extern "C" __global__ void __raygen__rg()
     const int startIdxY = idx.y * MOGTracingPatchSize;
 
     float2 minMaxT = make_float2(1e9, -1e9);
-    
+
 
 #pragma unroll
     for (int j = 0; j < MOGTracingPatchSize; ++j)
@@ -98,9 +98,9 @@ extern "C" __global__ void __raygen__rg()
 
             // clear out the output
 #pragma unroll
-            for (int k = 0; k < MOGTRACING_MAX_HITS_RETURNED; ++k)
+            for (int k = 0; k < MoGTracingMaxHitsReturned; ++k)
             {
-              params.rayHitInd[idx.z][y][x][k] = int_as_float(-1);
+              params.rayHitInd[idx.z][y][x][k] = -1;
             }
 
         }
@@ -118,8 +118,8 @@ extern "C" __global__ void __raygen__rg()
     uint32_t numHits = 0;
     float transmit = 1.0f;
     RayPayload p;
-
-    while ((startT <= minMaxT.y) && (transmit > minTransmittance))
+        
+    while ((startT <= minMaxT.y) && (transmit > minTransmittance) && numHits < MoGTracingMaxHitsReturned)
     {
         p.ahNumHits = 0;
 #pragma unroll
@@ -138,6 +138,7 @@ extern "C" __global__ void __raygen__rg()
             startT += slabSpacing;
             continue;
         }
+
 
 #ifndef MOGTRACING_TOPK_HITS
         // in case we got more hits than available slots, start the next ray from the last hit
@@ -199,9 +200,9 @@ extern "C" __global__ void __raygen__rg()
                         transmit = fmaxf(transmit, rayTrm[k][j]);
                        
                         // store the only output we actually care about
-                        // TODO FIXME need to track how many things we have put in this, i index is wrong
-                        params.rayHitInd[idx.z][y][x][i] = int_as_float(gId);
-
+                        if(i < MoGTracingMaxHitsReturned) {
+                          params.rayHitInd[idx.z][y][x][i] = gId;
+                        }
                     }
                 }
 

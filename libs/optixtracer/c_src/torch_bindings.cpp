@@ -315,7 +315,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
     else
     {
         OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingAH, cudaStream, paramsDevice,
-                                sizeof(MoGIndTracingParams), &stateWrapper.pState->sbtMoGTracingAH,
+                                sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingAH,
                                 div_round_up(rayRad.size(2), stateWrapper.pState->patchSize),
                                 div_round_up(rayRad.size(1), stateWrapper.pState->patchSize), rayRad.size(0)));
     }
@@ -413,7 +413,7 @@ std::tuple<torch::Tensor> trace_mog_inds(OptiXStateWrapper& stateWrapper,
                                         )
 {
     const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kInt32).device(torch::kCUDA);
-    torch::Tensor rayHitInd = torch::empty({ rayOri.size(0), rayOri.size(1), rayOri.size(2), 3 }, opts);
+    torch::Tensor rayHitInd = torch::empty({ rayOri.size(0), rayOri.size(1), rayOri.size(2), stateWrapper.pState->maxHitsReturned }, opts);
 
     MoGIndTracingParams paramsHost;
     paramsHost.handle = stateWrapper.pState->gasHandle;
@@ -423,7 +423,7 @@ std::tuple<torch::Tensor> trace_mog_inds(OptiXStateWrapper& stateWrapper,
     paramsHost.mogRot = packed_accessor32<float, 2>(mogRot);
     paramsHost.mogScl = packed_accessor32<float, 2>(mogScl);
     paramsHost.mogDns = packed_accessor32<float, 2>(mogDns);
-    paramsHost.rayHitInd = packed_accessor32<float, 4>(rayHitInd);
+    paramsHost.rayHitInd = packed_accessor32<int, 4>(rayHitInd);
 
     paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
@@ -439,12 +439,12 @@ std::tuple<torch::Tensor> trace_mog_inds(OptiXStateWrapper& stateWrapper,
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
 
     CUdeviceptr paramsDevice;
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&paramsDevice), sizeof(MoGTracingParams)));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&paramsDevice), sizeof(MoGIndTracingParams)));
     CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(paramsDevice), &paramsHost, sizeof(paramsHost), cudaMemcpyHostToDevice));
 
-      OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingInd, cudaStream, paramsDevice,
-                              sizeof(MoGTracingParams), &stateWrapper.pState->sbtMoGTracingInd, rayHitInd.size(2),
-                              rayHitInd.size(1), rayHitInd.size(0)));
+    OPTIX_CHECK(optixLaunch(stateWrapper.pState->pipelineMoGTracingInd, cudaStream, paramsDevice,
+                            sizeof(MoGIndTracingParams), &stateWrapper.pState->sbtMoGTracingInd, rayHitInd.size(2),
+                            rayHitInd.size(1), rayHitInd.size(0)));
 
     CUDA_CHECK(cudaStreamSynchronize(cudaStream));
 
