@@ -194,7 +194,7 @@ extern "C" __global__ void __raygen__rg()
 
                         const float3 grds = gscl * grd * dot(grd, -1 * gro);
                         const float gsqdist = dot(grds, grds);
-                        const float gdist = sqrtf(gdist);
+                        const float gdist = sqrtf(gsqdist);
 
                         const float weight = galpha * rayTrm[k][j];
                         
@@ -217,7 +217,7 @@ extern "C" __global__ void __raygen__rg()
                         const float3 grdRayHitGrd =  -gscl * make_float3(
                             2 * grd.x * gro.x + grd.y * gro.y + grd.z * gro.z,  
                             grd.x * gro.x + 2 * grd.y * gro.y + grd.z * gro.z,
-                            grd.x * gro.x + grd.y * gro.y + 2 * grd.z * gro.z;
+                            grd.x * gro.x + grd.y * gro.y + 2 * grd.z * gro.z
                         ) * grdsRayHitGrd;
                         //
                         // ===> d_grds / d_gro = - gscl * grd * grd
