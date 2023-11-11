@@ -28,3 +28,9 @@ def nearest_neighbor_dist_cpuKD(pts_torch):
     dists = torch.linalg.norm(pts_torch - pts_torch[neigh_inds], dim=-1)
 
     return dists
+
+
+def safe_normalize(vecs):
+    norms = torch.linalg.norm(vecs)
+    norms = torch.where(norms > 0., norms, 1.)
+    return vecs / norms[...,None]
