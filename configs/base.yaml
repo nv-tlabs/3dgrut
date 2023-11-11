@@ -4,7 +4,7 @@ resume: ""
 out_dir: "runs"
 n_iterations: 30000
 with_gui: false
-val_frequency: 1
+val_frequency: 1000
 num_workers: 8
 use_wandb: false
 

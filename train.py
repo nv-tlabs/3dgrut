@@ -36,7 +36,7 @@ logging.addLevelName( logging.ERROR, "\033[1;41m%s\033[1;0m" % logging.getLevelN
 @hydra.main(config_path="configs", version_base=None)
 def main(conf: DictConfig) -> None:
     # Run the training process
-    n_iterations = 10e4
+    n_iterations = conf.n_iterations
     val_frequency = conf.val_frequency
     scene_extent: float = 1.
     scene_bbox: tuple[torch.Tensor, torch.Tensor] # Tuple of vec3 (min,max)
@@ -397,25 +397,25 @@ def main(conf: DictConfig) -> None:
                         alpha = gpu_batch["alpha"]
                         rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
 
-                # Compute the loss
-                loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
-                writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
+                    # Compute the loss
+                    loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
+                    writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
 
-                if conf.loss.use_ssim and conf.dataset.train.get("sample_full_image", False):
-                    loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
-                    loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
-                    writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
-                else:
-                    loss = loss_l1
+                    if conf.loss.use_ssim and conf.dataset.train.get("sample_full_image", False):
+                        loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
+                        loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
+                        writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
+                    else:
+                        loss = loss_l1
 
-                if conf.model.lambda_background > 0.0:
-                    assert "sky_mask" in gpu_batch, "Sky ray mask missing for background-loss evaluation"
-                    # Push all background rays to have opacity 0 and non-background rays to have opacity 1 withing the FV
-                    foreground_mask = torch.ones_like(outputs["pred_opacity"])
-                    foreground_mask[gpu_batch['sky_mask']] = 0.0
-                    loss_background = torch.nn.functional.mse_loss(outputs["pred_opacity"], foreground_mask)
-                    loss += conf.model.lambda_background * loss_background
-                    writer.add_scalar("loss_background/train", loss_background.item(), global_step)
+                    if conf.model.lambda_background > 0.0:
+                        assert "sky_mask" in gpu_batch, "Sky ray mask missing for background-loss evaluation"
+                        # Push all background rays to have opacity 0 and non-background rays to have opacity 1 withing the FV
+                        foreground_mask = torch.ones_like(outputs["pred_opacity"])
+                        foreground_mask[gpu_batch['sky_mask']] = 0.0
+                        loss_background = torch.nn.functional.mse_loss(outputs["pred_opacity"], foreground_mask)
+                        loss += conf.model.lambda_background * loss_background
+                        writer.add_scalar("loss_background/train", loss_background.item(), global_step)
 
                 # backpropagate the gradients and update the parameters
                 with torch.cuda.nvtx.range("backward"):
