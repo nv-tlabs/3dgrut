@@ -334,14 +334,18 @@ class MixtureOfGaussians(torch.nn.Module):
         optimizable_tensors = self.prune_optimizer_tensors(mask=mask)
         self.update_optimizable_parameters(optimizable_tensors)
 
-    def init_from_auxiliary_data(self, dataset, scene_bbox, num_random_gspalt, hit_count_threshold, sky_step_frame, sky_step_pixel, pc_step_frame,pc_step_points):
-        # Initialize random Gaussians in the scene
-        print(f"Generating random point cloud ({num_random_gspalt})...")
+    def init_from_auxiliary_data(self, dataset, scene_bbox, spacing, hit_count_threshold, sky_step_frame, sky_step_pixel, pc_step_frame,pc_step_points):
+        # Initialize Gaussian grid in the scene
+        dx = torch.arange(scene_bbox[0][0], scene_bbox[1][0], spacing, device='cpu')
+        dy = torch.arange(scene_bbox[0][1], scene_bbox[1][1], spacing, device='cpu')
+        dz = torch.arange(scene_bbox[0][2], scene_bbox[1][2], spacing, device='cpu')
+        grid_x, grid_y, grid_z = torch.meshgrid(dx, dy, dz)
+        random_point_cloud = torch.cat([grid_x.reshape(-1,1), grid_y.reshape(-1,1), grid_z.reshape(-1,1)], dim=1)
 
-        # We spawn random Gaussians inside the bounds of the scene extent
-        self.init_from_random_point_cloud(num_gsplat=num_random_gspalt,
-                                          xyz_max=scene_bbox[1],
-                                          xyz_min=scene_bbox[0])
+        observer_points = torch.tensor(dataset.get_observer_points(), dtype=torch.float32, device='cpu')
+
+        self.default_initialize_from_points(to_np(random_point_cloud), observer_points, None)
+        print(f"initializing {grid_x.size} evenly-spaced Gaussiasn")
 
         self.set_optix_context()
         self.build_bvh()

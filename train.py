@@ -198,14 +198,16 @@ def main(conf: DictConfig) -> None:
                 model.init_from_lidar(pc, observer_points) 
 
             case 'auxiliary':
+                observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
                 model.init_from_auxiliary_data(dataset=train_dataset,
                                             scene_bbox=scene_bbox,
                                             num_random_gspalt=conf.num_gsplats,
+                                            spacing=conf.initialization.spacing,
                                             hit_count_threshold=0,
-                                            sky_step_frame=10,
-                                            sky_step_pixel=10,
-                                            pc_step_frame=10,
-                                            pc_step_points=100
+                                            sky_step_frame=conf.initialization.sky_step_frame,
+                                            sky_step_pixel=conf.initialization.sky_step_pixel,
+                                            pc_step_frame=conf.initialization.pc_step_frame,
+                                            pc_step_points=conf.initialization.pc_step_points
                                             )
             case _:
                 raise ValueError(f"unrecognized initialization.method {conf.initialization.method}, choose from [colmap, point_cloud, random, auxiliary]")
