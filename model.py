@@ -163,8 +163,8 @@ class MixtureOfGaussians(torch.nn.Module):
         logging.info(f"Generating random point cloud ({num_gsplat})...")
 
         # We create random points inside the bounds of the synthetic Blender scenes
-        # xyz in [-1.3, 1.3]
-        fused_point_cloud = torch.rand((num_gsplat, 3), dtype=dtype, device=self.device) * 2.6 - 1.3
+        # xyz in [-1.5, 1.5] -> standard NeRF convention, people often scale with 0.33 to get it to [-0.5, 0.5]
+        fused_point_cloud = torch.rand((num_gsplat, 3), dtype=dtype, device=self.device) * 3.0 - 1.5
         # sh albedo in [0, 0.0039]
         fused_color = torch.rand((num_gsplat, 3), dtype=dtype, device=self.device) / 255.0
 
