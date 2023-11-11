@@ -199,6 +199,7 @@ def main(conf: DictConfig) -> None:
 
         # viz stateful parameters & options
         viz_do_train = False
+        viz_bbox = False
         viz_skip_update = False  # if enabled, will skip rendering updates to accelerate background training loop
         viz_render_styles = ['color', 'density']
         viz_render_style_ind = 0
@@ -214,8 +215,10 @@ def main(conf: DictConfig) -> None:
                                 radius=1e-3, point_render_mode='quad')
         ps_point_cloud_buffer = ps_point_cloud.get_buffer("points")
 
-        train_dataset.create_dataset_camera_visualization()
-        val_dataset.create_dataset_camera_visualization()
+        # Only implemented for NeRF and Colmap dataset
+        if isinstance(train_dataset, (NeRFDataset, ColmapDataset)):
+            train_dataset.create_dataset_camera_visualization()
+            val_dataset.create_dataset_camera_visualization()
         
         def update_cloud_viz():
             nonlocal ps_point_cloud, ps_point_cloud_buffer
@@ -302,6 +305,15 @@ def main(conf: DictConfig) -> None:
                     viz_render_scalar_buffer = ps.get_quantity_buffer(viz_render_name, "values")
 
 
+            if viz_bbox: 
+                bbox_min, bbox_max = train_dataset.scene_bbox
+                nodes = np.array([[bbox_min[0], bbox_min[1], bbox_min[2]], [bbox_max[0], bbox_min[1], bbox_min[2]], [bbox_min[0], bbox_max[1], bbox_min[2]], 
+                                  [bbox_min[0], bbox_min[1], bbox_max[2]], [bbox_max[0], bbox_max[1], bbox_min[2]], [bbox_max[0], bbox_min[1], bbox_max[2]], 
+                                  [bbox_min[0], bbox_max[1], bbox_max[2]], [bbox_max[0], bbox_max[1], bbox_max[2]]])
+                edges = np.array(
+                    [[0, 1], [0, 2], [0, 3], [1, 4], [1, 5], [2, 6], [2, 4], [3, 5], [3, 6], [4, 7], [5, 7], [6, 7]])
+                ps.register_curve_network("bbox", nodes, edges)
+
             # do the actual rendering
             sple_orad, sple_odns, sple_ohit = render_from_current_ps_view()
 
@@ -316,12 +328,12 @@ def main(conf: DictConfig) -> None:
 
 
         def ps_ui_callback():
-            nonlocal viz_do_train, viz_skip_update, viz_render_style_ind
-
+            nonlocal viz_do_train, viz_skip_update, viz_render_style_ind, viz_bbox
             # Create a little ImGUI UI
             _, viz_do_train = psim.Checkbox("Train", viz_do_train)
             _, viz_skip_update = psim.Checkbox("Skip Render Update", viz_skip_update)
-
+            if isinstance(train_dataset, (NeRFDataset, ColmapDataset)):
+                _, viz_bbox = psim.Checkbox("Visualize the bbox", viz_bbox)
             _, viz_render_style_ind = psim.Combo("Render Display", viz_render_style_ind, viz_render_styles)
 
             if not viz_skip_update:
