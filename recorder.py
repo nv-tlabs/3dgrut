@@ -4,6 +4,7 @@ import torch
 import pickle
 from collections import defaultdict
 from pathlib import Path
+from datetime import datetime
 
 
 class TrainingRecorder:
@@ -16,6 +17,8 @@ class TrainingRecorder:
         self.train_info_dict = defaultdict(list)
         self.valid_info_dict = defaultdict(list)
         self.train_recording_frequency = 100    # Record training state every N steps
+        self._buffered_updates = False          # Contains updates not yet reported to tensorboard / wandb
+        self.timestamp = self.get_timestamp()
         if enabled:
             os.makedirs(TrainingRecorder.RECORDINGS_FOLDER, exist_ok=True)
 
@@ -28,12 +31,13 @@ class TrainingRecorder:
         self.valid_info_dict['loss'].append(loss)
         self.valid_info_dict['loss_mean'].append(np.mean(loss))
 
+    def is_time_to_record(self, iteration):
+        return iteration > 0 and iteration % self.train_recording_frequency == 0
+
     def record_train_step(self, model, iteration: int, iteration_time: int,
                           l1_loss: torch.Tensor, ssim_loss: torch.Tensor, total_loss: torch.Tensor, psnr: int):
-        if not self.enabled:
+        if not self.enabled or not self.is_time_to_record(iteration):
             return  # nop
-        if not (iteration > 0 and iteration % self.train_recording_frequency == 0):
-            return
         num_gaussians = model.positions.shape[0]
 
         self.train_info_dict['iteration'].append(iteration)
@@ -90,6 +94,57 @@ class TrainingRecorder:
         self.train_info_dict['rot_y_std'].append(model.get_rotation().std(dim=0)[1].item())
         self.train_info_dict['rot_z_std'].append(model.get_rotation().std(dim=0)[2].item())
         self.train_info_dict['rot_w_std'].append(model.get_rotation().std(dim=0)[3].item())
+        self._buffered_updates = True
+
+    def report_statistics(self, writer):
+        """ Reports last aggregated training statistics to experiments manager """
+        if not self.enabled or not self._buffered_updates:
+            return  # nop
+        writer.add_scalar("iter_time", self.train_info_dict['iter_time'][-1])
+        writer.add_scalar("g_statistics/num_gaussians", self.train_info_dict['num_gaussians'][-1])
+        writer.add_scalar("g_statistics/active_sh_deg", self.train_info_dict['active_sh_deg'][-1])
+
+        writer.add_scalar("g_statistics/density/opacity_mean", self.train_info_dict['opacity_mean'][-1])
+        writer.add_scalar("g_statistics/density/opacity_std", self.train_info_dict['opacity_std'][-1])
+        
+        writer.add_scalar("g_statistics/scale/scale_x_mean", self.train_info_dict['scale_x_mean'][-1])
+        writer.add_scalar("g_statistics/scale/scale_y_mean", self.train_info_dict['scale_y_mean'][-1])
+        writer.add_scalar("g_statistics/scale/scale_z_mean", self.train_info_dict['scale_z_mean'][-1])
+
+        writer.add_scalar("g_statistics/position/pos_x_mean", self.train_info_dict['pos_x_mean'][-1])
+        writer.add_scalar("g_statistics/position/pos_y_mean", self.train_info_dict['pos_y_mean'][-1])
+        writer.add_scalar("g_statistics/position/pos_z_mean", self.train_info_dict['pos_z_mean'][-1])
+        writer.add_scalar("g_statistics/position/pos_x_std", self.train_info_dict['pos_x_std'][-1])
+        writer.add_scalar("g_statistics/position/pos_y_std", self.train_info_dict['pos_y_std'][-1])
+        writer.add_scalar("g_statistics/position/pos_z_std", self.train_info_dict['pos_z_std'][-1])
+
+        writer.add_scalar("g_statistics/feature_albedo/features_albedo_mean", self.train_info_dict['features_albedo_mean'][-1])
+        writer.add_scalar("g_statistics/feature_albedo/features_albedo_R_mean", self.train_info_dict['features_albedo_R_mean'][-1])
+        writer.add_scalar("g_statistics/feature_albedo/features_albedo_G_mean", self.train_info_dict['features_albedo_G_mean'][-1])
+        writer.add_scalar("g_statistics/feature_albedo/features_albedo_B_mean", self.train_info_dict['features_albedo_B_mean'][-1])
+        writer.add_scalar("g_statistics/feature_albedo/features_albedo_std", self.train_info_dict['features_albedo_std'][-1])
+        writer.add_scalar("g_statistics/feature_albedo/features_albedo_R_std", self.train_info_dict['features_albedo_R_std'][-1])
+        writer.add_scalar("g_statistics/feature_albedo/features_albedo_G_std", self.train_info_dict['features_albedo_G_std'][-1])
+        writer.add_scalar("g_statistics/feature_albedo/features_albedo_B_std", self.train_info_dict['features_albedo_B_std'][-1])
+
+        writer.add_scalar("g_statistics/feature_specular/features_specular_mean", self.train_info_dict['features_specular_mean'][-1])
+        writer.add_scalar("g_statistics/feature_specular/features_specular_R_mean", self.train_info_dict['features_specular_R_mean'][-1])
+        writer.add_scalar("g_statistics/feature_specular/features_specular_G_mean", self.train_info_dict['features_specular_G_mean'][-1])
+        writer.add_scalar("g_statistics/feature_specular/features_specular_B_mean", self.train_info_dict['features_specular_B_mean'][-1])
+        writer.add_scalar("g_statistics/feature_specular/features_specular_std", self.train_info_dict['features_specular_std'][-1])
+        writer.add_scalar("g_statistics/feature_specular/features_specular_R_std", self.train_info_dict['features_specular_R_std'][-1])
+        writer.add_scalar("g_statistics/feature_specular/features_specular_G_std", self.train_info_dict['features_specular_G_std'][-1])
+        writer.add_scalar("g_statistics/feature_specular/features_specular_B_std", self.train_info_dict['features_specular_B_std'][-1])
+
+        writer.add_scalar("g_statistics/rotation/rot_x_mean", self.train_info_dict['rot_x_mean'][-1])
+        writer.add_scalar("g_statistics/rotation/rot_y_mean", self.train_info_dict['rot_y_mean'][-1])
+        writer.add_scalar("g_statistics/rotation/rot_z_mean", self.train_info_dict['rot_z_mean'][-1])
+        writer.add_scalar("g_statistics/rotation/rot_w_mean", self.train_info_dict['rot_w_mean'][-1])
+        writer.add_scalar("g_statistics/rotation/rot_x_std", self.train_info_dict['rot_x_std'][-1])
+        writer.add_scalar("g_statistics/rotation/rot_y_std", self.train_info_dict['rot_y_std'][-1])
+        writer.add_scalar("g_statistics/rotation/rot_z_std", self.train_info_dict['rot_z_std'][-1])
+        writer.add_scalar("g_statistics/rotation/rot_w_std", self.train_info_dict['rot_w_std'][-1])
+        self._buffered_updates = False
 
     def _get_gaussians_info(self, gaussians):
         num_gaussians = gaussians.get_positions().shape[0]
@@ -127,6 +182,15 @@ class TrainingRecorder:
         )
         return scene_info
 
+    @staticmethod
+    def get_run_name(data_path):
+        object_name = Path(data_path).stem
+        return object_name
+
+    @staticmethod
+    def get_timestamp():
+        return datetime.now().strftime("%d%m_%H%M%S")
+
     def submit_recording(self, dataset, scene_extent, train_path: str, model):
         if not self.enabled:
             return  # nop
@@ -135,7 +199,7 @@ class TrainingRecorder:
             gaussians=self._get_gaussians_info(model),
             extra_dict=self.train_info_dict
         )
-        object_name = Path(train_path).stem
-        filename = f'{TrainingRecorder.RECORDINGS_FOLDER}/{object_name}.pickle'
+        object_name = self.get_run_name(train_path)
+        filename = f'{TrainingRecorder.RECORDINGS_FOLDER}/{object_name}{self.timestamp}.pickle'
         with open(filename, 'wb') as handle:
             pickle.dump(recorded_output, handle, protocol=pickle.HIGHEST_PROTOCOL)

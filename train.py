@@ -182,13 +182,14 @@ def main(conf: DictConfig) -> None:
     if conf.experiment_name and os.path.exists(f'{conf.out_dir}/{conf.experiment_name}'):
         logging.warning("The selected experiment name already exists and the checkpoints could be overwritten!")
 
+    recorder = TrainingRecorder(enabled=conf.record_training)
     if conf.use_wandb:
         import wandb
-        wandb.init(config=OmegaConf.to_container(conf), project='3dgrt', name=conf.experiment_name)
+        object_name = TrainingRecorder.get_run_name(conf.path)
+        run_name = f'{object_name}-' + TrainingRecorder.get_timestamp()
+        wandb.init(config=OmegaConf.to_container(conf), project='3dgrt', group=conf.experiment_name, name=run_name)
         wandb.tensorboard.patch(root_logdir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None, save=False)
-
     writer = SummaryWriter(log_dir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None)
-    recorder = TrainingRecorder(enabled=conf.record_training)
     it_start = torch.cuda.Event(enable_timing=True)
     it_end = torch.cuda.Event(enable_timing=True)
 
@@ -297,6 +298,7 @@ def main(conf: DictConfig) -> None:
 
                 recorder.record_train_step(model, global_step, it_start.elapsed_time(it_end),
                                            loss_l1, loss_ssim, loss, psnr)
+                recorder.report_statistics(writer=writer)
 
                 # Save the checkpoint
                 if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
