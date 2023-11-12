@@ -91,6 +91,7 @@ scheduler:
     type: skip
 
 render:
+  method : optix
   hit_mode : 0
   max_hit_per_slab: 32
   max_num_slabs: 64
