@@ -5,7 +5,7 @@ out_dir: "runs"
 n_iterations: 30000
 with_gui: false
 gui_update_from_device: true
-val_frequency: 1
+val_frequency: 5000
 num_workers: 8
 use_wandb: false
 record_training: true
@@ -86,9 +86,9 @@ model:
     
   # Sample rays according to the error buffer - mode null skips the process
   error_based_sampling:
-    mode: buffer
-    sampling_frequency: 50
-    buffer_update_frequency: 2500
+    mode: null # Use buffer to do the error sampling 
+    sampling_frequency: 30
+    buffer_update_frequency: 2499 # to not do it in sync with other changes
     downsampling_factor: 1
 
   prune_sky_mlp: 
