@@ -365,6 +365,89 @@ def main(conf: DictConfig) -> None:
                 # Make a scheduler step
                 model.scheduler_step(global_step)
 
+                # Update the error buffers with new values
+                if global_step > 0 and model.error_based_sampling and global_step % model.error_buffer_update_frequency == 0:
+                    ray_origins = []
+                    ray_directions = []
+                    rgbs = []
+                    alphas = []
+                    errors = []
+                    
+                    model.build_bvh()
+                    with torch.no_grad():
+                        qbar = tqdm(range(len(train_dataset)))
+                        qbar.set_description("Computing error maps:" )
+                        for batch_idx in qbar:
+                            batch = train_dataset[batch_idx]
+                            gpu_batch = move_to_gpu(batch)
+                            rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"].unsqueeze(0), gpu_batch["rays_dir"].unsqueeze(0), gpu_batch["rgb_gt"].unsqueeze(0)
+
+                            # Append all the tensors
+                            ray_origins.append(rays_ori.reshape(-1,3).cpu())
+                            ray_directions.append(rays_dir.reshape(-1,3).cpu())
+                            rgbs.append(rgb_gt.reshape(-1,3).cpu())
+
+                            # Compute the outputs of a single batch
+                            outputs = model(rays_ori, rays_dir)
+
+                            # Check if alphas are given and if the background is a fix color
+                            if isinstance(model.background, BackgroundColor):
+                                assert "alpha" in gpu_batch
+                                alpha = gpu_batch["alpha"].unsqueeze(0)
+                                rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
+                                alphas.append(alpha.reshape(-1,1).cpu())
+
+                            # Compute the loss
+                            error_map = torch.abs(outputs['pred_rgb'] - rgb_gt).mean(dim=-1, keepdim=True)
+                            errors.append(error_map.reshape(-1,1))
+                    
+                            if batch_idx == 0:
+                                writer.add_image('image/error_map', error_map[-1].clip(0,1.0), global_step, dataformats='HWC')
+
+                    model.update_error_buffer(torch.vstack(ray_origins), torch.vstack(ray_directions),
+                                            torch.vstack(errors), torch.vstack(rgbs), 
+                                            torch.vstack(alphas) if len(alphas) else None)
+                    
+
+                # Sample a batch from the error buffer
+                if model.error_based_sampling and global_step > model.error_buffer_update_frequency and global_step % model.error_sampling_frequency:
+                    # Sample a new batch from the error buffer
+                    error_batch = model.sample_from_error_buffer(rays_ori.shape[:-1])
+                    gpu_error_batch = move_to_gpu(error_batch)
+                    rays_ori_error, rays_dir_error, rgb_gt_error = gpu_error_batch["rays_ori"], gpu_error_batch["rays_dir"], gpu_error_batch["rgb_gt"]
+
+                    # Compute the outputs of a single batch
+                    outputs_error = model(rays_ori_error, rays_dir_error)
+
+                    # Check if alphas are given and if the background is a fix color
+                    if isinstance(model.background, BackgroundColor):
+                        assert "alpha" in gpu_error_batch
+                        alpha_error = gpu_error_batch["alpha"]
+                        rgb_gt_error = rgb_gt_error * alpha_error + model.background.color * (1 - alpha_error)
+
+                    # Compute the loss
+                    loss_l1_error = torch.abs(outputs_error['pred_rgb'] - rgb_gt_error).mean()
+
+                    if conf.loss.use_ssim and conf.dataset.train.get("sample_full_image", False):
+                        loss_ssim_error = ssim(torch.permute(outputs_error['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
+                        loss_error = (1.0 - conf.loss.lambda_ssim) * loss_l1_error + conf.loss.lambda_ssim * (1.0 - loss_ssim_error)
+                    else:
+                        loss_ssim_error = None
+                        loss_error = loss_l1_error
+
+                    if conf.model.lambda_background > 0.0:
+                        assert "sky_mask" in gpu_batch, "Sky ray mask missing for background-loss evaluation"
+                        # Push all background rays to have opacity 0 and non-background rays to have opacity 1 withing the FV
+                        foreground_mask_error = torch.ones_like(outputs_error["pred_opacity"])
+                        foreground_mask_error[gpu_error_batch['sky_mask']] = 0.0
+                        loss_background_error = torch.nn.functional.mse_loss(outputs_error["pred_opacity"], foreground_mask_error)
+                        loss_error += conf.model.lambda_background * loss_background_error
+
+                    # backpropagate the gradients from the error rays and update the parameters
+                    loss_error.backward()
+                    model.optimizer.step()
+                    model.optimizer.zero_grad()
+
                 # Logging
                 psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
                 global_step += 1
