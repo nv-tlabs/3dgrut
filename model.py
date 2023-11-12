@@ -135,7 +135,8 @@ class MixtureOfGaussians(torch.nn.Module):
         self.features_albedo = torch.nn.Parameter(to_torch(np.transpose(np.stack((
             data['vertex']['f_dc_0'], data['vertex']['f_dc_1'], data['vertex']['f_dc_2']),
             dtype=np.float32)), device=self.device))  # type: ignore
-        self.features_specular = torch.nn.Parameter(to_torch(np.transpose(np.stack((
+
+        feats_sph = to_torch(np.transpose(np.stack((
             data['vertex']['f_rest_0'], data['vertex']['f_rest_1'], data['vertex']['f_rest_2'],
             data['vertex']['f_rest_3'], data['vertex']['f_rest_4'],
             data['vertex']['f_rest_5'], data['vertex']['f_rest_6'], data['vertex']['f_rest_7'],
@@ -154,7 +155,12 @@ class MixtureOfGaussians(torch.nn.Module):
             data['vertex']['f_rest_38'], data['vertex']['f_rest_39'],
             data['vertex']['f_rest_40'], data['vertex']['f_rest_41'], data['vertex']['f_rest_42'],
             data['vertex']['f_rest_43'], data['vertex']['f_rest_44']),
-            dtype=np.float32)), device=self.device))  # type: ignore
+        dtype=np.float32)), device=self.device)
+
+        # reinterpret from C-style to F-style layout
+        feats_sph = feats_sph.reshape(num_gsplat,3,-1).transpose(-1,-2).reshape(num_gsplat,-1)
+        
+        self.features_specular = torch.nn.Parameter(feats_sph)
 
         if set_optimizable_parameters:
             self.set_optimizable_parameters()
