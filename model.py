@@ -14,17 +14,17 @@ from utils import to_np
 import background
 
 class MixtureOfGaussians(torch.nn.Module):
-    def __init__(self, conf, scene_extent):
+    def __init__(self, conf, scene_extent=None):
         super().__init__()
 
         self.conf = conf
-        self.scene_extent = scene_extent        
-        self.positions = torch.empty([0,3])  # Positions of the 3D Gaussians (x, y, z) [n_gaussians, 3]
-        self.rotation  = torch.empty([0,4])   # Rotation of each Gaussian represented as a unit quaternion [n_gaussians, 4]
-        self.scale     = torch.empty([0,3])     # Anisotropic scale of each Gaussian [n_gaussians, 3]
-        self.density   = torch.empty([0,1])    # Density of each Gaussian [n_gaussians, 1]
-        self.features_albedo  = torch.empty([0,3])  # Feature vector of the 0th order SH coefficients [n_gaussians, 3] (We split it into two due to different learning rates)
-        self.features_specular  = torch.empty([0,1]) # Features of the higher order SH coefficients [n_gaussians, 3]
+        self.scene_extent = scene_extent
+        self.positions = torch.nn.Parameter(torch.empty([0, 3]))  # Positions of the 3D Gaussians (x, y, z) [n_gaussians, 3]
+        self.rotation = torch.nn.Parameter(torch.empty([0, 4]))  # Rotation of each Gaussian represented as a unit quaternion [n_gaussians, 4]
+        self.scale = torch.nn.Parameter(torch.empty([0, 3]))  # Anisotropic scale of each Gaussian [n_gaussians, 3]
+        self.density = torch.nn.Parameter(torch.empty([0, 1]))  # Density of each Gaussian [n_gaussians, 1]
+        self.features_albedo = torch.nn.Parameter(torch.empty([0, 3]))  # Feature vector of the 0th order SH coefficients [n_gaussians, 3] (We split it into two due to different learning rates)
+        self.features_specular = torch.nn.Parameter(torch.empty([0, 1]))  # Features of the higher order SH coefficients [n_gaussians, 3]
         self.device = 'cuda'
         self.optimizer = None
         self.optix_ctx = None
@@ -195,7 +195,7 @@ class MixtureOfGaussians(torch.nn.Module):
             self.set_optimizable_parameters()
         self.validate_fields()
 
-    def init_from_checkpoint(self, checkpoint: dict):
+    def init_from_checkpoint(self, checkpoint: dict, setup_optimizer=True):
         self.positions = checkpoint["positions"]
         self.rotation = checkpoint["rotation"]
         self.scale = checkpoint["scale"]
@@ -208,8 +208,9 @@ class MixtureOfGaussians(torch.nn.Module):
             self.feature_dim_increase_interval = checkpoint["feature_dim_increase_interval"]
             self.feature_dim_increase_step = checkpoint["feature_dim_increase_step"]
         self.background.load_state_dict(checkpoint["background"])
-        self.set_optimizable_parameters()
-        self.setup_optimizer(state_dict=checkpoint['optimizer'])
+        if setup_optimizer:
+            self.set_optimizable_parameters()
+            self.setup_optimizer(state_dict=checkpoint['optimizer'])
         self.validate_fields()
 
     def default_initialize_from_points(self, pts_np, colors_np=None):
@@ -291,11 +292,11 @@ class MixtureOfGaussians(torch.nn.Module):
         for name, args in self.conf.scheduler.items():
             if args.type is not None and getattr(self, name).requires_grad:
                 if name == "positions":
-                    self.schedulers[name] = get_scheduler(args.type)(            
+                    self.schedulers[name] = get_scheduler(args.type)(
                         lr_init=args.lr_init * self.scene_extent,
                         lr_final=args.lr_final * self.scene_extent,
                         max_steps=args.max_steps
-                    ) 
+                    )
                 else:
                     self.schedulers[name] = (get_scheduler(args.type)(**args))
 
