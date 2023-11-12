@@ -1,0 +1,77 @@
+# Copyright (c) 2022 NVIDIA CORPORATION.  All rights reserved.
+
+load("@cgrindel_bazel_starlib//bzlformat:defs.bzl", "bzlformat_pkg")
+load("@pip_deps//:requirements.bzl", "requirement")
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_cuda//cuda:defs.bzl", "cuda_library")
+load("@rules_python//python:defs.bzl", "py_library")
+load("//bazel/pytest:defs.bzl", "pytest_test")
+
+package(default_visibility = ["//visibility:public"])
+
+cuda_library(
+    name = "packed_ops_cuda",
+    srcs = [
+        "packed_operations.cu",
+    ],
+    hdrs = [
+        "utils.h",
+    ],
+    copts = [
+        "-D_GLIBCXX_USE_CXX11_ABI=0",
+        "-Wno-deprecated-declarations",
+        "-Werror=all-warnings",
+    ],
+    deps = [
+        "@pip_deps_torch//:torch_headers",
+        "@python_3_11//:python_headers",
+    ],
+)
+
+cc_binary(
+    name = "packed_ops_cc",
+    srcs = ["binding.cpp"],
+    copts = [
+        "-D_GLIBCXX_USE_CXX11_ABI=0",
+        "-DTORCH_API_INCLUDE_EXTENSION_H",
+        "-DTORCH_EXTENSION_NAME=libpacked_ops_cc",
+        "-std=c++14",
+    ],
+    linkopts = [
+        "-Wl,--no-undefined",
+        "-Wl,--as-needed",
+    ],
+    linkshared = True,
+    deps = [
+        ":packed_ops_cuda",
+        "@pip_deps_torch//:libc10",
+        "@pip_deps_torch//:libtorch_cpu",
+        "@pip_deps_torch//:libtorch_python",
+        "@python_3_11//:libpython",
+    ],
+)
+
+py_library(
+    name = "pylib",
+    srcs = [
+        "__init__.py",
+    ],
+    data = [
+        ":packed_ops_cc",
+    ],
+    deps = [
+        requirement("torch"),
+    ],
+)
+
+pytest_test(
+    name = "packed_operations_test",
+    srcs = ["packed_operations_test.py"],
+    deps = [
+        ":pylib",
+        requirement("torch"),
+        "//models:pylib",
+    ],
+)
+
+bzlformat_pkg(name = "bzlformat")
