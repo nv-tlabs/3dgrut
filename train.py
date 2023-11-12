@@ -280,6 +280,12 @@ def main(conf: DictConfig) -> None:
                     ray_jitter.enabled = True
                 with torch.cuda.nvtx.range(f"train.train_step_{global_step}"):
                     it_start.record()
+                    error_buffer_batch = False
+                    # Sample a new batch from the error buffer (the actual batch from the dataloader will be skipped)
+                    if model.error_based_sampling and global_step > model.error_buffer_update_frequency and global_step % model.error_sampling_frequency == 0:
+                        batch = model.sample_from_error_buffer(batch["rays_ori"].shape[:-1])
+                        error_buffer_batch = True
+
                     # Move data to GPU
                     gpu_batch = move_to_gpu(batch)
                     rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
@@ -300,7 +306,7 @@ def main(conf: DictConfig) -> None:
                     loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
                     writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
 
-                    if conf.loss.use_ssim and conf.dataset.train.get("sample_full_image", False):
+                    if conf.loss.use_ssim and ~error_buffer_batch and conf.dataset.train.get("sample_full_image", False):
                         loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
                         loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
                         writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
@@ -364,10 +370,50 @@ def main(conf: DictConfig) -> None:
 
                 # Make a scheduler step
                 model.scheduler_step(global_step)
+                        
+                psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
+                global_step += 1
+                pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
+                writer.add_scalar("psnr/train", psnr, global_step)
+
+                recorder.record_train_step(model, global_step, it_start.elapsed_time(it_end),
+                                           loss_l1, loss_ssim, loss, psnr)
+                recorder.report_statistics(writer=writer)
+
+                # Save the checkpoint
+                if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
+                    parameters = model.get_model_parameters()
+                    parameters |= {"global_step": global_step, "epoch": epoch_idx}
+                    torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
+
+                # Densify the Gaussians
+                if global_step > conf.model.densify.start_iteration and global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
+                    model.densify_gaussians(scene_extent=scene_extent)
+                    scene_updated = True
+
+                # Prune the Gaussians
+                if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
+                    model.prune_gaussians()
+                    scene_updated = True
+
+                # Reset the Gaussian density 
+                if global_step > conf.model.reset_density.start_iteration and global_step < conf.model.reset_density.end_iteration and global_step % conf.model.reset_density.frequency == 0:
+                    model.reset_density()
+                    scene_updated = True
+
+                # SH: Every N its we increase the levels of SH up to a maximum degree
+                # MLP: Every N we further unmask additional dimensions
+                if model.progressive_training and global_step > 0 and global_step % model.feature_dim_increase_interval == 0:
+                    model.increase_num_active_features()
+
+                # Update the BVH if required
+                if scene_updated or (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
+                    model.build_bvh()
+
 
                 # Update the error buffers with new values
-                with torch.cuda.nvtx.range(f"update_error_buffer[step {global_step}]"):
-                    if global_step > 0 and model.error_based_sampling and global_step % model.error_buffer_update_frequency == 0:
+                if global_step > 0 and model.error_based_sampling and global_step % model.error_buffer_update_frequency == 0:
+                    with torch.cuda.nvtx.range(f"update_error_buffer[step {global_step}]"):
                         ray_origins = []
                         ray_directions = []
                         rgbs = []
@@ -411,8 +457,7 @@ def main(conf: DictConfig) -> None:
 
                         model.update_error_buffer(torch.vstack(ray_origins), torch.vstack(ray_directions),
                                                 torch.vstack(errors), torch.vstack(rgbs),
-                                                torch.vstack(alphas) if len(alphas) else None)
-                    
+                                                torch.vstack(alphas) if len(alphas) else None)                   
 
                 # Sample a batch from the error buffer
                 with torch.cuda.nvtx.range(f"sample_batch_from_error_buffer[step {global_step}]"):

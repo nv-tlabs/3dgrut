@@ -154,7 +154,8 @@ class MixtureOfGaussians(torch.nn.Module):
     @torch.cuda.nvtx.range("sample_from_error_buffer")
     def sample_from_error_buffer(self, out_shape):
         b, h, w = out_shape
-        sampled_indices = torch.multinomial(self.error_buffer_errors[:2**24], torch.prod(torch.tensor(out_shape)).item(), False)
+        # Faster with replacement (shouldn't make a large difference )
+        sampled_indices = torch.multinomial(self.error_buffer_errors[:2**24], torch.prod(torch.tensor(out_shape)), replacement=True)
 
         sample = {
                 "rays_ori": self.error_buffer_rays[sampled_indices, :3].reshape(b,h,w,3), 
