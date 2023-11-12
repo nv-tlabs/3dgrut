@@ -454,8 +454,8 @@ def main(conf: DictConfig) -> None:
                         model.optimizer.step()
                         model.optimizer.zero_grad()
 
-                # Logging
-                psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
+                with torch.cuda.nvtx.range(f"criterions_psnr"):
+                    psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
                 global_step += 1
                 pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
                 if global_step > 0 and global_step % conf.log_frequency == 0:
@@ -466,11 +466,12 @@ def main(conf: DictConfig) -> None:
                 recorder.report_statistics(writer=writer)
 
                 # Save the checkpoint
-                if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
-                    parameters = model.get_model_parameters()
-                    parameters |= {"global_step": global_step, "epoch": epoch_idx}
-                    torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
-                
+                with torch.cuda.nvtx.range(f"ckpt_save"):
+                    if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
+                        parameters = model.get_model_parameters()
+                        parameters |= {"global_step": global_step, "epoch": epoch_idx}
+                        torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
+
                 # Densify the Gaussians
                 if global_step > conf.model.densify.start_iteration and  global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
                     model.densify_gaussians(scene_extent=scene_extent)

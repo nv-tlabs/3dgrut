@@ -37,7 +37,7 @@ class TrainingRecorder:
 
     @torch.cuda.nvtx.range("record_train_step")
     def record_train_step(self, model, iteration: int, iteration_time: int,
-                          l1_loss: torch.Tensor, ssim_loss: torch.Tensor | None, total_loss: torch.Tensor, psnr: int):
+                          l1_loss: torch.Tensor, ssim_loss: torch.Tensor | None, total_loss: torch.Tensor, psnr: float):
         if not self.enabled or not self.is_time_to_record(iteration):
             return  # nop
         num_gaussians = model.positions.shape[0]
