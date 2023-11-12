@@ -1,6 +1,9 @@
 import numpy as np
 import torch
 
+import arrgh
+
+from packed_ops import packed_cumprod, packed_sum, packed_mul
 
 from utils import to_np, quaternion_to_so3
 from geometry import safe_normalize
@@ -120,18 +123,21 @@ def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, s
 
     ## Mask out only the used elements
     dense_hit_mask = (dense_hit_gIds != -1)
-    dense_hit_mask3 = dense_hit_mask[...,None].expand(N,D,3)
     hit_gIds = dense_hit_gIds[dense_hit_mask]
+
+    # start and end indices per-ray of the hits
+    hit_count_ray = torch.sum(dense_hit_mask, dim=-1, dtype=torch.int32) # [N]
+    hitrange_end = torch.cumsum(hit_count_ray, dim=0, dtype=torch.int32) # [N]
+    hitrange_start = torch.zeros_like(hitrange_end)
+    hitrange_start[1:] = hitrange_end[:-1]
+    hitrange = torch.stack((hitrange_start, hit_count_ray), dim=-1)
+    ray_has_a_hit = hit_count_ray > 0
+    last_hit_inds = hitrange_end[ray_has_a_hit] - 1 # only for rays that have a hit
     
-    ## Shapes
-
     ## Gather all of the values associated with each hit
-
-    # Gather ray source/dir for each hit
-    hit_rays_o_dense = rays_o[:,None,:].expand(N,D,3)
-    hit_rays_o = hit_rays_o_dense[dense_hit_mask3].reshape(-1,3)
-    hit_rays_d_dense = rays_d[:,None,:].expand(N,D,3)
-    hit_rays_d = hit_rays_d_dense[dense_hit_mask3].reshape(-1,3)
+    hit_ray_inds = torch.arange(N, device=device)[:,None].expand(N,D)[dense_hit_mask]
+    hit_rays_o = rays_o[hit_ray_inds,:]
+    hit_rays_d = rays_d[hit_ray_inds,:]
 
     # Gather gaussian params
     hit_gpos = gpos[hit_gIds,:]
@@ -143,28 +149,17 @@ def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, s
     # Evaluate all of the individual Gaussians
     hit_grad, hit_galpha, hit_gdist = evaluate_gaussians(hit_rays_o, hit_rays_d, hit_gpos, hit_grot, hit_gscl, hit_gdns, hit_gsh, sph_deg)
 
-    ## Broadcast the results back to being dense
-    dense_grad = torch.zeros((N,D,3), dtype=dtype, device=device)
-    dense_grad[dense_hit_mask3] = hit_grad.flatten()
+    unalpha = 1.0 - hit_galpha
+    hit_transmit = packed_cumprod(unalpha, hitrange, True, False)
+    ray_final_transmit = torch.ones((N,1), dtype=dtype, device=device)
+    ray_final_transmit[ray_has_a_hit,:] = hit_transmit[last_hit_inds] * unalpha[last_hit_inds]
+    ray_opacity = 1. - ray_final_transmit
 
-    dense_alphas = torch.zeros((N,D), dtype=dtype, device=device)
-    dense_alphas[dense_hit_mask] = hit_galpha.flatten()
+    hit_weight = hit_transmit * hit_galpha
+    ray_rad = packed_sum(hit_weight * hit_grad, hitrange)
+    ray_dist = packed_sum(hit_weight * hit_gdist, hitrange) # TODO better to use max dist?
+    ray_ohit = hit_count_ray
 
-    dense_gdist = torch.zeros((N,D), dtype=dtype, device=device)
-    dense_gdist[dense_hit_mask] = hit_gdist.flatten()
-
-    ## Compute transmittance along the ray
-    dense_unalpha = torch.cat((torch.ones_like(dense_alphas[:,0:1]), 1. - dense_alphas), dim=-1)
-    dense_transmit_prod = torch.cumprod(dense_unalpha, dim=-1)
-    dense_transmit = dense_transmit_prod[:,:-1]
-    ray_opacity = 1.0 - dense_transmit_prod[:,-1]
-
-    ## Add up weighted contributions from each hit
-    dense_weight = dense_transmit * dense_alphas
-    ray_rad = torch.sum(dense_weight[...,None] * dense_grad, dim=-2)
-    ray_dist = torch.sum(dense_weight*dense_gdist, dim=-1) # TODO better to use max dist?
-    ray_ohit = torch.sum(dense_hit_mask, dim=-1)
-    
     ## Reshape to original size
     ray_rad = ray_rad.reshape(*orig_shape,3)
     ray_opacity = ray_opacity.reshape(*orig_shape,1)
