@@ -1,9 +1,11 @@
 import numpy as np
+
 import torch
+from torch.utils.checkpoint import checkpoint
 
 import arrgh
 
-from packed_ops import packed_cumprod, packed_sum, packed_mul
+from packed_ops_modules import packed_cumprod, packed_sum, packed_mul
 
 from utils import to_np, quaternion_to_so3
 from geometry import safe_normalize
@@ -121,12 +123,61 @@ def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, s
     rays_d = rays_d.reshape(N,3)
     dense_hit_gIds = dense_hit_gIds.reshape(N,D) 
 
+    # split to chunks
+    chunk_size = (1 << 12) # increases peak memory usage, but we need enough to saturate the gpu
+    i_c = 0
+    ray_rad_out = []
+    ray_opacity_out = []
+    ray_dist_out = []
+    ray_ohit_out = []
+
+    print(f"Processing {N} rays in chunks of size {chunk_size} --> {N // chunk_size} chunks")
+
+    while i_c < N:
+
+        C = min(chunk_size, N-i_c)
+
+        ray_rad, ray_opacity, ray_dist, ray_ohit = checkpoint(
+                eval_ray_chunk_tup, 
+                (i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg),
+                use_reentrant=False
+            )
+
+        ray_rad_out.append(ray_rad)
+        ray_opacity_out.append(ray_opacity)
+        ray_dist_out.append(ray_dist)
+        ray_ohit_out.append(ray_ohit)
+
+        i_c += C
+
+    ray_rad_out = torch.cat(ray_rad_out, dim=0)
+    ray_opacity_out = torch.cat(ray_opacity_out, dim=0)
+    ray_dist_out = torch.cat(ray_dist_out, dim=0)
+    ray_ohit_out = torch.cat(ray_ohit_out, dim=0)
+
+    ray_rad_out = ray_rad_out.reshape(*orig_shape,3)
+    ray_opacity_out = ray_opacity_out.reshape(*orig_shape,1)
+    ray_dist_out = ray_dist_out.reshape(*orig_shape,1)
+    ray_ohit_out = ray_ohit_out.reshape(*orig_shape,1)
+    
+    return ray_rad_out, ray_opacity_out, ray_ohit_out, ray_dist_out
+
+def eval_ray_chunk_tup(tup):
+    return eval_ray_chunk(*tup)
+
+def eval_ray_chunk(i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg):
+    
+    device = rays_o.device
+    dtype = rays_o.dtype
+        
+    hit_gId_chunk = dense_hit_gIds[i_c:(i_c+C),:]
+
     ## Mask out only the used elements
-    dense_hit_mask = (dense_hit_gIds != -1)
-    hit_gIds = dense_hit_gIds[dense_hit_mask]
+    hit_mask = (hit_gId_chunk != -1)
+    hit_gIds = hit_gId_chunk[hit_mask]
 
     # start and end indices per-ray of the hits
-    hit_count_ray = torch.sum(dense_hit_mask, dim=-1, dtype=torch.int32) # [N]
+    hit_count_ray = torch.sum(hit_mask, dim=-1, dtype=torch.int32) # [N]
     hitrange_end = torch.cumsum(hit_count_ray, dim=0, dtype=torch.int32) # [N]
     hitrange_start = torch.zeros_like(hitrange_end)
     hitrange_start[1:] = hitrange_end[:-1]
@@ -135,7 +186,7 @@ def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, s
     last_hit_inds = hitrange_end[ray_has_a_hit] - 1 # only for rays that have a hit
     
     ## Gather all of the values associated with each hit
-    hit_ray_inds = torch.arange(N, device=device)[:,None].expand(N,D)[dense_hit_mask]
+    hit_ray_inds = torch.arange(C, device=device)[:,None].expand(C,D)[hit_mask] + i_c
     hit_rays_o = rays_o[hit_ray_inds,:]
     hit_rays_d = rays_d[hit_ray_inds,:]
 
@@ -151,22 +202,17 @@ def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, s
 
     unalpha = 1.0 - hit_galpha
     hit_transmit = packed_cumprod(unalpha, hitrange, True, False)
-    ray_final_transmit = torch.ones((N,1), dtype=dtype, device=device)
+    ray_final_transmit = torch.ones((C,1), dtype=dtype, device=device)
     ray_final_transmit[ray_has_a_hit,:] = hit_transmit[last_hit_inds] * unalpha[last_hit_inds]
     ray_opacity = 1. - ray_final_transmit
 
     hit_weight = hit_transmit * hit_galpha
     ray_rad = packed_sum(hit_weight * hit_grad, hitrange)
     ray_dist = packed_sum(hit_weight * hit_gdist, hitrange) # TODO better to use max dist?
-    ray_ohit = hit_count_ray
+    ray_ohit = hit_count_ray[:,None]
 
-    ## Reshape to original size
-    ray_rad = ray_rad.reshape(*orig_shape,3)
-    ray_opacity = ray_opacity.reshape(*orig_shape,1)
-    ray_dist = ray_dist.reshape(*orig_shape,1)
-    ray_ohit = ray_ohit.reshape(*orig_shape,1)
-    
-    return ray_rad, ray_opacity, ray_ohit, ray_dist
+    return ray_rad, ray_opacity, ray_dist, ray_ohit
+
 
 def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg):
     """
