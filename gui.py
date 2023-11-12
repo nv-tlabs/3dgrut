@@ -33,7 +33,10 @@ class GUI:
         ps.set_background_color((0., 0., 0.))
         ps.set_ground_plane_mode("none")
         ps.set_window_resizable(True)
-        ps.set_window_size(1920, 1080)
+        if conf.render.method == 'torch':
+            ps.set_window_size(500, 500)
+        else:
+            ps.set_window_size(1920, 1080)
         ps.set_give_focus_on_show(True)
 
         ps.set_automatically_compute_scene_extents(False)
@@ -51,6 +54,9 @@ class GUI:
         self.viz_render_scalar_buffer = None
         self.viz_render_name = 'render'
         self.viz_render_enabled = True
+        self.viz_render_subsample = 1
+        if conf.render.method == 'torch':
+            self.viz_render_subsample = 4
 
         self.train_dataset = train_dataset
         self.model = model
@@ -91,6 +97,8 @@ class GUI:
     def render_from_current_ps_view(self):
 
         window_w, window_h = ps.get_window_size()
+        window_w = window_w // self.viz_render_subsample
+        window_h = window_h // self.viz_render_subsample
         view_params = ps.get_view_camera_parameters()
         cam_center = view_params.get_position()
         corner_rays = view_params.generate_camera_ray_corners()
@@ -117,6 +125,8 @@ class GUI:
     def update_render_view_viz(self, force=False):
 
         window_w, window_h = ps.get_window_size()
+        window_w = window_w // self.viz_render_subsample
+        window_h = window_h // self.viz_render_subsample
 
         # re-initialize if needed
         style = self.viz_render_styles[self.viz_render_style_ind]
@@ -187,7 +197,7 @@ class GUI:
 
         psim.SetNextItemOpen(True, psim.ImGuiCond_FirstUseEver)
         if psim.TreeNode("Render"):
-            psim.PushItemWidth(150)
+            psim.PushItemWidth(100)
 
             if(psim.Button("Show")):
                 self.viz_render_enabled = True
@@ -199,8 +209,12 @@ class GUI:
 
 
             _, self.viz_render_style_ind = psim.Combo("Style", self.viz_render_style_ind, self.viz_render_styles)
-            psim.PopItemWidth()
 
+            changed, self.viz_render_subsample = psim.InputInt("Subsample Factor", self.viz_render_subsample, 1)
+            if changed:
+                self.viz_render_subsample = max(self.viz_render_subsample, 1)
+
+            psim.PopItemWidth()
             psim.TreePop()
 
         if self.live_update:
