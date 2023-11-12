@@ -3,9 +3,7 @@ import numpy as np
 import torch
 from torch.utils.checkpoint import checkpoint
 
-import arrgh
-
-from packed_ops_modules import packed_cumprod, packed_sum, packed_mul
+from packed_ops_modules import packed_cumprod, packed_sum
 
 from utils import to_np, quaternion_to_so3
 from geometry import safe_normalize
@@ -107,7 +105,7 @@ def RGB2SH(rgb):
 def SH2RGB(sh):
     return sh * C0 + 0.5
 
-def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg):
+def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, chunk_size=10000):
     """
     """
     device = rays_o.device
@@ -124,14 +122,14 @@ def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, s
     dense_hit_gIds = dense_hit_gIds.reshape(N,D) 
 
     # split to chunks
-    chunk_size = (1 << 12) # increases peak memory usage, but we need enough to saturate the gpu
     i_c = 0
     ray_rad_out = []
     ray_opacity_out = []
     ray_dist_out = []
     ray_ohit_out = []
 
-    print(f"Processing {N} rays in chunks of size {chunk_size} --> {N // chunk_size} chunks")
+    # Evaluate in checkpoint'd chunks to reduce peak memory usage
+    # (note that this compes at a cost as it becomes python/CPU-heavy)
 
     while i_c < N:
 
