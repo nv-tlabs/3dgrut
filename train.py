@@ -374,13 +374,17 @@ def main(conf: DictConfig) -> None:
                     errors = []
                     
                     model.build_bvh()
+                    ds_factor = model.error_downsampling_factor
+                    #TODO: implement random shift for downsampling
                     with torch.no_grad():
                         qbar = tqdm(range(len(train_dataset)))
                         qbar.set_description("Computing error maps:" )
                         for batch_idx in qbar:
                             batch = train_dataset[batch_idx]
                             gpu_batch = move_to_gpu(batch)
-                            rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"].unsqueeze(0), gpu_batch["rays_dir"].unsqueeze(0), gpu_batch["rgb_gt"].unsqueeze(0)
+                            rays_ori = gpu_batch["rays_ori"][::ds_factor, ::ds_factor, :].unsqueeze(0)
+                            rays_dir = gpu_batch["rays_dir"][::ds_factor, ::ds_factor, :].unsqueeze(0)
+                            rgb_gt = gpu_batch["rgb_gt"][::ds_factor, ::ds_factor, :].unsqueeze(0)
 
                             # Append all the tensors
                             ray_origins.append(rays_ori.reshape(-1,3).cpu())
@@ -393,7 +397,7 @@ def main(conf: DictConfig) -> None:
                             # Check if alphas are given and if the background is a fix color
                             if isinstance(model.background, BackgroundColor):
                                 assert "alpha" in gpu_batch
-                                alpha = gpu_batch["alpha"].unsqueeze(0)
+                                alpha = gpu_batch["alpha"][::ds_factor, ::ds_factor, :].unsqueeze(0)
                                 rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
                                 alphas.append(alpha.reshape(-1,1).cpu())
 
