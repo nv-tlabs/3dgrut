@@ -212,7 +212,7 @@ def eval_ray_chunk(i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, 
     return ray_rad, ray_opacity, ray_dist, ray_ohit
 
 
-def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg):
+def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, clamp_rad=True, clamp_rad_min_bound=0.0001):
     """
     Evaluate the response of gaussians. All inputs are [N_gaussian,...]
     """
@@ -224,6 +224,13 @@ def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg):
     sh_dim = (sph_deg+1) ** 2
     gsh_reshape = gsh.reshape(gsh.shape[0], sh_dim, 3)
     grad = eval_sh(sph_deg, gsh_reshape, gdir) + 0.5
+
+    if clamp_rad:
+        grad = torch.where(grad > clamp_rad_min_bound,
+                    grad,
+                    torch.exp(grad - clamp_rad_min_bound) * clamp_rad_min_bound
+                )
+
 
     gposc = rays_o - gpos
     gdist = torch.sqrt(torch.linalg.vecdot(gposc, rays_d, dim=-1)[:,None])
