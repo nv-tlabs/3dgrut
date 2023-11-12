@@ -26,3 +26,4 @@ mode = "RW"
 [docker]
 team = "nvidian/ct-toronto-ai"
 name = "3dgrt"
+tag = "main"
