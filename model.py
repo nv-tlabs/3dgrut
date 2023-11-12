@@ -452,7 +452,7 @@ class MixtureOfGaussians(torch.nn.Module):
 
         # gsplat implementation
         positional_grad_norm = self.positional_grad_norm_accum / self.positional_grad_norm_denom
-        positional_grad_norm[positional_grad_norm.isnan()] = 0.0 # TODO check shape consistent whith gsplats
+        positional_grad_norm[positional_grad_norm.isnan()] = 0.0 
 
         # Keeping adam implementation for reference
         # positional_grad_norm = None
@@ -467,6 +467,9 @@ class MixtureOfGaussians(torch.nn.Module):
         self.clone_gaussians(positional_grad_norm.squeeze(), scene_extent)
         self.split_gaussians(positional_grad_norm.squeeze(), scene_extent)      
 
+        mask = self.get_density().squeeze() >= self.prune_density_threshold
+        self.prune_gaussians(mask)  # note tha Gsplat negate the mask in the prune fct, we don't
+
         torch.cuda.empty_cache()
 
     @torch.cuda.nvtx.range("densify_postfix")
@@ -475,10 +478,10 @@ class MixtureOfGaussians(torch.nn.Module):
         optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
         self.update_optimizable_parameters(optimizable_tensors)
 
-        self.positional_grad_norm_accum = torch.zeros((self.positions.shape[0], 1), 
+        self.positional_grad_norm_accum = torch.zeros((self.get_positions().shape[0], 1), 
                                                       device=self.device, 
                                                       dtype=self.positional_grad_norm_accum.dtype)
-        self.positional_grad_norm_denom = torch.zeros((self.positions.shape[0], 1), 
+        self.positional_grad_norm_denom = torch.zeros((self.get_positions().shape[0], 1), 
                                                       device=self.device, 
                                                       dtype=self.positional_grad_norm_accum.dtype)
         
@@ -512,6 +515,12 @@ class MixtureOfGaussians(torch.nn.Module):
 
         self.densify_postfix(add_gaussians)
 
+        prune_filter = torch.cat((
+                mask,
+                torch.zeros(self.split_n_gaussians * mask.sum(), device="cuda", dtype=bool),
+            ))
+        self.prune_gaussians(~prune_filter) # note tha Gsplat negate the mask in the prune fct, we don't
+
 
     @torch.cuda.nvtx.range("clone_gaussians")
     def clone_gaussians(self, positional_grad_norm: torch.Tensor, scene_extent: float):
@@ -535,13 +544,10 @@ class MixtureOfGaussians(torch.nn.Module):
         self.densify_postfix(add_gaussians)
 
     @torch.cuda.nvtx.range("prune_gaussians")
-    def prune_gaussians(self):
-
+    def prune_gaussians(self, mask):
         # Prune the Gaussians based on their opacity
         # TODO: consider having a buffer of the contribution of Gaussians to the rendering -> this might avoid the need to reset opacity
         # TODO: we could also consider pruning away some of the large Gaussians?
-        mask = self.get_density().squeeze() >= self.prune_density_threshold
-
         optimizable_tensors = self.prune_optimizer_tensors(mask)
         self.update_optimizable_parameters(optimizable_tensors)
 
