@@ -612,7 +612,7 @@ class MixtureOfGaussians(torch.nn.Module):
             grot = self.get_rotation()
             gscl = self.get_scale()
             gdns = self.get_density()
-            gsh  = self.get_features()
+            gsh  = features
 
             # Get the hit indices
             dense_hit_gIds, = optixtracer.trace_mog_inds(
