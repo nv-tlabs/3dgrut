@@ -14,8 +14,11 @@ conda create -n 3dgrt python=3.11
 conda activate 3dgrt 
 pip install -r requirements.txt
 
-# Install ray utils cpp module for AV data
+# Install ray utils cpp module for AV data / packed_ops
 pip install ./libs/ray_utils
+pip install ./libs/packed_ops
+
+# Install packed_ops
 
 # Install simple-knn submodule
 pip install ./thirdparty/simple-knn

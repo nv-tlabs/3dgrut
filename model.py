@@ -11,6 +11,7 @@ from datasets.colmap_utils import read_next_bytes
 from datasets.utils import PointCloud
 from geometry import nearest_neighbor_dist_cpuKD
 from utils import to_np
+from render_utils import evaluate_rays
 import background
 
 class MixtureOfGaussians(torch.nn.Module):
@@ -33,6 +34,9 @@ class MixtureOfGaussians(torch.nn.Module):
         self.scale_activation =  get_activation_function(self.conf.model.scale_activation)
         self.scale_activation_inv =  get_activation_function(self.conf.model.scale_activation, inverse=True)
         self.rotation_activation =   get_activation_function("normalize") # The default value of the dim parameter is 1
+
+        # Rendering parameters
+        self.render_method = conf.render.method
 
         self.background = background.make(self.conf.model.background.name, self.conf.model.background)
 
@@ -80,6 +84,7 @@ class MixtureOfGaussians(torch.nn.Module):
                 sph_degree = 0, # Dummy, dynamically controlled
                 gaussian_sigma_threshold = self.conf.render.gaussian_sigma_threshold,
                 min_transmittance = self.conf.render.min_transmittance,
+                max_hits_returned=128,
             )
         )
 
@@ -563,7 +568,7 @@ class MixtureOfGaussians(torch.nn.Module):
         )
         return mog_counts
 
-    def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward_optix_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
 
         num_gsplats = self.positions.shape[0]
         with torch.cuda.nvtx.range(f"model.forward({num_gsplats} gaussians)"):
@@ -590,3 +595,59 @@ class MixtureOfGaussians(torch.nn.Module):
             'pred_opacity': pred_opacity,
             'pred_ohit': pred_ohit
         }
+    
+    def forward_torch_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
+
+        ## Use the optix raycaster to get a list of hit indices
+        num_gsplats = self.positions.shape[0]
+        with torch.cuda.nvtx.range(f"model.forward_hitinds({num_gsplats} gaussians)"):
+            # The feature mask zeros out feature dims the model shouldn't use yet.
+            # That introduces a curriculum way of optimizing the model
+            features = self.get_features()
+            if self.progressive_training:
+                features *= self.get_active_feature_mask()
+
+            # Gather data
+            gpos = self.positions
+            grot = self.get_rotation()
+            gscl = self.get_scale()
+            gdns = self.get_density()
+            gsh  = features
+
+            # Get the hit indices
+            dense_hit_gIds, = optixtracer.trace_mog_inds(
+                    self.optix_ctx, rays_o, rays_d,
+                    self.positions, self.get_rotation(), self.get_scale(),
+                    self.get_density())
+
+        ## Evaluate the render pass
+        with torch.cuda.nvtx.range(f"model.forward_rendereval({num_gsplats} gaussians)"):
+
+            ray_rgb, ray_opacity, ray_ohit, ray_dist = evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, self.max_n_features, self.conf.render.chunk_size)
+
+            ray_rgb, ray_opacity = self.background(rays_d, ray_rgb, ray_opacity)
+
+
+        return {
+            'pred_rgb': ray_rgb,
+            'pred_opacity': ray_opacity,
+            'pred_ohit': ray_ohit,
+            'pred_dist': ray_dist,
+        }
+
+    
+    def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor, force_method=None) -> dict[str, torch.Tensor]:
+
+        if force_method is None:
+            force_method = self.render_method
+
+        if force_method == 'optix':
+            return self.forward_optix_render(rays_o, rays_d)
+
+        elif force_method == 'torch':
+            return self.forward_torch_render(rays_o, rays_d)
+
+        else:
+            raise ValueError(f"unrecognized render method {self.render_method}")
+
+

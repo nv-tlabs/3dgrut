@@ -1,18 +1,21 @@
 import numpy as np
 import torch
-import argparse
 import polyscope as ps
 import polyscope.imgui as psim
 from utils import to_np
 from model import MixtureOfGaussians
 
+import hydra
+from omegaconf import DictConfig, OmegaConf
 
 class Playground:
 
     DEFAULT_DEVICE = torch.device('cuda')
 
-    def __init__(self, object_paths):
-        objects = self.load_objects(object_paths)
+    def __init__(self, conf):
+        self.conf = conf
+        self.object_paths = conf.playground.objects
+        objects = self.load_objects(self.object_paths)
         self.scene_mog = self.mash_into_scene(objects)
         self.init_polyscope()
         self.is_running = True
@@ -21,39 +24,36 @@ class Playground:
         objects =  []
         for single_object_path in object_paths:
             checkpoint = torch.load(single_object_path)
-            conf = checkpoint["config"]
-            model = MixtureOfGaussians(conf)
+            obj_conf = checkpoint["config"]
+            model = MixtureOfGaussians(obj_conf)
             model.init_from_checkpoint(checkpoint, setup_optimizer=False)
             objects.append(model)
         return objects
 
     def mash_into_scene(self, objects):
-        if len(objects) == 1:
-            scene_mog = objects[0]
-        else:
-            conf = objects[0].conf  # Use first object conf
-            scene_mog = MixtureOfGaussians(conf).to(self.DEFAULT_DEVICE)
 
-            # TODO(operel): Validate that all objects use the same render / activations conf
-            for idx, o in enumerate(objects):
-                # TODO(operel): Scatter objects with a more interesting pattern
-                jitter = 0.5 * torch.rand(3, device=self.DEFAULT_DEVICE)
-                jitter[0] += 0.5 if idx % 2 == 0 else -0.5
-                jitter[1] += -0.5 if idx % 3 == 0 else 0.5
-                jitter[2] = 0.0  # Put them at the same level
-                jittered_positions = jitter[None].expand_as(o.positions)
-                scene_mog.positions = torch.nn.Parameter(torch.cat((scene_mog.positions, o.positions + jittered_positions), dim=0))
-                scene_mog.scale = torch.nn.Parameter(torch.cat((scene_mog.scale, o.scale), dim=0))
-                scene_mog.rotation = torch.nn.Parameter(torch.cat((scene_mog.rotation, o.rotation), dim=0))
-                scene_mog.density = torch.nn.Parameter(torch.cat((scene_mog.density, o.density), dim=0))
-                scene_mog.features_albedo = torch.nn.Parameter(torch.cat((scene_mog.features_albedo, o.features_albedo), dim=0))
+        scene_mog = MixtureOfGaussians(self.conf).to(self.DEFAULT_DEVICE)
 
-                if scene_mog.features_specular.shape[1] < o.features_specular.shape[1]:
-                    missing_sh_dims = o.features_specular.shape[1] - scene_mog.features_specular.shape[1]
-                    num_gaussians = scene_mog.features_specular.shape[0]
-                    padding = torch.zeros(num_gaussians, missing_sh_dims, device=self.DEFAULT_DEVICE)
-                    scene_mog.features_specular = torch.nn.Parameter(torch.cat((scene_mog.features_specular, padding), dim=1))
-                scene_mog.features_specular = torch.nn.Parameter(torch.cat((scene_mog.features_specular, o.features_specular), dim=0))
+        # TODO(operel): Validate that all objects use the same render / activations conf
+        for idx, o in enumerate(objects):
+            # TODO(operel): Scatter objects with a more interesting pattern
+            jitter = 0.5 * torch.rand(3, device=self.DEFAULT_DEVICE)
+            jitter[0] += 0.5 if idx % 2 == 0 else -0.5
+            jitter[1] += -0.5 if idx % 3 == 0 else 0.5
+            jitter[2] = 0.0  # Put them at the same level
+            jittered_positions = jitter[None].expand_as(o.positions)
+            scene_mog.positions = torch.nn.Parameter(torch.cat((scene_mog.positions, o.positions + jittered_positions), dim=0))
+            scene_mog.scale = torch.nn.Parameter(torch.cat((scene_mog.scale, o.scale), dim=0))
+            scene_mog.rotation = torch.nn.Parameter(torch.cat((scene_mog.rotation, o.rotation), dim=0))
+            scene_mog.density = torch.nn.Parameter(torch.cat((scene_mog.density, o.density), dim=0))
+            scene_mog.features_albedo = torch.nn.Parameter(torch.cat((scene_mog.features_albedo, o.features_albedo), dim=0))
+
+            if scene_mog.features_specular.shape[1] < o.features_specular.shape[1]:
+                missing_sh_dims = o.features_specular.shape[1] - scene_mog.features_specular.shape[1]
+                num_gaussians = scene_mog.features_specular.shape[0]
+                padding = torch.zeros(num_gaussians, missing_sh_dims, device=self.DEFAULT_DEVICE)
+                scene_mog.features_specular = torch.nn.Parameter(torch.cat((scene_mog.features_specular, padding), dim=1))
+            scene_mog.features_specular = torch.nn.Parameter(torch.cat((scene_mog.features_specular, o.features_specular), dim=0))
         scene_mog.set_optix_context()
         scene_mog.build_bvh()
         return scene_mog
@@ -74,7 +74,10 @@ class Playground:
         ps.set_background_color((0., 0., 0.))
         ps.set_ground_plane_mode("none")
         ps.set_window_resizable(True)
-        ps.set_window_size(1920, 1080)
+        if self.conf.render.method == 'torch':
+            ps.set_window_size(1280, 720)
+        else:
+            ps.set_window_size(1920, 1080)
         ps.set_give_focus_on_show(True)
 
         ps.set_automatically_compute_scene_extents(False)
@@ -91,6 +94,7 @@ class Playground:
         self.viz_render_scalar_buffer = None
         self.viz_render_name = 'render'
         self.viz_render_enabled = True
+        self.viz_render_subsample = 1
 
         ps.init()
         ps.set_user_callback(self.ps_ui_callback)
@@ -105,6 +109,8 @@ class Playground:
     @torch.no_grad()
     def render_from_current_ps_view(self):
         window_w, window_h = ps.get_window_size()
+        window_w = window_w // self.viz_render_subsample
+        window_h = window_h // self.viz_render_subsample
         view_params = ps.get_view_camera_parameters()
         cam_center = view_params.get_position()
         corner_rays = view_params.generate_camera_ray_corners()
@@ -131,6 +137,8 @@ class Playground:
     def update_render_view_viz(self, force=False):
 
         window_w, window_h = ps.get_window_size()
+        window_w = window_w // self.viz_render_subsample
+        window_h = window_h // self.viz_render_subsample
 
         # re-initialize if needed
         style = self.viz_render_styles[self.viz_render_style_ind]
@@ -190,7 +198,7 @@ class Playground:
         # Create a little ImGUI UI
         psim.SetNextItemOpen(True, psim.ImGuiCond_FirstUseEver)
         if psim.TreeNode("Render"):
-            psim.PushItemWidth(150)
+            psim.PushItemWidth(100)
 
             if (psim.Button("Show")):
                 self.viz_render_enabled = True
@@ -201,19 +209,21 @@ class Playground:
                 self.update_render_view_viz(force=True)
 
             _, self.viz_render_style_ind = psim.Combo("Style", self.viz_render_style_ind, self.viz_render_styles)
+            
+            changed, self.viz_render_subsample = psim.InputInt("Subsample Factor", self.viz_render_subsample, 1)
+            if changed:
+                self.viz_render_subsample = max(self.viz_render_subsample, 1)
+            
             psim.PopItemWidth()
-
             psim.TreePop()
 
         if self.live_update:
             self.update_render_view_viz()
 
+@hydra.main(config_path="configs", config_name='base', version_base=None)
+def main(conf: DictConfig) -> None:
+    playground = Playground(conf)
+    playground.run()
 
 if __name__ == "__main__":
-    # Set up command line argument parser
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--objects", required=True, nargs='+', help="List of *.pt object paths to load into scene.")
-    args = parser.parse_args()
-
-    playground = Playground(args.objects)
-    playground.run()
+    main()

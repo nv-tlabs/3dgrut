@@ -81,7 +81,7 @@ def quaternion_to_so3(r):
 
     q = r / norm[:, None]
 
-    R = torch.zeros((q.size(0), 3, 3), device='cuda')
+    R = torch.zeros((q.size(0), 3, 3), dtype=r.dtype, device=r.device)
 
     r = q[:, 0]
     x = q[:, 1]
