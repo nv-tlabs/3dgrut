@@ -138,7 +138,8 @@ class MixtureOfGaussians(torch.nn.Module):
         self.error_buffer_rgb = torch.empty([0,3])
         self.error_buffer_errors = torch.empty([0,1])
         self.error_alpha = None
-    
+
+    @torch.cuda.nvtx.range("update_error_buffer")
     def update_error_buffer(self, rays_o, rays_d, errors, rgb, alpha=None):
 
         # Shuffle the tensors
@@ -150,6 +151,7 @@ class MixtureOfGaussians(torch.nn.Module):
         if alpha is not None:
             self.error_alpha = alpha[idx].cpu()
 
+    @torch.cuda.nvtx.range("sample_from_error_buffer")
     def sample_from_error_buffer(self, out_shape):
         b, h, w = out_shape
         sampled_indices = torch.multinomial(self.error_buffer_errors[:2**24], torch.prod(torch.tensor(out_shape)).item(), False)

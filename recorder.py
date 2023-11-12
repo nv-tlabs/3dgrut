@@ -22,6 +22,7 @@ class TrainingRecorder:
         if enabled:
             os.makedirs(TrainingRecorder.RECORDINGS_FOLDER, exist_ok=True)
 
+    @torch.cuda.nvtx.range("record_metrics")
     def record_metrics(self, iteration: int, psnr, loss):
         if not self.enabled:
             return  # nop
@@ -34,6 +35,7 @@ class TrainingRecorder:
     def is_time_to_record(self, iteration):
         return iteration > 0 and iteration % self.train_recording_frequency == 0
 
+    @torch.cuda.nvtx.range("record_train_step")
     def record_train_step(self, model, iteration: int, iteration_time: int,
                           l1_loss: torch.Tensor, ssim_loss: torch.Tensor | None, total_loss: torch.Tensor, psnr: int):
         if not self.enabled or not self.is_time_to_record(iteration):
@@ -97,6 +99,7 @@ class TrainingRecorder:
         self.train_info_dict['rot_w_std'].append(model.get_rotation().std(dim=0)[3].item())
         self._buffered_updates = True
 
+    @torch.cuda.nvtx.range("report_statistics")
     def report_statistics(self, writer):
         """ Reports last aggregated training statistics to experiments manager """
         if not self.enabled or not self._buffered_updates:
@@ -192,6 +195,7 @@ class TrainingRecorder:
     def get_timestamp():
         return datetime.now().strftime("%d%m_%H%M%S")
 
+    @torch.cuda.nvtx.range("submit_recording")
     def submit_recording(self, dataset, scene_extent, train_path: str, model):
         if not self.enabled:
             return  # nop
