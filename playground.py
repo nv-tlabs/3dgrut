@@ -95,8 +95,6 @@ class Playground:
         self.viz_render_name = 'render'
         self.viz_render_enabled = True
         self.viz_render_subsample = 1
-        if self.conf.render.method == 'torch':
-            self.viz_render_subsample = 4
 
         ps.init()
         ps.set_user_callback(self.ps_ui_callback)
