@@ -9,7 +9,8 @@ from utils import to_torch, get_activation_function, inverse_sigmoid, get_schedu
     sh_degree_to_num_features, sh_degree_to_specular_dim
 from datasets.colmap_utils import read_next_bytes
 from datasets.utils import PointCloud
-from geometry import nearest_neighbor_dist_cpuKD
+from simple_knn._C import distCUDA2
+from color import RGB2SH
 from utils import to_np
 from render_utils import evaluate_rays
 import background
@@ -196,8 +197,9 @@ class MixtureOfGaussians(torch.nn.Module):
             features_specular = torch.zeros((num_gsplat, num_specular_features),
                                             dtype=dtype, device=self.device).contiguous()
 
-        dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(fused_point_cloud), 1e-3)
-        scales = torch.log(dist)[..., None].repeat(1, 3)
+        dist2 = torch.clamp_min(distCUDA2(fused_point_cloud.float().cuda()), 0.0000001)
+        scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
+
         rots = torch.zeros((num_gsplat, 4), device=self.device)
         rots[:, 0] = 1
 
@@ -256,17 +258,18 @@ class MixtureOfGaussians(torch.nn.Module):
 
         # set the scale as function of the distance from the origin
         # TODO this might not make sense for large-scale scenes
-        dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(positions), 1e-3)
-        scales = torch.log(dist)[..., None].repeat(1, 3)
+        dist2 = torch.clamp_min(distCUDA2(positions.float().cuda()), 0.0000001)
+        scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
 
         # set density as a constant
         opacities = self.density_activation_inv(0.1 * torch.ones((N,1), dtype=dtype, device=self.device))
 
         # set colors, constant if they weren't given
         if colors_np is None:
-            features_albedo = 0.5 * torch.ones((N, 3), dtype=dtype, device=self.device)
+            features_albedo = torch.rand((N, 3), dtype=dtype, device=self.device) / 255.0
         else:
-            features_albedo = to_torch(colors_np, dtype=dtype, device=self.device)
+            features_albedo = to_torch(RGB2SH(colors_np), dtype=dtype, device=self.device)
+        
         num_specular_dims = sh_degree_to_specular_dim(self.max_n_features)
         features_specular = torch.zeros((N, num_specular_dims))
 
