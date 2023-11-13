@@ -85,7 +85,7 @@ class _trace_mog_func(torch.autograd.Function):
             mog_dns,
             mog_sph
         )
-        ctx.save_for_backward(ray_ori, ray_dir, ray_radiance, ray_density, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph)
+        ctx.save_for_backward(ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph)
         ctx.optix_ctx = optix_ctx
         err_backprop_proxy = torch.ones_like(ray_density) # used to abuse autograd
         return ray_radiance, ray_density, ray_hit_distance, g_weights, err_backprop_proxy
@@ -93,13 +93,14 @@ class _trace_mog_func(torch.autograd.Function):
     @staticmethod
     def backward(ctx, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd, g_weights_grd_UNUSED, ray_fake_err):
         optix_ctx = ctx.optix_ctx
-        ray_ori, ray_dir, ray_radiance, ray_density, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph = ctx.saved_variables
+        ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph = ctx.saved_variables
         mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error = _plugin.trace_mog_bwd(
             optix_ctx.cpp_wrapper,
             ray_ori,
             ray_dir,
             ray_radiance,
             ray_density,
+            ray_hit_distance,
             mog_pos,
             mog_rot,
             mog_scl,
@@ -128,13 +129,14 @@ def trace_mog(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, m
     return ray_radiance, ray_density, ray_hit_distance, g_weights, err_backprop_proxy
 
 @torch.cuda.nvtx.range("trace_mog_grad")
-def trace_mog_grad(optix_ctx, ray_ori, ray_dir, ray_radiance, ray_density, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd):
+def trace_mog_grad(optix_ctx, ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd):
     return _plugin.trace_mog_bwd(
         optix_ctx.cpp_wrapper,
         ray_ori,
         ray_dir,
         ray_radiance,
         ray_density,
+        ray_hit_distance,
         mog_pos,
         mog_rot,
         mog_scl,

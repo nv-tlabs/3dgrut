@@ -67,6 +67,7 @@ struct MoGTracingBwdParams
     PackedTensorAccessor32<float, 4> rayDir; ///< ray direction
     PackedTensorAccessor32<float, 4> rayRad; ///< ray radiance (as computed by the forward pass)
     PackedTensorAccessor32<float, 4> rayDns; ///< ray density (as computed by the forward pass)
+    PackedTensorAccessor32<float, 4> rayHit; ///< ray hit distance (as computed by the forward pass)
     PackedTensorAccessor32<float, 2> mogPos; ///< gaussians position
     PackedTensorAccessor32<float, 2> mogRot; ///< gaussians rotation (quaternions)
     PackedTensorAccessor32<float, 2> mogScl; ///< gaussians scale
