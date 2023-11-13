@@ -589,7 +589,7 @@ class MixtureOfGaussians(torch.nn.Module):
             if self.feature_type == 'sh':
                 self.optix_ctx.set_sph_degree(self.n_active_features)
 
-            pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(
+            pred_rgb, pred_opacity, pred_dist = optixtracer.trace_mog(
                     self.optix_ctx, rays_o, rays_d,
                     self.positions, self.get_rotation(), self.get_scale(),
                     self.get_density(), features)
@@ -599,7 +599,7 @@ class MixtureOfGaussians(torch.nn.Module):
         return {
             'pred_rgb': pred_rgb,
             'pred_opacity': pred_opacity,
-            'pred_ohit': pred_ohit
+            'pred_dist': pred_dist
         }
     
     def forward_torch_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:

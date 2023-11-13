@@ -131,7 +131,7 @@ class Playground:
         # Render a frame
         outputs = self.render(rays_ori, rays_dir)
 
-        return outputs['pred_rgb'], outputs['pred_opacity'], outputs['pred_ohit']
+        return outputs['pred_rgb'], outputs['pred_opacity'], outputs['pred_dist']
 
     @torch.no_grad()
     def update_render_view_viz(self, force=False):
@@ -183,7 +183,7 @@ class Playground:
                 self.viz_render_scalar_buffer = ps.get_quantity_buffer(self.viz_render_name, "values")
 
         # do the actual rendering
-        sple_orad, sple_odns, sple_ohit = self.render_from_current_ps_view()
+        sple_orad, sple_odns, sple_odist = self.render_from_current_ps_view()
 
         # update the data
         if style == "color":

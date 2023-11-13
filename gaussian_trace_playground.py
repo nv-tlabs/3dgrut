@@ -191,7 +191,7 @@ def main(conf):
     ps.set_length_scale(s)
 
     # viz stateful parameters & options
-    viz_render_styles = ['color', 'density', 'hit count']
+    viz_render_styles = ['color', 'density', 'distance']
     viz_render_style_ind = 0
     viz_curr_render_size = None
     viz_curr_render_style_ind = None
@@ -240,11 +240,11 @@ def main(conf):
 
         with torch.no_grad():
 
-            pred_rgb, pred_opacity, pred_ohit = optixtracer.trace_mog(optix_ctx, 
+            pred_orad, pred_opacity, pred_dist = optixtracer.trace_mog(optix_ctx, 
                     rays_ori, rays_dir,
                     gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features_flat)
 
-        return pred_rgb, pred_opacity, pred_ohit
+        return pred_orad, pred_opacity, pred_dist
 
     def update_render_view_viz():
         nonlocal viz_curr_render_size, viz_curr_render_style_ind, viz_render_color_buffer, viz_render_scalar_buffer
@@ -293,7 +293,7 @@ def main(conf):
                 viz_render_color_buffer = None
                 viz_render_scalar_buffer = ps.get_quantity_buffer(viz_render_name, "values")
             
-            elif style == "hit count":
+            elif style == "distance":
             
                 dummy_vals = np.zeros((window_h, window_w), dtype=np.float32)
                 dummy_vals[0] = 3.0  # hack so the default polyscope scale gets set more nicely
@@ -314,7 +314,7 @@ def main(conf):
 
 
         # do the actual rendering
-        sple_orad, sple_odns, sple_ohit = render_from_current_ps_view()
+        sple_orad, sple_odns, sple_odist = render_from_current_ps_view()
 
         # print(f"rad max: {sple_orad.max()} dens max: {sple_odns.max()}")
 
@@ -328,8 +328,8 @@ def main(conf):
         elif style == "density":
             viz_render_scalar_buffer.update_data_from_device(sple_odns.detach())
         
-        elif style == "hit count":
-            viz_render_scalar_buffer.update_data_from_device(sple_ohit.detach())
+        elif style == "distance":
+            viz_render_scalar_buffer.update_data_from_device(sple_odist.detach())
 
 
     def ps_ui_callback():
