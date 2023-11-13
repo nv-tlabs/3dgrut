@@ -290,11 +290,8 @@ def main(conf: DictConfig) -> None:
                 with torch.cuda.nvtx.range("backward"):
                     loss.backward()
 
-                with torch.cuda.nvtx.range("update-positional-grad"):
-                    if global_step < conf.model.densify.end_iteration:
-                        hit_cts = model.get_hit_counts(rays_ori, rays_dir)
-                        mask = (hit_cts > 0).squeeze()
-                        model.update_positional_grad(mask)
+                if global_step < conf.model.densify.end_iteration:
+                    model.update_densification_buffer(rays_ori, rays_dir)
 
                 with torch.cuda.nvtx.range("backpropagation"):
                     model.optimizer.step()
@@ -325,9 +322,9 @@ def main(conf: DictConfig) -> None:
                     model.densify_gaussians(scene_extent=scene_extent)
                     scene_updated = True
 
-                # Prune the Gaussians
+                # Prune the Gaussians 
                 if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
-                    model.prune_gaussians()
+                    model.prune_gaussians_opacity()
                     scene_updated = True
 
                 # Reset the Gaussian density 
