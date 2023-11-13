@@ -8,7 +8,6 @@ wandb/
 outputs/
 extra_info/
 eval/
-extra_info/
 
 debug_**
 
@@ -26,5 +25,3 @@ libs/ray_utils/external/
 libs/ray_utils/build/
 libs/ray_utils/ray_utils.egg-info/
 libs/ray_utils/dist/
-
-**.so

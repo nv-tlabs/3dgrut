@@ -286,17 +286,9 @@ def main(conf: DictConfig) -> None:
                 # backpropagate the gradients and update the parameters
                 with torch.cuda.nvtx.range("backward"):
                     loss.backward()
-
-                with torch.cuda.nvtx.range("update-positional-grad"):
-                    if global_step < conf.model.densify.end_iteration:
-                        hit_cts = model.get_hit_counts(rays_ori, rays_dir)
-                        mask = (hit_cts > 0).squeeze()
-                        model.update_positional_grad(mask)
-
                 with torch.cuda.nvtx.range("backpropagation"):
                     model.optimizer.step()
                     model.optimizer.zero_grad()
-
                 it_end.record()
 
                 # Make a scheduler step
@@ -318,14 +310,14 @@ def main(conf: DictConfig) -> None:
                     torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
 
                 # Densify the Gaussians
-                if global_step > conf.model.densify.start_iteration and  global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
+                if global_step > conf.model.densify.start_iteration and global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
                     model.densify_gaussians(scene_extent=scene_extent)
                     scene_updated = True
 
-                # # Prune the Gaussians
-                # if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
-                #     model.prune_gaussians()
-                #     scene_updated = True
+                # Prune the Gaussians
+                if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
+                    model.prune_gaussians()
+                    scene_updated = True
 
                 # Reset the Gaussian density 
                 if global_step > conf.model.reset_density.start_iteration and global_step < conf.model.reset_density.end_iteration and global_step % conf.model.reset_density.frequency == 0:
