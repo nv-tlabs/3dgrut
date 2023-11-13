@@ -24,6 +24,7 @@ from model import MixtureOfGaussians
 from background import BackgroundColor
 from datasets.utils import move_to_gpu
 from loss_utils import ssim
+from utils import to_np
 from gui import GUI
 from recorder import TrainingRecorder
 from render import Renderer
@@ -206,6 +207,9 @@ def main(conf: DictConfig) -> None:
     assert model.optimizer is not None, "Optimizer needs to be initialized before the training can start!"
     
     for epoch_idx in range(n_epochs):
+
+        model.reset_rolling_buffers()
+
         if epoch_idx > 0 and epoch_idx % val_frequency == 0:
                 val_iteration = 0
                 with tqdm(val_dataloader) as pbar:
@@ -247,7 +251,9 @@ def main(conf: DictConfig) -> None:
                     scene_updated = False
 
                     # Compute the outputs of a single batch
-                    outputs = model(rays_ori, rays_dir)
+                    error_target = torch.zeros_like(model.density)
+                    error_target.requires_grad = True
+                    outputs = model(rays_ori, rays_dir, error_target)
 
                     # Check if alphas are given and if the background is a fix color
                     if isinstance(model.background, BackgroundColor):
@@ -286,9 +292,15 @@ def main(conf: DictConfig) -> None:
                         loss += conf.model.lambda_background * loss_background
                         writer.add_scalar("loss_background/train", loss_background.item(), global_step)
 
+                ray_err_abs = torch.abs(outputs['pred_rgb'] - rgb_gt)
+                model.rol = ray_err_abs.mean()
+
+                # horrible hacks to abuse gradients
+                fake_loss = loss + torch.sum(ray_err_abs*outputs['err_backprop_proxy'])
+    
                 # backpropagate the gradients and update the parameters
                 with torch.cuda.nvtx.range("backward"):
-                    loss.backward()
+                    fake_loss.backward()
 
                 if global_step < conf.model.densify.end_iteration:
                     model.update_densification_buffer(rays_ori, rays_dir)
@@ -298,6 +310,17 @@ def main(conf: DictConfig) -> None:
                     model.optimizer.zero_grad()
 
                 it_end.record()
+
+
+                # update error buffers
+                gaussian_error_this_pass = error_target.grad
+                model.rolling_error += gaussian_error_this_pass
+                model.rolling_weight_contrib += outputs['g_weights']
+
+                # ps_cloud = ps.register_point_cloud("test pts", to_np(model.get_positions()))
+                # ps_cloud.add_scalar_quantity("gaussian_error_this_pass", to_np(gaussian_error_this_pass[:,0]))
+                # ps_cloud.add_scalar_quantity("g_weights", to_np(outputs['g_weights'][:,0]))
+                # ps.show()
 
                 # Make a scheduler step
                 model.scheduler_step(global_step)
@@ -351,6 +374,14 @@ def main(conf: DictConfig) -> None:
                     ps.frame_tick()
                     while not gui.viz_do_train:
                         ps.frame_tick()
+                
+            ps_cloud = ps.register_point_cloud("test pts", to_np(model.get_positions()))
+            ps_cloud.add_scalar_quantity("rolling_error", to_np(model.rolling_error[:,0]))
+            ps_cloud.add_scalar_quantity("rolling_weights", to_np(model.rolling_weight_contrib[:,0]))
+            ps_cloud.add_scalar_quantity("div", to_np(model.rolling_error[:,0]/model.rolling_weight_contrib[:,0]))
+            ps_cloud.add_scalar_quantity("opacity", to_np(model.get_density()[:,0]))
+            ps_cloud.add_scalar_quantity("scale_max", to_np(torch.max(model.get_scale(), dim=1).values))
+            ps.show()
 
     recorder.submit_recording(
         dataset=train_dataset,

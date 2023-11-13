@@ -193,6 +193,8 @@ extern "C" __global__ void __raygen__rg()
                         // Distance to the gaussian center projection on the ray
                         const float hitT = getRayGaussianHit(gro,grd,gscl);
                         
+                        atomicAdd(&params.mogWeightSum[gId][0], weight);
+
                         rayRad[k][j] += grad * weight;
                         rayHit[k][j] += hitT * weight;
                         rayTrm[k][j] *= (1 - galpha);

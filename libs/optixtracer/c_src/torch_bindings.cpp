@@ -249,7 +249,7 @@ PackedTensorAccessor32<T, N> packed_accessor32(torch::Tensor tensor)
                                                    tensor.sizes().data(), tensor.strides().data());
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrapper& stateWrapper,
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrapper& stateWrapper,
                                                                   torch::Tensor rayOri,
                                                                   torch::Tensor rayDir,
                                                                   torch::Tensor mogPos,
@@ -262,6 +262,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
     torch::Tensor rayRad = torch::empty({ rayOri.size(0), rayOri.size(1), rayOri.size(2), 3 }, opts);
     torch::Tensor rayDns = torch::empty({ rayOri.size(0), rayOri.size(1), rayOri.size(2), 1 }, opts);
     torch::Tensor rayHit = torch::empty({ rayOri.size(0), rayOri.size(1), rayOri.size(2), 1 }, opts);
+    torch::Tensor mogWeightSum = torch::zeros({ mogDns.size(0), mogDns.size(1) }, opts);
 
     MoGTracingParams paramsHost;
     paramsHost.handle = stateWrapper.pState->gasHandle;
@@ -275,6 +276,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
     paramsHost.rayRad = packed_accessor32<float, 4>(rayRad);
     paramsHost.rayDns = packed_accessor32<float, 4>(rayDns);
     paramsHost.rayHit = packed_accessor32<float, 4>(rayHit);
+    paramsHost.mogWeightSum = packed_accessor32<float, 2>(mogWeightSum);
 
     paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
@@ -325,10 +327,10 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrap
                                 div_round_up(rayRad.size(1), stateWrapper.pState->patchSize), rayRad.size(0)));
     }
 
-    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>(rayRad, rayDns, rayHit);
+    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(rayRad, rayDns, rayHit, mogWeightSum);
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> trace_mog_bwd(
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> trace_mog_bwd(
     OptiXStateWrapper& stateWrapper,
     torch::Tensor rayOri,
     torch::Tensor rayDir,
@@ -341,7 +343,9 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     torch::Tensor mogSph,
     torch::Tensor rayRadGrd,
     torch::Tensor rayDnsGrd,
-    torch::Tensor rayHitGrd)
+    torch::Tensor rayHitGrd,
+    torch::Tensor rayError
+    )
 {
     const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
     torch::Tensor mogPosGrd = torch::zeros({ mogPos.size(0), mogPos.size(1) }, opts);
@@ -349,6 +353,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     torch::Tensor mogSclGrd = torch::zeros({ mogScl.size(0), mogScl.size(1) }, opts);
     torch::Tensor mogDnsGrd = torch::zeros({ mogDns.size(0), mogDns.size(1) }, opts);
     torch::Tensor mogSphGrd = torch::zeros({ mogSph.size(0), mogSph.size(1) }, opts);
+    torch::Tensor mogErrorBack = torch::zeros({ mogSph.size(0), mogSph.size(1) }, opts);
 
     MoGTracingBwdParams paramsHost;
     paramsHost.handle = stateWrapper.pState->gasHandle;
@@ -364,11 +369,13 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.rayRadGrd = packed_accessor32<float, 4>(rayRadGrd);
     paramsHost.rayDnsGrd = packed_accessor32<float, 4>(rayDnsGrd);
     paramsHost.rayHitGrd = packed_accessor32<float, 4>(rayHitGrd);
+    paramsHost.rayError  = packed_accessor32<float, 4>(rayError);
     paramsHost.mogPosGrd = packed_accessor32<float, 2>(mogPosGrd);
     paramsHost.mogRotGrd = packed_accessor32<float, 2>(mogRotGrd);
     paramsHost.mogSclGrd = packed_accessor32<float, 2>(mogSclGrd);
     paramsHost.mogDnsGrd = packed_accessor32<float, 2>(mogDnsGrd);
     paramsHost.mogSphGrd = packed_accessor32<float, 2>(mogSphGrd);
+    paramsHost.mogErrorBack = packed_accessor32<float, 2>(mogErrorBack);
 
     paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
@@ -404,8 +411,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
                                 div_round_up(rayRad.size(1), stateWrapper.pState->patchSize), rayRad.size(0)));
     }
 
-    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(
-        mogPosGrd, mogRotGrd, mogSclGrd, mogDnsGrd, mogSphGrd);
+    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(
+        mogPosGrd, mogRotGrd, mogSclGrd, mogDnsGrd, mogSphGrd, mogErrorBack);
 }
 
 std::tuple<torch::Tensor> trace_mog_inds(OptiXStateWrapper& stateWrapper,
