@@ -61,7 +61,7 @@ class SkyMlp(BaseBackground):
         )
 
     @torch.cuda.nvtx.range("sky_background.forward")
-    def forward(self, rays_d, rgb, opacity):
+    def forward(self, rays_d, rgb, opacity, train: bool):
         (b,h,w,c) = rays_d.shape
         rays_d = rearrange(rays_d,'b h w c -> (b h w) c')
         rgb = rearrange(rgb,'b h w c -> (b h w) c')
@@ -94,13 +94,19 @@ class BackgroundColor(BaseBackground):
             self.color = torch.ones((3,), dtype=torch.float32).to(self.device)
         elif self.background_color_type == "black":
             self.color = torch.zeros((3,), dtype=torch.float32).to(self.device)
+        elif self.background_color_type == "random":
+            # set the stored color to black for random, we use this when not training
+            self.color = torch.zeros((3,), dtype=torch.float32).to(self.device)
 
     @torch.cuda.nvtx.range("background_color.forward")
-    def forward(self, rays_d, rgb, opacity):
-        if self.background_color_type == "random":
+    def forward(self, rays_d, rgb, opacity, train: bool):
+
+        color = self.color
+
+        if self.background_color_type == "random" and train: # only use random color when training
             self.color = torch.rand((3,), dtype=torch.float32).to(rays_d)
 
-        rgb = rgb + self.color * (1.0 - opacity)
+        rgb = rgb + color * (1.0 - opacity)
 
         return rgb, opacity
 
@@ -109,5 +115,5 @@ class SkipBackground(BaseBackground):
         pass
 
     @torch.cuda.nvtx.range("skip_background.forward")
-    def forward(self, rays_d, rgb, opacity) -> None:
+    def forward(self, rays_d, rgb, opacity, train) -> None:
         return rgb, opacity
