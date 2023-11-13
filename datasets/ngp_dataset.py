@@ -291,6 +291,13 @@ class NGPDataset(Dataset):
 
             self.xform_matrices[3 * run_frames : 3 * run_frames + 3] = jsonmatrix[:-1, :]
 
+    def get_observer_points(self):
+        rolling_shutter_flag = np.any(self.rolling_shutter)
+        if rolling_shutter_flag:
+            return self.xform_matrices[:,3].reshape(self.n_frames*2,3)[::2] # returning t_start observer points
+        else:
+            return self.xform_matrices[:,3].reshape(self.n_frames,3)
+
     def get_point_cloud(
         self,
         non_dynamic_points_only: bool = True,

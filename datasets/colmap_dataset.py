@@ -48,6 +48,7 @@ class ColmapDataset(Dataset):
         self.poses = self.poses[temp_idx]
         self.rgb = self.rgb[temp_idx]
         self.intrinsic = self.intrinsic[temp_idx]
+        self.camera_centers = self.camera_centers[temp_idx]
 
         self.length_scale, self.center, self.scene_bbox = self.compute_spatial_extents()
 
@@ -96,7 +97,7 @@ class ColmapDataset(Dataset):
             W2C[3, 3] = 1.0
             C2W = np.linalg.inv(W2C)
             self.poses.append(C2W)
-            cam_centers.append(C2W[:3, 3:4])
+            cam_centers.append(C2W[:3, 3])
 
             if intr.model=="SIMPLE_PINHOLE":
                 focal_length_x = intr.params[0]
@@ -112,11 +113,12 @@ class ColmapDataset(Dataset):
             image_name = os.path.basename(image_path).split(".")[0]
             self.rgb.append(np.asarray(Image.open(image_path)).astype(np.float32) / 255.0 )
 
+        self.camera_centers = np.array(cam_centers)
+
         # https://github.com/graphdeco-inria/gaussian-splatting/blob/main/scene/__init__.py#L69
-        _, diagonal = get_center_and_diag(cam_centers)
+        _, diagonal = get_center_and_diag(self.camera_centers)
         self.cameras_extent = diagonal * 1.1
 
-        self.camera_centers = np.array(cam_centers)[:,:,0]
         self.rgb = torch.FloatTensor(np.stack(self.rgb))
         self.poses = np.stack(self.poses)
         self.intrinsic = np.stack(self.intrinsic)

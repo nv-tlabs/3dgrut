@@ -92,7 +92,7 @@ class MixtureOfGaussians(torch.nn.Module):
         # TODO this reads from the binary format, also implement the nearly-identical plaintext version?
         points_file = os.path.join(root_path, "sparse/0", "points3D.bin")
         if not os.path.isfile(points_file):
-            raise ValueError(f"colomap points file {points_file} not found")
+            raise ValueError(f"colmap points file {points_file} not found")
 
         with open(points_file, "rb") as file:
 
@@ -120,7 +120,6 @@ class MixtureOfGaussians(torch.nn.Module):
             observer_pts,
             colors=torch.tensor(file_rgb, dtype=torch.float32, device=self.device)
         )
-        self.validate_fields()
 
     def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
         data = PlyData.read(pc_path)
@@ -249,11 +248,11 @@ class MixtureOfGaussians(torch.nn.Module):
         scales = self.scale_activation_inv(observation_scale)[:,None].repeat(1,3)
 
         # set density as a constant
-        opacities = self.density_activation_inv(0.1 * torch.ones((N,1), dtype=dtype, device=self.device))
+        opacities = self.density_activation_inv(torch.full((N,1), fill_value=0.1, dtype=dtype, device=self.device))
 
         # set colors, constant if they weren't given
         if colors is None:
-            features_albedo = 0.5 * torch.ones((N, 3), dtype=dtype, device=self.device)
+            features_albedo = torch.full((N, 3), fill_value=0.5, dtype=dtype, device=self.device)
         else:
             features_albedo = colors
         num_specular_dims = sh_degree_to_specular_dim(self.max_n_features)
@@ -272,8 +271,7 @@ class MixtureOfGaussians(torch.nn.Module):
             
     def init_from_lidar(self, 
                         point_cloud : PointCloud, 
-                        observer_pts,
-                        ):
+                        observer_pts):
         """
         Observer points can be any set locations that observation came from. Camera centers, ray source points, etc. They are used to esimate initial scales.
         """
@@ -281,7 +279,7 @@ class MixtureOfGaussians(torch.nn.Module):
         logging.info(f"Initializing based on lidar point cloud ...")
        
         # only initialize by default from points for now
-        self.default_initialize_from_points(point_cloud.xyz_end, observer_pts, None)
+        self.default_initialize_from_points(point_cloud.xyz_end.to(device=self.device), observer_pts, None)
 
     def setup_optimizer(self, state_dict=None):
         params = []
