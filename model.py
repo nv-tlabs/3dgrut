@@ -1,4 +1,5 @@
 import logging, os
+from typing import Optional
 
 import numpy as np
 import torch
@@ -26,6 +27,12 @@ class MixtureOfGaussians(torch.nn.Module):
         self.density = torch.nn.Parameter(torch.empty([0, 1]))  # Density of each Gaussian [n_gaussians, 1]
         self.features_albedo = torch.nn.Parameter(torch.empty([0, 3]))  # Feature vector of the 0th order SH coefficients [n_gaussians, 3] (We split it into two due to different learning rates)
         self.features_specular = torch.nn.Parameter(torch.empty([0, 1]))  # Features of the higher order SH coefficients [n_gaussians, 3]
+        
+        if self.conf.model.densify.method == 'gradient-buffer':
+            # Accumulation of the norms of the positions gradients
+            self.positional_grad_norm_accum = torch.empty([0,1]) 
+            self.positional_grad_norm_denom = torch.empty([0,1])
+        
         self.device = 'cuda'
         self.optimizer = None
         self.optix_ctx = None
@@ -64,6 +71,10 @@ class MixtureOfGaussians(torch.nn.Module):
         assert self.density.shape == (num_gsplat, 1)
         assert self.rotation.shape == (num_gsplat, 4)
         assert self.scale.shape == (num_gsplat, 3)
+
+        if self.conf.model.densify.method == 'gradient-buffer':
+            assert self.positional_grad_norm_accum.shape == (num_gsplat, 1)
+            assert self.positional_grad_norm_denom.shape == (num_gsplat, 1)
 
         if self.feature_type == 'sh':
             assert self.features_albedo.shape == (num_gsplat, 3)
@@ -164,6 +175,8 @@ class MixtureOfGaussians(torch.nn.Module):
         feats_sph = feats_sph.reshape(num_gsplat,3,-1).transpose(-1,-2).reshape(num_gsplat,-1)
         
         self.features_specular = torch.nn.Parameter(feats_sph)
+        
+        self.init_densification_buffer()
 
         if set_optimizable_parameters:
             self.set_optimizable_parameters()
@@ -205,6 +218,8 @@ class MixtureOfGaussians(torch.nn.Module):
         self.features_albedo = torch.nn.Parameter(features_albedo.to(dtype=dtype, device=self.device))
         self.features_specular = torch.nn.Parameter(features_specular.to(dtype=dtype, device=self.device))
 
+        self.init_densification_buffer()
+
         if set_optimizable_parameters:
             self.set_optimizable_parameters()
         self.validate_fields()
@@ -221,6 +236,9 @@ class MixtureOfGaussians(torch.nn.Module):
         if self.progressive_training:
             self.feature_dim_increase_interval = checkpoint["feature_dim_increase_interval"]
             self.feature_dim_increase_step = checkpoint["feature_dim_increase_step"]
+
+        self.init_densification_buffer(checkpoint)
+
         self.background.load_state_dict(checkpoint["background"])
         if setup_optimizer:
             self.set_optimizable_parameters()
@@ -265,6 +283,7 @@ class MixtureOfGaussians(torch.nn.Module):
         self.features_albedo = torch.nn.Parameter(features_albedo.to(dtype=dtype, device=self.device))
         self.features_specular = torch.nn.Parameter(features_specular.to(dtype=dtype, device=self.device))
 
+        self.init_densification_buffer()
         self.set_optimizable_parameters()
         self.setup_optimizer()
         self.validate_fields()
@@ -428,26 +447,92 @@ class MixtureOfGaussians(torch.nn.Module):
                     group["params"][0] = torch.nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(group["params"][0].requires_grad))
                     optimizable_tensors[group["name"]] = group["params"][0]
         return optimizable_tensors
+    
+    def init_densification_buffer(self, checkpoint:Optional[dict] = None):
+        if checkpoint is not None:
+            match self.conf.model.densify.method:
+                case 'adam':
+                    # We already load the optimizer state in self.init_from_checkpoint
+                    pass
+                case 'gradient-buffer':
+                    self.positional_grad_norm_accum = checkpoint["positional_grad_norm_accum"]
+                    self.positional_grad_norm_denom = checkpoint["positional_grad_norm_denom"]
+                case _:
+                    raise ValueError(f"densify.method {self.conf.model.densify.method} not supported")
+        else: 
+            match self.conf.model.densify.method:
+                case 'adam':
+                    # Relying on Adam's exponential moving average
+                    pass
+                case 'gradient-buffer':
+                    num_gaussians = self.positions.shape[0]
+                    self.positional_grad_norm_accum = torch.zeros((num_gaussians,1), dtype=torch.float, device=self.device)
+                    self.positional_grad_norm_denom = torch.zeros((num_gaussians,1), dtype=torch.int, device=self.device)
+                case _:
+                    raise ValueError(f"densify.method {self.conf.model.densify.method} not supported")            
+
+    @torch.cuda.nvtx.range("update-densification-buffer")
+    def update_densification_buffer(self, rays_ori, rays_dir):
+        match self.conf.model.densify.method:
+            case 'adam':
+                # Relying on Adam's exponential moving average
+                assert isinstance(self.optimizer, torch.optim.Adam)
+            case 'gradient-buffer':
+                hit_cts = self.get_hit_counts(rays_ori, rays_dir)
+                mask = (hit_cts > 0).squeeze()
+                self.update_positional_grad(mask)
+            case _:
+                raise ValueError(f"densify.method {self.conf.model.densify.method} not supported")
+
+    def update_positional_grad(self, mask):
+        assert self.conf.model.densify.method == 'gradient-buffer'
+        self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask], dim=-1, keepdim=True)
+        self.positional_grad_norm_denom[mask] += 1
 
     @torch.cuda.nvtx.range("densify_gaussians")
     def densify_gaussians(self, scene_extent):
         assert self.optimizer is not None, "Optimizer need to be initialized before splitting and cloning the Gaussians"
         assert self.get_positions().requires_grad, "Trying to perform split and clone but the positions are not being optimized"
 
+        
         positional_grad_norm = None
-        # TODO: we directly use the gradient of the 3D positions, whereas 3D Gaussian Splatting uses the 2D position gradient after projection (in theory this should be the same as not projecting the gradient)
-        # TODO: we always consider all the Gaussians by tapping into the Adam's exponential moving average. 3DGS only considers Gaussians that survived the frustum culling in the last iteration.
-        for group in self.optimizer.param_groups:
-            if group["name"] == "positions":
-                positional_grad_norm = torch.norm(self.optimizer.state.get(group['params'][0], None)["exp_avg"], dim=-1)
+        match self.conf.model.densify.method:
+            case 'adam':
+                # TODO: we directly use the gradient of the 3D positions, whereas 3D Gaussian Splatting uses the 2D position gradient after projection (in theory this should be the same as not projecting the gradient)
+                # TODO: we always consider all the Gaussians by tapping into the Adam's exponential moving average. 3DGS only considers Gaussians that survived the frustum culling in the last iteration.
+                for group in self.optimizer.param_groups:
+                    if group["name"] == "positions":
+                        positional_grad_norm = torch.norm(self.optimizer.state.get(group['params'][0], None)["exp_avg"], dim=-1)
 
-        assert positional_grad_norm is not None, "Was not able to retrieve the exp average of the positional gradient from Adam"
+            case 'gradient-buffer':
+                # gsplat implementation
+                positional_grad_norm = self.positional_grad_norm_accum / self.positional_grad_norm_denom
+                positional_grad_norm[positional_grad_norm.isnan()] = 0.0 
+            case _:
+                raise ValueError(f"densify.method {self.conf.model.densify.method} not supported")
 
-        self.clone_gaussians(positional_grad_norm, scene_extent)
-        self.split_gaussians(positional_grad_norm, scene_extent)      
+        assert positional_grad_norm is not None, "Was not able to retrieve the exp average of the positional gradient from Adam"       
+
+        self.clone_gaussians(positional_grad_norm.squeeze(), scene_extent)
+        self.split_gaussians(positional_grad_norm.squeeze(), scene_extent)      
 
         torch.cuda.empty_cache()
 
+    @torch.cuda.nvtx.range("densify_postfix")
+    def densify_postfix(self, add_gaussians):
+        # Concatenate new tensors to the optimizer variables 
+        optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
+        self.update_optimizable_parameters(optimizable_tensors)
+
+
+        if self.conf.model.densify.method == 'gradient-buffer':
+            self.positional_grad_norm_accum = torch.zeros((self.get_positions().shape[0], 1), 
+                                                        device=self.device, 
+                                                        dtype=self.positional_grad_norm_accum.dtype)
+            self.positional_grad_norm_denom = torch.zeros((self.get_positions().shape[0], 1), 
+                                                        device=self.device, 
+                                                        dtype=self.positional_grad_norm_denom.dtype)
+        
     @torch.cuda.nvtx.range("split_gaussians")
     def split_gaussians(self, positional_grad_norm: torch.Tensor, scene_extent: float):
         n_init_points = self.get_positions().shape[0]
@@ -476,9 +561,8 @@ class MixtureOfGaussians(torch.nn.Module):
             add_gaussians["features_albedo"] = self.features_albedo[mask].repeat(self.split_n_gaussians, 1)
             add_gaussians["features_specular"] = self.features_specular[mask].repeat(self.split_n_gaussians, 1)
 
-        # Concatenate new tensors to the optimizer variables 
-        optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
-        self.update_optimizable_parameters(optimizable_tensors)
+        self.densify_postfix(add_gaussians)
+
 
     @torch.cuda.nvtx.range("clone_gaussians")
     def clone_gaussians(self, positional_grad_norm: torch.Tensor, scene_extent: float):
@@ -499,19 +583,23 @@ class MixtureOfGaussians(torch.nn.Module):
             add_gaussians["features_albedo"] = self.features_albedo[mask]
             add_gaussians["features_specular"] = self.features_specular[mask]
 
-        optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
-        self.update_optimizable_parameters(optimizable_tensors)
+        self.densify_postfix(add_gaussians)
+
+    def prune_gaussians_opacity(self):
+        # Prune the Gaussians based on their opacity
+        mask = self.get_density().squeeze() >= self.prune_density_threshold
+        self.prune_gaussians(mask)
 
     @torch.cuda.nvtx.range("prune_gaussians")
-    def prune_gaussians(self):
-
-        # Prune the Gaussians based on their opacity
+    def prune_gaussians(self, valid_mask):
         # TODO: consider having a buffer of the contribution of Gaussians to the rendering -> this might avoid the need to reset opacity
         # TODO: we could also consider pruning away some of the large Gaussians?
-        mask = self.get_density().squeeze() >= self.prune_density_threshold
-
-        optimizable_tensors = self.prune_optimizer_tensors(mask)
+        optimizable_tensors = self.prune_optimizer_tensors(valid_mask)
         self.update_optimizable_parameters(optimizable_tensors)
+
+        if self.conf.model.densify.method == 'gradient-buffer':
+            self.positional_grad_norm_accum = self.positional_grad_norm_accum[valid_mask]
+            self.positional_grad_norm_denom = self.positional_grad_norm_denom[valid_mask]
 
         torch.cuda.empty_cache()
 
@@ -552,6 +640,8 @@ class MixtureOfGaussians(torch.nn.Module):
             "n_active_features": self.n_active_features,
             "max_n_features": self.max_n_features,
             "progressive_training": self.progressive_training,
+
+
             # Add optimizer state dict
             "optimizer": self.optimizer.state_dict(),
             "config": self.conf
@@ -565,6 +655,10 @@ class MixtureOfGaussians(torch.nn.Module):
             model_params["features_albedo"] = self.features_albedo
             model_params["features_specular"] = self.features_specular
 
+        if self.conf.model.densify.method == 'gradient-buffer':
+            model_params["positional_grad_norm_accum"] = self.positional_grad_norm_accum,
+            model_params["positional_grad_norm_denom"] = self.positional_grad_norm_denom,
+        
         return model_params
 
     @torch.no_grad()

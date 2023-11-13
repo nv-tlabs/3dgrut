@@ -289,9 +289,14 @@ def main(conf: DictConfig) -> None:
                 # backpropagate the gradients and update the parameters
                 with torch.cuda.nvtx.range("backward"):
                     loss.backward()
+
+                if global_step < conf.model.densify.end_iteration:
+                    model.update_densification_buffer(rays_ori, rays_dir)
+
                 with torch.cuda.nvtx.range("backpropagation"):
                     model.optimizer.step()
                     model.optimizer.zero_grad()
+
                 it_end.record()
 
                 # Make a scheduler step
@@ -313,13 +318,13 @@ def main(conf: DictConfig) -> None:
                     torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
 
                 # Densify the Gaussians
-                if global_step > conf.model.densify.start_iteration and global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
+                if global_step > conf.model.densify.start_iteration and  global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
                     model.densify_gaussians(scene_extent=scene_extent)
                     scene_updated = True
 
-                # Prune the Gaussians
+                # Prune the Gaussians 
                 if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
-                    model.prune_gaussians()
+                    model.prune_gaussians_opacity()
                     scene_updated = True
 
                 # Reset the Gaussian density 
