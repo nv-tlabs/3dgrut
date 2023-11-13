@@ -311,16 +311,10 @@ def main(conf: DictConfig) -> None:
 
                 it_end.record()
 
-
                 # update error buffers
                 gaussian_error_this_pass = error_target.grad
                 model.rolling_error += gaussian_error_this_pass
                 model.rolling_weight_contrib += outputs['g_weights']
-
-                # ps_cloud = ps.register_point_cloud("test pts", to_np(model.get_positions()))
-                # ps_cloud.add_scalar_quantity("gaussian_error_this_pass", to_np(gaussian_error_this_pass[:,0]))
-                # ps_cloud.add_scalar_quantity("g_weights", to_np(outputs['g_weights'][:,0]))
-                # ps.show()
 
                 # Make a scheduler step
                 model.scheduler_step(global_step)
@@ -374,14 +368,6 @@ def main(conf: DictConfig) -> None:
                     ps.frame_tick()
                     while not gui.viz_do_train:
                         ps.frame_tick()
-                
-            ps_cloud = ps.register_point_cloud("test pts", to_np(model.get_positions()))
-            ps_cloud.add_scalar_quantity("rolling_error", to_np(model.rolling_error[:,0]))
-            ps_cloud.add_scalar_quantity("rolling_weights", to_np(model.rolling_weight_contrib[:,0]))
-            ps_cloud.add_scalar_quantity("div", to_np(model.rolling_error[:,0]/model.rolling_weight_contrib[:,0]))
-            ps_cloud.add_scalar_quantity("opacity", to_np(model.get_density()[:,0]))
-            ps_cloud.add_scalar_quantity("scale_max", to_np(torch.max(model.get_scale(), dim=1).values))
-            ps.show()
 
     recorder.submit_recording(
         dataset=train_dataset,

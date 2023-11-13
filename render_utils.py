@@ -196,7 +196,6 @@ def eval_ray_chunk(i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, 
     hit_ray_inds = torch.arange(C, device=device)[:,None].expand(C,D)[hit_mask] + i_c
     hit_rays_o = rays_o[hit_ray_inds,:]
     hit_rays_d = rays_d[hit_ray_inds,:]
-    # arrgh.arrgh(err_targets, hit_ray_inds, rays_o, rays_d)
 
     # Gather gaussian params
     hit_gpos = gpos[hit_gIds,:]
