@@ -983,7 +983,7 @@ class NCoreDataset(torch.utils.data.Dataset):
             )
 
     def get_observer_points(self, camera_id=None):
-        """ Return camera centers """
+        """ Return camera centers in colmap space """
         # make sure we are initialized
         self._init_worker()
 
@@ -1003,13 +1003,13 @@ class NCoreDataset(torch.utils.data.Dataset):
                 camera_sensor = self.sequence_camera_sensors[sequence_id][camera_id]
 
                 for camera_frame_index in chunk.time_range_us.cover_range(camera_sensor.get_frames_timestamps_us()):
-                    T_rig_colmap = self._ncore_world_to_colmap_poses(
-                        camera_sensor.get_frame_T_rig_world(
+                    T_sensor_colmap = self._ncore_world_to_colmap_poses(
+                        camera_sensor.get_frame_T_sensor_world(
                             camera_frame_index, frame_timepoint=ncore.data.FrameTimepoint.START
                         ),
                         chunk.T_world_local_world_common,
                     )
-                    camera_centers.append(T_rig_colmap[:3,3])
+                    camera_centers.append(T_sensor_colmap[:3,3])
 
         return np.array(camera_centers)
 
