@@ -28,6 +28,13 @@ model:
     increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
     
   lambda_background: 0.
+
+  density_decay:
+    gamma: 0.99
+    start_iteration: 500
+    end_iteration: 15000
+    frequency: 50
+
   background:
     name: background-color
     color: random
