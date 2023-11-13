@@ -55,6 +55,7 @@ class GUI:
         self.viz_render_name = 'render'
         self.viz_render_enabled = True
         self.viz_render_subsample = 1
+        self.viz_render_train_view = False
         if conf.render.method == 'torch':
             self.viz_render_subsample = 4
 
@@ -118,7 +119,7 @@ class GUI:
 
         # Render a frame
         with torch.no_grad():
-            outputs = self.model(rays_ori, rays_dir)
+            outputs = self.model(rays_ori, rays_dir, train=self.viz_render_train_view)
 
         return outputs['pred_rgb'], outputs['pred_opacity'], outputs['pred_dist']
 
@@ -233,6 +234,8 @@ class GUI:
             changed, self.viz_render_subsample = psim.InputInt("Subsample Factor", self.viz_render_subsample, 1)
             if changed:
                 self.viz_render_subsample = max(self.viz_render_subsample, 1)
+            
+            _, self.viz_render_train_view = psim.Checkbox("render w/ train=True", self.viz_render_train_view)
 
             psim.PopItemWidth()
             psim.TreePop()

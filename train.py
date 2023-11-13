@@ -223,7 +223,7 @@ def main(conf: DictConfig) -> None:
                                 rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
 
                                 # Compute the outputs of a single batch
-                                outputs = model(rays_ori, rays_dir)
+                                outputs = model(rays_ori, rays_dir, train=False)
 
                                 # Compute the loss
                                 val_loss.append(torch.abs(outputs['pred_rgb'] - rgb_gt).mean().item())
@@ -253,13 +253,13 @@ def main(conf: DictConfig) -> None:
                     # Compute the outputs of a single batch
                     error_target = torch.zeros_like(model.density)
                     error_target.requires_grad = True
-                    outputs = model(rays_ori, rays_dir, error_target)
+                    outputs = model(rays_ori, rays_dir, error_target, train=True)
 
                     # Check if alphas are given and if the background is a fix color
                     if isinstance(model.background, BackgroundColor):
-                        assert "alpha" in gpu_batch
-                        alpha = gpu_batch["alpha"]
-                        rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
+                        if "alpha" in gpu_batch:
+                            alpha = gpu_batch["alpha"]
+                            rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
 
                     # Compute the loss
                     loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()

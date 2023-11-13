@@ -91,20 +91,30 @@ class BackgroundColor(BaseBackground):
         ], "Background color must be one of 'white', 'black', 'random'"
 
         if self.background_color_type == "white":
-            self.color = torch.ones((3,), dtype=torch.float32).to(self.device)
+            self.color = torch.ones((3,), dtype=torch.float32, device=self.device)
         elif self.background_color_type == "black":
-            self.color = torch.zeros((3,), dtype=torch.float32).to(self.device)
+            self.color = torch.zeros((3,), dtype=torch.float32, device=self.device)
         elif self.background_color_type == "random":
             # set the stored color to black for random, we use this when not training
-            self.color = torch.zeros((3,), dtype=torch.float32).to(self.device)
+            self.color = torch.zeros((3,), dtype=torch.float32, device=self.device)
 
     @torch.cuda.nvtx.range("background_color.forward")
     def forward(self, rays_d, rgb, opacity, train: bool):
 
         color = self.color
 
-        if self.background_color_type == "random" and train: # only use random color when training
-            self.color = torch.rand((3,), dtype=torch.float32).to(rays_d)
+        if self.background_color_type == "random": # only use random color when training
+            if train:
+
+                # NOTE: this uses random color PER PIXEL, other codebases use constant random
+                color = torch.rand_like(rays_d, dtype=torch.float32, device=self.device)
+
+                # this is set up to statefully remember the last random color, we ise this during trainint
+                self.color = color
+
+            else:
+                # just use black when not training
+                color = torch.zeros((3,), dtype=torch.float32, device=self.device)
 
         rgb = rgb + color * (1.0 - opacity)
 
