@@ -9,6 +9,9 @@ LABEL org.opencontainers.image.authors="Riccardo de Lutio <rdelutio@nvidia.com>"
 # Needed for string substitution
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Needed as conda activate is intended to be run in interactive shell
+SHELL ["/bin/bash", "-l", "-c"]
+
 RUN \
     # Add additional system libraries
     apt-get update -qq --fix-missing && \
@@ -32,6 +35,9 @@ ADD requirements.txt requirements.txt
 ADD thirdparty thirdparty
 ADD libs/ray_utils libs/ray_utils
 ADD libs/packed_ops libs/packed_ops
+
+# Specify cuda arch list to build even if docker does not have access to cuda at build time 
+ENV TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6"
 
 # Create environment and install dependencies
 ENV CONDA_ENV=3dgrt
