@@ -114,7 +114,10 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
             cudaMallocAsync(reinterpret_cast<void**>(&stateWrapper.pState->gPrimTri), sizeof(int3) * gPrimNumTri * gNum,cudaStream));
 
         CUdeviceptr optixAabbPtr = 0;
+
+        OptixAabb hostOptixAabb{1e30f,1e30f,1e30f,-1e30f,-1e30f,-1e30f};
         CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&optixAabbPtr), sizeof(OptixAabb),cudaStream));
+        CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(optixAabbPtr), &hostOptixAabb, sizeof(OptixAabb), cudaMemcpyHostToDevice));
 
         stateWrapper.pState->gPrimNumTri = gPrimNumTri;
 
@@ -141,7 +144,10 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
         CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&stateWrapper.pState->gPrimAABB), sizeof(OptixAabb) * gNum,cudaStream));
 
         CUdeviceptr optixAabbPtr = 0;
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&optixAabbPtr), sizeof(OptixAabb)));
+
+        OptixAabb hostOptixAabb{1e30f,1e30f,1e30f,-1e30f,-1e30f,-1e30f};
+        CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&optixAabbPtr), sizeof(OptixAabb),cudaStream));
+        CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(optixAabbPtr), &hostOptixAabb, sizeof(OptixAabb), cudaMemcpyHostToDevice));
 
         stateWrapper.pState->gPrimNumTri = 0;
 
