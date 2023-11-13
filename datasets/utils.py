@@ -132,6 +132,6 @@ class PointCloud:
 def get_center_and_diag(cam_centers):
     avg_cam_center = np.mean(cam_centers, axis=0, keepdims=True)
     center = avg_cam_center
-    dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
+    dist = np.linalg.norm(cam_centers - center, axis=1, keepdims=True)
     diagonal = np.max(dist)
     return center.flatten(), diagonal
