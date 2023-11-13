@@ -352,7 +352,11 @@ def main(conf: DictConfig) -> None:
     )
 
     if conf.test_last:
-        renderer = Renderer(checkpoint_path = os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"),
+        parameters = model.get_model_parameters()
+        parameters |= {"global_step": global_step, "epoch": n_epochs-1}
+        last_ckpt_path = os.path.join(writer.get_logdir(), "ckpt_last.pt")
+        torch.save(parameters, last_ckpt_path)
+        renderer = Renderer(checkpoint_path=last_ckpt_path,
                             out_dir=writer.get_logdir(),
                             path=conf.path,
                             save_gt=False,

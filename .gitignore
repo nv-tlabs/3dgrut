@@ -6,6 +6,7 @@ runs/
 extra_info/
 wandb/
 outputs/
+extra_info/
 eval/
 
 debug_**
