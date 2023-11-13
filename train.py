@@ -147,13 +147,15 @@ def main(conf: DictConfig) -> None:
     else: # Initialize
 
         if conf.initialization.method == 'colmap':
-            model.init_from_colmap(conf.path)
+            observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
+            model.init_from_colmap(conf.path, observer_points)
 
         elif conf.initialization.method == 'point_cloud':
+            observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
             ply_path = None
             try:
                 ply_path = os.path.join(conf.path, "point_cloud.ply")
-                model.init_from_pretrained_point_cloud(ply_path)
+                model.init_from_pretrained_point_cloud(ply_path, observer_points)
             except FileNotFoundError as e:
                 logging.exception(e)
                 raise e
@@ -163,7 +165,8 @@ def main(conf: DictConfig) -> None:
 
         elif conf.initialization.method == 'lidar':
             assert conf.dataset.type in ['ngp', 'ncore'], 'can only initialize from lidar with the NGPDataset / NCoreDataset'
-            model.init_from_lidar(point_cloud = pc) 
+            observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
+            model.init_from_lidar(pc, observer_points) 
         else:
            raise ValueError(f"unrecognized initialization.method {conf.initialization.method}, choose from [colmap, point_cloud, random]")
 

@@ -69,7 +69,7 @@ class NeRFDataset(Dataset):
         for frame in tqdm(frames):
             c2w = np.array(frame['transform_matrix'])[:3, :4]
             c2w[:, 1:3] *= -1 # [right up back] to [right down front]
-            cam_centers.append(c2w[:3, 3:4])
+            cam_centers.append(c2w[:3, 3])
             self.poses += [c2w]
 
             try:
@@ -84,8 +84,10 @@ class NeRFDataset(Dataset):
                 self.rgbs += [img]
             except: pass
 
+        self.camera_centers = np.array(cam_centers)
+
         # https://github.com/graphdeco-inria/gaussian-splatting/blob/main/scene/__init__.py#L69
-        _, diagonal = get_center_and_diag(cam_centers)
+        _, diagonal = get_center_and_diag(self.camera_centers)
         self.cameras_extent = diagonal * 1.1
 
         if len(self.rgbs)>0:
@@ -117,6 +119,9 @@ class NeRFDataset(Dataset):
     def get_bbox(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Tuple of vec3 (min,max)"""
         return self.scene_bbox
+
+    def get_observer_points(self):
+        return self.camera_centers
 
     def __len__(self):
         if self.split == 'train': 

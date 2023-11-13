@@ -982,6 +982,37 @@ class NCoreDataset(torch.utils.data.Dataset):
                 dtype=np.int32,
             )
 
+    def get_observer_points(self, camera_id=None):
+        """ Return camera centers in colmap space """
+        # make sure we are initialized
+        self._init_worker()
+
+        # default to first camera if not provided explicitly
+        assert len(self.camera_ids), "NCoreDataset: no camera sensors loaded"
+        camera_id = self.camera_ids[0] if camera_id is None else camera_id
+
+        camera_centers = []
+        # provided samples are ordered by chunks
+        for unique_camera_id in self._sensor_ids_to_unique_ids([camera_id], "camera"):
+            for chunk in self.chunks:
+                sequence_id = chunk.sequence_id
+                for camera_id in self.sequence_camera_sensors[sequence_id].keys():
+                    if self.sequence_camera_unique_ids[sequence_id][camera_id].id != unique_camera_id:
+                        continue
+
+                camera_sensor = self.sequence_camera_sensors[sequence_id][camera_id]
+
+                for camera_frame_index in chunk.time_range_us.cover_range(camera_sensor.get_frames_timestamps_us()):
+                    T_sensor_colmap = self._ncore_world_to_colmap_poses(
+                        camera_sensor.get_frame_T_sensor_world(
+                            camera_frame_index, frame_timepoint=ncore.data.FrameTimepoint.START
+                        ),
+                        chunk.T_world_local_world_common,
+                    )
+                    camera_centers.append(T_sensor_colmap[:3,3])
+
+        return np.array(camera_centers)
+
     def __len__(self) -> int:
         """Returns the total number of samples provided by the dataset (depending on split type and parametrization)"""
         # we create ray batches internally using randomization -
