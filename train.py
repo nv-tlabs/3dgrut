@@ -378,6 +378,14 @@ def main(conf: DictConfig) -> None:
     )
 
     if conf.test_last:
+        if train_dataloader is not None:
+            del train_dataloader
+        if val_dataloader is not None:
+            del val_dataloader
+        if train_dataset is not None:
+            del train_dataset
+        if val_dataset is not None:
+            del val_dataset
         parameters = model.get_model_parameters()
         parameters |= {"global_step": global_step, "epoch": n_epochs-1}
         last_ckpt_path = os.path.join(writer.get_logdir(), "ckpt_last.pt")

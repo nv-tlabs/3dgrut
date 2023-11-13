@@ -19,31 +19,19 @@ BACKGROUND_COLOR = torch.zeros((3,), dtype=torch.float32, device='cuda')
 
 
 class Renderer:
-    def __init__(self, conf, global_step, out_dir, path="", save_gt=True, writer=None, model=None) -> None:
+    def __init__(self, model, conf, global_step, out_dir, path="", save_gt=True, writer=None) -> None:
+        self.model = model
+
         self.out_dir = out_dir
         self.path = path
         self.save_gt = save_gt
-
         # Replace the path to the test data
         if path:
             conf.path = path
-
         self.conf = conf
         self.global_step = global_step
+
         self.dataloader = self.create_test_dataloader(conf)
-
-        if model is None:
-            # Initialize the model and the optix context
-            self.model = MixtureOfGaussians(self.conf)
-            self.model.set_optix_context()
-
-            # Initialize the parameters from checkpoint
-            self.model.init_from_checkpoint(self.checkpoint)
-            self.model.build_bvh()
-        else:
-            self.model = model
-            self.model.build_bvh()
-
         self.writer = writer
 
     def create_test_dataloader(self, conf):
@@ -67,17 +55,33 @@ class Renderer:
 
     @classmethod
     def from_checkpoint(cls, checkpoint_path, out_dir, path="", save_gt=True, writer=None, model=None):
+        """ Loads checkpoint for test path.
+        If path is stated, it will override the test path in checkpoint.
+        If model is None, it will be loaded base on the
+        """
 
         checkpoint = torch.load(checkpoint_path)
         conf = checkpoint["config"]
         global_step = checkpoint['global_step']
-        return Renderer(conf=conf,
-                        global_step=global_step,
-                        out_dir=out_dir,
-                        path=path,
-                        save_gt=save_gt,
-                        writer=writer,
-                        model=model)
+
+        if model is None:
+            # Initialize the model and the optix context
+            model = MixtureOfGaussians(conf)
+            model.set_optix_context()
+
+            # Initialize the parameters from checkpoint
+            model.init_from_checkpoint(checkpoint)
+        model.build_bvh()
+
+        return Renderer(
+            model=model,
+            conf=conf,
+            global_step=global_step,
+            out_dir=out_dir,
+            path=path,
+            save_gt=save_gt,
+            writer=writer
+        )
 
     @classmethod
     def from_preloaded_model(cls, model, out_dir, path="", save_gt=True, writer=None, global_step=None):
@@ -85,14 +89,14 @@ class Renderer:
         conf = model.conf
         if global_step is None:
             global_step = ''
-
-        return Renderer(conf=conf,
+        model.build_bvh()
+        return Renderer(model=model,
+                        conf=conf,
                         global_step=global_step,
                         out_dir=out_dir,
                         path=path,
                         save_gt=save_gt,
-                        writer=writer,
-                        model=model)
+                        writer=writer)
 
 
     def render_all(self):
