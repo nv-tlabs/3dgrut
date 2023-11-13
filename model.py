@@ -508,7 +508,8 @@ class MixtureOfGaussians(torch.nn.Module):
                 # gsplat implementation
                 positional_grad_norm = self.positional_grad_norm_accum / self.positional_grad_norm_denom
                 positional_grad_norm[positional_grad_norm.isnan()] = 0.0 
-      
+            case _:
+                raise ValueError(f"densify.method {self.conf.model.densify.method} not supported")
 
         assert positional_grad_norm is not None, "Was not able to retrieve the exp average of the positional gradient from Adam"       
 
