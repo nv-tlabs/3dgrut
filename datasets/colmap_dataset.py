@@ -116,6 +116,7 @@ class ColmapDataset(Dataset):
         _, diagonal = get_center_and_diag(cam_centers)
         self.cameras_extent = diagonal * 1.1
 
+        self.camera_centers = np.array(cam_centers)[:,:,0]
         self.rgb = torch.FloatTensor(np.stack(self.rgb))
         self.poses = np.stack(self.poses)
         self.intrinsic = np.stack(self.intrinsic)
@@ -148,6 +149,9 @@ class ColmapDataset(Dataset):
     def get_bbox(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Tuple of vec3 (min,max)"""
         return self.scene_bbox
+
+    def get_observer_points(self):
+        return self.camera_centers
 
     def __len__(self) -> int:
         if self.split == 'train': 

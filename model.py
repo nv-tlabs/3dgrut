@@ -88,7 +88,7 @@ class MixtureOfGaussians(torch.nn.Module):
             )
         )
 
-    def init_from_colmap(self, root_path: str):
+    def init_from_colmap(self, root_path: str, observer_pts):
         # TODO this reads from the binary format, also implement the nearly-identical plaintext version?
         points_file = os.path.join(root_path, "sparse/0", "points3D.bin")
         if not os.path.isfile(points_file):
@@ -115,7 +115,11 @@ class MixtureOfGaussians(torch.nn.Module):
 
         file_rgb = file_rgb / 255.
 
-        self.default_initialize_from_points(file_pts, file_rgb)
+        self.default_initialize_from_points(
+            torch.tensor(file_pts, dtype=torch.float32, device=self.device), 
+            observer_pts,
+            colors=torch.tensor(file_rgb, dtype=torch.float32, device=self.device)
+        )
         self.validate_fields()
 
     def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
@@ -224,7 +228,7 @@ class MixtureOfGaussians(torch.nn.Module):
             self.setup_optimizer(state_dict=checkpoint['optimizer'])
         self.validate_fields()
 
-    def default_initialize_from_points(self, pts_np, colors_np=None):
+    def default_initialize_from_points(self, pts, observer_pts, colors=None):
         """
         Given an Nx3 array of points (and optionally Nx3 rgb colors), 
         initialize default values for the other parameters of the model
@@ -232,26 +236,26 @@ class MixtureOfGaussians(torch.nn.Module):
                               
         dtype = torch.float32
 
-        N = pts_np.shape[0]
-        positions = to_torch(pts_np, dtype=dtype, device=self.device)
+        N = pts.shape[0]
+        positions = pts
        
         # identity rotations
         rots = torch.zeros((N,4), dtype=dtype, device=self.device)
         rots[:,0] = 1. # they're quaternions
 
-        # set the scale as function of the distance from the origin
-        # TODO this might not make sense for large-scale scenes
-        dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(positions), 1e-3)
-        scales = torch.log(dist)[..., None].repeat(1, 3)
+        # estimate scales based on distances to observers
+        dist_to_observers = torch.clamp_min(nearest_neighbor_dist_cpuKD(pts, observer_pts), 1e-7)
+        observation_scale = dist_to_observers * self.conf.initialization.observation_scale_factor
+        scales = self.scale_activation_inv(observation_scale)[:,None].repeat(1,3)
 
         # set density as a constant
         opacities = self.density_activation_inv(0.1 * torch.ones((N,1), dtype=dtype, device=self.device))
 
         # set colors, constant if they weren't given
-        if colors_np is None:
+        if colors is None:
             features_albedo = 0.5 * torch.ones((N, 3), dtype=dtype, device=self.device)
         else:
-            features_albedo = to_torch(colors_np, dtype=dtype, device=self.device)
+            features_albedo = colors
         num_specular_dims = sh_degree_to_specular_dim(self.max_n_features)
         features_specular = torch.zeros((N, num_specular_dims))
 
@@ -268,12 +272,16 @@ class MixtureOfGaussians(torch.nn.Module):
             
     def init_from_lidar(self, 
                         point_cloud : PointCloud, 
+                        observer_pts,
                         ):
+        """
+        Observer points can be any set locations that observation came from. Camera centers, ray source points, etc. They are used to esimate initial scales.
+        """
         
         logging.info(f"Initializing based on lidar point cloud ...")
        
         # only initialize by default from points for now
-        self.default_initialize_from_points(to_np(point_cloud.xyz_end), None)
+        self.default_initialize_from_points(point_cloud.xyz_end, observer_pts, None)
 
     def setup_optimizer(self, state_dict=None):
         params = []

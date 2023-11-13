@@ -1,1 +1,2 @@
 method: colmap
+observation_scale_factor: 0.01
