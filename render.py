@@ -19,51 +19,86 @@ BACKGROUND_COLOR = torch.zeros((3,), dtype=torch.float32, device='cuda')
 
 
 class Renderer:
-    def __init__(self, checkpoint_path, out_dir, path="", save_gt=True, writer=None, model=None) -> None:
+    def __init__(self, model, conf, global_step, out_dir, path="", save_gt=True, writer=None) -> None:
+        self.model = model
+
         self.out_dir = out_dir
         self.path = path
         self.save_gt = save_gt
-
-
-        self.checkpoint = torch.load(checkpoint_path)
-        self.conf = self.checkpoint["config"]
-        self.global_step = self.checkpoint['global_step']
-
         # Replace the path to the test data
-        if self.path: 
-            self.conf.path = path
+        if path:
+            conf.path = path
+        self.conf = conf
+        self.global_step = global_step
 
+        self.dataloader = self.create_test_dataloader(conf)
+        self.writer = writer
+
+    def create_test_dataloader(self, conf):
         val_collate_fn = None
         # Create the dataset
-        if self.conf.dataset.type == 'nerf':
+        if conf.dataset.type == 'nerf':
             dataset = NeRFDataset(
-                self.conf.path, 
-                split='test', 
-                sample_full_image=True, 
+                conf.path,
+                split='test',
+                sample_full_image=True,
                 batch_size=1,
                 return_alphas=True
             )
         else:
-            raise ValueError(f'Unsupported dataset type: {self.conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp", "ncore"]. ')
-        
-        self.dataloader = torch.utils.data.DataLoader(dataset, num_workers=8, batch_size=1, shuffle=False, collate_fn=val_collate_fn)
+            raise ValueError(
+                f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp", "ncore"]. ')
 
-        
+        dataloader = torch.utils.data.DataLoader(dataset, num_workers=8, batch_size=1, shuffle=False,
+                                                      collate_fn=val_collate_fn)
+        return dataloader
+
+    @classmethod
+    def from_checkpoint(cls, checkpoint_path, out_dir, path="", save_gt=True, writer=None, model=None):
+        """ Loads checkpoint for test path.
+        If path is stated, it will override the test path in checkpoint.
+        If model is None, it will be loaded base on the
+        """
+
+        checkpoint = torch.load(checkpoint_path)
+        conf = checkpoint["config"]
+        global_step = checkpoint['global_step']
+
         if model is None:
             # Initialize the model and the optix context
-            self.model = MixtureOfGaussians(self.conf)
-            self.model.set_optix_context()
-
+            model = MixtureOfGaussians(conf)
+            model.set_optix_context()
 
             # Initialize the parameters from checkpoint
-            self.model.init_from_checkpoint(self.checkpoint)
-            self.model.build_bvh()
-        else:
-            self.model = model
-            self.model.build_bvh()
+            model.init_from_checkpoint(checkpoint)
+        model.build_bvh()
 
-        self.writer = writer
-        
+        return Renderer(
+            model=model,
+            conf=conf,
+            global_step=global_step,
+            out_dir=out_dir,
+            path=path,
+            save_gt=save_gt,
+            writer=writer
+        )
+
+    @classmethod
+    def from_preloaded_model(cls, model, out_dir, path="", save_gt=True, writer=None, global_step=None):
+
+        conf = model.conf
+        if global_step is None:
+            global_step = ''
+        model.build_bvh()
+        return Renderer(model=model,
+                        conf=conf,
+                        global_step=global_step,
+                        out_dir=out_dir,
+                        path=path,
+                        save_gt=save_gt,
+                        writer=writer)
+
+
     def render_all(self):
         # Criterions that we log during training
         criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda")}
@@ -121,7 +156,8 @@ if __name__ == "__main__":
     parser.add_argument("--save-gt", action="store_false", help="If set, the GT images will not be saved [True by default]")
     args = parser.parse_args()
 
-    renderer = Renderer(checkpoint_path=args.checkpoint,
+    renderer = Renderer.from_checkpoint(
+                        checkpoint_path=args.checkpoint,
                         path=args.path,
                         out_dir=args.out_dir,
                         save_gt=args.save_gt)

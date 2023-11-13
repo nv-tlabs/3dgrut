@@ -50,7 +50,8 @@ if __name__ == "__main__":
 
                 print()
                 print(f"Rendering for experiment {args.experiment_name}, run {run}, checkpoint {last_checkpoint}")
-                renderer = Renderer(checkpoint_path=os.path.join(run_path,last_checkpoint), 
+                renderer = Renderer.from_checkpoint(
+                                    checkpoint_path=os.path.join(run_path,last_checkpoint),
                                     out_dir=os.path.join(args.out_dir,run),
                                     path=local_data_path,
                                     save_gt=args.save_gt)
