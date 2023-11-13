@@ -9,7 +9,8 @@ from utils import to_torch, get_activation_function, inverse_sigmoid, get_schedu
     sh_degree_to_num_features, sh_degree_to_specular_dim
 from datasets.colmap_utils import read_next_bytes
 from datasets.utils import PointCloud
-from geometry import nearest_neighbor_dist_cpuKD
+from simple_knn._C import distCUDA2
+from color import RGB2SH
 from utils import to_np
 from render_utils import evaluate_rays
 import background
@@ -26,6 +27,9 @@ class MixtureOfGaussians(torch.nn.Module):
         self.density = torch.nn.Parameter(torch.empty([0, 1]))  # Density of each Gaussian [n_gaussians, 1]
         self.features_albedo = torch.nn.Parameter(torch.empty([0, 3]))  # Feature vector of the 0th order SH coefficients [n_gaussians, 3] (We split it into two due to different learning rates)
         self.features_specular = torch.nn.Parameter(torch.empty([0, 1]))  # Features of the higher order SH coefficients [n_gaussians, 3]
+        self.positional_grad_norm_accum = torch.empty([0,1]) # Accumulation of the normas of the positions gradients
+        self.positional_grad_norm_denom = torch.empty([0,1])
+        
         self.device = 'cuda'
         self.optimizer = None
         self.optix_ctx = None
@@ -64,6 +68,8 @@ class MixtureOfGaussians(torch.nn.Module):
         assert self.density.shape == (num_gsplat, 1)
         assert self.rotation.shape == (num_gsplat, 4)
         assert self.scale.shape == (num_gsplat, 3)
+        assert self.positional_grad_norm_accum.shape == (num_gsplat, 1)
+        assert self.positional_grad_norm_denom.shape == (num_gsplat, 1)
 
         if self.feature_type == 'sh':
             assert self.features_albedo.shape == (num_gsplat, 3)
@@ -162,6 +168,9 @@ class MixtureOfGaussians(torch.nn.Module):
         
         self.features_specular = torch.nn.Parameter(feats_sph)
 
+        self.positional_grad_norm_accum = torch.zeros((num_gsplat,1), dtype=torch.float, device=self.device)
+        self.positional_grad_norm_denom = torch.zeros((num_gsplat,1), dtype=torch.float, device=self.device)
+
         if set_optimizable_parameters:
             self.set_optimizable_parameters()
         self.validate_fields()
@@ -188,8 +197,9 @@ class MixtureOfGaussians(torch.nn.Module):
             features_specular = torch.zeros((num_gsplat, num_specular_features),
                                             dtype=dtype, device=self.device).contiguous()
 
-        dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(fused_point_cloud), 1e-3)
-        scales = torch.log(dist)[..., None].repeat(1, 3)
+        dist2 = torch.clamp_min(distCUDA2(fused_point_cloud.float().cuda()), 0.0000001)
+        scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
+
         rots = torch.zeros((num_gsplat, 4), device=self.device)
         rots[:, 0] = 1
 
@@ -201,6 +211,9 @@ class MixtureOfGaussians(torch.nn.Module):
         self.density = torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device))
         self.features_albedo = torch.nn.Parameter(features_albedo.to(dtype=dtype, device=self.device))
         self.features_specular = torch.nn.Parameter(features_specular.to(dtype=dtype, device=self.device))
+
+        self.positional_grad_norm_accum = torch.zeros((num_gsplat,1), dtype=torch.float, device=self.device)
+        self.positional_grad_norm_denom = torch.zeros((num_gsplat,1), dtype=torch.float, device=self.device)
 
         if set_optimizable_parameters:
             self.set_optimizable_parameters()
@@ -218,6 +231,10 @@ class MixtureOfGaussians(torch.nn.Module):
         if self.progressive_training:
             self.feature_dim_increase_interval = checkpoint["feature_dim_increase_interval"]
             self.feature_dim_increase_step = checkpoint["feature_dim_increase_step"]
+        
+        self.positional_grad_norm_accum = checkpoint["positional_grad_norm_accum"]
+        self.positional_grad_norm_denom = checkpoint["positional_grad_norm_denom"]
+
         self.background.load_state_dict(checkpoint["background"])
         if setup_optimizer:
             self.set_optimizable_parameters()
@@ -241,17 +258,18 @@ class MixtureOfGaussians(torch.nn.Module):
 
         # set the scale as function of the distance from the origin
         # TODO this might not make sense for large-scale scenes
-        dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(positions), 1e-3)
-        scales = torch.log(dist)[..., None].repeat(1, 3)
+        dist2 = torch.clamp_min(distCUDA2(positions.float().cuda()), 0.0000001)
+        scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
 
         # set density as a constant
         opacities = self.density_activation_inv(0.1 * torch.ones((N,1), dtype=dtype, device=self.device))
 
         # set colors, constant if they weren't given
         if colors_np is None:
-            features_albedo = 0.5 * torch.ones((N, 3), dtype=dtype, device=self.device)
+            features_albedo = torch.rand((N, 3), dtype=dtype, device=self.device) / 255.0
         else:
-            features_albedo = to_torch(colors_np, dtype=dtype, device=self.device)
+            features_albedo = to_torch(RGB2SH(colors_np), dtype=dtype, device=self.device)
+        
         num_specular_dims = sh_degree_to_specular_dim(self.max_n_features)
         features_specular = torch.zeros((N, num_specular_dims))
 
@@ -261,6 +279,9 @@ class MixtureOfGaussians(torch.nn.Module):
         self.density = torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device))
         self.features_albedo = torch.nn.Parameter(features_albedo.to(dtype=dtype, device=self.device))
         self.features_specular = torch.nn.Parameter(features_specular.to(dtype=dtype, device=self.device))
+
+        self.positional_grad_norm_accum = torch.zeros((N,1), dtype=torch.float, device=self.device)
+        self.positional_grad_norm_denom = torch.zeros((N,1), dtype=torch.float, device=self.device)
 
         self.set_optimizable_parameters()
         self.setup_optimizer()
@@ -422,26 +443,51 @@ class MixtureOfGaussians(torch.nn.Module):
                     group["params"][0] = torch.nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(group["params"][0].requires_grad))
                     optimizable_tensors[group["name"]] = group["params"][0]
         return optimizable_tensors
+    
+    def update_positional_grad(self, mask):
+        self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask], dim=-1, keepdim=True)
+        self.positional_grad_norm_denom[mask] += 1
 
     @torch.cuda.nvtx.range("densify_gaussians")
     def densify_gaussians(self, scene_extent):
         assert self.optimizer is not None, "Optimizer need to be initialized before splitting and cloning the Gaussians"
         assert self.get_positions().requires_grad, "Trying to perform split and clone but the positions are not being optimized"
 
-        positional_grad_norm = None
-        # TODO: we directly use the gradient of the 3D positions, whereas 3D Gaussian Splatting uses the 2D position gradient after projection (in theory this should be the same as not projecting the gradient)
-        # TODO: we always consider all the Gaussians by tapping into the Adam's exponential moving average. 3DGS only considers Gaussians that survived the frustum culling in the last iteration.
-        for group in self.optimizer.param_groups:
-            if group["name"] == "positions":
-                positional_grad_norm = torch.norm(self.optimizer.state.get(group['params'][0], None)["exp_avg"], dim=-1)
+        # gsplat implementation
+        positional_grad_norm = self.positional_grad_norm_accum / self.positional_grad_norm_denom
+        positional_grad_norm[positional_grad_norm.isnan()] = 0.0 
 
-        assert positional_grad_norm is not None, "Was not able to retrieve the exp average of the positional gradient from Adam"
+        # Keeping adam implementation for reference
+        # positional_grad_norm = None
+        # # TODO: we directly use the gradient of the 3D positions, whereas 3D Gaussian Splatting uses the 2D position gradient after projection (in theory this should be the same as not projecting the gradient)
+        # # TODO: we always consider all the Gaussians by tapping into the Adam's exponential moving average. 3DGS only considers Gaussians that survived the frustum culling in the last iteration.
+        # for group in self.optimizer.param_groups:
+        #     if group["name"] == "positions":
+        #         positional_grad_norm = torch.norm(self.optimizer.state.get(group['params'][0], None)["exp_avg"], dim=-1)
 
-        self.clone_gaussians(positional_grad_norm, scene_extent)
-        self.split_gaussians(positional_grad_norm, scene_extent)      
+        # assert positional_grad_norm is not None, "Was not able to retrieve the exp average of the positional gradient from Adam"       
+
+        self.clone_gaussians(positional_grad_norm.squeeze(), scene_extent)
+        self.split_gaussians(positional_grad_norm.squeeze(), scene_extent)      
+
+        mask = self.get_density().squeeze() >= self.prune_density_threshold
+        self.prune_gaussians(mask)  # note tha Gsplat negate the mask in the prune fct, we don't
 
         torch.cuda.empty_cache()
 
+    @torch.cuda.nvtx.range("densify_postfix")
+    def densify_postfix(self, add_gaussians):
+        # Concatenate new tensors to the optimizer variables 
+        optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
+        self.update_optimizable_parameters(optimizable_tensors)
+
+        self.positional_grad_norm_accum = torch.zeros((self.get_positions().shape[0], 1), 
+                                                      device=self.device, 
+                                                      dtype=self.positional_grad_norm_accum.dtype)
+        self.positional_grad_norm_denom = torch.zeros((self.get_positions().shape[0], 1), 
+                                                      device=self.device, 
+                                                      dtype=self.positional_grad_norm_accum.dtype)
+        
     @torch.cuda.nvtx.range("split_gaussians")
     def split_gaussians(self, positional_grad_norm: torch.Tensor, scene_extent: float):
         n_init_points = self.get_positions().shape[0]
@@ -470,9 +516,14 @@ class MixtureOfGaussians(torch.nn.Module):
             add_gaussians["features_albedo"] = self.features_albedo[mask].repeat(self.split_n_gaussians, 1)
             add_gaussians["features_specular"] = self.features_specular[mask].repeat(self.split_n_gaussians, 1)
 
-        # Concatenate new tensors to the optimizer variables 
-        optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
-        self.update_optimizable_parameters(optimizable_tensors)
+        self.densify_postfix(add_gaussians)
+
+        prune_filter = torch.cat((
+                mask,
+                torch.zeros(self.split_n_gaussians * mask.sum(), device="cuda", dtype=bool),
+            ))
+        self.prune_gaussians(~prune_filter) # note tha Gsplat negate the mask in the prune fct, we don't
+
 
     @torch.cuda.nvtx.range("clone_gaussians")
     def clone_gaussians(self, positional_grad_norm: torch.Tensor, scene_extent: float):
@@ -493,19 +544,18 @@ class MixtureOfGaussians(torch.nn.Module):
             add_gaussians["features_albedo"] = self.features_albedo[mask]
             add_gaussians["features_specular"] = self.features_specular[mask]
 
-        optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
-        self.update_optimizable_parameters(optimizable_tensors)
+        self.densify_postfix(add_gaussians)
 
     @torch.cuda.nvtx.range("prune_gaussians")
-    def prune_gaussians(self):
-
+    def prune_gaussians(self, mask):
         # Prune the Gaussians based on their opacity
         # TODO: consider having a buffer of the contribution of Gaussians to the rendering -> this might avoid the need to reset opacity
         # TODO: we could also consider pruning away some of the large Gaussians?
-        mask = self.get_density().squeeze() >= self.prune_density_threshold
-
         optimizable_tensors = self.prune_optimizer_tensors(mask)
         self.update_optimizable_parameters(optimizable_tensors)
+
+        self.positional_grad_norm_accum = self.positional_grad_norm_accum[mask]
+        self.positional_grad_norm_denom = self.positional_grad_norm_denom[mask]
 
         torch.cuda.empty_cache()
 
@@ -546,6 +596,9 @@ class MixtureOfGaussians(torch.nn.Module):
             "n_active_features": self.n_active_features,
             "max_n_features": self.max_n_features,
             "progressive_training": self.progressive_training,
+            "positional_grad_norm_accum": self.positional_grad_norm_accum,
+            "positional_grad_norm_accum": self.positional_grad_norm_denom,
+
             # Add optimizer state dict
             "optimizer": self.optimizer.state_dict(),
             "config": self.conf
