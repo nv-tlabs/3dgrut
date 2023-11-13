@@ -536,6 +536,7 @@ class MixtureOfGaussians(torch.nn.Module):
         optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
         self.update_optimizable_parameters(optimizable_tensors)
 
+        self.reset_rolling_buffers()
 
         if self.conf.model.densify.method == 'gradient-buffer':
             self.positional_grad_norm_accum = torch.zeros((self.get_positions().shape[0], 1), 
@@ -614,6 +615,7 @@ class MixtureOfGaussians(torch.nn.Module):
             self.positional_grad_norm_denom = self.positional_grad_norm_denom[valid_mask]
 
         torch.cuda.empty_cache()
+        self.reset_rolling_buffers()
 
     def get_scale(self, preactivation=False):
         if preactivation:
