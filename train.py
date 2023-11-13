@@ -382,12 +382,14 @@ def main(conf: DictConfig) -> None:
         parameters |= {"global_step": global_step, "epoch": n_epochs-1}
         last_ckpt_path = os.path.join(writer.get_logdir(), "ckpt_last.pt")
         torch.save(parameters, last_ckpt_path)
-        renderer = Renderer(checkpoint_path=last_ckpt_path,
-                            out_dir=writer.get_logdir(),
-                            path=conf.path,
-                            save_gt=False,
-                            writer=writer,
-                            model = model)
+        renderer = Renderer.from_preloaded_model(
+            model=model,
+            out_dir=writer.get_logdir(),
+            path=conf.path,
+            save_gt=False,
+            writer=writer,
+            global_step=global_step
+        )
         renderer.render_all()
 
 if __name__ == "__main__":
