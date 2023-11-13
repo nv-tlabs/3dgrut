@@ -204,6 +204,17 @@ class GUI:
         elif style == "distance":
             self.viz_render_scalar_buffer.update_data_from_device(sple_odist.detach())
 
+    def populate_rolling_buffers(self):
+        self.ps_point_cloud = ps.register_point_cloud("centers", to_np(self.model.get_positions()))
+
+        self.ps_point_cloud.add_scalar_quantity("rolling_error", to_np(self.model.rolling_error[:,0]))
+        self.ps_point_cloud.add_scalar_quantity("rolling_weights", to_np(self.model.rolling_weight_contrib[:,0]))
+        self.ps_point_cloud.add_scalar_quantity("rolling_error / rolling_weight_contrib", to_np(self.model.rolling_error[:,0]/self.model.rolling_weight_contrib[:,0]))
+        self.ps_point_cloud.add_scalar_quantity("opacity", to_np(self.model.get_density()[:,0]))
+        self.ps_point_cloud.add_scalar_quantity("scale_min", to_np(torch.min(self.model.get_scale(), dim=1).values))
+        self.ps_point_cloud.add_scalar_quantity("scale_max", to_np(torch.max(self.model.get_scale(), dim=1).values))
+
+
 
     def ps_ui_callback(self):
         # Create a little ImGUI UI
@@ -236,6 +247,11 @@ class GUI:
                 self.viz_render_subsample = max(self.viz_render_subsample, 1)
             
             _, self.viz_render_train_view = psim.Checkbox("render w/ train=True", self.viz_render_train_view)
+
+            psim.SameLine()
+            if(psim.Button("Viz rolling buffers")):
+                self.update_render_view_viz(force=True)
+                self.populate_rolling_buffers()
 
             psim.PopItemWidth()
             psim.TreePop()
