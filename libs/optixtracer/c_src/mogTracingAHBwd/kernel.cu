@@ -353,7 +353,8 @@ extern "C" __global__ void __raygen__rg()
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // error back projection
-                        // THIS IS NOT A GRADIENT, ITS BEING ABUSED
+                        // THIS IS NOT REALLY A GRADIENT, the kernel is being abused to
+                        // compute weight * error, since it shared the same computational structure as a gradient 
                         atomicAdd(&params.mogErrorBack[gId][0], weight * rayError[k][j]);
 
                         
