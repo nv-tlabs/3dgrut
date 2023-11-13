@@ -231,6 +231,8 @@ class MixtureOfGaussians(torch.nn.Module):
         self.features_specular = checkpoint["features_specular"]
         self.n_active_features = checkpoint["n_active_features"]
         self.max_n_features = checkpoint["max_n_features"]
+        self.scene_extent = checkpoint["scene_extent"]
+
         if self.progressive_training:
             self.feature_dim_increase_interval = checkpoint["feature_dim_increase_interval"]
             self.feature_dim_increase_step = checkpoint["feature_dim_increase_step"]
@@ -650,7 +652,7 @@ class MixtureOfGaussians(torch.nn.Module):
             "n_active_features": self.n_active_features,
             "max_n_features": self.max_n_features,
             "progressive_training": self.progressive_training,
-
+            "scene_extent": self.scene_extent,
 
             # Add optimizer state dict
             "optimizer": self.optimizer.state_dict(),
