@@ -65,6 +65,9 @@ class MixtureOfGaussians(torch.nn.Module):
             self.feature_dim_increase_step = self.conf.model.progressive_training.increase_step
             self.progressive_training = True
 
+        self.rolling_error = None
+        self.rolling_weight_contrib = None
+
     def validate_fields(self):
         num_gsplat = self.positions.shape[0]
         assert self.positions.shape == (num_gsplat, 3)
@@ -322,6 +325,8 @@ class MixtureOfGaussians(torch.nn.Module):
         # When loading from the checkpoint also load the state dict
         if state_dict is not None:
             self.optimizer.load_state_dict(state_dict)
+    
+        self.reset_rolling_buffers()
 
     def setup_scheduler(self):
         self.schedulers = {}
@@ -385,6 +390,11 @@ class MixtureOfGaussians(torch.nn.Module):
         optimizable_tensors = self.replace_tensor_to_optimizer(updated_densities, "density")
         self.density = optimizable_tensors["density"]
 
+
+    def reset_rolling_buffers(self):
+        self.rolling_error = torch.zeros_like(self.density)
+        self.rolling_weight_contrib = torch.zeros_like(self.density)
+
     def replace_tensor_to_optimizer(self, tensor, name: str):
         assert self.optimizer is not None, "Optimizer need to be initialized when storing the checkpoint"
         optimizable_tensors = {}
@@ -421,6 +431,8 @@ class MixtureOfGaussians(torch.nn.Module):
                 else:
                     group["params"][0] = torch.nn.Parameter(group["params"][0][mask].requires_grad_(True))
                     optimizable_tensors[group["name"]] = group["params"][0]
+    
+        self.reset_rolling_buffers()
 
         return optimizable_tensors
     
@@ -524,6 +536,7 @@ class MixtureOfGaussians(torch.nn.Module):
         optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
         self.update_optimizable_parameters(optimizable_tensors)
 
+        self.reset_rolling_buffers()
 
         if self.conf.model.densify.method == 'gradient-buffer':
             self.positional_grad_norm_accum = torch.zeros((self.get_positions().shape[0], 1), 
@@ -602,6 +615,7 @@ class MixtureOfGaussians(torch.nn.Module):
             self.positional_grad_norm_denom = self.positional_grad_norm_denom[valid_mask]
 
         torch.cuda.empty_cache()
+        self.reset_rolling_buffers()
 
     def get_scale(self, preactivation=False):
         if preactivation:
@@ -674,7 +688,10 @@ class MixtureOfGaussians(torch.nn.Module):
         )
         return mog_counts
 
-    def forward_optix_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward_optix_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target, train: bool) -> dict[str, torch.Tensor]:
+
+        if err_target is None:
+            err_target = torch.ones_like(rays_o[:,0])
 
         num_gsplats = self.positions.shape[0]
         with torch.cuda.nvtx.range(f"model.forward({num_gsplats} gaussians)"):
@@ -689,20 +706,22 @@ class MixtureOfGaussians(torch.nn.Module):
             if self.feature_type == 'sh':
                 self.optix_ctx.set_sph_degree(self.n_active_features)
 
-            pred_rgb, pred_opacity, pred_dist = optixtracer.trace_mog(
+            pred_rgb, pred_opacity, pred_dist, g_weights, err_backprop_proxy = optixtracer.trace_mog(
                     self.optix_ctx, rays_o, rays_d,
                     self.positions, self.get_rotation(), self.get_scale(),
-                    self.get_density(), features)
+                    self.get_density(), features, err_target)
 
-            pred_rgb, pred_opacity = self.background(rays_d, pred_rgb, pred_opacity)
+            pred_rgb, pred_opacity = self.background(rays_d, pred_rgb, pred_opacity, train)
 
         return {
             'pred_rgb': pred_rgb,
             'pred_opacity': pred_opacity,
-            'pred_dist': pred_dist
+            'pred_dist': pred_dist,
+            'g_weights': g_weights,
+            'err_backprop_proxy': err_backprop_proxy,
         }
     
-    def forward_torch_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward_torch_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target: torch.Tensor, train: bool) -> dict[str, torch.Tensor]:
 
         ## Use the optix raycaster to get a list of hit indices
         num_gsplats = self.positions.shape[0]
@@ -729,9 +748,9 @@ class MixtureOfGaussians(torch.nn.Module):
         ## Evaluate the render pass
         with torch.cuda.nvtx.range(f"model.forward_rendereval({num_gsplats} gaussians)"):
 
-            ray_rgb, ray_opacity, ray_ohit, ray_dist = evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, self.max_n_features, self.conf.render.chunk_size)
+            ray_rgb, ray_opacity, ray_ohit, ray_dist, g_weights, err_backprop_proxy = evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, err_target, self.max_n_features, self.conf.render.chunk_size)
 
-            ray_rgb, ray_opacity = self.background(rays_d, ray_rgb, ray_opacity)
+            ray_rgb, ray_opacity = self.background(rays_d, ray_rgb, ray_opacity, train)
 
 
         return {
@@ -739,19 +758,27 @@ class MixtureOfGaussians(torch.nn.Module):
             'pred_opacity': ray_opacity,
             'pred_ohit': ray_ohit,
             'pred_dist': ray_dist,
+            'g_weights': g_weights,
+            'err_backprop_proxy': err_backprop_proxy,
         }
 
     
-    def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor, force_method=None) -> dict[str, torch.Tensor]:
+    def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target=None, force_method=None, train=False) -> dict[str, torch.Tensor]:
+        """
+        err_target is a "dummy" input used to implement rolling error accumulation
+        """
+        
+        if err_target is None:
+            err_target = torch.ones_like(self.density)
 
         if force_method is None:
             force_method = self.render_method
 
         if force_method == 'optix':
-            return self.forward_optix_render(rays_o, rays_d)
+            return self.forward_optix_render(rays_o, rays_d, err_target, train)
 
         elif force_method == 'torch':
-            return self.forward_torch_render(rays_o, rays_d)
+            return self.forward_torch_render(rays_o, rays_d, err_target, train)
 
         else:
             raise ValueError(f"unrecognized render method {self.render_method}")

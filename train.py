@@ -24,6 +24,7 @@ from model import MixtureOfGaussians
 from background import BackgroundColor
 from datasets.utils import move_to_gpu
 from loss_utils import ssim
+from utils import to_np
 from gui import GUI
 from recorder import TrainingRecorder
 from render import Renderer
@@ -206,6 +207,9 @@ def main(conf: DictConfig) -> None:
     assert model.optimizer is not None, "Optimizer needs to be initialized before the training can start!"
     
     for epoch_idx in range(n_epochs):
+
+        model.reset_rolling_buffers()
+
         if epoch_idx > 0 and epoch_idx % val_frequency == 0:
                 val_iteration = 0
                 with tqdm(val_dataloader) as pbar:
@@ -219,7 +223,7 @@ def main(conf: DictConfig) -> None:
                                 rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
 
                                 # Compute the outputs of a single batch
-                                outputs = model(rays_ori, rays_dir)
+                                outputs = model(rays_ori, rays_dir, train=False)
 
                                 # Compute the loss
                                 val_loss.append(torch.abs(outputs['pred_rgb'] - rgb_gt).mean().item())
@@ -247,13 +251,15 @@ def main(conf: DictConfig) -> None:
                     scene_updated = False
 
                     # Compute the outputs of a single batch
-                    outputs = model(rays_ori, rays_dir)
+                    error_target = torch.zeros_like(model.density)
+                    error_target.requires_grad = True
+                    outputs = model(rays_ori, rays_dir, error_target, train=True)
 
                     # Check if alphas are given and if the background is a fix color
                     if isinstance(model.background, BackgroundColor):
-                        assert "alpha" in gpu_batch
-                        alpha = gpu_batch["alpha"]
-                        rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
+                        if "alpha" in gpu_batch:
+                            alpha = gpu_batch["alpha"]
+                            rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
 
                     # Compute the loss
                     loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
@@ -286,9 +292,16 @@ def main(conf: DictConfig) -> None:
                         loss += conf.model.lambda_background * loss_background
                         writer.add_scalar("loss_background/train", loss_background.item(), global_step)
 
+                ray_err_abs = torch.abs(outputs['pred_rgb'] - rgb_gt)
+                model.rol = ray_err_abs.mean()
+
+                # horrible hacks to abuse gradients: distributing error statistics back to the 
+                # gaussians can be viewed as backprop'nig through a proxy weight
+                fake_loss = loss + torch.sum(ray_err_abs.detach()*outputs['err_backprop_proxy'])
+    
                 # backpropagate the gradients and update the parameters
                 with torch.cuda.nvtx.range("backward"):
-                    loss.backward()
+                    fake_loss.backward()
 
                 if global_step < conf.model.densify.end_iteration:
                     model.update_densification_buffer(rays_ori, rays_dir)
@@ -298,6 +311,11 @@ def main(conf: DictConfig) -> None:
                     model.optimizer.zero_grad()
 
                 it_end.record()
+
+                # update error buffers
+                gaussian_error_this_pass = error_target.grad
+                model.rolling_error += gaussian_error_this_pass
+                model.rolling_weight_contrib += outputs['g_weights']
 
                 # Make a scheduler step
                 model.scheduler_step(global_step)

@@ -29,7 +29,8 @@ model:
     
   lambda_background: 0.
   background:
-    name: skip-background
+    name: background-color
+    color: random
 
   densify:
     method: adam

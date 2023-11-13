@@ -268,7 +268,7 @@ __global__ void packed_cumprod_kernel(
     int32_t end = begin + pack_infos[tidx * 2 + 1];
     
     if (begin == end) { 
-      // can't touch any of the arrays below if size == 0
+      // NSHARP CHANGED: can't touch any of the arrays below if size == 0
       return;
     }
 

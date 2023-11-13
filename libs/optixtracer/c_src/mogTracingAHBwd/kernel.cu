@@ -72,6 +72,7 @@ extern "C" __global__ void __raygen__rg()
     float3 accumulatedRayRad[MOGTracingPatchSize][MOGTracingPatchSize];
 
     float rayDnsGrd[MOGTracingPatchSize][MOGTracingPatchSize];
+    float rayError[MOGTracingPatchSize][MOGTracingPatchSize];
     float accumulatedRayTrm[MOGTracingPatchSize][MOGTracingPatchSize];
 
     float rayHitGrd[MOGTracingPatchSize][MOGTracingPatchSize];
@@ -106,6 +107,7 @@ extern "C" __global__ void __raygen__rg()
             accumulatedRayRad[j][i] = make_float3(0);
 
             rayDnsGrd[j][i] = params.rayDnsGrd[idx.z][y][x][0];
+            rayError[j][i] = params.rayError[idx.z][y][x][0];
             accumulatedRayTrm[j][i] = 1 - params.rayDns[idx.z][y][x][0];
 
             rayHitGrd[j][i] = params.rayHitGrd[idx.z][y][x][0];
@@ -347,6 +349,14 @@ extern "C" __global__ void __raygen__rg()
                         atomicAdd(&params.mogRotGrd[gId][1], grotGrdPoscr.y + grotGrdRayDirR.y);
                         atomicAdd(&params.mogRotGrd[gId][2], grotGrdPoscr.z + grotGrdRayDirR.z);
                         atomicAdd(&params.mogRotGrd[gId][3], grotGrdPoscr.w + grotGrdRayDirR.w);                       
+                        
+
+                        // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                        // error back projection
+                        // THIS IS NOT REALLY A GRADIENT, the kernel is being abused to
+                        // compute weight * error, since it shared the same computational structure as a gradient 
+                        atomicAdd(&params.mogErrorBack[gId][0], weight * rayError[k][j]);
+
                         
                         rayTrm[k][j] = nextTransmit;
                         transmit = fmaxf(transmit, rayTrm[k][j]);
