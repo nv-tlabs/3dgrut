@@ -6,5 +6,11 @@ defaults:
   - /background@_global_: sky_mlp
   - _self_
 
+# overwrite of default parameters
+num_workers: 16
+
 dataset:
   use_aux_data: true
+
+checkpoint:
+  frequency: 1000
