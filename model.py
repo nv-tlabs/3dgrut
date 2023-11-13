@@ -11,9 +11,8 @@ from utils import to_torch, get_activation_function, inverse_sigmoid, get_schedu
 from datasets.colmap_utils import read_next_bytes
 from datasets.utils import PointCloud
 from geometry import nearest_neighbor_dist_cpuKD
-from utils import to_np
-from render_utils import evaluate_rays
 import background
+from color import RGB2SH
 
 class MixtureOfGaussians(torch.nn.Module):
     def __init__(self, conf, scene_extent=None):
@@ -129,11 +128,7 @@ class MixtureOfGaussians(torch.nn.Module):
 
         file_rgb = file_rgb / 255.
 
-        self.default_initialize_from_points(
-            torch.tensor(file_pts, dtype=torch.float32, device=self.device), 
-            observer_pts,
-            colors=torch.tensor(file_rgb, dtype=torch.float32, device=self.device)
-        )
+        self.default_initialize_from_points(file_pts, observer_pts, file_rgb)
 
     def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
         data = PlyData.read(pc_path)
@@ -273,9 +268,10 @@ class MixtureOfGaussians(torch.nn.Module):
 
         # set colors, constant if they weren't given
         if colors is None:
-            features_albedo = torch.full((N, 3), fill_value=0.5, dtype=dtype, device=self.device)
+            features_albedo = torch.rand((N, 3), dtype=dtype, device=self.device) / 255.0
         else:
-            features_albedo = colors
+            features_albedo = to_torch(RGB2SH(colors))
+                                       
         num_specular_dims = sh_degree_to_specular_dim(self.max_n_features)
         features_specular = torch.zeros((N, num_specular_dims))
 
