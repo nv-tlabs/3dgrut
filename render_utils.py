@@ -105,7 +105,7 @@ def RGB2SH(rgb):
 def SH2RGB(sh):
     return sh * C0 + 0.5
 
-def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, chunk_size=10000):
+def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, err_targets, sph_deg, chunk_size=10000):
     """
     """
     device = rays_o.device
@@ -127,17 +127,21 @@ def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, s
     ray_opacity_out = []
     ray_dist_out = []
     ray_ohit_out = []
+    err_backprop_proxy_out = []
 
     # Evaluate in checkpoint'd chunks to reduce peak memory usage
     # (note that this compes at a cost as it becomes python/CPU-heavy)
+
+    g_weight_accum = torch.zeros_like(gdns)
+    g_weight_accum.requires_grad = False
 
     while i_c < N:
 
         C = min(chunk_size, N-i_c)
 
-        ray_rad, ray_opacity, ray_dist, ray_ohit = checkpoint(
+        ray_rad, ray_opacity, ray_dist, ray_ohit, err_backprop_proxy, g_weight_accum = checkpoint(
                 eval_ray_chunk_tup, 
-                (i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg),
+                (i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, err_targets, g_weight_accum),
                 use_reentrant=False
             )
 
@@ -145,6 +149,7 @@ def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, s
         ray_opacity_out.append(ray_opacity)
         ray_dist_out.append(ray_dist)
         ray_ohit_out.append(ray_ohit)
+        err_backprop_proxy_out.append(err_backprop_proxy)
 
         i_c += C
 
@@ -152,18 +157,22 @@ def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, s
     ray_opacity_out = torch.cat(ray_opacity_out, dim=0)
     ray_dist_out = torch.cat(ray_dist_out, dim=0)
     ray_ohit_out = torch.cat(ray_ohit_out, dim=0)
+    err_backprop_proxy_out = torch.cat(err_backprop_proxy_out, dim=0)
+    
 
     ray_rad_out = ray_rad_out.reshape(*orig_shape,3)
     ray_opacity_out = ray_opacity_out.reshape(*orig_shape,1)
     ray_dist_out = ray_dist_out.reshape(*orig_shape,1)
     ray_ohit_out = ray_ohit_out.reshape(*orig_shape,1)
+
+    err_backprop_proxy_out = err_backprop_proxy_out.reshape(*orig_shape,1)
     
-    return ray_rad_out, ray_opacity_out, ray_ohit_out, ray_dist_out
+    return ray_rad_out, ray_opacity_out, ray_ohit_out, ray_dist_out, g_weight_accum, err_backprop_proxy_out
 
 def eval_ray_chunk_tup(tup):
     return eval_ray_chunk(*tup)
 
-def eval_ray_chunk(i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg):
+def eval_ray_chunk(i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, err_targets, g_weight_accum):
     
     device = rays_o.device
     dtype = rays_o.dtype
@@ -187,6 +196,7 @@ def eval_ray_chunk(i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, 
     hit_ray_inds = torch.arange(C, device=device)[:,None].expand(C,D)[hit_mask] + i_c
     hit_rays_o = rays_o[hit_ray_inds,:]
     hit_rays_d = rays_d[hit_ray_inds,:]
+    # arrgh.arrgh(err_targets, hit_ray_inds, rays_o, rays_d)
 
     # Gather gaussian params
     hit_gpos = gpos[hit_gIds,:]
@@ -194,6 +204,7 @@ def eval_ray_chunk(i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, 
     hit_gscl = gscl[hit_gIds,:]
     hit_gdns = gdns[hit_gIds,:]
     hit_gsh  =  gsh[hit_gIds,:]
+    hit_err_targets = err_targets[hit_gIds,:]
 
     # Evaluate all of the individual Gaussians
     hit_grad, hit_galpha, hit_gdist = evaluate_gaussians(hit_rays_o, hit_rays_d, hit_gpos, hit_grot, hit_gscl, hit_gdns, hit_gsh, sph_deg)
@@ -207,9 +218,13 @@ def eval_ray_chunk(i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, 
     hit_weight = hit_transmit * hit_galpha
     ray_rad = packed_sum(hit_weight * hit_grad, hitrange)
     ray_dist = packed_sum(hit_weight * hit_gdist, hitrange) # TODO better to use max dist?
+    ray_err_backprop_proxy = packed_sum(hit_weight * hit_err_targets, hitrange)
     ray_ohit = hit_count_ray[:,None]
 
-    return ray_rad, ray_opacity, ray_dist, ray_ohit
+    with torch.no_grad():
+        g_weight_accum = g_weight_accum.scatter_add_(dim=0, index=hit_gIds[:,None].to(dtype=torch.int64), src=hit_weight)
+    
+    return ray_rad, ray_opacity, ray_dist, ray_ohit, ray_err_backprop_proxy, g_weight_accum
 
 
 def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, clamp_rad=True, clamp_rad_min_bound=0.0001):
