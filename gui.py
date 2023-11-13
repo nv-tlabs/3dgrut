@@ -46,7 +46,7 @@ class GUI:
         self.viz_do_train = False
         self.viz_bbox = False
         self.live_update = True # if disabled , will skip rendering updates to accelerate background training loop
-        self.viz_render_styles = ['color', 'density']
+        self.viz_render_styles = ['color', 'density', 'distance']
         self.viz_render_style_ind = 0
         self.viz_curr_render_size = None
         self.viz_curr_render_style_ind = None
@@ -120,7 +120,7 @@ class GUI:
         with torch.no_grad():
             outputs = self.model(rays_ori, rays_dir)
 
-        return outputs['pred_rgb'], outputs['pred_opacity'], outputs['pred_ohit']
+        return outputs['pred_rgb'], outputs['pred_opacity'], outputs['pred_dist']
 
     def update_render_view_viz(self, force=False):
 
@@ -169,10 +169,27 @@ class GUI:
                 self.viz_render_color_buffer = None
                 self.viz_render_scalar_buffer = ps.get_quantity_buffer(self.viz_render_name, "values")
 
+            elif style == "distance":
+            
+                dummy_vals = np.zeros((window_h, window_w), dtype=np.float32)
+                dummy_vals[0] = 3.0  # hack so the default polyscope scale gets set more nicely
 
+                ps.add_scalar_image_quantity(
+                    self.viz_render_name,
+                    dummy_vals,
+                    enabled=True,
+                    image_origin="upper_left",
+                    show_fullscreen=True,
+                    show_in_imgui_window=False,
+                    cmap="jet",
+                    vminmax=(0, 3),
+                )
+
+                self.viz_render_color_buffer = None
+                self.viz_render_scalar_buffer = ps.get_quantity_buffer(self.viz_render_name, "values")
 
         # do the actual rendering
-        sple_orad, sple_odns, sple_ohit = self.render_from_current_ps_view()
+        sple_orad, sple_odns, sple_odist = self.render_from_current_ps_view()
 
         # update the data
         if style == "color":
@@ -182,6 +199,9 @@ class GUI:
 
         elif style == "density":
             self.viz_render_scalar_buffer.update_data_from_device(sple_odns.detach())
+
+        elif style == "distance":
+            self.viz_render_scalar_buffer.update_data_from_device(sple_odist.detach())
 
 
     def ps_ui_callback(self):

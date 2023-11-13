@@ -231,9 +231,7 @@ def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, cla
                     torch.exp(grad - clamp_rad_min_bound) * clamp_rad_min_bound
                 )
 
-
     gposc = rays_o - gpos
-    gdist = torch.sqrt(torch.linalg.vecdot(gposc, rays_d, dim=-1)[:,None])
     gposcr = torch.bmm(gposc[:,None,:],grotMat)[:,0,:]
     gro = giscl * gposcr
     rayDirR = torch.bmm(rays_d[:,None,:],grotMat)[:,0,:]
@@ -243,5 +241,8 @@ def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, cla
     grayDir = torch.linalg.vecdot(gcrod, gcrod, dim=-1)
     gres = torch.exp(-0.5 * grayDir)
     galpha = gres[:,None] * gdns
-    
+
+    grds = gscl * grd * torch.linalg.vecdot(grd, -1 * gro, dim=-1)[:,None]
+    gdist = torch.sqrt(torch.linalg.vecdot(grds, grds, dim=-1)[:,None])
+
     return grad, galpha, gdist
