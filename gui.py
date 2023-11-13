@@ -250,7 +250,7 @@ class GUI:
 
             psim.SameLine()
             if(psim.Button("Viz rolling buffers")):
-                self.update_render_view_viz(force=True)
+                self.update_cloud_viz()
                 self.populate_rolling_buffers()
 
             psim.PopItemWidth()
