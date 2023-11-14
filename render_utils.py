@@ -226,18 +226,19 @@ def eval_ray_chunk(i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, 
     return ray_rad, ray_opacity, ray_dist, ray_ohit, ray_err_backprop_proxy, g_weight_accum
 
 
-def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, clamp_rad=True, clamp_rad_min_bound=0.0001):
+def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, clamp_rad=True, clamp_rad_min_bound=0.001,
+                       evaluation_strategy="algebraic" # either 'geometric' or 'analytic'
+                       ):
     """
-    Evaluate the response of gaussians. All inputs are [N_gaussian,...]
+    Evaluate the response of Gaussians. All inputs are [N_gaussian,...]
     """
 
     grotMat = quaternion_to_so3(grot)
     giscl = 1. / gscl
 
-    gdir = safe_normalize(gpos - rays_o) # this sign is weird... for consistency?
     sh_dim = (sph_deg+1) ** 2
     gsh_reshape = gsh.reshape(gsh.shape[0], sh_dim, 3)
-    grad = eval_sh(sph_deg, gsh_reshape, gdir) + 0.5
+    grad = eval_sh(sph_deg, gsh_reshape, safe_normalize(gpos - rays_o)) + 0.5 # this sign is weird... for consistency?) 
 
     if clamp_rad:
         grad = torch.where(grad > clamp_rad_min_bound,
@@ -245,21 +246,52 @@ def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, cla
                     torch.exp(grad - clamp_rad_min_bound) * clamp_rad_min_bound
                 )
 
-    gposc = rays_o - gpos
-    gposcr = torch.bmm(gposc[:,None,:],grotMat)[:,0,:]
-    gro = giscl * gposcr
-    rayDirR = torch.bmm(rays_d[:,None,:],grotMat)[:,0,:]
-    grdu = giscl * rayDirR
-    grd = safe_normalize(grdu)
-    gcrod = torch.linalg.cross(grd, gro, dim=-1)
-    grayDir = torch.linalg.vecdot(gcrod, gcrod, dim=-1)
-    gres = torch.exp(-0.5 * grayDir)
-    galpha = gres[:,None] * gdns
+    match evaluation_strategy:
+        case "geometric":
+            gposc = rays_o - gpos
+            gposcr = torch.bmm(gposc[:,None,:],grotMat)[:,0,:]
+            gro = giscl * gposcr
+            rayDirR = torch.bmm(rays_d[:,None,:],grotMat)[:,0,:]
+            grdu = giscl * rayDirR
+            grd = safe_normalize(grdu)
+            gcrod = torch.linalg.cross(grd, gro, dim=-1)
+            grayDir = torch.linalg.vecdot(gcrod, gcrod, dim=-1)
+            gres = torch.exp(-0.5 * grayDir)
+            galpha = gres[:,None] * gdns
 
-    # Analytical distance computation as the *maximum* Gaussian response along the ray
-    # Derived as the distance t along the ray that maximizes the Gaussian exponent s(t) = ((x+t*d) - μ)' * inv(Σ) * ((x+t*d) - μ)
-    # ∇_t s = 2x'*inv(Σ)*d + 2d'*inv(Σ)*d*t - 2*μ*inv(Σ)*d ⊜ 0
-    # → t = (μ - x)'*inv(Σ)*d / d'*inv(Σ)*d = (μ - x)'*ḋ / d'*ḋ with ḋ = inv(Σ)*d
-    gdist = (torch.linalg.vecdot(-gposcr, grdu, dim=-1) / torch.linalg.vecdot(rays_d, grdu, dim=-1))[:,None]
+            grds = gscl * grd * torch.linalg.vecdot(grd, -1 * gro, dim=-1)[:,None]
+            gdist = torch.sqrt(torch.linalg.vecdot(grds, grds, dim=-1)[:,None])
+
+        case "algebraic":
+            # remap some names
+            R = grotMat # BUG(?): is it transforming columns or rows / and in which direction?
+
+            # scale = gscl            
+            inv_scale = giscl
+
+            μ = gpos
+            x = rays_o
+            d = rays_d
+
+            # Covariances are parameterized by Σ = R @ S @ S^T @ R^T
+            sigma_inv = torch.einsum("bij,bj,bj,bkj->bik", R, inv_scale, inv_scale, R) # inv(Σ) = R @ inv(S^T) @ inv(S) @ R^T
+
+            # Analytical distance computation as the *maximum* Gaussian response along the ray
+            # Derived as the distance t along the ray that maximizes the Gaussian exponent s(t) = ((x+t*d) - μ)' * inv(Σ) * ((x+t*d) - μ)
+            # ∇_t s = 2x'*inv(Σ)*d + 2d'*inv(Σ)*d*t - 2*μ*inv(Σ)*d ⊜ 0
+            # → t = (μ - x)'*inv(Σ)*d / d'*inv(Σ)*d = (μ - x)'*ḋ / d'*ḋ with ḋ = inv(Σ)*d
+            ḋ = torch.einsum("bij,bj->bi", sigma_inv, d) # ḋ = inv(Σ)*d
+            t = (torch.einsum("bi,bi->b", μ - x, ḋ) / torch.einsum("bi,bi->b", d, ḋ)) # (μ - x)'*ḋ / d'*ḋ
+
+            # Vector to maximum point on ray relative to Gaussian center
+            m = (x + torch.einsum("b,bi->bi", t, d)) - μ # m = (x + t*d) - μ
+
+            # Evaluate Gaussian on maximum points
+            p = torch.einsum("bj,bij,bi->b", m, sigma_inv, m) # m' * inv(Σ) * m
+            gaussian_response = torch.exp(-0.5 * p)
+            
+            # outputs
+            galpha = gaussian_response[:,None] * gdns
+            gdist = t[:,None]
 
     return grad, galpha, gdist
