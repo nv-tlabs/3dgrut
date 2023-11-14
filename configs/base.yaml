@@ -116,7 +116,7 @@ render:
   patch_size: 1
   gaussian_sigma_threshold: 3.0
   min_transmittance: 0.03
-  chunk_size : 64000  # only used for method: torch. decrease to trade speed for peak memory usage
+  chunk_size : 250000  # only used for method: torch. decrease to trade speed for peak memory usage
 
 loss:
   use_ssim: True
