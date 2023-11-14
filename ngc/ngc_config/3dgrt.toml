@@ -1,4 +1,3 @@
-
 name = "3dgrt_app"
 description = "Running our 3D gaussian ray tracing code."
 # This command is run before any other specified commands (see README)
@@ -26,3 +25,4 @@ mode = "RW"
 [docker]
 team = "nvidian/ct-toronto-ai"
 name = "3dgrt"
+tag = "main"
