@@ -374,7 +374,7 @@ def main(conf: DictConfig) -> None:
                     parameters = model.get_model_parameters()
                     parameters |= {"global_step": global_step, "epoch": epoch_idx}
                     torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
-
+                
                 # Densify the Gaussians
                 if global_step > conf.model.densify.start_iteration and  global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
                     model.densify_gaussians(scene_extent=scene_extent)
@@ -383,6 +383,12 @@ def main(conf: DictConfig) -> None:
                 # Prune the Gaussians 
                 if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
                     model.prune_gaussians_opacity()
+                    model.prune_gaussians_weight()
+                    scene_updated = True
+                
+                # Error-densify the Gaussians
+                if global_step > conf.model.error_densify.start_iteration and  global_step < conf.model.error_densify.end_iteration and global_step % conf.model.error_densify.frequency == 0:
+                    model.clone_gaussians_error()
                     scene_updated = True
 
                 # Prune the needle Gaussians 

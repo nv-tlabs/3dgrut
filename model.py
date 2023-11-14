@@ -439,8 +439,6 @@ class MixtureOfGaussians(torch.nn.Module):
                     group["params"][0] = torch.nn.Parameter(group["params"][0][mask].requires_grad_(True))
                     optimizable_tensors[group["name"]] = group["params"][0]
     
-        self.reset_rolling_buffers()
-
         return optimizable_tensors
     
 
@@ -608,10 +606,62 @@ class MixtureOfGaussians(torch.nn.Module):
             add_gaussians["features_specular"] = self.features_specular[mask]
 
         self.densify_postfix(add_gaussians)
+    
+    @torch.cuda.nvtx.range("clone_gaussians_error")
+    def clone_gaussians_error(self):
+        n_split = 1
 
+        # Clone points with high error ratio
+        # This roughly correspond to "what fraction of what this ray contributed was error"
+        error_ratio = self.rolling_error[:,0] / self.rolling_weight_contrib[:,0]
+        error_ratio_mask = error_ratio > self.conf.model.error_densify.error_ratio_threshold
+
+        mask = error_ratio_mask
+        
+        # stats
+        n_before = mask.shape[0]
+        n_clone = mask.sum()
+        print(f"Cloned {n_clone} / {n_before} ({n_clone/n_before*100:.2f}%) gaussians")
+
+        # sample new locations according to the shape of the sourcea gaussian
+        stds = self.get_scale()[mask]
+        means = torch.zeros((stds.size(0), 3),device="cuda")
+        samples = torch.normal(mean=means, std=stds)
+        rots = quaternion_to_so3(self.rotation[mask]).repeat(n_split,1,1)
+        new_pos = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_positions()[mask]
+
+        add_gaussians = {
+                "positions": new_pos,
+                "density":  self.density[mask],
+                "scale":  self.scale[mask, :],
+                "rotation": self.rotation[mask,:]
+            }
+
+        if self.feature_type == 'sh':
+            add_gaussians["features_albedo"] = self.features_albedo[mask]
+            add_gaussians["features_specular"] = self.features_specular[mask]
+
+        self.densify_postfix(add_gaussians)
+
+    def prune_gaussians_weight(self):
+        # Prune the Gaussians based on their weight
+        mask = self.rolling_weight_contrib[:,0] >= self.conf.model.prune.weight_threshold
+        print(self.rolling_weight_contrib[:,0].mean())
+
+        n_before = mask.shape[0]
+        n_prune = n_before - mask.sum()
+        print(f"Weight-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
+
+        self.prune_gaussians(mask)
+    
     def prune_gaussians_opacity(self):
         # Prune the Gaussians based on their opacity
         mask = self.get_density().squeeze() >= self.prune_density_threshold
+
+        n_before = mask.shape[0]
+        n_prune = n_before - mask.sum()
+        print(f"Density-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
+
         self.prune_gaussians(mask)
 
     def prune_needles(self):
@@ -630,8 +680,11 @@ class MixtureOfGaussians(torch.nn.Module):
             self.positional_grad_norm_accum = self.positional_grad_norm_accum[valid_mask]
             self.positional_grad_norm_denom = self.positional_grad_norm_denom[valid_mask]
 
+        # TODO only touch these based on a densify method?
+        self.rolling_error = self.rolling_error[valid_mask]
+        self.rolling_weight_contrib = self.rolling_weight_contrib[valid_mask]
+
         torch.cuda.empty_cache()
-        self.reset_rolling_buffers()
 
     def get_scale(self, preactivation=False):
         if preactivation:
