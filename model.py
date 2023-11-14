@@ -574,6 +574,10 @@ class MixtureOfGaussians(torch.nn.Module):
 
         self.densify_postfix(add_gaussians)
 
+        # Prune away the Gaussians that were originally slected
+        valid = ~torch.cat((mask, torch.zeros(self.split_n_gaussians * mask.sum(), device="cuda", dtype=bool)))
+        self.prune_gaussians(valid)
+
 
     @torch.cuda.nvtx.range("clone_gaussians")
     def clone_gaussians(self, positional_grad_norm: torch.Tensor, scene_extent: float):
@@ -600,6 +604,11 @@ class MixtureOfGaussians(torch.nn.Module):
         # Prune the Gaussians based on their opacity
         mask = self.get_density().squeeze() >= self.prune_density_threshold
         self.prune_gaussians(mask)
+
+    def prune_needles(self):
+        # Prune small needle gaussians 
+        mask = torch.min(self.get_scale(),dim=1).values >= self.conf.model.prune_needles.min_scale_threshold
+        self.prune_gaussians(mask.squeeze())
 
     @torch.cuda.nvtx.range("prune_gaussians")
     def prune_gaussians(self, valid_mask):

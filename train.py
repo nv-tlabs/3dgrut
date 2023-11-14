@@ -345,6 +345,11 @@ def main(conf: DictConfig) -> None:
                     model.prune_gaussians_opacity()
                     scene_updated = True
 
+                # Prune the needle Gaussians 
+                if global_step > conf.model.prune_needles.start_iteration and global_step < conf.model.prune_needles.end_iteration and global_step % conf.model.prune_needles.frequency == 0:
+                    model.prune_needles()
+                    scene_updated = True
+
                 # Reset the Gaussian density 
                 if global_step > conf.model.reset_density.start_iteration and global_step < conf.model.reset_density.end_iteration and global_step % conf.model.reset_density.frequency == 0:
                     model.reset_density()
