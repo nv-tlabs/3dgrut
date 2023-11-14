@@ -12,7 +12,8 @@ from utils import to_np
 
 
 class NeRFDataset(Dataset):
-    def __init__(self, root_dir, split='train', sample_full_image=False, batch_size=8192, return_alphas=False, **kwargs):
+    def __init__(self, root_dir, split='train', sample_full_image=False, batch_size=8192, return_alphas=False,
+                 ray_jitter=None, **kwargs):
         self.root_dir = root_dir 
         self.split = split
         
@@ -20,6 +21,7 @@ class NeRFDataset(Dataset):
         self.batch_size = batch_size
 
         self.return_alphas = return_alphas
+        self.ray_jitter = ray_jitter
 
         self.read_intrinsics()
         self.read_meta(split)
@@ -45,7 +47,7 @@ class NeRFDataset(Dataset):
                         [0,  0,   1]])
 
         self.K = torch.FloatTensor(K)
-        self.directions = get_ray_directions(h, w, self.K)
+        self.directions = get_ray_directions(h, w, self.K, ray_jitter=self.ray_jitter)
         self.img_wh = (w, h)
 
 

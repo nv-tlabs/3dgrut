@@ -6,7 +6,7 @@ import torch
 import numpy as np
 
 @torch.cuda.amp.autocast(dtype=torch.float32)
-def get_ray_directions(H, W, K, device='cpu', random=False, return_uv=False, flatten=True):
+def get_ray_directions(H, W, K, device='cpu', ray_jitter=None, return_uv=False, flatten=True):
     """
     Get ray directions for all pixels in camera coordinate [right down front].
     Reference: https://www.scratchapixel.com/lessons/3d-basic-rendering/
@@ -15,7 +15,7 @@ def get_ray_directions(H, W, K, device='cpu', random=False, return_uv=False, fla
     Inputs:
         H, W: image height and width
         K: (3, 3) camera intrinsics
-        random: whether the ray passes randomly inside the pixel
+        ray_jitter: Optional RayJitter component, for whether the ray passes randomly inside the pixel
         return_uv: whether to return uv image coordinates
 
     Outputs: (shape depends on @flatten)
@@ -26,14 +26,11 @@ def get_ray_directions(H, W, K, device='cpu', random=False, return_uv=False, fla
     u, v = grid.unbind(-1)
 
     fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
-    if random:
-        directions = \
-            torch.stack([(u-cx+torch.rand_like(u))/fx,
-                         (v-cy+torch.rand_like(v))/fy,
-                         torch.ones_like(u)], -1)
-    else: # pass by the center
-        directions = \
-            torch.stack([(u-cx+0.5)/fx, (v-cy+0.5)/fy, torch.ones_like(u)], -1)
+    if ray_jitter is None: # pass by the center
+        directions = torch.stack([(u - cx + 0.5) / fx, (v - cy + 0.5) / fy, torch.ones_like(u)], -1)
+    else:
+        jitter = ray_jitter(u.shape)
+        directions = torch.stack([((u + jitter[:,:,0]) - cx) / fx, ((v + jitter[:,:,1]) - cy) / fy, torch.ones_like(u)], -1)
     if flatten:
         directions = directions.reshape(-1, 3)
         grid = grid.reshape(-1, 2)
