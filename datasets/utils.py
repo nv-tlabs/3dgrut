@@ -15,13 +15,14 @@ DEFAULT_DEVICE = torch.device('cuda')
 
 @torch.cuda.nvtx.range("move_to_gpu")
 def move_to_gpu(batch : dict | NCoreBatch) -> dict[str, torch.Tensor]:
-    gpu_batch: dict[str, torch.Tensor]  # expecting 'rays_ori', 'rays_dir', 'rgb_gt', optional 'sky_mask', 'alphas'
+    gpu_batch: dict[str, torch.Tensor]  # expecting 'rays_ori', 'rays_dir', 'rgb_gt', optional 'sky_mask', 'alphas', 'lidar_rays_ori', 'lidar_rays_dir', 'lidar_dist_gt'
 
     if isinstance(batch, dict):
         gpu_batch = {key: tensor.to(device=DEFAULT_DEVICE) for key,tensor in batch.items()}
     else:
         # Reshape NCore batch to target sizes (B x H x W x F) / (B x 1 x N x F)
         if (h := batch.h) is not None and (w := batch.w) is not None:
+            assert isinstance(h, list) and isinstance(w, list)
             assert len(h) == 1 and len(w) == 1
             out_shape3 = (1, h[0], w[0], 3)
             out_shape1 = (1, h[0], w[0], 1)
@@ -29,6 +30,8 @@ def move_to_gpu(batch : dict | NCoreBatch) -> dict[str, torch.Tensor]:
             out_shape3 = (1, 1, len(batch.rays_cam), 3)
             out_shape1 = (1, 1, len(batch.rays_cam), 1)
 
+        # Camera data
+        assert batch.labels.rgb is not None
         gpu_batch = {
              "rays_ori": batch.rays_cam[:, :3].reshape(out_shape3).to(device=DEFAULT_DEVICE),
              "rays_dir": batch.rays_cam[:, 3:6].reshape(out_shape3).to(device=DEFAULT_DEVICE),
@@ -36,6 +39,17 @@ def move_to_gpu(batch : dict | NCoreBatch) -> dict[str, torch.Tensor]:
              "sky_mask": batch.rays_cam_meta.get_mask_flags_all(NCoreRayFlags.SKY_SEMANTIC).reshape(out_shape1).to(device=DEFAULT_DEVICE),
             # NCore doesn't support 'alpha' channels
         }
+
+        # Lidar data
+        if batch.rays_lidar is not None:
+            out_shape3_lidar = (1, 1, len(batch.rays_lidar), 3)
+            out_shape1_lidar = (1, 1, len(batch.rays_lidar), 1)
+            assert batch.labels.lidar is not None
+            gpu_batch |= {
+                "lidar_rays_ori": batch.rays_lidar[:, :3].reshape(out_shape3_lidar).to(device=DEFAULT_DEVICE),
+                "lidar_rays_dir": batch.rays_lidar[:, 3:6].reshape(out_shape3_lidar).to(device=DEFAULT_DEVICE),
+                "lidar_dist_gt": batch.labels.lidar.reshape(out_shape1_lidar).to(device=DEFAULT_DEVICE),
+            }
 
     return gpu_batch
 

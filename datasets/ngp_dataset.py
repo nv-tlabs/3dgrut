@@ -19,13 +19,14 @@ from utils import to_torch
 
 
 class NGPDataset(Dataset):
-    def __init__(self, root_dir, split="train", batch_size=8192, use_lidar=False, sample_full_image=False, val_downsample=1, max_dist_m=150, use_dynamic_masks=False, val_frame_subsample=5, use_aux=False):
+    def __init__(self, root_dir, split="train", batch_size=8192, batch_size_lidar=0, use_lidar=False, sample_full_image=False, val_downsample=1, max_dist_m=150, use_dynamic_masks=False, val_frame_subsample=5, use_aux=False):
         super().__init__()
 
         # store relevant parameters from config
         self.path: str = root_dir
         self.split: str = split
         self.batch_size: int = batch_size
+        self.batch_size_lidar: int = batch_size_lidar
         self.use_lidar: bool = use_lidar
         self.sample_full_image: bool = sample_full_image
         self.val_downsample: int = val_downsample
@@ -396,7 +397,6 @@ class NGPDataset(Dataset):
                 self.camera_distortion_mode,
             )
 
-
             rays_o = rays[..., :3]
             rays_d = rays[..., 3:]
 
@@ -407,8 +407,32 @@ class NGPDataset(Dataset):
                 "rays_dir":rays_d.reshape(out_shape), 
                 "rgb_gt":rgbs.reshape(out_shape),
             }
+
             if self.aux_data:
                 sample["sky_mask"]= (self.semantic_masks[idxs] == self.sky_class_id).squeeze().reshape(out_shape[0],out_shape[1],1)
+
+            if len(self.lidars) > 0 and self.batch_size_lidar > 0:
+                idx_lidar = np.random.randint(0, len(self.lidars))
+
+                idxs_lidar = np.random.choice(self.lidars[idx_lidar].n_valid_rays, self.batch_size_lidar)
+
+                rays_lidar = self.lidars[idx_lidar].rays[idxs_lidar]
+                assert isinstance(rays_lidar, np.ndarray), "[NGPAVDataset] rays_lidar must be a numpy array"
+
+                rays_dist = np.linalg.norm(rays_lidar[:, 3:6], axis=1)
+                rays_lidar[:, 3:6] /= rays_dist.reshape(-1, 1)  # normalized
+
+                rays_lidar_o = rays_lidar[..., :3]
+                rays_lidar_d = rays_lidar[..., 3:]
+
+                out_shape3_lidar = (1, -1, 3)
+                out_shape1_lidar = (1, -1, 1)
+
+                sample |= {
+                    "lidar_rays_ori": rays_lidar_o.reshape(out_shape3_lidar),
+                    "lidar_rays_dir": rays_lidar_d.reshape(out_shape3_lidar),
+                    "lidar_dist_gt": rays_dist.reshape(out_shape1_lidar),
+                }
 
             return sample
         elif self.split == 'val':
