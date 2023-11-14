@@ -13,6 +13,7 @@ from datasets.utils import PointCloud
 from geometry import nearest_neighbor_dist_cpuKD
 import background
 from color import RGB2SH
+from render_utils import evaluate_rays
 
 class MixtureOfGaussians(torch.nn.Module):
     def __init__(self, conf, scene_extent=None):
