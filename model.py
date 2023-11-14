@@ -11,6 +11,7 @@ from utils import to_torch, get_activation_function, inverse_sigmoid, get_schedu
 from datasets.colmap_utils import read_next_bytes
 from datasets.utils import PointCloud
 from geometry import nearest_neighbor_dist_cpuKD
+from utils import to_np
 import background
 from color import RGB2SH
 from render_utils import evaluate_rays
@@ -128,6 +129,9 @@ class MixtureOfGaussians(torch.nn.Module):
                 read_next_bytes(file, num_bytes=8 * t_len, format_char_sequence="ii" * t_len)
 
         file_rgb = file_rgb / 255.
+
+        file_pts = torch.tensor(file_pts, dtype=torch.float32, device=self.device)
+        file_rgb = torch.tensor(file_rgb, dtype=torch.float32, device=self.device)
 
         self.default_initialize_from_points(file_pts, observer_pts, file_rgb)
 
@@ -273,7 +277,7 @@ class MixtureOfGaussians(torch.nn.Module):
         if colors is None:
             features_albedo = torch.rand((N, 3), dtype=dtype, device=self.device) / 255.0
         else:
-            features_albedo = to_torch(RGB2SH(colors))
+            features_albedo = to_torch(RGB2SH(to_np(colors)), device=self.device)
                                        
         num_specular_dims = sh_degree_to_specular_dim(self.max_n_features)
         features_specular = torch.zeros((N, num_specular_dims))
