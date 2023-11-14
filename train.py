@@ -346,9 +346,6 @@ def main(conf: DictConfig) -> None:
                 if global_step < conf.model.densify.end_iteration:
                     model.update_densification_buffer(rays_ori, rays_dir)
 
-                with torch.cuda.nvtx.range("backpropagation"):
-                    model.optimizer.step()
-                    model.optimizer.zero_grad()
 
                 it_end.record()
 
@@ -389,11 +386,14 @@ def main(conf: DictConfig) -> None:
                 if global_step > conf.model.prune_needles.start_iteration and global_step < conf.model.prune_needles.end_iteration and global_step % conf.model.prune_needles.frequency == 0:
                     model.prune_needles()
                     scene_updated = True
+                    
+                # Decay the density values
+                if global_step > conf.model.density_decay.start_iteration and global_step < conf.model.density_decay.end_iteration and global_step % conf.model.density_decay.frequency == 0:
+                    model.decay_density()
 
                 # Reset the Gaussian density 
                 if global_step > conf.model.reset_density.start_iteration and global_step < conf.model.reset_density.end_iteration and global_step % conf.model.reset_density.frequency == 0:
                     model.reset_density()
-                    scene_updated = True
 
                 # SH: Every N its we increase the levels of SH up to a maximum degree
                 # MLP: Every N we further unmask additional dimensions
@@ -414,6 +414,10 @@ def main(conf: DictConfig) -> None:
                     ps.frame_tick()
                     while not gui.viz_do_train:
                         ps.frame_tick()
+
+                with torch.cuda.nvtx.range("backpropagation"):
+                    model.optimizer.step()
+                    model.optimizer.zero_grad()
 
     recorder.submit_recording(
         dataset=train_dataset,

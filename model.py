@@ -388,11 +388,15 @@ class MixtureOfGaussians(torch.nn.Module):
         mask[0,:active_features] = 1.0
         return mask
 
+    def decay_density(self):
+        decayed_densities = inverse_sigmoid(self.get_density() * self.conf.model.density_decay.gamma)
+        optimizable_tensors = self.replace_tensor_to_optimizer(decayed_densities, "density")
+        self.density = optimizable_tensors["density"]
+
     def reset_density(self):
         updated_densities = inverse_sigmoid(torch.min(self.get_density(), torch.ones_like(self.density) * self.new_max_density))
         optimizable_tensors = self.replace_tensor_to_optimizer(updated_densities, "density")
         self.density = optimizable_tensors["density"]
-
 
     def reset_rolling_buffers(self):
         self.rolling_error = torch.zeros_like(self.density)
