@@ -205,8 +205,6 @@ class GUI:
             self.viz_render_scalar_buffer.update_data_from_device(sple_odist.detach())
 
     def populate_rolling_buffers(self):
-        self.ps_point_cloud = ps.register_point_cloud("centers", to_np(self.model.get_positions()))
-
         self.ps_point_cloud.add_scalar_quantity("rolling_error", to_np(self.model.rolling_error[:,0]))
         self.ps_point_cloud.add_scalar_quantity("rolling_weights", to_np(self.model.rolling_weight_contrib[:,0]))
         self.ps_point_cloud.add_scalar_quantity("rolling_error / rolling_weight_contrib", to_np(self.model.rolling_error[:,0]/self.model.rolling_weight_contrib[:,0]))
