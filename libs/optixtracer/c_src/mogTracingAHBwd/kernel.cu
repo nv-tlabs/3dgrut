@@ -75,8 +75,10 @@ extern "C" __global__ void __raygen__rg()
     float rayError[MOGTracingPatchSize][MOGTracingPatchSize];
     float accumulatedRayTrm[MOGTracingPatchSize][MOGTracingPatchSize];
 
+    float totalRayHit[MOGTracingPatchSize][MOGTracingPatchSize];
     float rayHitGrd[MOGTracingPatchSize][MOGTracingPatchSize];
-    
+    float accumulatedRayHit[MOGTracingPatchSize][MOGTracingPatchSize];
+
     const int startIdxX = idx.x * MOGTracingPatchSize;
     const int startIdxY = idx.y * MOGTracingPatchSize;
 
@@ -110,7 +112,9 @@ extern "C" __global__ void __raygen__rg()
             rayError[j][i] = params.rayError[idx.z][y][x][0];
             accumulatedRayTrm[j][i] = 1 - params.rayDns[idx.z][y][x][0];
 
+            totalRayHit[j][i] = params.rayHit[idx.z][y][x][0];
             rayHitGrd[j][i] = params.rayHitGrd[idx.z][y][x][0];
+            accumulatedRayHit[j][i] = 0;
         }
     }
 
@@ -200,14 +204,24 @@ extern "C" __global__ void __raygen__rg()
                         const float gdist = sqrtf(gsqdist);
 
                         const float weight = galpha * rayTrm[k][j];
-                        
+
+                        const float nextTransmit = (1 - galpha) * rayTrm[k][j];
+                                   
+                        // ---> hitT = accumulatedHitT + galpha * prevTrm * gdist + (1-galpha) * prevTrm * residualHitT
+                        accumulatedRayHit[k][j] += weight * gdist;
+                        const float residualHitT =
+                            fmaxf((nextTransmit <= minTransmittance ?
+                                       0 :
+                                       (totalRayHit[k][j] - accumulatedRayHit[k][j]) / nextTransmit),
+                                  0);
+
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-                        // ---> hitT = gdist * weight
-                        //           = gdist * ( galpha * prevTrm )
-                        // 
-                        // ===> d_hitT / d_galpha = gidst * prevTrm 
+                        // ---> hitT = accumulatedHitT + galpha * prevTrm * gdist + (1-galpha) * prevTrm * residualHitT
                         //
-                        const float galphaRayHitGrd = gdist * rayTrm[k][j] * rayHitGrd[k][j];
+                        // ===> d_hitT / d_galpha = gdist * prevTrm - residualHitT * prevTrm
+                        //                        = (gdist - residualHitT) * prevTrm
+                        //
+                        const float galphaRayHitGrd = (gdist - residualHitT) * rayTrm[k][j] * rayHitGrd[k][j];
                         //
                         // ===> d_hitT / d_gsqdist = weight / (2*gdist)
                         // ===> d_gsqdist / d_grds =  2 * grds                        
@@ -243,7 +257,6 @@ extern "C" __global__ void __raygen__rg()
                         // >>> rayRadiance = accumulatedRayRad + weigth * rayRad + (1-galpha)*transmit * residualRayRad
                         const float3 rayRad = weight * grad;
                         accumulatedRayRad[k][j] += rayRad;
-                        const float nextTransmit = (1 - galpha) * rayTrm[k][j];
                         const float3 residualRayRad = maxf3((nextTransmit <= minTransmittance ?
                                                                  make_float3(0) :
                                                                  (totalRayRad[k][j] - accumulatedRayRad[k][j]) / nextTransmit),
