@@ -15,6 +15,12 @@ dataset:
   train:
     sample_full_image: True
 
+    ray_jittering:
+      type: stratified             # Choose from: 'none', 'stratified', 'random'
+      start_iteration: 500         # Start jittering from iteration N
+      num_samples: 16              # 'stratified' jittering only -- number of subsamples to use in pattern
+      apply_every_n_iterations: 1  # 1 for applying every iteration, 2 for applying every other iteration
+
 model:
   background:
     name: background-color

@@ -20,6 +20,7 @@ from datasets.ngp_dataset import NGPDataset
 from datasets.ncore_dataset import NCoreDataset
 from datasets.ncore_utils import Batch as NCoreBatch
 from datasets.utils import PointCloud
+from antialiasing import StratifiedRayJitter, RandomRayJitter
 from model import MixtureOfGaussians
 from background import BackgroundColor
 from datasets.utils import move_to_gpu
@@ -47,13 +48,34 @@ def main(conf: DictConfig) -> None:
     val_dataset: torch.utils.data.Dataset
     train_collate_fn = None
     val_collate_fn = None
+
+    ray_jitter=None
+    if conf.dataset.train.ray_jittering.type == 'none':
+        pass
+    elif conf.dataset.train.ray_jittering.type == 'random':
+        ray_jitter = RandomRayJitter(
+            enabled=False,  # Start jittering from iteration N
+            apply_every_n_iterations=conf.dataset.train.ray_jittering.apply_every_n_iterations,
+            device='cpu'
+        )
+    elif conf.dataset.train.ray_jittering.type == 'stratified':
+        ray_jitter = StratifiedRayJitter(
+            enabled=False,  # Start jittering from iteration N
+            apply_every_n_iterations=conf.dataset.train.ray_jittering.apply_every_n_iterations,
+            num_samples=conf.dataset.train.ray_jittering.num_samples,
+            device='cpu'
+        )
+    else:
+        raise ValueError(f'Unknown ray jitter type: {conf.dataset.train.ray_jittering.type}')
+
     if conf.dataset.type == 'nerf':
         train_dataset = NeRFDataset(
             conf.path, 
             split='train', 
             sample_full_image=conf.dataset.train.sample_full_image, 
             batch_size=conf.dataset.train.batch_size,
-            return_alphas=True
+            return_alphas=True,
+            ray_jitter=ray_jitter
         )
         val_dataset = NeRFDataset(
             conf.path,
@@ -243,6 +265,8 @@ def main(conf: DictConfig) -> None:
 
         with tqdm(train_dataloader) as pbar:
             for batch in pbar:
+                if ray_jitter is not None and conf.dataset.train.ray_jittering.start_iteration >= global_step:
+                    ray_jitter.enabled = True
                 with torch.cuda.nvtx.range(f"train.train_step_{global_step}"):
                     it_start.record()
                     # Move data to GPU
