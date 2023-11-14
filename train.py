@@ -278,6 +278,8 @@ def main(conf: DictConfig) -> None:
                     writer.add_scalar("psnr/val", np.mean(val_psnr), global_step)
                     writer.add_scalar("loss_l1/val", np.mean(val_loss), global_step)
 
+                    print(f"Validation: {np.mean(val_psnr):.3f}")
+
                     recorder.record_metrics(iteration=global_step, psnr=val_psnr, loss=val_loss)
 
         with tqdm(train_dataloader) as pbar:
@@ -372,6 +374,10 @@ def main(conf: DictConfig) -> None:
                     if conf.model.densify.method == 'gradient-buffer':
                         model.update_gradient_buffer(rays_ori, rays_dir)
 
+
+                # clamp density
+                if conf.model.density_activation == "none":
+                    model.clamp_density()
 
                 it_end.record()
 
