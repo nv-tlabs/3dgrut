@@ -105,7 +105,7 @@ def RGB2SH(rgb):
 def SH2RGB(sh):
     return sh * C0 + 0.5
 
-def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, err_targets, sph_deg, chunk_size=10000):
+def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, err_targets, sph_deg, chunk_size):
     """
     """
     device = rays_o.device
@@ -256,7 +256,10 @@ def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, cla
     gres = torch.exp(-0.5 * grayDir)
     galpha = gres[:,None] * gdns
 
-    grds = gscl * grd * torch.linalg.vecdot(grd, -1 * gro, dim=-1)[:,None]
-    gdist = torch.sqrt(torch.linalg.vecdot(grds, grds, dim=-1)[:,None])
+    # Analytical distance computation as the *maximum* Gaussian response along the ray
+    # Derived as the distance t along the ray that maximizes the Gaussian exponent s(t) = ((x+t*d) - μ)' * inv(Σ) * ((x+t*d) - μ)
+    # ∇_t s = 2x'*inv(Σ)*d + 2d'*inv(Σ)*d*t - 2*μ*inv(Σ)*d ⊜ 0
+    # → t = (μ - x)'*inv(Σ)*d / d'*inv(Σ)*d = (μ - x)'*ḋ / d'*ḋ with ḋ = inv(Σ)*d
+    gdist = (torch.linalg.vecdot(-gposcr, grdu, dim=-1) / torch.linalg.vecdot(rays_d, grdu, dim=-1))[:,None]
 
     return grad, galpha, gdist
