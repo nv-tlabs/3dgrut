@@ -381,25 +381,34 @@ def main(conf: DictConfig) -> None:
                 recorder.report_statistics(writer=writer)
 
                 # Save the checkpoint
-                if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
-                    parameters = model.get_model_parameters()
-                    parameters |= {"global_step": global_step, "epoch": epoch_idx}
-                    torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
+                with torch.cuda.nvtx.range(f"ckpt_save"):
+                    if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
+                        parameters = model.get_model_parameters()
+                        parameters |= {"global_step": global_step, "epoch": epoch_idx}
+                        torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
 
                 # Densify the Gaussians
-                if global_step > conf.model.densify.start_iteration and global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
+                if global_step > conf.model.densify.start_iteration and  global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
                     model.densify_gaussians(scene_extent=scene_extent)
                     scene_updated = True
 
-                # Prune the Gaussians
+                # Prune the Gaussians 
                 if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
-                    model.prune_gaussians()
+                    model.prune_gaussians_opacity()
                     scene_updated = True
+
+                # Prune the needle Gaussians 
+                if global_step > conf.model.prune_needles.start_iteration and global_step < conf.model.prune_needles.end_iteration and global_step % conf.model.prune_needles.frequency == 0:
+                    model.prune_needles()
+                    scene_updated = True
+                    
+                # Decay the density values
+                if global_step > conf.model.density_decay.start_iteration and global_step < conf.model.density_decay.end_iteration and global_step % conf.model.density_decay.frequency == 0:
+                    model.decay_density()
 
                 # Reset the Gaussian density 
                 if global_step > conf.model.reset_density.start_iteration and global_step < conf.model.reset_density.end_iteration and global_step % conf.model.reset_density.frequency == 0:
                     model.reset_density()
-                    scene_updated = True
 
                 # SH: Every N its we increase the levels of SH up to a maximum degree
                 # MLP: Every N we further unmask additional dimensions
@@ -409,6 +418,21 @@ def main(conf: DictConfig) -> None:
                 # Update the BVH if required
                 if scene_updated or (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
                     model.build_bvh()
+                
+                if gui is not None:
+                    if gui.live_update:
+                        if scene_updated or model.get_positions().requires_grad:
+                            gui.update_cloud_viz()
+            
+                        gui.update_render_view_viz()
+
+                    ps.frame_tick()
+                    while not gui.viz_do_train:
+                        ps.frame_tick()
+
+                with torch.cuda.nvtx.range("backpropagation"):
+                    model.optimizer.step()
+                    model.optimizer.zero_grad()
 
 
                 # Update the error buffers with new values
@@ -525,12 +549,8 @@ def main(conf: DictConfig) -> None:
                 # Prune the Gaussians based on their opacity
                 if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
                     model.prune_gaussians_opacity()
-<<<<<<< HEAD
                     scene_updated = True
 
-=======
-                
->>>>>>> f2295c6 (fix issues after rebase)
                 # Prune the Gaussians based on their contribution weight
                 if global_step > conf.model.prune_weight.start_iteration and global_step < conf.model.prune_weight.end_iteration and global_step % conf.model.prune_weight.frequency == 0:
                     if conf.model.log_rolling_buffers:
