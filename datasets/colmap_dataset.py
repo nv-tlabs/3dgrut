@@ -12,13 +12,15 @@ from utils import to_torch, to_np
 
 class ColmapDataset(Dataset):
 
-    def __init__(self, path, split='train', sample_full_image=False, batch_size=8192, downsample_factor=1):
+    def __init__(self, path, split='train', sample_full_image=False, batch_size=8192, downsample_factor=1,
+                 ray_jitter=None):
         self.path = path
         self.split = split
         self.llff_test_split = 8
         self.sample_full_image = sample_full_image
         self.batch_size = batch_size
         self.downsample_factor = downsample_factor
+        self.ray_jitter = ray_jitter
 
         try:
             cameras_extrinsic_file = os.path.join(self.path, "sparse/0", "images.bin")
@@ -177,7 +179,10 @@ class ColmapDataset(Dataset):
                 v = np.random.choice(self.image_h, self.batch_size, replace=True)
                 out_shape = (1,self.batch_size,3)
 
-            rays_o_cam, rays_d_cam = pinhole_camera_rays(u, v, self.intrinsic[frame_idx,0], self.intrinsic[frame_idx,1], self.image_w, self.image_h)
+            rays_o_cam, rays_d_cam = pinhole_camera_rays(u, v,
+                                                         self.intrinsic[frame_idx,0], self.intrinsic[frame_idx,1],
+                                                         self.image_w, self.image_h,
+                                                         self.ray_jitter)
 
             rays_o, rays_d = camera_to_world_rays(rays_o_cam, rays_d_cam, self.poses[frame_idx])
 

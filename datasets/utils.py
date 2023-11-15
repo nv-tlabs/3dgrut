@@ -87,14 +87,21 @@ def fov2focal(fov_radians: float, pixels: int):
 def focal2fov(focal: float, pixels: int):
     return 2*math.atan(pixels/(2*focal))
 
-def pinhole_camera_rays(x, y, f_x, f_y, w, h):
+def pinhole_camera_rays(x, y, f_x, f_y, w, h, ray_jitter=None):
     """ return 
         ray_origin (sz_y, sz_x, 3) 
         normalized ray_direction (sz_y, sz_x, 3)
     """
-    
-    xs = ((x + 0.5) - 0.5 * w) / f_x
-    ys = ((y + 0.5) - 0.5 * h) / f_y
+
+    if ray_jitter is not None:
+        jitter = ray_jitter(x.shape).numpy()
+        jitter_xs = jitter[:,0]
+        jitter_ys = jitter[:,1] 
+    else:
+        jitter_xs = jitter_ys = 0.5
+
+    xs = ((x + jitter_xs) - 0.5 * w) / f_x
+    ys = ((y + jitter_ys) - 0.5 * h) / f_y
 
     ray_lookat = np.stack((xs, ys, np.ones_like(xs)), axis=-1)
     ray_origin = np.zeros_like(ray_lookat)

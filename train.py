@@ -92,7 +92,8 @@ def main(conf: DictConfig) -> None:
             split='train', 
             sample_full_image=conf.dataset.train.sample_full_image, 
             batch_size=conf.dataset.train.batch_size,
-            downsample_factor=conf.dataset.downsample_factor
+            downsample_factor=conf.dataset.downsample_factor,
+            ray_jitter=ray_jitter
         )
         val_dataset = ColmapDataset(
             conf.path,
