@@ -20,14 +20,14 @@ from datasets.ngp_dataset import NGPDataset
 from datasets.ncore_dataset import NCoreDataset
 from datasets.ncore_utils import Batch as NCoreBatch
 from datasets.utils import PointCloud
-from antialiasing import StratifiedRayJitter, RandomRayJitter
-from model import MixtureOfGaussians
-from background import BackgroundColor, SkyMlp
+from models.antialiasing import StratifiedRayJitter, RandomRayJitter
+from models.model import MixtureOfGaussians
+from models.background import BackgroundColor
 from datasets.utils import move_to_gpu
-from loss_utils import ssim
-from utils import to_np
-from gui import GUI
-from recorder import TrainingRecorder
+from models.losses import ssim
+from utils.misc import to_np
+from utils.gui import GUI
+from utils.recorder import TrainingRecorder
 from render import Renderer
 sys.path.append(os.path.dirname(os.path.dirname(os.getcwd())))
 

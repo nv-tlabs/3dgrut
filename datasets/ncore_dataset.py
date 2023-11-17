@@ -45,7 +45,7 @@ from datasets.ncore_utils import (
 )
 from datasets.utils import PointCloud
 
-from utils import to_torch, to_torch_optional, unpack_optional
+from utils.misc import to_torch, to_torch_optional, unpack_optional
 
 
 def chunk_sizes(n: int, size: int) -> Generator[int, None, None]:

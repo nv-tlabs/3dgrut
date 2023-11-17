@@ -11,7 +11,7 @@ except ImportError:
     import packed_ops  # type: ignore
 
 from utils.tests import CommonTestCase, NonDeterministicTestCase
-from models.custom_modules import (
+from models.packed_ops_modules import (
     packed_cumsum,
     packed_cumprod,
     packed_add,

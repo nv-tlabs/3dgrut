@@ -8,7 +8,7 @@ from PIL import Image
 
 from datasets.nerf_utils import get_ray_directions, read_image, get_rays, create_camera_visualization
 from datasets.utils import get_center_and_diag
-from utils import to_np
+from utils.misc import to_np
 
 
 class NeRFDataset(Dataset):

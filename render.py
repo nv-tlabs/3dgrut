@@ -5,7 +5,7 @@ import os
 import numpy as np
 
 from tqdm import tqdm
-from model import MixtureOfGaussians
+from models.model import MixtureOfGaussians
 from datasets.utils import move_to_gpu
 
 from datasets.colmap_dataset import ColmapDataset

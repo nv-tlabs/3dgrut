@@ -15,7 +15,7 @@ import ray_utils  # type: ignore
 from datasets.utils import fov2focal
 from datasets.ngp_utils import load_pc_dat, nerf_ray_to_colmap, nerf_matrix_to_colmap
 from datasets.utils import PointCloud
-from utils import to_torch
+from utils.misc import to_torch
 
 
 class NGPDataset(Dataset):

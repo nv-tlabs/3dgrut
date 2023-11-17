@@ -2,8 +2,8 @@ import numpy as np
 import torch
 import polyscope as ps
 import polyscope.imgui as psim
-from utils import to_np
-from model import MixtureOfGaussians
+from utils.misc import to_np
+from models.model import MixtureOfGaussians
 
 import hydra
 from omegaconf import DictConfig, OmegaConf

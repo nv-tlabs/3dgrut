@@ -3,10 +3,10 @@ import numpy as np
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from packed_ops_modules import packed_cumprod, packed_sum
+from models.packed_ops_modules import packed_cumprod, packed_sum
 
-from utils import to_np, quaternion_to_so3
-from geometry import safe_normalize
+from utils.misc import to_np, quaternion_to_so3
+from models.geometry import safe_normalize
 
 ## NOTE: SPH code from gaussian-splatting, from plenoctree, from ???
 C0 = 0.28209479177387814
