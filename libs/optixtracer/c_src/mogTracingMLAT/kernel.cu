@@ -124,7 +124,7 @@ extern "C" __global__ void __raygen__rg()
 
 extern "C" __global__ void __anyhit__ah()
 {
-    const unsigned int gId = optixGetPrimitiveIndex() / MOGPrimNumTri;
+    const unsigned int gId = optixGetPrimitiveIndex() / params.gPrimNumTri;
 
     const float3 rayOri = optixGetWorldRayOrigin();
     const float3 rayDir = optixGetWorldRayDirection();

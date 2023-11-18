@@ -32,5 +32,6 @@ struct MoGIndTracingParams
     uint2 frameBounds;
     
     unsigned int frameNumber;
-    float3 padding;
+    unsigned int gPrimNumTri;
+    float2 padding;
 };

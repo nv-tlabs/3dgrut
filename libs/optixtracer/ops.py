@@ -173,6 +173,10 @@ def trace_mog_inds(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_d
     )
     return ray_hits
 
+@torch.cuda.nvtx.range("get_mog_primitives")
+def get_mog_primitives(optix_ctx):
+    return _plugin.get_mog_primitives(optix_ctx.cpp_wrapper)
+
 #----------------------------------------------------------------------------
 #
 @torch.cuda.nvtx.range("build_mog_bvh")

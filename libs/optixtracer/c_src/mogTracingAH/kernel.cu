@@ -160,7 +160,10 @@ extern "C" __global__ void __raygen__rg()
             // project ray in the gaussian
             float33 grotMat;
             rotationMatrix(make_float4(grot.x, grot.y, grot.z, grot.w), grotMat);
+            float33 invGrotMat;
+            invRotationMatrix(make_float4(grot.x, grot.y, grot.z, grot.w), invGrotMat);
             const float3 giscl = make_float3(1 / gscl.x, 1 / gscl.y, 1 / gscl.z);
+
 
             // NB : this is an approximation : we are using the sampleRayOri instead of the real rayOri we factorizing
             // the sph computation
@@ -185,20 +188,42 @@ extern "C" __global__ void __raygen__rg()
                         const float3 grd = safe_normalize(grdu);
                         const float3 gcrod = cross(grd, gro);
                         const float grayDir = dot(gcrod, gcrod);
-                        const float gres = expf(-0.5 * grayDir);
+                        float gres = expf(-0.5 * grayDir);
+
+                        // alternative computation
+                        const float hitT = fabs(dot(gro,grdu) / dot(grdu,grdu));
+                        //const float hitT = getRayGaussianHit(gro,grd,gscl);
+                        const float3 rh = rayOri[k][j] + rayDir[k][j]*hitT;
+                        const float3 grh=  giscl * ( (rh-gpos) * grotMat);
+                        const float grhd = expf(-0.5 * dot(grh,grh));
+                        gres = grhd;
+
+                        if (gres > params.minTransmittance)
+                        {
+                        
                         const float galpha = gres * gdns;
 
                         const float weight = galpha * rayTrm[k][j];
                         
                         // Distance to the gaussian center projection on the ray
-                        const float hitT = getRayGaussianHit(gro,grd,gscl);
+                        //const float hitT = getRayGaussianHit(gro,grd,gscl);
+
+                        const float ellispoidRadius = 3.0;
+                        const float isHit = dot(grd, -1 * gro);
+                        const float isSqHitSurf = isHit - sqrtf( ellispoidRadius*ellispoidRadius - grayDir);
+                        const float3 isNormal = safe_normalize(gro + grd*isSqHitSurf);
+                        const float3 wordlNormal =  safe_normalize( (gscl * isNormal) * invGrotMat );
+
+                        const float3 lightDir = safe_normalize(make_float3(0.3,0.2,0.5));
                         
                         atomicAdd(&params.mogWeightSum[gId][0], weight);
 
-                        rayRad[k][j] += grad * weight;
+                        //rayRad[k][j] += grad * weight;
+                        float3 grd_disp = (wordlNormal + 1) * 0.5;
+                        rayRad[k][j] = grd_disp; //make_float3(0.0,0.0,0.789); // * fmaxf(dot(wordlNormal, lightDir),0.1);
                         rayHit[k][j] += hitT * weight;
-                        rayTrm[k][j] *= (1 - galpha);
-
+                        rayTrm[k][j] *= 0.5; //(1 - galpha);
+                        }
                         transmit = fmaxf(transmit, rayTrm[k][j]);
                     }
                 }
@@ -230,7 +255,7 @@ extern "C" __global__ void __anyhit__ah()
     float2* ahHitTablePtr =
         reinterpret_cast<float2*>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
     unsigned int ahNumHits = optixGetPayload_0();
-    const unsigned int gId = optixGetPrimitiveIndex() / MOGPrimNumTri;
+    const unsigned int gId = optixGetPrimitiveIndex() / params.gPrimNumTri;
     const float hitT = MoGTracingHitMode == MOGTracingGaussianHit ?
                            computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params) :
                            optixGetRayTmax();

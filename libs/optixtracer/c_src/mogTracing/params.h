@@ -19,8 +19,11 @@ enum MOGTracingMode
     MOGTracingDefaultMode = MOGTracingModeNone
 };
 
-static constexpr int MOGPrimNumVert = 6; ///< octaHedron have 6 vertices
-static constexpr int MOGPrimNumTri = 8; ///< octaHedron have 8 triangles
+enum MOGPrimitiveTypes
+{
+    MOGTracingOctraHedron,
+    MOGTracingTetraHedron 
+};
 
 enum MOGTracingPipeline
 {
@@ -58,7 +61,8 @@ struct MoGTracingParams
     uint2 frameBounds;
     
     unsigned int frameNumber;
-    float3 padding;
+    unsigned int gPrimNumTri;
+    float2 padding;
 };
 
 struct MoGTracingBwdParams
@@ -94,5 +98,6 @@ struct MoGTracingBwdParams
     uint2 frameBounds;
     
     unsigned int frameNumber;
-    float3 padding;
+    unsigned int gPrimNumTri;
+    float2 padding;
 };
