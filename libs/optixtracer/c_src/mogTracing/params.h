@@ -22,7 +22,8 @@ enum MOGTracingMode
 enum MOGPrimitiveTypes
 {
     MOGTracingOctraHedron,
-    MOGTracingTetraHedron 
+    MOGTracingTetraHedron,
+    MOGTracingDiamond  
 };
 
 enum MOGTracingPipeline

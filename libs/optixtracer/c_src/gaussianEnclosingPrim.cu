@@ -18,7 +18,14 @@ namespace
 {
 constexpr uint32_t octaHedronNumVrt = 6;
 constexpr uint32_t octaHedronNumTri = 8;
-
+//
+// enclosing regular octahedron
+//
+// r = radius of the inscribed circle = 1
+// s = edge length = 6 / sqrt(6) = 2.4494897427831783
+// h = height = sqrt(2/3) * s = 2
+// V = 2 * s^2 * h / 3= 8.0
+constexpr float octaHedraDiag = 1.7320508075688774; // s / sqrt(2)
 template <typename scalar_t>
 __global__ void computeGaussianEnclosingOctaHedronKernel(
     const uint32_t gNum,
@@ -41,11 +48,9 @@ __global__ void computeGaussianEnclosingOctaHedronKernel(
         const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
         const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
-        const float3 octaHedronVrt[octaHedronNumVrt] = {
-            make_float3(0, 0, -1.5), make_float3(0, 1.5, 0),
-            make_float3(-1.5, 0, 0), make_float3(0, -1.5, 0),
-            make_float3(1.5, 0, 0),  make_float3(0, 0, 1.5)
-        };
+        const float3 octaHedronVrt[octaHedronNumVrt] = { make_float3(0, 0, -octaHedraDiag), make_float3(0, octaHedraDiag, 0),
+                                                         make_float3(-octaHedraDiag, 0, 0), make_float3(0, -octaHedraDiag, 0),
+                                                         make_float3(octaHedraDiag, 0, 0),  make_float3(0, 0, octaHedraDiag) };
 
 #pragma unroll
         for (int i = 0; i < octaHedronNumVrt; ++i)
@@ -79,23 +84,23 @@ __global__ void computeGaussianEnclosingOctaHedronKernel(
 constexpr uint32_t tetraHedronNumVrt = 4;
 constexpr uint32_t tetraHedronNumTri = 4;
 //
-// enclosing tetraHedra 
+// enclosing regular tetraHedra
 //     1              Y
 //    / \            |__X
 //   / 2 \            \
 //  0-----3            Z
-//       
+//
 //
 // r = radius of the inscribed circle = 1
 // s = edge length = sqrt(24) ~ 4.89
 // h = height = sqrt(2/3) * s = sqrt(2/3) * sqrt(24) = sqrt(16) = 4
 // q = h - r = 4 -1 = 3
-// V = s^3 / (6*sqrt(2)) ~ 13.85
+// V = s^3 / (6*sqrt(2)) = 13.856406460551014
 constexpr float tetraHedraInRadius = 1;
-constexpr float tetraHedraEdge =  4.89897948557; // sqrt(24) 
+constexpr float tetraHedraEdge = 4.898979485566356; // sqrt(24)
 constexpr float tetraHedraHeight = 4; // tetraHedraEdge * sqrt(2/3)
-constexpr float tetraHedraFaceHeight =  4.24264068712 ; //  tetraHedraEdge * sqrt(3) / 2
-constexpr float tetraHedraFaceInRadius =  1.41421356237 ; //  tetraHedraEdge * sqrt(3) / 6 = sqrt(2)
+constexpr float tetraHedraFaceHeight = 4.242640687119285; //  tetraHedraEdge * sqrt(3) / 2
+constexpr float tetraHedraFaceInRadius = 1.4142135623730951; //  tetraHedraEdge * sqrt(3) / 6 = sqrt(2)
 template <typename scalar_t>
 __global__ void computeGaussianEnclosingTetraHedronKernel(
     const uint32_t gNum,
@@ -118,10 +123,12 @@ __global__ void computeGaussianEnclosingTetraHedronKernel(
         const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
         const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
-        const float3 tetraHedronVrt[tetraHedronNumVrt] = { make_float3(-0.5*tetraHedraEdge, -tetraHedraFaceInRadius, -1),
-                                                           make_float3(0, tetraHedraFaceHeight - tetraHedraFaceInRadius, -1),
-                                                           make_float3(0, 0, tetraHedraHeight-tetraHedraInRadius),
-                                                           make_float3(0.5*tetraHedraEdge, -tetraHedraFaceInRadius, -1) };
+        const float3 tetraHedronVrt[tetraHedronNumVrt] = {
+            make_float3(-0.5 * tetraHedraEdge, -tetraHedraFaceInRadius, -1),
+            make_float3(0, tetraHedraFaceHeight - tetraHedraFaceInRadius, -1),
+            make_float3(0, 0, tetraHedraHeight - tetraHedraInRadius),
+            make_float3(0.5 * tetraHedraEdge, -tetraHedraFaceInRadius, -1)
+        };
 
 #pragma unroll
         for (int i = 0; i < tetraHedronNumVrt; ++i)
@@ -154,16 +161,21 @@ __global__ void computeGaussianEnclosingTetraHedronKernel(
 constexpr uint32_t diamondNumVrt = 5;
 constexpr uint32_t diamondNumTri = 6;
 //
-// enclosing triangular diamond 
+// enclosing triangular diamond
 //
+//              0
+//             / \
+//            2-3-4
+//             \ /
+//              1
 // r = radius of the inscribed circle = 1
 // s = edge length = 6 * r / sqrt(3)
-// h = height = sqrt(2/3) * s 
-// V = 2 * s^3 / (6*sqrt(2)) = 
+// h = height = sqrt(2/3) * s
+// V = 2 * s^3 / (6*sqrt(2)) = 9.797958971132713
 constexpr float diamondInRadius = 1;
-constexpr float diamondEdge =  3.46410161514; // 6 / sqrt(3) 
-constexpr float diamondHeight = 2.82842712475; // tetraHedraEdge * sqrt(2/3) = 2 * sqrt(2)
-constexpr float diamondFaceHeight =  3 ; //  tetraHedraEdge * sqrt(3) / 2
+constexpr float diamondEdge = 3.464101615137755; // 6 / sqrt(3)
+constexpr float diamondHeight = 2.8284271247461903; // tetraHedraEdge * sqrt(2/3) = 2 * sqrt(2)
+constexpr float diamondFaceHeight = 3; //  tetraHedraEdge * sqrt(3) / 2
 template <typename scalar_t>
 __global__ void computeGaussianEnclosingDiamondKernel(
     const uint32_t gNum,
@@ -186,10 +198,11 @@ __global__ void computeGaussianEnclosingDiamondKernel(
         const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
         const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
-        const float3 diamondVrt[diamondNumVrt] = { make_float3(-0.5*tetraHedraEdge, -tetraHedraFaceInRadius, -1),
-                                                           make_float3(0, tetraHedraFaceHeight - tetraHedraFaceInRadius, -1),
-                                                           make_float3(0, 0, tetraHedraHeight-tetraHedraInRadius),
-                                                           make_float3(0.5*tetraHedraEdge, -tetraHedraFaceInRadius, -1) };
+        const float3 diamondVrt[diamondNumVrt] = { make_float3(0,diamondHeight,0),
+                                                   make_float3(0, -diamondHeight,0),
+                                                   make_float3(-0.5*diamondEdge, 0, -1),
+                                                   make_float3(0, 0, diamondFaceHeight-1),
+                                                   make_float3(0.5*diamondEdge, 0, -1) };
 
 #pragma unroll
         for (int i = 0; i < diamondNumVrt; ++i)
@@ -207,8 +220,8 @@ __global__ void computeGaussianEnclosingDiamondKernel(
             }
         }
 
-        const int3 diamondTri[diamondNumTri] = { make_int3(0, 2, 1), make_int3(0, 3, 2), make_int3(0, 1, 3),
-                                                         make_int3(1, 2, 3) };
+        const int3 diamondTri[diamondNumTri] = { make_int3(0, 2, 3), make_int3(0, 4, 2), make_int3(0, 3, 4),
+                                                 make_int3(1, 3, 2), make_int3(1, 2, 4), make_int3(1, 4, 3) };
         const int3 triIdxOffset = make_int3(sVertIdx, sVertIdx, sVertIdx);
 
 #pragma unroll
@@ -233,7 +246,7 @@ __global__ void copyGaussianEnclosingPrimitivesKernel(
     if (idx < gNum)
     {
         const uint32_t sVertIdx = gNumVert * idx;
-        
+
         for (int i = 0; i < gNumVert; ++i)
         {
             const float3 vrt = gPrimVrt[sVertIdx + i];
@@ -241,7 +254,7 @@ __global__ void copyGaussianEnclosingPrimitivesKernel(
             gPrimVertTs[sVertIdx + i][1] = vrt.y;
             gPrimVertTs[sVertIdx + i][2] = vrt.z;
         }
-        
+
         const uint32_t sTriIdx = gNumTri * idx;
 
         for (int i = 0; i < gNumTri; ++i)
@@ -360,6 +373,29 @@ void computeGaussianEnclosingTetraHedron(uint32_t gNum,
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         gPos.type(), "computeGaussianEnclosingTetraHedron", ([&] {
             computeGaussianEnclosingTetraHedronKernel<scalar_t>
+                <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                 gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                 gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                 sigmaSclTh, gPrimVrt, gPrimTri, gPrimAABB);
+        }));
+}
+
+void computeGaussianEnclosingDiamond(uint32_t gNum,
+                                     torch::Tensor gPos,
+                                     torch::Tensor gRot,
+                                     torch::Tensor gScl,
+                                     float sigmaSclTh,
+                                     float3* gPrimVrt,
+                                     int3* gPrimTri,
+                                     OptixAabb* gPrimAABB,
+                                     cudaStream_t stream)
+{
+    const uint32_t threads = 1024;
+    const uint32_t blocks = div_round_up(static_cast<uint32_t>(gNum), threads);
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        gPos.type(), "computeGaussianEnclosingDiamond", ([&] {
+            computeGaussianEnclosingDiamondKernel<scalar_t>
                 <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                  gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                  gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),

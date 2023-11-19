@@ -81,14 +81,24 @@ void computeGaussianEnclosingOctaHedron(uint32_t gNum,
                                         cudaStream_t stream);
 
 void computeGaussianEnclosingTetraHedron(uint32_t gNum,
-                                        torch::Tensor gPos,
-                                        torch::Tensor gRot,
-                                        torch::Tensor gScl,
-                                        float sigmaSclTh,
-                                        float3* gPrimVrt,
-                                        int3* gPrimTri,
-                                        OptixAabb* gPrimAABB,
-                                        cudaStream_t stream);
+                                         torch::Tensor gPos,
+                                         torch::Tensor gRot,
+                                         torch::Tensor gScl,
+                                         float sigmaSclTh,
+                                         float3* gPrimVrt,
+                                         int3* gPrimTri,
+                                         OptixAabb* gPrimAABB,
+                                         cudaStream_t stream);
+
+void computeGaussianEnclosingDiamond(uint32_t gNum,
+                                     torch::Tensor gPos,
+                                     torch::Tensor gRot,
+                                     torch::Tensor gScl,
+                                     float sigmaSclTh,
+                                     float3* gPrimVrt,
+                                     int3* gPrimTri,
+                                     OptixAabb* gPrimAABB,
+                                     cudaStream_t stream);
 
 void computeGaussianEnclosingAABB(uint32_t gNum,
                                   torch::Tensor gPos,
@@ -151,9 +161,9 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
                                                reinterpret_cast<int3*>(stateWrapper.pState->gPrimTri),
                                                reinterpret_cast<OptixAabb*>(optixAabbPtr), cudaStream);
         }
-        else
+        else if (stateWrapper.pState->gPrimType == MOGTracingTetraHedron)
         {
-            stateWrapper.pState->gPrimNumVert = 5;
+            stateWrapper.pState->gPrimNumVert = 4;
             stateWrapper.pState->gPrimNumTri = 4;
 
             CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&stateWrapper.pState->gPrimVrt),
@@ -166,6 +176,22 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
                                                 reinterpret_cast<float3*>(stateWrapper.pState->gPrimVrt),
                                                 reinterpret_cast<int3*>(stateWrapper.pState->gPrimTri),
                                                 reinterpret_cast<OptixAabb*>(optixAabbPtr), cudaStream);
+        }
+        else
+        {
+            stateWrapper.pState->gPrimNumVert = 5;
+            stateWrapper.pState->gPrimNumTri = 6;
+
+            CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&stateWrapper.pState->gPrimVrt),
+                                       sizeof(float3) * stateWrapper.pState->gPrimNumVert * gNum, cudaStream));
+            CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&stateWrapper.pState->gPrimTri),
+                                       sizeof(int3) * stateWrapper.pState->gPrimNumTri * gNum, cudaStream));
+
+
+            computeGaussianEnclosingDiamond(gNum, mogPos, mogRot, mogScl, stateWrapper.pState->gaussianSigmaThreshold,
+                                            reinterpret_cast<float3*>(stateWrapper.pState->gPrimVrt),
+                                            reinterpret_cast<int3*>(stateWrapper.pState->gPrimTri),
+                                            reinterpret_cast<OptixAabb*>(optixAabbPtr), cudaStream);
         }
         CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(&stateWrapper.pState->gasAABB),
                                    reinterpret_cast<void*>(optixAabbPtr), sizeof(OptixAabb), cudaMemcpyDeviceToHost,
