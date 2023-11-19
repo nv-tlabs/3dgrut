@@ -115,8 +115,8 @@ __global__ void computeGaussianEnclosingTetraHedronKernel(
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < gNum)
     {
-        const uint32_t sVertIdx = octaHedronNumVrt * idx;
-        const uint32_t sTriIdx = octaHedronNumTri * idx;
+        const uint32_t sVertIdx = tetraHedronNumVrt * idx;
+        const uint32_t sTriIdx = tetraHedronNumTri * idx;
 
         float33 rot;
         invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
@@ -190,8 +190,8 @@ __global__ void computeGaussianEnclosingDiamondKernel(
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < gNum)
     {
-        const uint32_t sVertIdx = octaHedronNumVrt * idx;
-        const uint32_t sTriIdx = octaHedronNumTri * idx;
+        const uint32_t sVertIdx = diamondNumVrt * idx;
+        const uint32_t sTriIdx = diamondNumTri * idx;
 
         float33 rot;
         invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
