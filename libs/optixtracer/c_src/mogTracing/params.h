@@ -21,6 +21,7 @@ enum MOGTracingMode
 
 enum MOGPrimitiveTypes
 {
+    MOGTracingIcosaHedron,
     MOGTracingOctraHedron,
     MOGTracingTetraHedron,
     MOGTracingDiamond  

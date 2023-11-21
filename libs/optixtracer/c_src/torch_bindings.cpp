@@ -69,6 +69,15 @@ inline float minGaussianResponse(const float s)
 
 } // namespace name
 
+void computeGaussianEnclosingIcosaHedron(uint32_t gNum,
+                                        torch::Tensor gPos,
+                                        torch::Tensor gRot,
+                                        torch::Tensor gScl,
+                                        float sigmaSclTh,
+                                        float3* gPrimVrt,
+                                        int3* gPrimTri,
+                                        OptixAabb* gPrimAABB,
+                                        cudaStream_t stream);
 
 void computeGaussianEnclosingOctaHedron(uint32_t gNum,
                                         torch::Tensor gPos,
@@ -145,7 +154,23 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
 
         stateWrapper.pState->gNum = gNum;
 
-        if (stateWrapper.pState->gPrimType == MOGTracingOctraHedron)
+        if (stateWrapper.pState->gPrimType == MOGTracingIcosaHedron)
+        {
+            stateWrapper.pState->gPrimNumVert = 12;
+            stateWrapper.pState->gPrimNumTri = 20;
+
+            CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&stateWrapper.pState->gPrimVrt),
+                                       sizeof(float3) * stateWrapper.pState->gPrimNumVert * gNum, cudaStream));
+            CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&stateWrapper.pState->gPrimTri),
+                                       sizeof(int3) * stateWrapper.pState->gPrimNumTri * gNum, cudaStream));
+
+
+            computeGaussianEnclosingIcosaHedron(gNum, mogPos, mogRot, mogScl, stateWrapper.pState->gaussianSigmaThreshold,
+                                               reinterpret_cast<float3*>(stateWrapper.pState->gPrimVrt),
+                                               reinterpret_cast<int3*>(stateWrapper.pState->gPrimTri),
+                                               reinterpret_cast<OptixAabb*>(optixAabbPtr), cudaStream);
+        }
+        else if (stateWrapper.pState->gPrimType == MOGTracingOctraHedron)
         {
             stateWrapper.pState->gPrimNumVert = 6;
             stateWrapper.pState->gPrimNumTri = 8;

@@ -24,7 +24,7 @@ constexpr uint32_t octaHedronNumTri = 8;
 // r = radius of the inscribed circle = 1
 // s = edge length = 6 / sqrt(6) = 2.4494897427831783
 // h = height = sqrt(2/3) * s = 2
-// V = 2 * s^2 * h / 3= 8.0
+// V = 2 * s^2 * h / 3 = 8.0
 constexpr float octaHedraDiag = 1.7320508075688774; // s / sqrt(2)
 template <typename scalar_t>
 __global__ void computeGaussianEnclosingOctaHedronKernel(
@@ -48,9 +48,10 @@ __global__ void computeGaussianEnclosingOctaHedronKernel(
         const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
         const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
-        const float3 octaHedronVrt[octaHedronNumVrt] = { make_float3(0, 0, -octaHedraDiag), make_float3(0, octaHedraDiag, 0),
-                                                         make_float3(-octaHedraDiag, 0, 0), make_float3(0, -octaHedraDiag, 0),
-                                                         make_float3(octaHedraDiag, 0, 0),  make_float3(0, 0, octaHedraDiag) };
+        const float3 octaHedronVrt[octaHedronNumVrt] = {
+            make_float3(0, 0, -octaHedraDiag), make_float3(0, octaHedraDiag, 0), make_float3(-octaHedraDiag, 0, 0),
+            make_float3(0, -octaHedraDiag, 0), make_float3(octaHedraDiag, 0, 0), make_float3(0, 0, octaHedraDiag)
+        };
 
 #pragma unroll
         for (int i = 0; i < octaHedronNumVrt; ++i)
@@ -198,11 +199,10 @@ __global__ void computeGaussianEnclosingDiamondKernel(
         const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
         const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
-        const float3 diamondVrt[diamondNumVrt] = { make_float3(0,diamondHeight,0),
-                                                   make_float3(0, -diamondHeight,0),
-                                                   make_float3(-0.5*diamondEdge, 0, -1),
-                                                   make_float3(0, 0, diamondFaceHeight-1),
-                                                   make_float3(0.5*diamondEdge, 0, -1) };
+        const float3 diamondVrt[diamondNumVrt] = { make_float3(0, diamondHeight, 0), make_float3(0, -diamondHeight, 0),
+                                                   make_float3(-0.5 * diamondEdge, 0, -1),
+                                                   make_float3(0, 0, diamondFaceHeight - 1),
+                                                   make_float3(0.5 * diamondEdge, 0, -1) };
 
 #pragma unroll
         for (int i = 0; i < diamondNumVrt; ++i)
@@ -263,6 +263,80 @@ __global__ void copyGaussianEnclosingPrimitivesKernel(
             gPrimTriTs[sTriIdx + i][0] = faceIdx.x;
             gPrimTriTs[sTriIdx + i][1] = faceIdx.y;
             gPrimTriTs[sTriIdx + i][2] = faceIdx.z;
+        }
+    }
+}
+
+constexpr uint32_t icosaHedronNumVrt = 12;
+constexpr uint32_t icosaHedronNumTri = 20;
+//
+// enclosing regular octahedron
+//
+// phi = golden ratio = (1 + sqrt(5)) / 2
+// r = radius of the inscribed circle = 1 = (phi^2 * s) / ( 2 * sqrt(3))
+// s = edge length = ( 2 * sqrt(3) ) / phi^2
+// V = (5/12) * ( 3 + sqrt(5) ) * s^3 = 8.0
+constexpr float goldenRatio = 1.618033988749895; 
+constexpr float icosaEdge = 1.323169076499215;
+constexpr float icosaVrtScale = 0.5 * icosaEdge;
+template <typename scalar_t>
+__global__ void computeGaussianEnclosingIcosaHedronKernel(
+    const uint32_t gNum,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
+    const float sigmaSclTh,
+    float3* __restrict__ gPrimVrt,
+    int3* __restrict__ gPrimTri,
+    OptixAabb* gPrimAABB)
+{
+    const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < gNum)
+    {
+        const uint32_t sVertIdx = icosaHedronNumVrt * idx;
+        const uint32_t sTriIdx = icosaHedronNumTri * idx;
+
+        float33 rot;
+        invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
+        const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh * icosaVrtScale;
+        const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
+
+        const float3 icosaHedronVrt[icosaHedronNumVrt] = {
+            make_float3(-1, goldenRatio, 0),  make_float3(1, goldenRatio, 0),  make_float3(0, 1, -goldenRatio),
+            make_float3(-goldenRatio, 0, -1), make_float3(-goldenRatio, 0, 1), make_float3(0, 1, goldenRatio),
+            make_float3(goldenRatio, 0, 1),   make_float3(0, -1, goldenRatio), make_float3(-1, -goldenRatio, 0),
+            make_float3(0, -1, -goldenRatio), make_float3(goldenRatio, 0, -1), make_float3(1, -goldenRatio, 0)
+        };
+
+#pragma unroll
+        for (int i = 0; i < icosaHedronNumVrt; ++i)
+        {
+            float3& vrt = gPrimVrt[sVertIdx + i];
+            vrt = (icosaHedronVrt[i] * scl) * rot + trans;
+            if (gPrimAABB)
+            {
+                atomicMinFloat(&gPrimAABB[0].minX, vrt.x);
+                atomicMinFloat(&gPrimAABB[0].minY, vrt.y);
+                atomicMinFloat(&gPrimAABB[0].minZ, vrt.z);
+                atomicMaxFloat(&gPrimAABB[0].maxX, vrt.x);
+                atomicMaxFloat(&gPrimAABB[0].maxY, vrt.y);
+                atomicMaxFloat(&gPrimAABB[0].maxZ, vrt.z);
+            }
+        }
+
+        const int3 icosaHedronTri[icosaHedronNumTri] = {
+            make_int3(0, 1, 2), make_int3(0, 2, 3), make_int3(0, 3, 4),  make_int3(0, 4, 5),   make_int3(0, 5, 1),
+            make_int3(6, 1, 5), make_int3(6, 5, 7), make_int3(6, 7, 11), make_int3(6, 11, 10), make_int3(6, 10, 1),
+            make_int3(8, 4, 3),make_int3(8, 3, 9),make_int3(8, 9, 11), make_int3(8, 11, 7), make_int3(8, 7, 4),
+            make_int3(9, 3, 2),make_int3(9, 2, 10),make_int3(9, 10, 11), 
+            make_int3(5, 4, 7), make_int3(1, 10, 2)
+        };
+        const int3 triIdxOffset = make_int3(sVertIdx, sVertIdx, sVertIdx);
+
+#pragma unroll
+        for (int i = 0; i < icosaHedronNumTri; ++i)
+        {
+            gPrimTri[sTriIdx + i] = icosaHedronTri[i] + triIdxOffset;
         }
     }
 }
@@ -350,6 +424,29 @@ void computeGaussianEnclosingOctaHedron(uint32_t gNum,
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         gPos.type(), "computeGaussianEnclosingOctaHedron", ([&] {
             computeGaussianEnclosingOctaHedronKernel<scalar_t>
+                <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                 gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                 gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                 sigmaSclTh, gPrimVrt, gPrimTri, gPrimAABB);
+        }));
+}
+
+void computeGaussianEnclosingIcosaHedron(uint32_t gNum,
+                                         torch::Tensor gPos,
+                                         torch::Tensor gRot,
+                                         torch::Tensor gScl,
+                                         float sigmaSclTh,
+                                         float3* gPrimVrt,
+                                         int3* gPrimTri,
+                                         OptixAabb* gPrimAABB,
+                                         cudaStream_t stream)
+{
+    const uint32_t threads = 1024;
+    const uint32_t blocks = div_round_up(static_cast<uint32_t>(gNum), threads);
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        gPos.type(), "computeGaussianEnclosingIcosaHedron", ([&] {
+            computeGaussianEnclosingIcosaHedronKernel<scalar_t>
                 <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                  gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                  gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
