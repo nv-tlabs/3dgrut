@@ -282,10 +282,10 @@ void build_mog_bvh(OptiXStateWrapper& stateWrapper,
                                    cudaStream));
         CUDA_CHECK(cudaFreeAsync(reinterpret_cast<void*>(optixAabbPtr), cudaStream));
 
-        std::cout << "AABB = [ (" << stateWrapper.pState->gasAABB.minX << " , " << stateWrapper.pState->gasAABB.minY
-                  << " , " << stateWrapper.pState->gasAABB.minZ << " ) ( " << stateWrapper.pState->gasAABB.maxX << ", "
-                  << stateWrapper.pState->gasAABB.maxY << " , " << stateWrapper.pState->gasAABB.maxZ << " ) ] "
-                  << std::endl;
+        // std::cout << "AABB = [ (" << stateWrapper.pState->gasAABB.minX << " , " << stateWrapper.pState->gasAABB.minY
+        //           << " , " << stateWrapper.pState->gasAABB.minZ << " ) ( " << stateWrapper.pState->gasAABB.maxX << ", "
+        //           << stateWrapper.pState->gasAABB.maxY << " , " << stateWrapper.pState->gasAABB.maxZ << " ) ] "
+        //           << std::endl;
     }
 
     // Clear BVH GPU memory

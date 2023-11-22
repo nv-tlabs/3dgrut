@@ -19,8 +19,8 @@ import polyscope.imgui as psim
 
 from datasets.utils import PointCloud
 from datasets.utils import move_to_gpu, pinhole_camera_rays
-from models.losses import ssim
-from utils.misc import to_np
+from loss_utils import ssim
+from utils import to_np
 from libs import optixtracer
 sys.path.append(os.path.dirname(os.path.dirname(os.getcwd()))) 
 
@@ -38,19 +38,20 @@ def main(conf):
     optix_ctx = optixtracer.OptiXContext(
         params = optixtracer.OptixMogTracingParams(
             hit_mode = conf.render.hit_mode,
+            primitive_type=optixtracer.OptixMogPrimitive.TRACING_ICOSAHEDRON,
             max_hit_per_slab = conf.render.max_hit_per_slab,
             max_num_slabs = conf.render.max_num_slabs,
             topk_hits = conf.render.topk_hits,
             patch_size = conf.render.patch_size,
-            sph_degree = conf.render.sph_degree,
-            gaussian_sigma_threshold = conf.render.gaussian_sigma_threshold,
+            sph_degree = 1, #conf.render.sph_degree,
+            gaussian_sigma_threshold = 3, #conf.render.gaussian_sigma_threshold,
             min_transmittance = conf.render.min_transmittance,
         )
     )
 
     ## Manage a collection of Gaussians
     n_gaussians = 0
-    max_sh_degree = 0
+    max_sh_degree = 1
     sh_dim = (max_sh_degree+1) ** 2
     gauss_pos = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
     gauss_rot = torch.zeros((0,4), dtype=torch.float32, device=DEFAULT_DEVICE)
@@ -58,9 +59,12 @@ def main(conf):
     gauss_scale = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
     gauss_features = torch.zeros((0,sh_dim,3), dtype=torch.float32, device=DEFAULT_DEVICE)
 
+    gauss_vertices = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
+    gauss_face_idx = torch.zeros((0,3), dtype=torch.int32, device=DEFAULT_DEVICE)
+
 
     def add_gaussian():
-        nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features
+        nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features, gauss_vertices, gauss_face_idx
         n_gaussians += 1
 
         gauss_pos = torch.cat((gauss_pos, torch.tensor([[0.0, 0.0, 0.0],], dtype=torch.float32, device=DEFAULT_DEVICE)), dim=0)
@@ -77,11 +81,13 @@ def main(conf):
         gauss_rot = torch.nn.functional.normalize(gauss_rot, dim=-1)
 
         optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, True)
-
+        gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
+        torch.cuda.current_stream().synchronize()
+        
     add_gaussian() # single initial Gaussian
 
     def remove_gaussian():
-        nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features
+        nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features, gauss_vertices, gauss_face_idx
 
         if n_gaussians == 0: 
             return
@@ -95,9 +101,11 @@ def main(conf):
         gauss_features = gauss_features[:-1,...]
         
         optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, True)
-
+        gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
+        torch.cuda.current_stream().synchronize()
+        
     def build_gaussian_ui():
-        nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features
+        nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features, gauss_vertices, gauss_face_idx
         any_changed = False
 
         psim.Separator()
@@ -171,6 +179,8 @@ def main(conf):
         if any_changed:
             gauss_rot = torch.nn.functional.normalize(gauss_rot, dim=-1)
             optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, True)
+            gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
+            torch.cuda.current_stream().synchronize()
 
     ## Set up Polyscope
 
@@ -204,6 +214,8 @@ def main(conf):
     ps_point_cloud = ps.register_point_cloud("centers", to_np(gauss_pos), radius=1e-2)
     ps_point_cloud_buffer = ps_point_cloud.get_buffer("points")
 
+    ps.register_surface_mesh("octahedrons", to_np(gauss_vertices), to_np(gauss_face_idx), smooth_shade=True)
+
         
     def update_cloud_viz():
         nonlocal ps_point_cloud, ps_point_cloud_buffer
@@ -212,9 +224,12 @@ def main(conf):
         if ps_point_cloud is None or ps_point_cloud.n_points() != gauss_pos.shape[0]:
             ps_point_cloud = ps.register_point_cloud("centers", to_np(gauss_pos))
             ps_point_cloud_buffer = ps_point_cloud.get_buffer("points")
+            ps.register_surface_mesh("octahedrons", to_np(gauss_vertices), to_np(gauss_face_idx), smooth_shade=True)
+
 
         # direct on-GPU update, must not have changed size
         ps_point_cloud_buffer.update_data_from_device(gauss_pos.detach())
+        ps.get_surface_mesh("octahedrons").update_vertex_positions(to_np(gauss_vertices))
 
     def render_from_current_ps_view():
 
@@ -240,9 +255,9 @@ def main(conf):
 
         with torch.no_grad():
 
-            pred_orad, pred_opacity, pred_dist = optixtracer.trace_mog(optix_ctx, 
+            pred_orad, pred_opacity, pred_dist, _, _ = optixtracer.trace_mog(optix_ctx, 
                     rays_ori, rays_dir,
-                    gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features_flat)
+                    gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features_flat, None)
 
         return pred_orad, pred_opacity, pred_dist
 
@@ -260,7 +275,7 @@ def main(conf):
 
             if style == "color":
 
-                dummy_image = np.ones((window_h, window_w, 4), dtype=np.float32)
+                dummy_image = np.zeros((window_h, window_w, 4), dtype=np.float32)
 
                 ps.add_color_alpha_image_quantity(
                     viz_render_name,
@@ -321,7 +336,7 @@ def main(conf):
         # update the data
         if style == "color":
             # append 1s for alpha
-            sple_orad = torch.cat((sple_orad, torch.ones_like(sple_orad[:,:,:,0:1])), dim=-1)
+            sple_orad = torch.cat((sple_orad + 0.001, sple_odns), dim=-1)
             # sple_orad = torch.cat((sple_orad, sple_orad[...,0:1]), dim=-1)
             viz_render_color_buffer.update_data_from_device(sple_orad.detach())
 
