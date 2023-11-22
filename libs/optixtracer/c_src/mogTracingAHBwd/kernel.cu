@@ -6,8 +6,8 @@
 // distribution of this software and related documentation without an express
 // license agreement from NVIDIA CORPORATION is strictly prohibited.
 //
-#include "../mogTracing/utils.h"
 #include "../mogTracing/params.h"
+#include "../mogTracing/utils.h"
 #include "../optix_utils.h"
 #include "../random_utils.h"
 #include "../ray_data.h"
@@ -17,6 +17,7 @@ extern "C"
     __constant__ MoGTracingBwdParams params;
 }
 
+static constexpr bool MoGCustomPrimitive = (MOGTRACING_PRIMITIVE_TYPE == 5);
 static constexpr unsigned int MoGTracingHitMode = MOGTRACING_HIT_MODE;
 static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = MOGTRACING_MAXNUMHITS_PER_SLAB;
 static constexpr unsigned int MOGTracingPatchSize = MOGTRACING_PATCH_SIZE;
@@ -26,6 +27,11 @@ struct RayPayload
     unsigned int ahNumHits; // number of valid hits in ahHitTable
     float2 ahHitTable[MoGTracingAHMaxNumHitPerSlab]; // hit data : x = hitT, y = gId
 };
+
+static __device__ __inline__ float getGaussianIndex(uint32_t primitiveIndex)
+{
+    return MoGCustomPrimitive ? primitiveIndex : primitiveIndex / params.gPrimNumTri;
+}
 
 static __device__ __inline__ float2 intersectAABB(const OptixAabb& aabb, const float3& rayOri, const float3& rayDir)
 {
@@ -104,8 +110,8 @@ extern "C" __global__ void __raygen__rg()
 
             totalRayRad[j][i] =
                 make_float3(params.rayRad[idx.z][y][x][0], params.rayRad[idx.z][y][x][1], params.rayRad[idx.z][y][x][2]);
-            rayRadGrd[j][i] =
-                make_float3(params.rayRadGrd[idx.z][y][x][0], params.rayRadGrd[idx.z][y][x][1], params.rayRadGrd[idx.z][y][x][2]);
+            rayRadGrd[j][i] = make_float3(
+                params.rayRadGrd[idx.z][y][x][0], params.rayRadGrd[idx.z][y][x][1], params.rayRadGrd[idx.z][y][x][2]);
             accumulatedRayRad[j][i] = make_float3(0);
 
             rayDnsGrd[j][i] = params.rayDnsGrd[idx.z][y][x][0];
@@ -138,9 +144,10 @@ extern "C" __global__ void __raygen__rg()
             p.ahHitTable[i] = make_float2(1e9, 1e9);
         }
 
-        // TODO : add a GOOD ray jittering scheme over the patch (not bounded by the convex hull of the rayDirs if possible)
-        const float3 sampleRayOri = rayOri[MOGTracingPatchSize/2][MOGTracingPatchSize/2];
-        const float3 sampleRayDir = rayDir[MOGTracingPatchSize/2][MOGTracingPatchSize/2];
+        // TODO : add a GOOD ray jittering scheme over the patch (not bounded by the convex hull of the rayDirs if
+        // possible)
+        const float3 sampleRayOri = rayOri[MOGTracingPatchSize / 2][MOGTracingPatchSize / 2];
+        const float3 sampleRayDir = rayDir[MOGTracingPatchSize / 2][MOGTracingPatchSize / 2];
 
         trace(&p, sampleRayOri, sampleRayDir, startT + epsT, startT + slabSpacing);
         if (p.ahNumHits == 0)
@@ -206,7 +213,7 @@ extern "C" __global__ void __raygen__rg()
                         const float weight = galpha * rayTrm[k][j];
 
                         const float nextTransmit = (1 - galpha) * rayTrm[k][j];
-                                   
+
                         // ---> hitT = accumulatedHitT + galpha * prevTrm * gdist + (1-galpha) * prevTrm * residualHitT
                         accumulatedRayHit[k][j] += weight * gdist;
                         const float residualHitT =
@@ -224,30 +231,31 @@ extern "C" __global__ void __raygen__rg()
                         const float galphaRayHitGrd = (gdist - residualHitT) * rayTrm[k][j] * rayHitGrd[k][j];
                         //
                         // ===> d_hitT / d_gsqdist = weight / (2*gdist)
-                        // ===> d_gsqdist / d_grds =  2 * grds                        
-                        const float3 grdsRayHitGrd = ( (2 * grds * weight) / (2 * gdist) ) * rayHitGrd[k][j];
+                        // ===> d_gsqdist / d_grds =  2 * grds
+                        const float3 grdsRayHitGrd = ((2 * grds * weight) / (2 * gdist)) * rayHitGrd[k][j];
 
                         // ---> grds = gscl * grd * dot(grd, -1 * gro)
                         //
                         // ===> d_grds / d_gscl =  grd * dot(grd, -1 * gro)
                         const float3 gsclRayHitGrd = grdd * grdsRayHitGrd;
                         // ===> d_grds / d_grd =  - gscl * grd * (2 dot(grd, -1 * gro)
-                        const float3 grdRayHitGrd =  -gscl * make_float3(
-                            2 * grd.x * gro.x + grd.y * gro.y + grd.z * gro.z,  
-                            grd.x * gro.x + 2 * grd.y * gro.y + grd.z * gro.z,
-                            grd.x * gro.x + grd.y * gro.y + 2 * grd.z * gro.z
-                        ) * grdsRayHitGrd;
+                        const float3 grdRayHitGrd = -gscl *
+                                                    make_float3(2 * grd.x * gro.x + grd.y * gro.y + grd.z * gro.z,
+                                                                grd.x * gro.x + 2 * grd.y * gro.y + grd.z * gro.z,
+                                                                grd.x * gro.x + grd.y * gro.y + 2 * grd.z * gro.z) *
+                                                    grdsRayHitGrd;
                         //
                         // ===> d_grds / d_gro = - gscl * grd * grd
-                        const float3 groRayHitGrd = -gscl * grd * grd * grdsRayHitGrd; 
+                        const float3 groRayHitGrd = -gscl * grd * grd * grdsRayHitGrd;
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // ---> rayDns = 1 - prevTrm * (1-galpha) * nextTrm
                         //             = 1 - (1-galpha) * prevTrm * nextTrm
                         // ===> d_rayDns / d_galpha = prevTrm * nextTrm = residualTrm
-                        const float residualTrm = galpha < 0.999999 ? accumulatedRayTrm[k][j] / (1 - galpha) : rayTrm[k][j];
+                        const float residualTrm =
+                            galpha < 0.999999 ? accumulatedRayTrm[k][j] / (1 - galpha) : rayTrm[k][j];
                         const float galphaRayDnsGrd = residualTrm * rayDnsGrd[k][j];
-            
+
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // compute the gradient wrt to the sph coefficients and position (through the sph view
                         // direction)
@@ -257,10 +265,11 @@ extern "C" __global__ void __raygen__rg()
                         // >>> rayRadiance = accumulatedRayRad + weigth * rayRad + (1-galpha)*transmit * residualRayRad
                         const float3 rayRad = weight * grad;
                         accumulatedRayRad[k][j] += rayRad;
-                        const float3 residualRayRad = maxf3((nextTransmit <= minTransmittance ?
-                                                                 make_float3(0) :
-                                                                 (totalRayRad[k][j] - accumulatedRayRad[k][j]) / nextTransmit),
-                                                            make_float3(0));
+                        const float3 residualRayRad =
+                            maxf3((nextTransmit <= minTransmittance ?
+                                       make_float3(0) :
+                                       (totalRayRad[k][j] - accumulatedRayRad[k][j]) / nextTransmit),
+                                  make_float3(0));
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // ---> rayDns = 1 - prevTrm * (1-galpha) * nextTrm
@@ -272,11 +281,11 @@ extern "C" __global__ void __raygen__rg()
                         //                  = accumulatedRayRad + gdns * gres * transmit * grad + (1-gdns*gres) *
                         //                  transmit * residualRayRad
                         // ===> d_rayRad / d_gdns = gres * transmit * grad - gres * transmit * residualRayRad
-                        atomicAdd(
-                            &params.mogDnsGrd[gId][0],
-                            gres * ( galphaRayHitGrd + galphaRayDnsGrd + rayTrm[k][j] * (grad.x - residualRayRad.x) * rayRadGrd[k][j].x +
-                                    rayTrm[k][j] * (grad.y - residualRayRad.y) * rayRadGrd[k][j].y +
-                                    rayTrm[k][j] * (grad.z - residualRayRad.z) * rayRadGrd[k][j].z));
+                        atomicAdd(&params.mogDnsGrd[gId][0],
+                                  gres * (galphaRayHitGrd + galphaRayDnsGrd +
+                                          rayTrm[k][j] * (grad.x - residualRayRad.x) * rayRadGrd[k][j].x +
+                                          rayTrm[k][j] * (grad.y - residualRayRad.y) * rayRadGrd[k][j].y +
+                                          rayTrm[k][j] * (grad.z - residualRayRad.z) * rayRadGrd[k][j].z));
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // ---> rayDns = 1 - prevTrm * (1-galpha) * nextTrm
@@ -288,10 +297,10 @@ extern "C" __global__ void __raygen__rg()
                         //                  = accumulatedRayRad + gdns * gres * transmit * grad + (1 - gdns * gres) *
                         //                  transmit * residualRayRad
                         // ===> d_rayRad / d_gres = gdns * transmit * grad - gdns * transmit * residualRayRad
-                        const float gresGrd =
-                            gdns * (galphaRayHitGrd + galphaRayDnsGrd + rayTrm[k][j] * (grad.x - residualRayRad.x) * rayRadGrd[k][j].x +
-                                    rayTrm[k][j] * (grad.y - residualRayRad.y) * rayRadGrd[k][j].y +
-                                    rayTrm[k][j] * (grad.z - residualRayRad.z) * rayRadGrd[k][j].z);
+                        const float gresGrd = gdns * (galphaRayHitGrd + galphaRayDnsGrd +
+                                                      rayTrm[k][j] * (grad.x - residualRayRad.x) * rayRadGrd[k][j].x +
+                                                      rayTrm[k][j] * (grad.y - residualRayRad.y) * rayRadGrd[k][j].y +
+                                                      rayTrm[k][j] * (grad.z - residualRayRad.z) * rayRadGrd[k][j].z);
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // ---> gres = exp(-0.5 * grayDist)
@@ -321,9 +330,10 @@ extern "C" __global__ void __raygen__rg()
                         // ---> gro = (1/gscl)*gposcr
                         // ===> d_gro / d_gscl = -gposcr/(gscl*gscl)
                         // ===> d_gro / d_gposcr = (1/gscl)
-                        const float3 gsclGrdGro = make_float3((-gposcr.x / (gscl.x * gscl.x)),
-                                                              (-gposcr.y / (gscl.y * gscl.y)),
-                                                              (-gposcr.z / (gscl.z * gscl.z))) * (groGrd + groRayHitGrd);
+                        const float3 gsclGrdGro =
+                            make_float3((-gposcr.x / (gscl.x * gscl.x)), (-gposcr.y / (gscl.y * gscl.y)),
+                                        (-gposcr.z / (gscl.z * gscl.z))) *
+                            (groGrd + groRayHitGrd);
                         const float3 gposcrGrd = giscl * (groGrd + groRayHitGrd);
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -349,9 +359,12 @@ extern "C" __global__ void __raygen__rg()
                         // ---> grdu = (1/gscl)*rayDirR
                         // ===> d_grdu / d_gscl = -rayDirR/(gscl*gscl)
                         // ===> d_grdu / d_rayDirR = (1/gscl)
-                        atomicAdd(&params.mogSclGrd[gId][0], gsclRayHitGrd.x + gsclGrdGro.x + (-rayDirR.x / (gscl.x * gscl.x)) * grduGrd.x);
-                        atomicAdd(&params.mogSclGrd[gId][1], gsclRayHitGrd.y + gsclGrdGro.y + (-rayDirR.y / (gscl.y * gscl.y)) * grduGrd.y);
-                        atomicAdd(&params.mogSclGrd[gId][2], gsclRayHitGrd.z + gsclGrdGro.z + (-rayDirR.z / (gscl.z * gscl.z)) * grduGrd.z);
+                        atomicAdd(&params.mogSclGrd[gId][0],
+                                  gsclRayHitGrd.x + gsclGrdGro.x + (-rayDirR.x / (gscl.x * gscl.x)) * grduGrd.x);
+                        atomicAdd(&params.mogSclGrd[gId][1],
+                                  gsclRayHitGrd.y + gsclGrdGro.y + (-rayDirR.y / (gscl.y * gscl.y)) * grduGrd.y);
+                        atomicAdd(&params.mogSclGrd[gId][2],
+                                  gsclRayHitGrd.z + gsclGrdGro.z + (-rayDirR.z / (gscl.z * gscl.z)) * grduGrd.z);
                         const float3 rayDirRGrd = giscl * grduGrd;
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -361,21 +374,56 @@ extern "C" __global__ void __raygen__rg()
                         atomicAdd(&params.mogRotGrd[gId][0], grotGrdPoscr.x + grotGrdRayDirR.x);
                         atomicAdd(&params.mogRotGrd[gId][1], grotGrdPoscr.y + grotGrdRayDirR.y);
                         atomicAdd(&params.mogRotGrd[gId][2], grotGrdPoscr.z + grotGrdRayDirR.z);
-                        atomicAdd(&params.mogRotGrd[gId][3], grotGrdPoscr.w + grotGrdRayDirR.w);                       
-                        
+                        atomicAdd(&params.mogRotGrd[gId][3], grotGrdPoscr.w + grotGrdRayDirR.w);
+
 
                         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                         // error back projection
                         // THIS IS NOT REALLY A GRADIENT, the kernel is being abused to
-                        // compute weight * error, since it shared the same computational structure as a gradient 
+                        // compute weight * error, since it shared the same computational structure as a gradient
                         atomicAdd(&params.mogErrorBack[gId][0], weight * rayError[k][j]);
 
-                        
+
                         rayTrm[k][j] = nextTransmit;
                         transmit = fmaxf(transmit, rayTrm[k][j]);
                     }
                 }
             }
+        }
+    }
+}
+
+extern "C" __global__ void __intersection__is()
+{
+    const float3 ro = optixGetWorldRayOrigin();
+    const float3 rd = optixGetWorldRayDirection();
+
+    const float tmin = optixGetRayTmin();
+    const float tmax = optixGetRayTmax();
+
+    const unsigned int gId = getGaussianIndex(optixGetPrimitiveIndex());
+
+    const float3 gPos = make_float3(params.mogPos[gId][0], params.mogPos[gId][1], params.mogPos[gId][2]);
+    const float4 gRot =
+        make_float4(params.mogRot[gId][0], params.mogRot[gId][1], params.mogRot[gId][2], params.mogRot[gId][3]);
+    const float3 gScl = make_float3(params.mogScl[gId][0], params.mogScl[gId][1], params.mogScl[gId][2]);
+
+    float33 rot;
+    rotationMatrix(make_float4(gRot.x, gRot.y, gRot.z, gRot.w), rot);
+    const float3 giscl = make_float3(1 / gScl.x, 1 / gScl.y, 1 / gScl.z);
+    const float3 gro = giscl * ((ro - gPos) * rot);
+    const float3 grdu = giscl * ((rd * rot));
+    const float t = fabs(dot(gro, grdu) / dot(grdu, grdu));
+
+    if (t > tmin && t < tmax)
+    {
+        const float3 grd = safe_normalize(grdu);
+        const float gdns = params.mogDns[gId][0];
+        const float3 gcrod = cross(grd, gro);
+        const float gres = expf(-0.5 * dot(gcrod, gcrod));
+        if (gres > params.hitMinGaussianResponse)
+        {
+            optixReportIntersection(t, 0);
         }
     }
 }
@@ -387,10 +435,10 @@ extern "C" __global__ void __anyhit__ah()
     float2* ahHitTablePtr =
         reinterpret_cast<float2*>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
     unsigned int ahNumHits = optixGetPayload_0();
-    const unsigned int gId = optixGetPrimitiveIndex() / params.gPrimNumTri;
-    const float hitT = MoGTracingHitMode == MOGTracingGaussianHit ?
-                           computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params) :
-                           optixGetRayTmax();
+    const unsigned int gId = getGaussianIndex(optixGetPrimitiveIndex());
+    const float hitT = (MoGCustomPrimitive || MoGTracingHitMode != MOGTracingGaussianHit) ?
+                           optixGetRayTmax() :
+                           computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params);
     if (hitT < ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x)
     {
         float2 ahHit = { hitT, uint_as_float(gId) };

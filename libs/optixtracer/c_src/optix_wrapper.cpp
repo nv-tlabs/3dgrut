@@ -17,6 +17,7 @@
 #include "common.h"
 #include "optix_wrapper.h"
 #include "ray_data.h"
+#include "mogTracing/paramDefs.h"
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
@@ -175,6 +176,7 @@ enum CreatePipelineFlags
     PipelineFlag_HasAH = 1 << 2,
     PipelineFlag_HasMS = 1 << 3,
     PipelineFlag_HasRG = 1 << 4,
+    PipelineFlag_SpherePrim = 1 << 5
 };
 
 void createPipeline(const OptixDeviceContext context,
@@ -190,6 +192,7 @@ void createPipeline(const OptixDeviceContext context,
     char log[2048];
 
     OptixPipelineCompileOptions pipeline_compile_options = {};
+    OptixModule builtinIsModule = nullptr;
     {
         OptixModuleCompileOptions module_compile_options = {};
         module_compile_options.maxRegisterCount = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT;
@@ -203,6 +206,14 @@ void createPipeline(const OptixDeviceContext context,
         pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE;
         pipeline_compile_options.pipelineLaunchParamsVariableName = "params";
         pipeline_compile_options.usesPrimitiveTypeFlags = OPTIX_PRIMITIVE_TYPE_FLAGS_TRIANGLE;
+        if (flags & PipelineFlag_HasIS)
+        {
+            pipeline_compile_options.usesPrimitiveTypeFlags |= OPTIX_PRIMITIVE_TYPE_FLAGS_CUSTOM;
+        }
+        else if (flags & PipelineFlag_SpherePrim)
+        {
+            pipeline_compile_options.usesPrimitiveTypeFlags |= OPTIX_PRIMITIVE_TYPE_FLAGS_SPHERE;
+        }
 
         size_t inputSize = 0;
         std::string shaderFile = path + "/c_src/" + kernel_name + "/kernel.cu";
@@ -216,6 +227,12 @@ void createPipeline(const OptixDeviceContext context,
 
         OPTIX_CHECK_LOG(optixModuleCreateFromPTX(
             context, &module_compile_options, &pipeline_compile_options, input, inputSize, log, &sizeof_log, module));
+
+        if ( !(flags & PipelineFlag_HasIS) && (flags & PipelineFlag_SpherePrim) )
+        {
+             OptixBuiltinISOptions isOptions = {OPTIX_PRIMITIVE_TYPE_SPHERE, 0, OPTIX_BUILD_FLAG_PREFER_FAST_TRACE, 0};
+             OPTIX_CHECK_LOG(optixBuiltinISModuleGet(context, &module_compile_options, &pipeline_compile_options, &isOptions, &builtinIsModule));
+        }
     }
 
     //
@@ -263,6 +280,11 @@ void createPipeline(const OptixDeviceContext context,
         {
             hitgroup_prog_group_desc.hitgroup.moduleIS = *module;
             hitgroup_prog_group_desc.hitgroup.entryFunctionNameIS = "__intersection__is";
+        }
+        else if (flags & PipelineFlag_SpherePrim)
+        {
+            hitgroup_prog_group_desc.hitgroup.moduleIS = builtinIsModule;
+            hitgroup_prog_group_desc.hitgroup.entryFunctionNameIS = nullptr;
         }
         if (flags & PipelineFlag_HasAH)
         {
@@ -357,6 +379,7 @@ void createPipeline(const OptixDeviceContext context,
 OptiXStateWrapper::OptiXStateWrapper(const std::string& path,
                                      const std::string& cuda_path,
                                      uint32_t pipeline,
+                                     uint32_t primitiveType,
                                      uint32_t hitMode,
                                      uint32_t maxHitsPerSlab,
                                      uint32_t maxNumSlabs,
@@ -401,7 +424,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path,
     pState->maxHitsReturned = maxHitsReturned;
 
     pState->gNum = 0;
-    pState->gPrimType = 0;
+    pState->gPrimType = primitiveType;
     pState->gPrimNumVert = 0;
     pState->gPrimNumTri = 0;
 
@@ -413,11 +436,16 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path,
         defines.emplace_back("-DMOGTRACING_PATCH_SIZE=" + std::to_string(pState->patchSize));
         defines.emplace_back("-DMOGTRACING_SPH_DEGREE=" + std::to_string(pState->sphDegree));
         defines.emplace_back("-DMOGTRACING_MAX_HITS_RETURNED=" + std::to_string(pState->maxHitsReturned));
+        defines.emplace_back("-DMOGTRACING_PRIMITIVE_TYPE=" + std::to_string(pState->gPrimType));
         if (pState->topKHits)
         {
             defines.emplace_back("-DMOGTRACING_TOPK_HITS");
         }
     }
+
+    const uint sharedFlags =
+        (pState->gPrimType == MOGTracingSphere ? PipelineFlag_SpherePrim :
+                                                 (pState->gPrimType == MOGTracingCustom ? PipelineFlag_HasIS : 0));
 
     //
     // Create pipelines
@@ -426,50 +454,50 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path,
     pState->pipelineMoGTracingCH = nullptr;
     pState->sbtMoGTracingCH = {};
     createPipeline(pState->context, path, cuda_path, defines, "mogTracingCH",
-                   PipelineFlag_HasRG | PipelineFlag_HasMS | PipelineFlag_HasCH, &pState->moduleMoGTracingCH,
+                   sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasMS | PipelineFlag_HasCH, &pState->moduleMoGTracingCH,
                    &pState->pipelineMoGTracingCH, pState->sbtMoGTracingCH);
 
     pState->moduleMoGTracingAH = nullptr;
     pState->pipelineMoGTracingAH = nullptr;
     pState->sbtMoGTracingAH = {};
-    createPipeline(pState->context, path, cuda_path, defines, "mogTracingAH", PipelineFlag_HasRG | PipelineFlag_HasAH,
+    createPipeline(pState->context, path, cuda_path, defines, "mogTracingAH", sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH,
                    &pState->moduleMoGTracingAH, &pState->pipelineMoGTracingAH, pState->sbtMoGTracingAH);
 
     pState->moduleMoGTracingAHBwd = nullptr;
     pState->pipelineMoGTracingAHBwd = nullptr;
     pState->sbtMoGTracingAHBwd = {};
-    createPipeline(pState->context, path, cuda_path, defines, "mogTracingAHBwd", PipelineFlag_HasRG | PipelineFlag_HasAH,
+    createPipeline(pState->context, path, cuda_path, defines, "mogTracingAHBwd", sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH,
                    &pState->moduleMoGTracingAHBwd, &pState->pipelineMoGTracingAHBwd, pState->sbtMoGTracingAHBwd);
 
     pState->moduleMoGTracingIS = nullptr;
     pState->pipelineMoGTracingIS = nullptr;
     pState->sbtMoGTracingIS = {};
     createPipeline(pState->context, path, cuda_path, defines, "mogTracingIS",
-                   PipelineFlag_HasRG | PipelineFlag_HasAH | PipelineFlag_HasIS, &pState->moduleMoGTracingIS,
+                   sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH | PipelineFlag_HasIS, &pState->moduleMoGTracingIS,
                    &pState->pipelineMoGTracingIS, pState->sbtMoGTracingIS);
 
     pState->moduleMoGTracingMLAT = nullptr;
     pState->pipelineMoGTracingMLAT = nullptr;
     pState->sbtMoGTracingMLAT = {};
-    createPipeline(pState->context, path, cuda_path, defines, "mogTracingMLAT", PipelineFlag_HasRG | PipelineFlag_HasAH,
+    createPipeline(pState->context, path, cuda_path, defines, "mogTracingMLAT", sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH,
                    &pState->moduleMoGTracingMLAT, &pState->pipelineMoGTracingMLAT, pState->sbtMoGTracingMLAT);
 
     pState->moduleMoGTracingMBOIT = nullptr;
     pState->pipelineMoGTracingMBOIT = nullptr;
     pState->sbtMoGTracingMBOIT = {};
-    createPipeline(pState->context, path, cuda_path, defines, "mogTracingMBOIT", PipelineFlag_HasRG | PipelineFlag_HasAH,
+    createPipeline(pState->context, path, cuda_path, defines, "mogTracingMBOIT", sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH,
                    &pState->moduleMoGTracingMBOIT, &pState->pipelineMoGTracingMBOIT, pState->sbtMoGTracingMBOIT);
 
     pState->moduleMoGTracingInd = nullptr;
     pState->pipelineMoGTracingInd = nullptr;
     pState->sbtMoGTracingInd = {};
-    createPipeline(pState->context, path, cuda_path, defines, "mogTracingInd", PipelineFlag_HasRG | PipelineFlag_HasAH,
+    createPipeline(pState->context, path, cuda_path, defines, "mogTracingInd", sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH,
                    &pState->moduleMoGTracingInd, &pState->pipelineMoGTracingInd, pState->sbtMoGTracingInd);
 
     pState->moduleMoGTracingHC = nullptr;
     pState->pipelineMoGTracingHC = nullptr;
     pState->sbtMoGTracingHC = {};
-    createPipeline(pState->context, path, cuda_path, defines, "mogTracingHC", PipelineFlag_HasRG | PipelineFlag_HasAH,
+    createPipeline(pState->context, path, cuda_path, defines, "mogTracingHC", sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH,
                    &pState->moduleMoGTracingHC, &pState->pipelineMoGTracingHC, pState->sbtMoGTracingHC);
 
     printf("End of OptiXStateWrapper \n");

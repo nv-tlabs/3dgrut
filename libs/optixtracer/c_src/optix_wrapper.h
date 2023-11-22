@@ -87,6 +87,7 @@ public:
         const std::string& cuda_path,
         uint32_t hitMode,
         uint32_t pipeline,
+        uint32_t primitiveType,
         uint32_t maxHitsPerSlab,
         uint32_t maxNumSlabs,
         bool topKHits,

@@ -232,6 +232,37 @@ __global__ void computeGaussianEnclosingDiamondKernel(
     }
 }
 
+//
+// enclosing sphere
+template <typename scalar_t>
+__global__ void computeGaussianEnclosingSphereKernel(
+    const uint32_t gNum,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
+    const float sigmaSclTh,
+    float3* __restrict__ gPrimCenter,
+    float* __restrict__ gPrimRadius,
+    OptixAabb* gPrimAABB)
+{
+    const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < gNum)
+    {
+        gPrimCenter[idx] = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
+        gPrimRadius[idx] = fmaxf(gScl[idx][0], fmaxf(gScl[idx][1], gScl[idx][2])) * sigmaSclTh;
+
+        if (gPrimAABB)
+        {
+            atomicMinFloat(&gPrimAABB[0].minX, gPrimCenter[idx].x - gPrimRadius[idx]);
+            atomicMinFloat(&gPrimAABB[0].minY, gPrimCenter[idx].y - gPrimRadius[idx]);
+            atomicMinFloat(&gPrimAABB[0].minZ, gPrimCenter[idx].z - gPrimRadius[idx]);
+            atomicMaxFloat(&gPrimAABB[0].maxX, gPrimCenter[idx].x + gPrimRadius[idx]);
+            atomicMaxFloat(&gPrimAABB[0].maxY, gPrimCenter[idx].y + gPrimRadius[idx]);
+            atomicMaxFloat(&gPrimAABB[0].maxZ, gPrimCenter[idx].z + gPrimRadius[idx]);
+        }
+    }
+}
+
 template <typename scalar_t>
 __global__ void copyGaussianEnclosingPrimitivesKernel(
     const uint32_t gNum,
@@ -497,6 +528,29 @@ void computeGaussianEnclosingDiamond(uint32_t gNum,
                                                  gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                  gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                  sigmaSclTh, gPrimVrt, gPrimTri, gPrimAABB);
+        }));
+}
+
+void computeGaussianEnclosingSphere(uint32_t gNum,
+    torch::Tensor gPos,
+    torch::Tensor gRot,
+    torch::Tensor gScl,
+    float sigmaSclTh,
+    float3* gPrimCenter,
+    float* gPrimRadius,
+    OptixAabb* gPrimAABB,
+    cudaStream_t stream)
+{
+    const uint32_t threads = 1024;
+    const uint32_t blocks = div_round_up(static_cast<uint32_t>(gNum), threads);
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        gPos.type(), "computeGaussianEnclosingSphere", ([&] {
+            computeGaussianEnclosingSphereKernel<scalar_t>
+                <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                 gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                 gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                 sigmaSclTh, gPrimCenter, gPrimRadius, gPrimAABB);
         }));
 }
 

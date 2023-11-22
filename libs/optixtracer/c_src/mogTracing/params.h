@@ -11,32 +11,7 @@
 #include "../accessor.h"
 
 #include <optix.h>
-
-enum MOGTracingMode
-{
-    MOGTracingModeNone = 0,
-    MOGTracingGaussianHit = 1<<0, ///< use the position on the ray with highest gaussian response
-    MOGTracingDefaultMode = MOGTracingModeNone
-};
-
-enum MOGPrimitiveTypes
-{
-    MOGTracingIcosaHedron,
-    MOGTracingOctraHedron,
-    MOGTracingTetraHedron,
-    MOGTracingDiamond  
-};
-
-enum MOGTracingPipeline
-{
-    MOGTracingPipelineCH = 0,
-    MOGTracingPipelineAH = 1,
-    MOGTracingPipelineIS = 2,
-    MOGTracingPipelineMLAT = 3,
-    MOGTracingPipelineMBOIT = 4,
-    MOGTracingPipelineHC = 5,
-    MOGTracingPipelineInd = 6,
-};
+#include "paramDefs.h"
 
 struct MoGTracingParams
 {
