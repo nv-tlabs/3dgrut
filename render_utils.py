@@ -105,7 +105,7 @@ def RGB2SH(rgb):
 def SH2RGB(sh):
     return sh * C0 + 0.5
 
-def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, err_targets, sph_deg, chunk_size):
+def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, err_targets, sph_deg, settings: dict):
     """
     """
     device = rays_o.device
@@ -136,12 +136,11 @@ def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, e
     g_weight_accum.requires_grad = False
 
     while i_c < N:
-
-        C = min(chunk_size, N-i_c)
+        C = min(settings["chunk_size"], N-i_c)
 
         ray_rad, ray_opacity, ray_dist, ray_ohit, err_backprop_proxy, g_weight_accum = checkpoint(
                 eval_ray_chunk_tup, 
-                (i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, err_targets, g_weight_accum),
+                (i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, err_targets, g_weight_accum, settings),
                 use_reentrant=False
             )
 
@@ -172,7 +171,7 @@ def evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, e
 def eval_ray_chunk_tup(tup):
     return eval_ray_chunk(*tup)
 
-def eval_ray_chunk(i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, err_targets, g_weight_accum):
+def eval_ray_chunk(i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, err_targets, g_weight_accum, settings: dict):
     
     device = rays_o.device
     dtype = rays_o.dtype
@@ -206,7 +205,7 @@ def eval_ray_chunk(i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, 
     hit_err_targets = err_targets[hit_gIds,:]
 
     # Evaluate all of the individual Gaussians
-    hit_grad, hit_galpha, hit_gdist = evaluate_gaussians(hit_rays_o, hit_rays_d, hit_gpos, hit_grot, hit_gscl, hit_gdns, hit_gsh, sph_deg)
+    hit_grad, hit_galpha, hit_gdist = evaluate_gaussians(hit_rays_o, hit_rays_d, hit_gpos, hit_grot, hit_gscl, hit_gdns, hit_gsh, sph_deg, settings)
 
     unalpha = 1.0 - hit_galpha
     hit_transmit = packed_cumprod(unalpha, hitrange, True, False)
@@ -226,8 +225,15 @@ def eval_ray_chunk(i_c, C, D, dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, 
     return ray_rad, ray_opacity, ray_dist, ray_ohit, ray_err_backprop_proxy, g_weight_accum
 
 
-def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, clamp_rad=True, clamp_rad_min_bound=0.001,
-                       evaluation_strategy="algebraic" # either 'geometric' or 'analytic'
+def evaluate_gaussians(rays_o,
+                       rays_d,
+                       gpos,
+                       grot,
+                       gscl,
+                       gdns,
+                       gsh,
+                       sph_deg,
+                       settings: dict
                        ):
     """
     Evaluate the response of Gaussians. All inputs are [N_gaussian,...]
@@ -240,13 +246,14 @@ def evaluate_gaussians(rays_o, rays_d, gpos, grot, gscl, gdns, gsh, sph_deg, cla
     gsh_reshape = gsh.reshape(gsh.shape[0], sh_dim, 3)
     grad = eval_sh(sph_deg, gsh_reshape, safe_normalize(gpos - rays_o)) + 0.5 # this sign is weird... for consistency?) 
 
-    if clamp_rad:
+    if settings["clamp_rad"]:
+        clamp_rad_min_bound = settings["clamp_rad_min_bound"]
         grad = torch.where(grad > clamp_rad_min_bound,
                     grad,
                     torch.exp(grad - clamp_rad_min_bound) * clamp_rad_min_bound
                 )
 
-    match evaluation_strategy:
+    match settings["gaussian_evaluation"]:
         case "geometric":
             gposc = rays_o - gpos
             gposcr = torch.bmm(gposc[:,None,:],grotMat)[:,0,:]

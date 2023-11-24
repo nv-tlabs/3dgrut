@@ -763,12 +763,21 @@ class MixtureOfGaussians(torch.nn.Module):
 
         ## Evaluate the render pass
         with torch.cuda.nvtx.range(f"model.forward_rendereval({num_gsplats} gaussians)"):
-
-            ray_rgb, ray_opacity, ray_ohit, ray_dist, g_weights, err_backprop_proxy = evaluate_rays(dense_hit_gIds, rays_o, rays_d, gpos, grot, gscl, gdns, gsh, err_target, self.max_n_features, self.conf.render.chunk_size)
+            ray_rgb, ray_opacity, ray_ohit, ray_dist, g_weights, err_backprop_proxy = evaluate_rays(
+                dense_hit_gIds,
+                rays_o,
+                rays_d,
+                gpos,
+                grot,
+                gscl,
+                gdns,
+                gsh,
+                err_target,
+                self.max_n_features,
+                self.conf.render.torch,
+            )
 
             ray_rgb, ray_opacity = self.background(rays_d, ray_rgb, ray_opacity, train)
-
-
         return {
             'pred_rgb': ray_rgb,
             'pred_opacity': ray_opacity,
