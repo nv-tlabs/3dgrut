@@ -181,7 +181,7 @@ def main(conf: DictConfig) -> None:
             ply_path = None
             try:
                 ply_path = os.path.join(conf.path, "point_cloud.ply")
-                model.init_from_pretrained_point_cloud(ply_path, observer_points)
+                model.init_from_pretrained_point_cloud(ply_path)
             except FileNotFoundError as e:
                 logging.exception(e)
                 raise e
