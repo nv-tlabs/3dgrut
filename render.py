@@ -45,6 +45,13 @@ class Renderer:
                 batch_size=1,
                 return_alphas=True
             )
+        elif conf.dataset.type == 'colmap':
+            dataset = ColmapDataset(
+                conf.path,
+                split='val',
+                sample_full_image=True,
+                downsample_factor=conf.dataset.downsample_factor
+            )
         else:
             raise ValueError(
                 f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp", "ncore"]. ')
@@ -127,9 +134,9 @@ class Renderer:
                         self.writer.add_image('image/test', outputs['pred_rgb'][-1].clip(0,1.0), self.global_step, dataformats='HWC')
 
 
+                    if "alpha" in gpu_batch:
+                        rgb_gt = rgb_gt * gpu_batch["alpha"] + BACKGROUND_COLOR * (1 - gpu_batch["alpha"])
                     if self.save_gt:
-                        if "alpha" in gpu_batch: 
-                            rgb_gt = rgb_gt * gpu_batch["alpha"] + BACKGROUND_COLOR * (1 - gpu_batch["alpha"])
                         torchvision.utils.save_image(rgb_gt.squeeze(0).permute(2,0,1), os.path.join(output_path_gt, '{0:05d}'.format(iteration) + ".png"))
 
                     # Compute the loss
