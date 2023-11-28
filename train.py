@@ -335,14 +335,16 @@ def main(conf: DictConfig) -> None:
 
                 ray_err_abs = torch.abs(outputs['pred_rgb'] - rgb_gt)
                 model.rol = ray_err_abs.mean()
-
-                # horrible hacks to abuse gradients: distributing error statistics back to the 
-                # gaussians can be viewed as backprop'nig through a proxy weight
-                fake_loss = loss + torch.sum(ray_err_abs.detach()*outputs['err_backprop_proxy'])
     
                 # backpropagate the gradients and update the parameters
                 with torch.cuda.nvtx.range("backward"):
-                    fake_loss.backward()
+                    if not conf.loss.use_fake_loss:
+                        loss.backward()
+                    else:
+                        # horrible hacks to abuse gradients: distributing error statistics back to the
+                        # gaussians can be viewed as backprop'nig through a proxy weight
+                        fake_loss = loss + torch.sum(ray_err_abs.detach() * outputs['err_backprop_proxy'])
+                        fake_loss.backward()
 
                 if global_step < conf.model.densify.end_iteration:
                     model.update_densification_buffer(rays_ori, rays_dir)

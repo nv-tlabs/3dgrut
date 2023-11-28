@@ -2,7 +2,7 @@ type: nerf
   
 train:
   batch_size: 8192
-  sample_full_image: False
+  sample_full_image: True
 
   ray_jittering:
     type: none

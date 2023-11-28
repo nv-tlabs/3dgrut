@@ -31,13 +31,13 @@ model:
 
   density_decay:
     gamma: 0.99
-    start_iteration: 500
-    end_iteration: 15000
+    start_iteration: -1 # 500
+    end_iteration: -1 # 15000
     frequency: 50
 
   background:
-    name: background-color
-    color: random
+    name: background-color # one of [skip-background, background-color, sky-mlp]
+    color: black # one of [black, white, random] needs to be defined if name == background-color
 
   densify:
     method: adam
@@ -67,8 +67,8 @@ model:
 
   prune_needles: 
     frequency: 100 # Opacity reset interval in 3DGS default value 3000
-    start_iteration: 500
-    end_iteration: 15000
+    start_iteration: -1
+    end_iteration: -1
     min_scale_threshold: 1e-6
 
 checkpoint:
@@ -135,3 +135,6 @@ loss:
   # Lidar-based distance supervision
   use_lidardistance: False
   lambda_lidardistance: 0.01
+
+  # Calculate ray errors using backprop hack
+  use_fake_loss: False
