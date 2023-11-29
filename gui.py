@@ -42,6 +42,8 @@ class GUI:
         ps.set_automatically_compute_scene_extents(False)
         ps.set_bounding_box(to_np(scene_bbox[0]), to_np(scene_bbox[1]))
 
+        self.update_from_device = conf.gui_update_from_device
+
         # viz stateful parameters & options
         self.viz_do_train = False
         self.viz_bbox = False
@@ -92,8 +94,11 @@ class GUI:
             self.ps_point_cloud = ps.register_point_cloud("centers", to_np(self.model.get_positions()))
             self.ps_point_cloud_buffer = self.ps_point_cloud.get_buffer("points")
 
-        # direct on-GPU update, must not have changed size
-        self.ps_point_cloud_buffer.update_data_from_device(self.model.get_positions().detach())
+        if self.update_from_device:
+            # direct on-GPU update, must not have changed size
+            self.ps_point_cloud_buffer.update_data_from_device(self.model.get_positions().detach())
+        else:
+            self.ps_point_cloud_buffer.update_data(to_np(self.model.get_positions()))
 
     def render_from_current_ps_view(self):
 
@@ -196,13 +201,22 @@ class GUI:
         if style == "color":
             # append 1s for alpha
             sple_orad = torch.cat((sple_orad, torch.ones_like(sple_orad[:,:,:,0:1])), dim=-1)
-            self.viz_render_color_buffer.update_data_from_device(sple_orad.detach())
+            if self.update_from_device:
+                self.viz_render_color_buffer.update_data_from_device(sple_orad.detach())
+            else:
+                self.viz_render_color_buffer.update_data(to_np(sple_orad))
 
         elif style == "density":
-            self.viz_render_scalar_buffer.update_data_from_device(sple_odns.detach())
+            if self.update_from_device:
+                self.viz_render_scalar_buffer.update_data_from_device(sple_odns.detach())
+            else:
+                self.viz_render_scalar_buffer.update_data(to_np(sple_odns))
 
         elif style == "distance":
-            self.viz_render_scalar_buffer.update_data_from_device(sple_odist.detach())
+            if self.update_from_device:
+                self.viz_render_scalar_buffer.update_data_from_device(sple_odist.detach())
+            else:
+                self.viz_render_scalar_buffer.update_data(to_np(sple_odist))
 
     def populate_rolling_buffers(self):
         self.ps_point_cloud.add_scalar_quantity("rolling_error", to_np(self.model.rolling_error[:,0]))
