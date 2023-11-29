@@ -29,10 +29,21 @@ class MixtureOfGaussians(torch.nn.Module):
         self.features_albedo = torch.nn.Parameter(torch.empty([0, 3]))  # Feature vector of the 0th order SH coefficients [n_gaussians, 3] (We split it into two due to different learning rates)
         self.features_specular = torch.nn.Parameter(torch.empty([0, 1]))  # Features of the higher order SH coefficients [n_gaussians, 3]
         
-        if self.conf.model.densify.method == 'gradient-buffer':
-            # Accumulation of the norms of the positions gradients
-            self.positional_grad_norm_accum = torch.empty([0,1]) 
-            self.positional_grad_norm_denom = torch.empty([0,1])
+        if self.conf.model.log_rolling_buffers:
+            self.rolling_error = torch.empty([0,1]) 
+            self.rolling_weight_contrib = torch.empty([0,1]) 
+
+        match self.conf.model.densify.method:
+            case 'gradient-buffer':
+                # Accumulation of the norms of the positions gradients
+                self.positional_grad_norm_accum = torch.empty([0,1]) 
+                self.positional_grad_norm_denom = torch.empty([0,1])
+            case 'error':
+                assert self.conf.model.log_rolling_buffers, "must log weights and errors to densify based on them"
+            case 'adam':
+                pass 
+            case _:
+                raise ValueError(f"densify.method {self.conf.model.densify.method} not supported")            
         
         self.device = 'cuda'
         self.optimizer = None
@@ -66,9 +77,6 @@ class MixtureOfGaussians(torch.nn.Module):
             self.feature_dim_increase_step = self.conf.model.progressive_training.increase_step
             self.progressive_training = True
 
-        self.rolling_error = None
-        self.rolling_weight_contrib = None
-
     def validate_fields(self):
         num_gsplat = self.positions.shape[0]
         assert self.positions.shape == (num_gsplat, 3)
@@ -76,10 +84,21 @@ class MixtureOfGaussians(torch.nn.Module):
         assert self.rotation.shape == (num_gsplat, 4)
         assert self.scale.shape == (num_gsplat, 3)
 
-        if self.conf.model.densify.method == 'gradient-buffer':
-            assert self.positional_grad_norm_accum.shape == (num_gsplat, 1)
-            assert self.positional_grad_norm_denom.shape == (num_gsplat, 1)
+        if self.conf.model.log_rolling_buffers:
+            assert self.rolling_error.shape == (num_gsplat, 1)
+            assert self.rolling_weight_contrib.shape == (num_gsplat, 1)
 
+        match self.conf.model.densify.method:
+            case 'gradient-buffer':
+                assert self.positional_grad_norm_accum.shape == (num_gsplat, 1)
+                assert self.positional_grad_norm_denom.shape == (num_gsplat, 1)
+            case 'error':
+                assert self.conf.model.log_rolling_buffers
+            case 'adam': 
+                pass
+            case _:
+                raise ValueError(f"densify.method {self.conf.model.densify.method} not supported")            
+            
         if self.feature_type == 'sh':
             assert self.features_albedo.shape == (num_gsplat, 3)
             specular_sh_dims = sh_degree_to_specular_dim(self.max_n_features)
@@ -329,8 +348,6 @@ class MixtureOfGaussians(torch.nn.Module):
         if state_dict is not None:
             self.optimizer.load_state_dict(state_dict)
     
-        self.reset_rolling_buffers()
-
     def setup_scheduler(self):
         self.schedulers = {}
         for name, args in self.conf.scheduler.items():
@@ -467,51 +484,51 @@ class MixtureOfGaussians(torch.nn.Module):
     
     def init_densification_buffer(self, checkpoint:Optional[dict] = None):
         if checkpoint is not None:
-            match self.conf.model.densify.method:
-                case 'adam':
-                    # We already load the optimizer state in self.init_from_checkpoint
-                    pass
-                case 'gradient-buffer':
-                    self.positional_grad_norm_accum = checkpoint["positional_grad_norm_accum"]
-                    self.positional_grad_norm_denom = checkpoint["positional_grad_norm_denom"]
-                case _:
-                    raise ValueError(f"densify.method {self.conf.model.densify.method} not supported")
+            if self.conf.model.log_rolling_buffers:
+                self.rolling_error = checkpoint["rolling_error"]
+                self.rolling_weight_contrib = checkpoint["rolling_weight_contrib"]
+
+            if self.conf.model.densify.method == 'gradient-buffer':
+                self.positional_grad_norm_accum = checkpoint["positional_grad_norm_accum"]
+                self.positional_grad_norm_denom = checkpoint["positional_grad_norm_denom"]
         else: 
-            match self.conf.model.densify.method:
-                case 'adam':
-                    # Relying on Adam's exponential moving average
-                    pass
-                case 'gradient-buffer':
-                    num_gaussians = self.positions.shape[0]
-                    self.positional_grad_norm_accum = torch.zeros((num_gaussians,1), dtype=torch.float, device=self.device)
-                    self.positional_grad_norm_denom = torch.zeros((num_gaussians,1), dtype=torch.int, device=self.device)
-                case _:
-                    raise ValueError(f"densify.method {self.conf.model.densify.method} not supported")            
+            if self.conf.model.log_rolling_buffers:
+                num_gaussians = self.positions.shape[0]
+                self.rolling_error = torch.zeros((num_gaussians,1), dtype=torch.float, device=self.device)
+                self.rolling_weight_contrib = torch.zeros((num_gaussians,1), dtype=torch.float, device=self.device)
 
-    @torch.cuda.nvtx.range("update-densification-buffer")
-    def update_densification_buffer(self, rays_ori, rays_dir):
-        match self.conf.model.densify.method:
-            case 'adam':
-                # Relying on Adam's exponential moving average
-                assert isinstance(self.optimizer, torch.optim.Adam)
-            case 'gradient-buffer':
-                hit_cts = self.get_hit_counts(rays_ori, rays_dir)
-                mask = (hit_cts > 0).squeeze()
-                self.update_positional_grad(mask)
-            case _:
-                raise ValueError(f"densify.method {self.conf.model.densify.method} not supported")
+            if self.conf.model.densify.method == 'gradient-buffer':
+                num_gaussians = self.positions.shape[0]
+                self.positional_grad_norm_accum = torch.zeros((num_gaussians,1), dtype=torch.float, device=self.device)
+                self.positional_grad_norm_denom = torch.zeros((num_gaussians,1), dtype=torch.int, device=self.device)
 
-    def update_positional_grad(self, mask):
+    @torch.cuda.nvtx.range("update-gradient-buffer")
+    def update_gradient_buffer(self, rays_ori, rays_dir):
         assert self.conf.model.densify.method == 'gradient-buffer'
+        hit_cts = self.get_hit_counts(rays_ori, rays_dir)
+        mask = (hit_cts > 0).squeeze()
+
+        assert self.positions.grad is not None
         self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask], dim=-1, keepdim=True)
         self.positional_grad_norm_denom[mask] += 1
 
+    @torch.cuda.nvtx.range("update_rolling_buffers")
+    def update_rolling_buffers(self, gaussian_errors, gaussian_weights):
+        assert self.conf.model.log_rolling_buffers
+        self.rolling_error += gaussian_errors
+        self.rolling_weight_contrib += gaussian_weights
+
     @torch.cuda.nvtx.range("densify_gaussians")
     def densify_gaussians(self, scene_extent):
+        if self.conf.model.densify.method in ["adam", "gradient-buffer"]:
+            self.densify_positional_grad(scene_extent)
+        elif self.conf.model.densify.method == "error":
+            self.clone_gaussians_error()
+
+    def densify_positional_grad(self, scene_extent):
         assert self.optimizer is not None, "Optimizer need to be initialized before splitting and cloning the Gaussians"
         assert self.get_positions().requires_grad, "Trying to perform split and clone but the positions are not being optimized"
 
-        
         positional_grad_norm = None
         match self.conf.model.densify.method:
             case 'adam':
@@ -541,7 +558,8 @@ class MixtureOfGaussians(torch.nn.Module):
         optimizable_tensors = self.concatenate_optimizer_tensors(add_gaussians)
         self.update_optimizable_parameters(optimizable_tensors)
 
-        self.reset_rolling_buffers()
+        if self.conf.model.log_rolling_buffers:
+            self.reset_rolling_buffers()
 
         if self.conf.model.densify.method == 'gradient-buffer':
             self.positional_grad_norm_accum = torch.zeros((self.get_positions().shape[0], 1), 
@@ -580,6 +598,13 @@ class MixtureOfGaussians(torch.nn.Module):
             add_gaussians["features_specular"] = self.features_specular[mask].repeat(self.split_n_gaussians, 1)
 
         self.densify_postfix(add_gaussians)
+        
+        # stats
+        if self.conf.model.print_stats:
+            n_before = mask.shape[0]
+            n_clone = mask.sum()
+            print(f"Splitted {n_clone} / {n_before} ({n_clone/n_before*100:.2f}%) gaussians")
+        
 
         # Prune away the Gaussians that were originally slected
         valid = ~torch.cat((mask, torch.zeros(self.split_n_gaussians * mask.sum(), device="cuda", dtype=bool)))
@@ -595,6 +620,12 @@ class MixtureOfGaussians(torch.nn.Module):
         # If the gaussians are larger they shouldn't be cloned, but rather split
         mask = torch.logical_and(mask, torch.max(self.get_scale(), dim=1).values <= self.relative_size_threshold * scene_extent)
 
+        # stats
+        if self.conf.model.print_stats:
+            n_before = mask.shape[0]
+            n_clone = mask.sum()
+            print(f"Cloned {n_clone} / {n_before} ({n_clone/n_before*100:.2f}%) gaussians")
+        
         # Use the mask to dupicate these points
         add_gaussians = {
                 "positions": self.positions[mask],
@@ -609,6 +640,8 @@ class MixtureOfGaussians(torch.nn.Module):
     
     @torch.cuda.nvtx.range("clone_gaussians_error")
     def clone_gaussians_error(self):
+        assert self.conf.model.log_rolling_buffers
+
         n_split = 1
 
         # Clone points with high error ratio
@@ -619,9 +652,10 @@ class MixtureOfGaussians(torch.nn.Module):
         mask = error_ratio_mask
         
         # stats
-        n_before = mask.shape[0]
-        n_clone = mask.sum()
-        print(f"Cloned {n_clone} / {n_before} ({n_clone/n_before*100:.2f}%) gaussians")
+        if self.conf.model.print_stats:
+            n_before = mask.shape[0]
+            n_clone = mask.sum()
+            print(f"Error-cloned {n_clone} / {n_before} ({n_clone/n_before*100:.2f}%) gaussians")
 
         # sample new locations according to the shape of the sourcea gaussian
         stds = self.get_scale()[mask]
@@ -645,12 +679,11 @@ class MixtureOfGaussians(torch.nn.Module):
 
     def prune_gaussians_weight(self):
         # Prune the Gaussians based on their weight
-        mask = self.rolling_weight_contrib[:,0] >= self.conf.model.prune.weight_threshold
-        print(self.rolling_weight_contrib[:,0].mean())
-
-        n_before = mask.shape[0]
-        n_prune = n_before - mask.sum()
-        print(f"Weight-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
+        mask = self.rolling_weight_contrib[:,0] >= self.conf.model.prune_weight.weight_threshold
+        if self.conf.model.print_stats:
+            n_before = mask.shape[0]
+            n_prune = n_before - mask.sum()
+            print(f"Weight-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
 
         self.prune_gaussians(mask)
     
@@ -658,9 +691,10 @@ class MixtureOfGaussians(torch.nn.Module):
         # Prune the Gaussians based on their opacity
         mask = self.get_density().squeeze() >= self.prune_density_threshold
 
-        n_before = mask.shape[0]
-        n_prune = n_before - mask.sum()
-        print(f"Density-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
+        if self.conf.model.print_stats:
+            n_before = mask.shape[0]
+            n_prune = n_before - mask.sum()
+            print(f"Density-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
 
         self.prune_gaussians(mask)
 
@@ -680,9 +714,10 @@ class MixtureOfGaussians(torch.nn.Module):
             self.positional_grad_norm_accum = self.positional_grad_norm_accum[valid_mask]
             self.positional_grad_norm_denom = self.positional_grad_norm_denom[valid_mask]
 
-        # TODO only touch these based on a densify method?
-        self.rolling_error = self.rolling_error[valid_mask]
-        self.rolling_weight_contrib = self.rolling_weight_contrib[valid_mask]
+        if self.conf.model.log_rolling_buffers:
+            # TODO only touch these based on a densify method?
+            self.rolling_error = self.rolling_error[valid_mask]
+            self.rolling_weight_contrib = self.rolling_weight_contrib[valid_mask]
 
         torch.cuda.empty_cache()
 

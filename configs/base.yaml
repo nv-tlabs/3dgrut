@@ -40,29 +40,32 @@ model:
     name: background-color # one of [skip-background, background-color, sky-mlp]
     color: black # one of [black, white, random] needs to be defined if name == background-color
 
+  log_rolling_buffers: ${eq:model.densify.method,error}
+  print_stats: false
+
   densify:
-    method: adam
-    frequency: 999999999 # densification_interval in 3DGS with default value 100
+    method: adam # one of [adam, gradient-buffer, error]
+    frequency: 100 # densification_interval in 3DGS with default value 100
     start_iteration: 500 # densify_from_iter in 3DGS default value 500
     end_iteration: 15000 # densify_until_iter in 3DGS default value 15_000
     clone_grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
     split_grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
     relative_size_threshold: 0.01 # Gaussians larger than relative_size_threshold * scene_extent will be split not cloned. Called percent_dense in 3DGS with default value 0.01
+    error_ratio_threshold: 0.5
     split:
       n_gaussians: 2 # Hardcoded to 2 in 3DGS
-  
-  error_densify:
-    frequency: 100
-    start_iteration: 200
-    end_iteration: 15000 
-    error_ratio_threshold: 0.5
 
   # They use the same values for pruning and densification so check the above values
   prune:
     frequency: 100
-    start_iteration: 200
+    start_iteration: 500
     end_iteration: 15000
     density_threshold: 0.01 # All Gaussians with the density lower than this will be pruned away
+    
+  prune_weight:
+    frequency: 100
+    start_iteration: -1
+    end_iteration: -1
     weight_threshold : 0.5
 
   # Start and end iteration are not used in 3DGS
@@ -143,6 +146,3 @@ loss:
   # Lidar-based distance supervision
   use_lidardistance: False
   lambda_lidardistance: 0.01
-
-  # Calculate ray errors using backprop hack
-  use_fake_loss: False

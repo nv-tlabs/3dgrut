@@ -13,6 +13,7 @@ from math import exp
 
 
 OmegaConf.register_new_resolver("div", lambda a, b: a / b)
+OmegaConf.register_new_resolver("eq", lambda a, b: a == b)
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
