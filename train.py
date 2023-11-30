@@ -390,8 +390,12 @@ def main(conf: DictConfig) -> None:
                 # Prune the Gaussians based on their opacity
                 if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
                     model.prune_gaussians_opacity()
+<<<<<<< HEAD
                     scene_updated = True
 
+=======
+                
+>>>>>>> f2295c6 (fix issues after rebase)
                 # Prune the Gaussians based on their contribution weight
                 if global_step > conf.model.prune_weight.start_iteration and global_step < conf.model.prune_weight.end_iteration and global_step % conf.model.prune_weight.frequency == 0:
                     if conf.model.log_rolling_buffers:
