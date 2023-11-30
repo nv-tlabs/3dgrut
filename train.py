@@ -280,6 +280,7 @@ def main(conf: DictConfig) -> None:
                     ray_jitter.enabled = True
                 with torch.cuda.nvtx.range(f"train.train_step_{global_step}"):
                     it_start.record()
+
                     error_buffer_batch = False
                     # Sample a new batch from the error buffer (the actual batch from the dataloader will be skipped)
                     if model.error_based_sampling and global_step > model.error_buffer_update_frequency and global_step % model.error_sampling_frequency == 0:
@@ -370,11 +371,13 @@ def main(conf: DictConfig) -> None:
 
                 # Make a scheduler step
                 model.scheduler_step(global_step)
-                        
+
+                # Logging
                 psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
                 global_step += 1
                 pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
-                writer.add_scalar("psnr/train", psnr, global_step)
+                if global_step > 0 and global_step % conf.log_frequency == 0:
+                    writer.add_scalar("psnr/train", psnr, global_step)
 
                 recorder.record_train_step(model, global_step, it_start.elapsed_time(it_end),
                                            loss_l1, loss_ssim, loss, psnr)
@@ -392,16 +395,27 @@ def main(conf: DictConfig) -> None:
                     model.densify_gaussians(scene_extent=scene_extent)
                     scene_updated = True
 
-                # Prune the Gaussians 
+                # Prune the Gaussians based on their opacity
                 if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
                     model.prune_gaussians_opacity()
+                    scene_updated = True
+
+                # Prune the Gaussians based on their contribution weight
+                if global_step > conf.model.prune_weight.start_iteration and global_step < conf.model.prune_weight.end_iteration and global_step % conf.model.prune_weight.frequency == 0:
+                    if conf.model.log_rolling_buffers:
+                        model.prune_gaussians_weight()
                     scene_updated = True
 
                 # Prune the needle Gaussians 
                 if global_step > conf.model.prune_needles.start_iteration and global_step < conf.model.prune_needles.end_iteration and global_step % conf.model.prune_needles.frequency == 0:
                     model.prune_needles()
                     scene_updated = True
-                    
+
+                # Prune the sky Gaussians
+                if isinstance(model.background,SkyMlp) and global_step > conf.model.prune_sky_mlp.start_iteration and global_step < conf.model.prune_sky_mlp.end_iteration and global_step % conf.model.prune_sky_mlp.frequency == 0:
+                    model.prune_sky_gaussians(train_dataset.get_sky_rays(step_frame=conf.model.prune_sky_mlp.step_frame,step_pixel=conf.model.prune_sky_mlp.step_pixel))
+                    scene_updated = True
+
                 # Decay the density values
                 if global_step > conf.model.density_decay.start_iteration and global_step < conf.model.density_decay.end_iteration and global_step % conf.model.density_decay.frequency == 0:
                     model.decay_density()
@@ -418,18 +432,19 @@ def main(conf: DictConfig) -> None:
                 # Update the BVH if required
                 if scene_updated or (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
                     model.build_bvh()
-                
+
+                # Updating the GUI
                 if gui is not None:
                     if gui.live_update:
                         if scene_updated or model.get_positions().requires_grad:
                             gui.update_cloud_viz()
-            
                         gui.update_render_view_viz()
 
                     ps.frame_tick()
                     while not gui.viz_do_train:
                         ps.frame_tick()
 
+                # Optimizer step
                 with torch.cuda.nvtx.range("backpropagation"):
                     model.optimizer.step()
                     model.optimizer.zero_grad()
@@ -481,47 +496,7 @@ def main(conf: DictConfig) -> None:
 
                         model.update_error_buffer(torch.vstack(ray_origins), torch.vstack(ray_directions),
                                                 torch.vstack(errors), torch.vstack(rgbs),
-                                                torch.vstack(alphas) if len(alphas) else None)                   
-
-                # Sample a batch from the error buffer
-                with torch.cuda.nvtx.range(f"sample_batch_from_error_buffer[step {global_step}]"):
-                    if model.error_based_sampling and global_step > model.error_buffer_update_frequency and global_step % model.error_sampling_frequency:
-                        # Sample a new batch from the error buffer
-                        error_batch = model.sample_from_error_buffer(rays_ori.shape[:-1])
-                        gpu_error_batch = move_to_gpu(error_batch)
-                        rays_ori_error, rays_dir_error, rgb_gt_error = gpu_error_batch["rays_ori"], gpu_error_batch["rays_dir"], gpu_error_batch["rgb_gt"]
-
-                        # Compute the outputs of a single batch
-                        outputs_error = model(rays_ori_error, rays_dir_error)
-
-                        # Check if alphas are given and if the background is a fix color
-                        if isinstance(model.background, BackgroundColor):
-                            assert "alpha" in gpu_error_batch
-                            alpha_error = gpu_error_batch["alpha"]
-                            rgb_gt_error = rgb_gt_error * alpha_error + model.background.color * (1 - alpha_error)
-
-                        # Compute the loss
-                        loss_l1_error = torch.abs(outputs_error['pred_rgb'] - rgb_gt_error).mean()
-
-                        if conf.loss.use_ssim and conf.dataset.train.get("sample_full_image", False):
-                            loss_ssim_error = ssim(torch.permute(outputs_error['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
-                            loss_error = (1.0 - conf.loss.lambda_ssim) * loss_l1_error + conf.loss.lambda_ssim * (1.0 - loss_ssim_error)
-                        else:
-                            loss_ssim_error = None
-                            loss_error = loss_l1_error
-
-                        if conf.model.lambda_background > 0.0:
-                            assert "sky_mask" in gpu_batch, "Sky ray mask missing for background-loss evaluation"
-                            # Push all background rays to have opacity 0 and non-background rays to have opacity 1 withing the FV
-                            foreground_mask_error = torch.ones_like(outputs_error["pred_opacity"])
-                            foreground_mask_error[gpu_error_batch['sky_mask']] = 0.0
-                            loss_background_error = torch.nn.functional.mse_loss(outputs_error["pred_opacity"], foreground_mask_error)
-                            loss_error += conf.model.lambda_background * loss_background_error
-
-                        # backpropagate the gradients from the error rays and update the parameters
-                        loss_error.backward()
-                        model.optimizer.step()
-                        model.optimizer.zero_grad()
+                                                torch.vstack(alphas) if len(alphas) else None)
 
                 with torch.cuda.nvtx.range(f"criterions_psnr"):
                     psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()

@@ -83,10 +83,10 @@ model:
     start_iteration: -1
     end_iteration: -1
     min_scale_threshold: 1e-6
-    
+
   # Sample rays according to the error buffer - mode null skips the process
   error_based_sampling:
-    mode: none # Use buffer to do the error sampling 
+    use: false # Use buffer to do the error sampling
     sampling_frequency: 30
     buffer_update_frequency: 2499 # to not do it in sync with other changes
     downsampling_factor: 1

@@ -80,7 +80,7 @@ class MixtureOfGaussians(torch.nn.Module):
 
         # Check if we would like to use error-based sampling
         self.error_based_sampling = False
-        if self.conf.model.error_based_sampling.mode != None:
+        if self.conf.model.error_based_sampling.use:
             self.error_based_sampling = True
             self.error_sampling_frequency = self.conf.model.error_based_sampling.sampling_frequency
             self.error_downsampling_factor = self.conf.model.error_based_sampling.downsampling_factor
@@ -158,8 +158,8 @@ class MixtureOfGaussians(torch.nn.Module):
         sampled_indices = torch.multinomial(self.error_buffer_errors[:2**24], torch.prod(torch.tensor(out_shape)), replacement=True)
 
         sample = {
-                "rays_ori": self.error_buffer_rays[sampled_indices, :3].reshape(b,h,w,3), 
-                "rays_dir": self.error_buffer_rays[sampled_indices, 3:].reshape(b,h,w,3), 
+                "rays_ori": self.error_buffer_rays[sampled_indices, :3].reshape(b,h,w,3),
+                "rays_dir": self.error_buffer_rays[sampled_indices, 3:].reshape(b,h,w,3),
                 "rgb_gt": self.error_buffer_rgb[sampled_indices].reshape(b,h,w,3),
             }
 
@@ -168,7 +168,7 @@ class MixtureOfGaussians(torch.nn.Module):
 
         return sample
 
-    def init_from_colmap(self, root_path: str):
+    def init_from_colmap(self, root_path: str, observer_pts):
         # TODO this reads from the binary format, also implement the nearly-identical plaintext version?
         points_file = os.path.join(root_path, "sparse/0", "points3D.bin")
         if not os.path.isfile(points_file):
