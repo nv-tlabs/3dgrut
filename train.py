@@ -376,7 +376,7 @@ def main(conf: DictConfig) -> None:
 
 
                 # clamp density
-                if conf.model.density_activation == "none":
+                if global_step>0 and conf.model.density_activation == "none":
                     model.clamp_density()
 
                 it_end.record()
