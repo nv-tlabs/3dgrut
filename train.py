@@ -23,7 +23,7 @@ from datasets.utils import PointCloud
 from antialiasing import StratifiedRayJitter, RandomRayJitter
 from model import MixtureOfGaussians
 from background import BackgroundColor, SkyMlp
-from datasets.utils import move_to_gpu, SceneBounds
+from datasets.utils import move_to_gpu
 from loss_utils import ssim
 from utils import to_np
 from gui import GUI
@@ -125,12 +125,11 @@ def main(conf: DictConfig) -> None:
                 val_frame_subsample=5,
                 use_aux=conf.dataset.get("use_aux_data", False)
             )
-            pc = train_dataset.get_point_cloud(step_frame=10)
+            pc = PointCloud.from_sequence(list(train_dataset.get_point_clouds(step_frame=10, non_dynamic_points_only=True)), device="cpu")
 
             # Scene extend from bbox of point-cloud
             scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
             scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0]) #TODO implement as in colmap dataset and nerf dataset
-
         case 'ncore':
             # TODO: add all of the dataset parameters to config
             duration_sec = 2.0
@@ -178,7 +177,6 @@ def main(conf: DictConfig) -> None:
             case 'colmap':
                 observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
                 model.init_from_colmap(conf.path, observer_points)
-
             case 'point_cloud':
                 observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
                 ply_path = None
@@ -187,28 +185,22 @@ def main(conf: DictConfig) -> None:
                     model.init_from_pretrained_point_cloud(ply_path)
                 except FileNotFoundError as e:
                     logging.exception(e)
-                    raise e
-            
+                    raise e           
             case'random':
                 model.init_from_random_point_cloud(num_gsplat=conf.initialization.num_gaussians)
-
             case 'lidar':
                 assert conf.dataset.type in ['ngp', 'ncore'], 'can only initialize from lidar with the NGPDataset / NCoreDataset'
                 observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
                 model.init_from_lidar(pc, observer_points) 
-
             case 'auxiliary':
-                observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
                 model.init_from_auxiliary_data(dataset=train_dataset,
-                                            scene_bbox=scene_bbox,
-                                            num_random_gspalt=conf.num_gsplats,
-                                            spacing=conf.initialization.spacing,
-                                            hit_count_threshold=0,
-                                            sky_step_frame=conf.initialization.sky_step_frame,
-                                            sky_step_pixel=conf.initialization.sky_step_pixel,
-                                            pc_step_frame=conf.initialization.pc_step_frame,
-                                            pc_step_points=conf.initialization.pc_step_points
-                                            )
+                                               scene_bbox=scene_bbox,
+                                               spacing=conf.initialization.spacing,
+                                               hit_count_threshold=0,
+                                               sky_step_frame=conf.initialization.sky_step_frame,
+                                               sky_step_pixel=conf.initialization.sky_step_pixel,
+                                               pc_step_frame=conf.initialization.pc_step_frame,
+                                               pc_step_points=conf.initialization.pc_step_points)
             case _:
                 raise ValueError(f"unrecognized initialization.method {conf.initialization.method}, choose from [colmap, point_cloud, random, auxiliary]")
 
@@ -373,13 +365,12 @@ def main(conf: DictConfig) -> None:
                 # Make a scheduler step
                 model.scheduler_step(global_step)
 
+                # Logging
                 psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
                 global_step += 1
                 pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
-
                 if global_step > 0 and global_step % conf.log_frequency == 0:
                     writer.add_scalar("psnr/train", psnr, global_step)
-                    writer.add_scalar("num_gauss", model.get_positions().detach().shape[0], global_step)
 
                 recorder.record_train_step(model, global_step, it_start.elapsed_time(it_end),
                                            loss_l1, loss_ssim, loss, psnr)
@@ -396,10 +387,12 @@ def main(conf: DictConfig) -> None:
                     model.densify_gaussians(scene_extent=scene_extent)
                     scene_updated = True
 
-                # Prune the Gaussians 
+                # Prune the Gaussians based on their opacity
                 if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
                     model.prune_gaussians_opacity()
-                
+                    scene_updated = True
+
+                # Prune the Gaussians based on their contribution weight
                 if global_step > conf.model.prune_weight.start_iteration and global_step < conf.model.prune_weight.end_iteration and global_step % conf.model.prune_weight.frequency == 0:
                     if conf.model.log_rolling_buffers:
                         model.prune_gaussians_weight()
@@ -428,11 +421,11 @@ def main(conf: DictConfig) -> None:
                 if model.progressive_training and global_step > 0 and global_step % model.feature_dim_increase_interval == 0:
                     model.increase_num_active_features()
 
-
                 # Update the BVH if required
                 if scene_updated or (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
                     model.build_bvh()
 
+                # Updating the GUI
                 if gui is not None:
                     if gui.live_update:
                         if scene_updated or model.get_positions().requires_grad:
@@ -444,6 +437,7 @@ def main(conf: DictConfig) -> None:
                     while not gui.viz_do_train:
                         ps.frame_tick()
 
+                # Optimizer step
                 with torch.cuda.nvtx.range("backpropagation"):
                     model.optimizer.step()
                     model.optimizer.zero_grad()

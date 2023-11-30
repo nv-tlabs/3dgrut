@@ -84,6 +84,13 @@ model:
     end_iteration: -1
     min_scale_threshold: 1e-6
 
+  prune_sky_mlp: 
+    frequency: 100 # Opacity reset interval in 3DGS default value 3000
+    start_iteration: -1
+    end_iteration: -1
+    step_pixel: 10
+    step_frame: 10
+
 checkpoint:
   frequency: 10000
 

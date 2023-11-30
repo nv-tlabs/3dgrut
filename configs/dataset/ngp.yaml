@@ -1,6 +1,5 @@
   type: ngp
   use_aux_data: False
-  padding: [150, 0, 30, 0, 0, 0]
 
   train:
     batch_size: 1000000
