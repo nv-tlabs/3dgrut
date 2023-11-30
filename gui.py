@@ -13,13 +13,15 @@ DEFAULT_DEVICE = torch.device('cuda')
 class GUI:
     def __init__(self, conf, model, train_dataset, val_dataset, scene_bbox):
 
+        self.conf = conf
+
         ps.set_use_prefs_file(False)
 
-        if conf.dataset.type == 'nerf': # NeRF synthetic uses the blender coordinate-system
+        if self.conf.dataset.type == 'nerf': # NeRF synthetic uses the blender coordinate-system
             ps.set_up_dir("z_up")
             ps.set_front_dir("neg_y_front")
             ps.set_navigation_style("turntable")
-        elif conf.dataset.type == 'colmap': # Colmap scenes use a cartesian coordinate-system
+        elif self.conf.dataset.type == 'colmap': # Colmap scenes use a cartesian coordinate-system
             ps.set_up_dir("neg_y_up")
             ps.set_front_dir("neg_z_front")
             ps.set_navigation_style("free")
@@ -33,7 +35,7 @@ class GUI:
         ps.set_background_color((0., 0., 0.))
         ps.set_ground_plane_mode("none")
         ps.set_window_resizable(True)
-        if conf.render.method == 'torch':
+        if self.conf.render.method == 'torch':
             ps.set_window_size(500, 500)
         else:
             ps.set_window_size(1920, 1080)
@@ -42,7 +44,7 @@ class GUI:
         ps.set_automatically_compute_scene_extents(False)
         ps.set_bounding_box(to_np(scene_bbox[0]), to_np(scene_bbox[1]))
 
-        self.update_from_device = conf.gui_update_from_device
+        self.update_from_device = self.conf.gui_update_from_device
 
         # viz stateful parameters & options
         self.viz_do_train = False
@@ -58,7 +60,7 @@ class GUI:
         self.viz_render_enabled = True
         self.viz_render_subsample = 1
         self.viz_render_train_view = False
-        if conf.render.method == 'torch':
+        if self.conf.render.method == 'torch':
             self.viz_render_subsample = 4
 
         self.train_dataset = train_dataset
@@ -226,8 +228,6 @@ class GUI:
         self.ps_point_cloud.add_scalar_quantity("scale_min", to_np(torch.min(self.model.get_scale(), dim=1).values))
         self.ps_point_cloud.add_scalar_quantity("scale_max", to_np(torch.max(self.model.get_scale(), dim=1).values))
 
-
-
     def ps_ui_callback(self):
         # Create a little ImGUI UI
 
@@ -260,13 +260,14 @@ class GUI:
             
             _, self.viz_render_train_view = psim.Checkbox("render w/ train=True", self.viz_render_train_view)
 
-            psim.SameLine()
-            if(psim.Button("Viz rolling buffers")):
-                self.update_cloud_viz()
-                self.populate_rolling_buffers()
+            if self.conf.model.log_rolling_buffers:
+                psim.SameLine()
+                if(psim.Button("Viz rolling buffers")):
+                    self.update_cloud_viz()
+                    self.populate_rolling_buffers()
 
-            psim.PopItemWidth()
-            psim.TreePop()
+                psim.PopItemWidth()
+                psim.TreePop()
 
         if self.live_update:
             self.update_render_view_viz()

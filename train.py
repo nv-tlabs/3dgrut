@@ -232,8 +232,8 @@ def main(conf: DictConfig) -> None:
     assert model.optimizer is not None, "Optimizer needs to be initialized before the training can start!"
     
     for epoch_idx in range(n_epochs):
-
-        model.reset_rolling_buffers()
+        if conf.model.log_rolling_buffers:
+            model.reset_rolling_buffers()
 
         if epoch_idx > 0 and epoch_idx % val_frequency == 0:
                 val_iteration = 0
@@ -332,30 +332,27 @@ def main(conf: DictConfig) -> None:
                         loss_background = torch.nn.functional.mse_loss(outputs["pred_opacity"], foreground_mask)
                         loss += conf.model.lambda_background * loss_background
                         writer.add_scalar("loss_background/train", loss_background.item(), global_step)
-
-                ray_err_abs = torch.abs(outputs['pred_rgb'] - rgb_gt)
-                model.rol = ray_err_abs.mean()
     
                 # backpropagate the gradients and update the parameters
                 with torch.cuda.nvtx.range("backward"):
-                    if not conf.loss.use_fake_loss:
-                        loss.backward()
-                    else:
+                    if conf.model.log_rolling_buffers:
+                        ray_err_abs = torch.abs(outputs['pred_rgb'] - rgb_gt)
                         # horrible hacks to abuse gradients: distributing error statistics back to the
                         # gaussians can be viewed as backprop'nig through a proxy weight
                         fake_loss = loss + torch.sum(ray_err_abs.detach() * outputs['err_backprop_proxy'])
                         fake_loss.backward()
+                    else:
+                        loss.backward()
 
+                # update densification buffer:
                 if global_step < conf.model.densify.end_iteration:
-                    model.update_densification_buffer(rays_ori, rays_dir)
+                    if conf.model.log_rolling_buffers:
+                        model.update_rolling_buffers(error_target.grad, outputs['g_weights'])
+                    if conf.model.densify.method == 'gradient-buffer':
+                        model.update_gradient_buffer(rays_ori, rays_dir)
 
 
                 it_end.record()
-
-                # update error buffers
-                gaussian_error_this_pass = error_target.grad
-                model.rolling_error += gaussian_error_this_pass
-                model.rolling_weight_contrib += outputs['g_weights']
 
                 # Make a scheduler step
                 model.scheduler_step(global_step)
@@ -374,7 +371,7 @@ def main(conf: DictConfig) -> None:
                     parameters = model.get_model_parameters()
                     parameters |= {"global_step": global_step, "epoch": epoch_idx}
                     torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
-
+                
                 # Densify the Gaussians
                 if global_step > conf.model.densify.start_iteration and  global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
                     model.densify_gaussians(scene_extent=scene_extent)
@@ -383,6 +380,10 @@ def main(conf: DictConfig) -> None:
                 # Prune the Gaussians 
                 if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
                     model.prune_gaussians_opacity()
+                
+                if global_step > conf.model.prune_weight.start_iteration and global_step < conf.model.prune_weight.end_iteration and global_step % conf.model.prune_weight.frequency == 0:
+                    if conf.model.log_rolling_buffers:
+                        model.prune_gaussians_weight()
                     scene_updated = True
 
                 # Prune the needle Gaussians 
