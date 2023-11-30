@@ -243,7 +243,7 @@ def main(conf: DictConfig) -> None:
         if conf.model.log_rolling_buffers:
             model.reset_rolling_buffers()
 
-        if (epoch_idx > 0 or conf.validate_first) and epoch_idx % val_frequency == 0:
+        if (global_step > 0 or conf.validate_first) and global_step % val_frequency == 0:
                 val_iteration = 0
                 with tqdm(val_dataloader) as pbar:
                     pbar.set_description("Validation:" )
