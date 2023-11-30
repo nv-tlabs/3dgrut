@@ -232,6 +232,9 @@ def main(conf: DictConfig) -> None:
     assert model.optimizer is not None, "Optimizer needs to be initialized before the training can start!"
     
     for epoch_idx in range(n_epochs):
+        if conf.model.log_rolling_buffers:
+            model.reset_rolling_buffers()
+
         if epoch_idx > 0 and epoch_idx % val_frequency == 0:
                 val_iteration = 0
                 with tqdm(val_dataloader) as pbar:
