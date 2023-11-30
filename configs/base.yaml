@@ -40,7 +40,7 @@ model:
     name: background-color # one of [skip-background, background-color, sky-mlp]
     color: black # one of [black, white, random] needs to be defined if name == background-color
 
-  log_rolling_buffers: ${eq:model.densify.method,error}
+  log_rolling_buffers: false # needs to be set as true if densify.method == error
   print_stats: false
 
   densify:
