@@ -14,7 +14,7 @@ import ray_utils  # type: ignore
 
 from datasets.utils import fov2focal
 from datasets.ngp_utils import load_pc_dat, nerf_ray_to_colmap, nerf_matrix_to_colmap
-from datasets.utils import PointCloud
+from datasets.utils import PointCloud, get_center_and_diag
 from utils.misc import to_torch
 
 
@@ -298,6 +298,28 @@ class NGPDataset(Dataset):
             return self.xform_matrices[:,3].reshape(self.n_frames*2,3)[::2] # returning t_start observer points
         else:
             return self.xform_matrices[:,3].reshape(self.n_frames,3)
+
+    def get_scene_extent(self):
+        # reference implementation
+        pc = PointCloud.from_sequence(list(self.get_point_clouds(step_frame=10, non_dynamic_points_only=True)), device="cpu")
+        # Scene extend from bbox of point-cloud
+        scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
+        scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0]) 
+        # _, diagonal = get_center_and_diag(self.get_observer_points())
+        # scene_extent = diagonal * 1.1
+        return scene_extent
+
+    def get_scene_bbox(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Tuple of vec3 (min,max)"""
+        # reference implementation
+        pc = PointCloud.from_sequence(list(self.get_point_clouds(step_frame=10, non_dynamic_points_only=True)), device="cpu")
+        # Scene extend from bbox of point-cloud
+        scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
+        # camera_origins = torch.tensor(self.get_observer_points())
+        # bbox_min = torch.min(camera_origins, dim=0).values
+        # bbox_max = torch.max(camera_origins, dim=0).values
+        # scene_bbox =  (bbox_min, bbox_max)
+        return scene_bbox
 
     def get_point_clouds(
         self,

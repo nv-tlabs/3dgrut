@@ -96,7 +96,7 @@ class NeRFDataset(Dataset):
             self.rgbs = torch.FloatTensor(np.stack(self.rgbs)) # (N_images, hw, ?)
         if self.return_alphas and len(self.alphas)>0:
             self.alphas = torch.FloatTensor(np.stack(self.alphas))
-        self.poses = torch.FloatTensor(self.poses) # (N_images, 3, 4)
+        self.poses = torch.FloatTensor(np.array(self.poses)) # (N_images, 3, 4)
 
     def compute_spatial_extents(self):
 
@@ -118,9 +118,12 @@ class NeRFDataset(Dataset):
     def get_center(self):
         return self.center
     
-    def get_bbox(self) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_scene_bbox(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Tuple of vec3 (min,max)"""
         return self.scene_bbox
+    
+    def get_scene_extent(self):
+        return self.cameras_extent
 
     def get_observer_points(self):
         return self.camera_centers
