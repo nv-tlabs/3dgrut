@@ -78,6 +78,16 @@ class MixtureOfGaussians(torch.nn.Module):
             self.feature_dim_increase_step = self.conf.model.progressive_training.increase_step
             self.progressive_training = True
 
+        # Check if we would like to use error-based sampling
+        self.error_based_sampling = False
+        if self.conf.model.error_based_sampling.use:
+            self.error_based_sampling = True
+            self.error_sampling_frequency = self.conf.model.error_based_sampling.sampling_frequency
+            self.error_downsampling_factor = self.conf.model.error_based_sampling.downsampling_factor
+            self.error_buffer_update_frequency = self.conf.model.error_based_sampling.buffer_update_frequency
+            self.initialize_error_buffer()
+
+
     def validate_fields(self):
         num_gsplat = self.positions.shape[0]
         assert self.positions.shape == (num_gsplat, 3)
@@ -122,6 +132,41 @@ class MixtureOfGaussians(torch.nn.Module):
                 max_hits_returned=128,
             )
         )
+
+    def initialize_error_buffer(self):
+        self.error_buffer_rays = torch.empty([0,6])
+        self.error_buffer_rgb = torch.empty([0,3])
+        self.error_buffer_errors = torch.empty([0,1])
+        self.error_alpha = None
+
+    @torch.cuda.nvtx.range("update_error_buffer")
+    def update_error_buffer(self, rays_o, rays_d, errors, rgb, alpha=None):
+
+        # Shuffle the tensors
+        idx = torch.randperm(rays_o.shape[0])
+
+        self.error_buffer_rays = torch.cat([rays_o[idx], rays_d[idx]], dim=1).cpu()
+        self.error_buffer_rgb = rgb[idx].cpu()
+        self.error_buffer_errors = errors[idx].cpu().squeeze()
+        if alpha is not None:
+            self.error_alpha = alpha[idx].cpu()
+
+    @torch.cuda.nvtx.range("sample_from_error_buffer")
+    def sample_from_error_buffer(self, out_shape):
+        b, h, w = out_shape
+        # Faster with replacement (shouldn't make a large difference )
+        sampled_indices = torch.multinomial(self.error_buffer_errors[:2**24], torch.prod(torch.tensor(out_shape)), replacement=True)
+
+        sample = {
+                "rays_ori": self.error_buffer_rays[sampled_indices, :3].reshape(b,h,w,3),
+                "rays_dir": self.error_buffer_rays[sampled_indices, 3:].reshape(b,h,w,3),
+                "rgb_gt": self.error_buffer_rgb[sampled_indices].reshape(b,h,w,3),
+            }
+
+        if self.error_alpha is not None:
+            sample["alpha"] = self.error_alpha[sampled_indices].reshape(b,h,w,1)
+
+        return sample
 
     def init_from_colmap(self, root_path: str, observer_pts):
         # TODO this reads from the binary format, also implement the nearly-identical plaintext version?
