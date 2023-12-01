@@ -462,22 +462,6 @@ def main(conf: DictConfig) -> None:
                     model.optimizer.step()
                     model.optimizer.zero_grad()
 
-                # Updating the GUI
-                if gui is not None:
-                    if gui.live_update:
-                        if scene_updated or model.get_positions().requires_grad:
-                            gui.update_cloud_viz()
-                        gui.update_render_view_viz()
-
-                    ps.frame_tick()
-                    while not gui.viz_do_train:
-                        ps.frame_tick()
-
-                # Optimizer step
-                with torch.cuda.nvtx.range("backpropagation"):
-                    model.optimizer.step()
-                    model.optimizer.zero_grad()
-
                 # Update the error buffers with new values
                 if global_step > 0 and model.error_based_sampling and global_step % model.error_buffer_update_frequency == 0:
                     with torch.cuda.nvtx.range(f"update_error_buffer[step {global_step}]"):
