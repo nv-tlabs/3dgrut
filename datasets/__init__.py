@@ -1,11 +1,8 @@
-import torch
-
 from datasets.nerf_dataset import NeRFDataset
 from datasets.ngp_dataset import NGPDataset
 from datasets.colmap_dataset import ColmapDataset
 from datasets.ncore_dataset import NCoreDataset
 from datasets.ncore_utils import Batch as NCoreBatch
-from datasets.utils import PointCloud
 
 def make(name:str, config, ray_jitter):
     train_collate_fn = None
@@ -23,7 +20,7 @@ def make(name:str, config, ray_jitter):
             )
             val_dataset = NeRFDataset(
                 config.path,
-                split='test', # TODO : change back to val, but ww can directly monitor what we will get :)
+                split='val',
                 sample_full_image=True,
                 return_alphas=False
             )
