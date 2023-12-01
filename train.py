@@ -186,7 +186,7 @@ def main(conf: DictConfig) -> None:
                 except FileNotFoundError as e:
                     logging.exception(e)
                     raise e           
-            case'random':
+            case 'random':
                 model.init_from_random_point_cloud(num_gsplat=conf.initialization.num_gaussians)
             case 'lidar':
                 assert conf.dataset.type in ['ngp', 'ncore'], 'can only initialize from lidar with the NGPDataset / NCoreDataset'
@@ -239,6 +239,12 @@ def main(conf: DictConfig) -> None:
 
     assert model.optimizer is not None, "Optimizer needs to be initialized before the training can start!"
     
+    if val_frequency % len(train_dataset) != 0:
+        logging.warning(f"The selected val_frequency {val_frequency} is not a multiple of the train_dataset size {len(train_dataset)}")
+        val_frequency -= val_frequency % len(train_dataset) 
+        logging.warning(f"setting val_frequency to {val_frequency}")
+
+
     for epoch_idx in range(n_epochs):
         if conf.model.log_rolling_buffers:
             model.reset_rolling_buffers()
