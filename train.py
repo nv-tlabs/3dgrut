@@ -25,7 +25,7 @@ from models.model import MixtureOfGaussians
 from models.background import BackgroundColor
 from datasets.utils import move_to_gpu
 from models.losses import ssim
-from utils.misc import to_np
+from models.background import SkyMlp
 from utils.gui import GUI
 from utils.recorder import TrainingRecorder
 from render import Renderer

@@ -5,7 +5,7 @@ defaults:
   - /base.yaml
   - /dataset: ngp
   - /initialization: auxiliary
-  - /background: sky_mlp
+  - /model/background: sky_mlp
   - _self_
 
 # overwrite of default parameters

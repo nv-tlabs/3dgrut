@@ -3,7 +3,7 @@
 # order in which configs override each other (/* - denotes a relative search path)
 defaults:
   - /apps/ncore
-  - /background@_global_: sky_mlp
+  - /model/background@_global_: sky_mlp
   - _self_
 
 # overwrite of default parameters

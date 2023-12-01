@@ -1,5 +1,3 @@
-import numpy as np
-
 import torch
 from torch.utils.checkpoint import checkpoint
 
