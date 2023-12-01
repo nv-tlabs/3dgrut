@@ -5,8 +5,10 @@ import torch
 from torch.cuda.amp.autocast_mode import custom_fwd, custom_bwd
 from torch.autograd.function import once_differentiable
 
-import packed_ops  # type: ignore
-
+try:
+    from libs.packed_ops import packed_ops  # type: ignore
+except ImportError:
+    import packed_ops  # type: ignore
 
 class _TruncExp(torch.autograd.Function):
     @staticmethod

@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 from datasets.colmap_utils import read_extrinsics_binary, read_intrinsics_binary, read_extrinsics_text, read_intrinsics_text,qvec2rotmat
 from datasets.nerf_utils import create_camera_visualization
 from datasets.utils import pinhole_camera_rays, camera_to_world_rays, get_center_and_diag
-from utils import to_torch, to_np
+from utils.misc import to_torch, to_np
 
 class ColmapDataset(Dataset):
 
@@ -150,9 +150,12 @@ class ColmapDataset(Dataset):
     def get_center(self):
         return self.center
     
-    def get_bbox(self) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_scene_bbox(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Tuple of vec3 (min,max)"""
         return self.scene_bbox
+
+    def get_scene_extent(self):
+        return self.cameras_extent
 
     def get_observer_points(self):
         return self.camera_centers

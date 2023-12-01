@@ -7,15 +7,14 @@ import tqdm
 from plyfile import PlyData
 
 from libs import optixtracer
-from utils import to_torch, get_activation_function, inverse_sigmoid, get_scheduler, quaternion_to_so3, \
+from utils.misc import to_torch, get_activation_function, inverse_sigmoid, get_scheduler, quaternion_to_so3, \
     sh_degree_to_num_features, sh_degree_to_specular_dim
 from datasets.colmap_utils import read_next_bytes
 from datasets.utils import PointCloud
-from geometry import nearest_neighbor_dist_cpuKD
-from utils import to_np
-import background
-from color import RGB2SH
-from render_utils import evaluate_rays
+from models.geometry import nearest_neighbor_dist_cpuKD
+from utils.misc import to_np
+import models.background as background
+from models.render_utils import evaluate_rays, RGB2SH
 
 class MixtureOfGaussians(torch.nn.Module):
     def __init__(self, conf, scene_extent=None):

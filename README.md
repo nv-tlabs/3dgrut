@@ -37,7 +37,7 @@ The latter two packages `cuda-python` and `cupy` may very slow to install and/or
 
 ## NGC utils
 
-Based on [ngc-toolbox](https://gitlab-master.nvidia.com/jalucas/ngc-toolbox/-/tree/main?ref_type=heads) see more detailed README in `./ngc/README.md`
+Based on [ngc-toolbox](https://gitlab-master.nvidia.com/jalucas/ngc-toolbox/-/tree/main?ref_type=heads) see more detailed README in `./utils/ngc/README.md`
 
 ### Prerequisites
 
@@ -57,47 +57,47 @@ Based on [ngc-toolbox](https://gitlab-master.nvidia.com/jalucas/ngc-toolbox/-/tr
 
 ### Updating Docker container (only if needed)
 ```bash
-python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml build_docker
-python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml push_docker
+python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml build_docker
+python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml push_docker
 ```
 ### Workspace
 
 Mounting a workspace locally:
 ```bash
-python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml mount_workspace
+python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml mount_workspace
 ```
 Unmounting:
 ```bash
-python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml unmount_workspace
+python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml unmount_workspace
 ```
 
 Syncing current version of code to workspace:
 ```bash
-python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml sync_workspace experiment_name
+python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml sync_workspace experiment_name
 ```
 This will create a copy of the code in the workspace, in the directory `experiments/experiment_name`.
 
 ### Jobs
-Before any job, the command will execute `./ngc/ngc_pre_job.sh`.
-After any job, the command will execute `./ngc/ngc_post_job.sh`.
+Before any job, the command will execute `./utils/ngc/ngc_pre_job.sh`.
+After any job, the command will execute `./utils/ngc/ngc_post_job.sh`.
 
 Start an interactive job:
 ```bash
-python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml run_interactive_job --runtime 4h 
+python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml run_interactive_job --runtime 4h 
 ```
 The job will spin up and you'll be assigned a job ID (presented in the command output). You can connect to the job via `ngc batch exec <job_id>`.
 
 
 Runnig a normal job:
 ```bash
-python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml run_job "python train.py --arg1 value1 --arg2 value2" experiment_name
+python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml run_job "python train.py --arg1 value1 --arg2 value2" experiment_name
 ```
 
 The job will spin up on ngc, and should be visible on the [NGC dashboard](https://ngc.nvidia.com/dashboard).
 
 Note that syncing a workspace and running a normal job can be combined using the `submit_job` method:
 
-`python ./ngc/app.py --config ngc_config/3dgrt.toml submit_job "python train.py --arg1 value1 --arg2 value2" experiment_name`
+`python ./utils/ngc/app.py --config ngc_config/3dgrt.toml submit_job "python train.py --arg1 value1 --arg2 value2" experiment_name`
 
 **A large batch of jobs**
 
@@ -111,10 +111,10 @@ python train.py --arg1 a1 --arg2 b2
 python train.py --arg1 b1 --arg2 b2
 ```
 
-Then execute `python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml  generate_job_array grid_search.txt grid_search grid_search_jobs/`.
+Then execute `python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml  generate_job_array grid_search.txt grid_search grid_search_jobs/`.
 The final three arguments are the file containing the commands, a name for the experiment, and the output folder to place the job data.
 Running this command creates a new directory called `grid_search_jobs` containing the files `[cmd_0.json, cmd_1.json, cmd_2.json, cmd_3.json]`. You can then dispatch all jobs to NGC via,
 
-`python ./ngc/app.py --config ngc/ngc_config/3dgrt.toml  run_job_array grid_search_jobs`
+`python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml  run_job_array grid_search_jobs`
 
 _This could also be achieve in one step, by adding the `--run` flag to the `generate_job_array` command._

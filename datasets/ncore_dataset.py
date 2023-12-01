@@ -43,9 +43,9 @@ from datasets.ncore_utils import (
     RigTrajectories,
     object_mask_from_image_points,
 )
-from datasets.utils import PointCloud
+from datasets.utils import PointCloud, get_center_and_diag
 
-from utils import to_torch, to_torch_optional, unpack_optional
+from utils.misc import to_torch, to_torch_optional, unpack_optional
 
 
 def chunk_sizes(n: int, size: int) -> Generator[int, None, None]:
@@ -1012,6 +1012,28 @@ class NCoreDataset(torch.utils.data.Dataset):
                     camera_centers.append(T_sensor_colmap[:3,3])
 
         return np.array(camera_centers)
+
+    def get_scene_extent(self):
+        # reference implementation
+        # pc = PointCloud.from_sequence(list(train_dataset.get_point_clouds(step_frame=10, non_dynamic_points_only=True)), device="cpu")
+        # # Scene extend from bbox of point-cloud
+        # scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
+        # scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0]) 
+        _, diagonal = get_center_and_diag(self.get_observer_points())
+        cameras_extent = diagonal * 1.1
+        return cameras_extent
+
+    def get_scene_bbox(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Tuple of vec3 (min,max)"""
+        # reference implementation
+        # pc = PointCloud.from_sequence(list(train_dataset.get_point_clouds(step_frame=10, non_dynamic_points_only=True)), device="cpu")
+        # # Scene extend from bbox of point-cloud
+        # scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
+        # scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0]) 
+        camera_origins = torch.tensor(self.get_observer_points())
+        bbox_min = torch.min(camera_origins, dim=0).values
+        bbox_max = torch.max(camera_origins, dim=0).values
+        return (bbox_min, bbox_max)
 
     def __len__(self) -> int:
         """Returns the total number of samples provided by the dataset (depending on split type and parametrization)"""

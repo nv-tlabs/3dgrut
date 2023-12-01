@@ -12,7 +12,7 @@ extra_info/
 
 debug_**
 
-ngc/grid_search_configs
+utils/ngc/grid_search_configs
 
 imgui.ini
 data

@@ -1,5 +1,24 @@
 import torch
 
+def make(name:str, config):
+    match name:
+        case 'none':
+            pass
+        case 'random':
+            return RandomRayJitter(
+                enabled=False,  # Start jittering from iteration N
+                apply_every_n_iterations=config.dataset.train.ray_jittering.apply_every_n_iterations,
+                device='cpu'
+            )
+        case 'stratified':
+            return StratifiedRayJitter(
+                enabled=False,  # Start jittering from iteration N
+                apply_every_n_iterations=config.dataset.train.ray_jittering.apply_every_n_iterations,
+                num_samples=config.dataset.train.ray_jittering.num_samples,
+                device='cpu'
+            )
+        case _:
+            raise ValueError(f'Unknown ray jitter type: {config.dataset.train.ray_jittering.type}')
 
 # Adapted from InstantNGP / following Peter Shirley's blog:
 # https://psgraphics.blogspot.com/2011/01/improved-code-for-concentric-map.html

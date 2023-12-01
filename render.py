@@ -5,13 +5,14 @@ import os
 import numpy as np
 
 from tqdm import tqdm
-from model import MixtureOfGaussians
+from models.model import MixtureOfGaussians
 from datasets.utils import move_to_gpu
 
 from datasets.colmap_dataset import ColmapDataset
 from datasets.nerf_dataset import NeRFDataset
 from datasets.ngp_dataset import NGPDataset
 from datasets.ncore_dataset import NCoreDataset
+from datasets.ncore_utils import Batch as NCoreBatch
 
 from torchmetrics import PeakSignalNoiseRatio
 
@@ -37,24 +38,45 @@ class Renderer:
     def create_test_dataloader(self, conf):
         val_collate_fn = None
         # Create the dataset
-        if conf.dataset.type == 'nerf':
-            dataset = NeRFDataset(
-                conf.path,
-                split='test',
-                sample_full_image=True,
-                batch_size=1,
-                return_alphas=True
-            )
-        elif conf.dataset.type == 'colmap':
-            dataset = ColmapDataset(
-                conf.path,
-                split='val',
-                sample_full_image=True,
-                downsample_factor=conf.dataset.downsample_factor
-            )
-        else:
-            raise ValueError(
-                f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp", "ncore"]. ')
+        match conf.dataset.type:
+            case 'nerf':
+                dataset = NeRFDataset(
+                    conf.path,
+                    split='test',
+                    sample_full_image=True,
+                    batch_size=1,
+                    return_alphas=True
+                )
+            case 'colmap':
+                dataset = ColmapDataset(
+                    conf.path,
+                    split='val',
+                    sample_full_image=True,
+                    downsample_factor=conf.dataset.downsample_factor
+                )
+            case 'ngp':
+                dataset = NGPDataset(
+                    conf.path,
+                    split='val',
+                    sample_full_image=True,
+                    val_downsample=5,
+                    val_frame_subsample=5,
+                    use_aux=conf.dataset.get("use_aux_data", False)
+                )
+            case 'ncore':
+                # TODO: add all of the dataset parameters to config
+                duration_sec = 2.0
+                dataset = NCoreDataset(
+                    conf.path,
+                    split='val',
+                    duration_sec=duration_sec,
+                )
+                # Dataset produces NCoreBatch requiring dedicated collate_fns
+                val_collate_fn = NCoreBatch.collate_fn
+
+            case _:
+                raise ValueError(
+                    f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp", "ncore"]. ')
 
         dataloader = torch.utils.data.DataLoader(dataset, num_workers=8, batch_size=1, shuffle=False,
                                                       collate_fn=val_collate_fn)

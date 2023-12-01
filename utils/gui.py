@@ -1,7 +1,7 @@
 import torch 
 import numpy as np
 
-from utils import to_np
+from utils.misc import to_np
 from datasets.colmap_dataset import ColmapDataset
 from datasets.nerf_dataset import NeRFDataset
 

@@ -3,7 +3,7 @@ description = "Running our 3D gaussian ray tracing code."
 # This command is run before any other specified commands (see README)
 #    Note: workspace_path is pulled from the `[ngc.workspace.path]` value
 #          end this command with `;` as additional commands will be appended
-base_command = "cd  {workspace_path}/experiments/{exp_name}; . ./ngc/ngc_pre_job.sh; "
+base_command = "cd  {workspace_path}/experiments/{exp_name}; . ./utils/ngc/ngc_pre_job.sh; "
 
 [ngc]
 name = "3dgrt.notamodel.3dgrt_app"

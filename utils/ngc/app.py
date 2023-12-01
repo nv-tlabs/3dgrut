@@ -90,14 +90,14 @@ class NGCToolbox:
         config: Path to config file.
     """
 
-    def __init__(self, config):
+    def __init__(self, config = "./utils/ngc/ngc_config/3dgrt.toml"):
         self._cfg = load_config(config)
 
 
     def build_docker(self, docker_fpath: Optional[os.PathLike] = None):
         """Build the docker container.
         """
-        cmd = 'docker build -f ./ngc/Dockerfile.build . -t {0}'.format(self._cfg["docker"]["name"])
+        cmd = 'docker build -f ./utils/ngc/Dockerfile.build . -t {0}'.format(self._cfg["docker"]["name"])
         if docker_fpath is not None:
             cmd += f" -f {docker_fpath}"
         print(cmd)
@@ -242,7 +242,7 @@ class NGCToolbox:
         """
         cmd_json = get_cmd_template(self._cfg, exp_name)
         cmd_json["command"] += command
-        cmd_json["command"] += " ; . ./ngc/ngc_post_job.sh"
+        cmd_json["command"] += " ; . ./utils/ngc/ngc_post_job.sh"
         dump_and_run("command.json", cmd_json, dry_run, cleanup)
 
 
@@ -265,7 +265,7 @@ class NGCToolbox:
         """
         # Create the job directory to store the commands
         try:
-            jobdir = os.path.join('./ngc/grid_search_configs/',jobdir)
+            jobdir = os.path.join('./utils/ngc/grid_search_configs/',jobdir)
             os.makedirs(jobdir, exist_ok=keep_dir)
         except FileExistsError:
             print("Job directory already exists. Please delete it (or provide --keep_dir flag)")
@@ -281,7 +281,7 @@ class NGCToolbox:
             cmd_json = deepcopy(job_template)
             cmd_json["name"] += "." + job_id
             cmd_json["command"] += cmd.format(exp_name=exp_name)
-            cmd_json["command"] += " ; . ./ngc/ngc_post_job.sh"
+            cmd_json["command"] += " ; . ./utils/ngc/ngc_post_job.sh"
             job_fpath = os.path.join(jobdir, "cmd_{}.json".format(job_id))
 
             with open(job_fpath , "w") as f:

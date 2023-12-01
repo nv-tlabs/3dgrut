@@ -1,5 +1,5 @@
 
-from utils import to_np
+from utils.misc import to_np
 
 import numpy as np
 import sklearn.neighbors

@@ -19,8 +19,8 @@ import polyscope.imgui as psim
 
 from datasets.utils import PointCloud
 from datasets.utils import move_to_gpu, pinhole_camera_rays
-from loss_utils import ssim
-from utils import to_np
+from models.losses import ssim
+from utils.misc import to_np
 from libs import optixtracer
 sys.path.append(os.path.dirname(os.path.dirname(os.getcwd()))) 
 
