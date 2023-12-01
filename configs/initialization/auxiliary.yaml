@@ -1,0 +1,8 @@
+method: auxiliary
+spacing: 0.5
+sky_step_frame: 10
+sky_step_pixel: 10
+pc_step_frame: 10
+pc_step_points: 1
+num_gsplats: 100_000
+observation_scale_factor: 0.01

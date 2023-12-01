@@ -3,6 +3,7 @@ from typing import Optional
 
 import numpy as np
 import torch
+import tqdm
 from plyfile import PlyData
 
 from libs import optixtracer
@@ -208,13 +209,15 @@ class MixtureOfGaussians(torch.nn.Module):
     def init_from_random_point_cloud(self,
                                      num_gsplat: int = 100_000,
                                      dtype=torch.float32,
-                                     set_optimizable_parameters: bool = True):
+                                     set_optimizable_parameters: bool = True,
+                                     xyz_max = 1.5,
+                                     xyz_min = -1.5):
 
         logging.info(f"Generating random point cloud ({num_gsplat})...")
 
         # We create random points inside the bounds of the synthetic Blender scenes
         # xyz in [-1.5, 1.5] -> standard NeRF convention, people often scale with 0.33 to get it to [-0.5, 0.5]
-        fused_point_cloud = torch.rand((num_gsplat, 3), dtype=dtype, device=self.device) * 3.0 - 1.5
+        fused_point_cloud = torch.rand((num_gsplat, 3), dtype=dtype, device=self.device) * (xyz_max - xyz_min) + xyz_min
         # sh albedo in [0, 0.0039]
         fused_color = torch.rand((num_gsplat, 3), dtype=dtype, device=self.device) / 255.0
 
@@ -324,6 +327,108 @@ class MixtureOfGaussians(torch.nn.Module):
        
         # only initialize by default from points for now
         self.default_initialize_from_points(point_cloud.xyz_end.to(device=self.device), observer_pts, None)
+
+    def delete_hit_gaussians(self, mask):
+        # take output of the forward pass and delete gaussians that where hit
+        optimizable_tensors = self.prune_optimizer_tensors(mask=mask)
+        self.update_optimizable_parameters(optimizable_tensors)
+
+    def init_from_auxiliary_data(self, dataset, scene_bbox, spacing, hit_count_threshold, sky_step_frame, sky_step_pixel, pc_step_frame, pc_step_points):
+        # Initialize Gaussian grid in the scene
+        dx = torch.arange(scene_bbox[0][0], scene_bbox[1][0], spacing, device='cpu')
+        dy = torch.arange(scene_bbox[0][1], scene_bbox[1][1], spacing, device='cpu')
+        dz = torch.arange(scene_bbox[0][2], scene_bbox[1][2], spacing, device='cpu')
+        grid_x, grid_y, grid_z = torch.meshgrid(dx, dy, dz)
+        random_point_cloud = torch.cat([grid_x.reshape(-1,1), grid_y.reshape(-1,1), grid_z.reshape(-1,1)], dim=1)
+
+        observer_points = torch.tensor(dataset.get_observer_points(), dtype=torch.float32, device='cpu')
+
+        print(f"Initializing {len(grid_x.flatten())} evenly-spaced Gaussiasn...")
+        self.default_initialize_from_points(random_point_cloud, observer_points, None)
+
+        self.set_optix_context()
+        self.build_bvh()
+        
+        # Iterate over the point clouds and prune away gaussians along lidar rays
+        point_clouds = []
+        num_deleted_lidar = 0
+        for lidar_pc in tqdm.tqdm(
+            dataset.get_point_clouds(step_frame=pc_step_frame),
+            desc="Pruning Gaussians with lidar rays...",
+        ):
+            ray_o = lidar_pc.xyz_start.to(self.device)
+            ray_d = (lidar_pc.xyz_end - lidar_pc.xyz_start).to(self.device)
+            ray_d /= torch.linalg.norm(ray_d, dim=1, keepdim=True)
+                       
+            point_clouds.append(lidar_pc)
+
+            # Prune Gaussians along lidar ray
+            hit_counts = self.get_hit_counts(rays_o=ray_o[None,None,::pc_step_points,:],rays_d=ray_d[None,None,::pc_step_points,:])
+            mask = (hit_counts <= hit_count_threshold).squeeze()
+            if (~mask).any():
+                self.delete_hit_gaussians(mask)
+                self.build_bvh()
+            num_deleted_lidar += (~mask).sum()
+        print(f"Culled {num_deleted_lidar} Gaussians using lidar rays...")
+
+
+        # Iterate over the sky rays and prune away gaussians along them
+        num_deleted_sky = 0
+        for semantic_rays in tqdm.tqdm(
+            dataset.get_sky_rays(step_frame=sky_step_frame, step_pixel=sky_step_pixel),
+            desc="Pruning Gaussians with sky rays...",
+        ):
+            ray_o = semantic_rays[:, :3].to(self.device)
+            ray_d = semantic_rays[:, 3:6].to(self.device)
+            ray_d /= torch.linalg.norm(ray_d, dim=1, keepdim=True)
+
+
+            # Prune Gaussians along ray
+            hit_counts = self.get_hit_counts(rays_o=ray_o[None,None,...],rays_d=ray_d[None,None,...])
+            mask = (hit_counts <= hit_count_threshold).squeeze()
+            if (~mask).any():
+                self.delete_hit_gaussians(mask)
+                self.build_bvh()
+            num_deleted_sky += (~mask).sum()
+        print(f"Culled {num_deleted_sky} Gaussians using sky rays...")
+
+        # Get the aggregated point cloud and add the gaussians back
+        aggregated_point_cloud = PointCloud.from_sequence(point_clouds, device=self.device).xyz_end
+        N = aggregated_point_cloud.size()[0]
+        print(f"Adding {N} Gaussians using lidar rays...")
+
+        dtype = torch.float
+
+        # identity rotations
+        rots = torch.zeros((N,4), dtype=dtype, device=self.device)
+        rots[:,0] = 1. # they're quaternions
+
+        # estimate scales based on distances to observers
+        dist_to_observers = torch.clamp_min(nearest_neighbor_dist_cpuKD(aggregated_point_cloud, observer_points), 1e-7)
+        observation_scale = dist_to_observers * self.conf.initialization.observation_scale_factor
+        scales = self.scale_activation_inv(observation_scale)[:,None].repeat(1,3)
+
+        # set density as a constant
+        opacities = self.density_activation_inv(torch.full((N,1), fill_value=0.1, dtype=dtype, device=self.device))
+
+        # set color as a constant
+        features_albedo = torch.rand((N, 3), dtype=dtype, device=self.device) / 255.0
+                                       
+        num_specular_dims = sh_degree_to_specular_dim(self.max_n_features)
+        features_specular = torch.zeros((N, num_specular_dims))
+
+        add_gaussians = {
+                "positions": torch.nn.Parameter(aggregated_point_cloud.to(dtype=dtype, device=self.device)),
+                "density":  torch.nn.Parameter(opacities.to(dtype=dtype, device=self.device)),
+                "scale":  torch.nn.Parameter(scales.to(dtype=dtype, device=self.device)),
+                "rotation": torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
+                }
+        if self.feature_type == 'sh':
+            add_gaussians["features_albedo"] = torch.nn.Parameter(features_albedo.to(dtype=dtype, device=self.device))
+            add_gaussians["features_specular"] = torch.nn.Parameter(features_specular.to(dtype=dtype, device=self.device))
+
+        self.densify_postfix(add_gaussians)
+        print(f"Initialized a total of {self.positions.shape[0]} Gaussians")
 
     def setup_optimizer(self, state_dict=None):
         params = []
@@ -720,6 +825,25 @@ class MixtureOfGaussians(torch.nn.Module):
             self.rolling_weight_contrib = self.rolling_weight_contrib[valid_mask]
 
         torch.cuda.empty_cache()
+
+    def prune_sky_gaussians(self, sky_rays, hit_count_threshold=0):
+        # Iterate over the sky rays and prune away gaussians along them
+        num_deleted_sky = 0
+        hit_buffer = torch.zeros((self.positions.shape[0],),device=self.device)
+        for semantic_rays in tqdm.tqdm(
+            sky_rays,
+            desc="Pruning the Gaussians with sky rays",
+        ):
+            ray_o = semantic_rays[:, :3].to(self.device)
+            ray_d = semantic_rays[:, 3:6].to(self.device)
+            ray_d /= torch.linalg.norm(ray_d, dim=1, keepdim=True)
+            
+            # Prune Gaussians along ray
+            hit_buffer += self.get_hit_counts(rays_o=ray_o[None,...],rays_d=ray_d[None,...]).squeeze()
+        mask = (hit_buffer <= hit_count_threshold).squeeze()
+        self.delete_hit_gaussians(mask)
+        num_deleted_sky += (~mask).sum()
+        print(f"culled {num_deleted_sky} using sky rays...")
 
     def get_scale(self, preactivation=False):
         if preactivation:

@@ -22,7 +22,7 @@ from datasets.ncore_utils import Batch as NCoreBatch
 from datasets.utils import PointCloud
 from antialiasing import StratifiedRayJitter, RandomRayJitter
 from model import MixtureOfGaussians
-from background import BackgroundColor
+from background import BackgroundColor, SkyMlp
 from datasets.utils import move_to_gpu
 from loss_utils import ssim
 from utils import to_np
@@ -50,112 +50,114 @@ def main(conf: DictConfig) -> None:
     val_collate_fn = None
 
     ray_jitter=None
-    if conf.dataset.train.ray_jittering.type == 'none':
-        pass
-    elif conf.dataset.train.ray_jittering.type == 'random':
-        ray_jitter = RandomRayJitter(
-            enabled=False,  # Start jittering from iteration N
-            apply_every_n_iterations=conf.dataset.train.ray_jittering.apply_every_n_iterations,
-            device='cpu'
-        )
-    elif conf.dataset.train.ray_jittering.type == 'stratified':
-        ray_jitter = StratifiedRayJitter(
-            enabled=False,  # Start jittering from iteration N
-            apply_every_n_iterations=conf.dataset.train.ray_jittering.apply_every_n_iterations,
-            num_samples=conf.dataset.train.ray_jittering.num_samples,
-            device='cpu'
-        )
-    else:
-        raise ValueError(f'Unknown ray jitter type: {conf.dataset.train.ray_jittering.type}')
+    match conf.dataset.train.ray_jittering.type:
+        case 'none':
+            pass
+        case 'random':
+            ray_jitter = RandomRayJitter(
+                enabled=False,  # Start jittering from iteration N
+                apply_every_n_iterations=conf.dataset.train.ray_jittering.apply_every_n_iterations,
+                device='cpu'
+            )
+        case 'stratified':
+            ray_jitter = StratifiedRayJitter(
+                enabled=False,  # Start jittering from iteration N
+                apply_every_n_iterations=conf.dataset.train.ray_jittering.apply_every_n_iterations,
+                num_samples=conf.dataset.train.ray_jittering.num_samples,
+                device='cpu'
+            )
+        case _:
+            raise ValueError(f'Unknown ray jitter type: {conf.dataset.train.ray_jittering.type}')
 
-    if conf.dataset.type == 'nerf':
-        train_dataset = NeRFDataset(
-            conf.path, 
-            split='train', 
-            sample_full_image=conf.dataset.train.sample_full_image, 
-            batch_size=conf.dataset.train.batch_size,
-            return_alphas=True,
-            ray_jitter=ray_jitter
-        )
-        val_dataset = NeRFDataset(
-            conf.path,
-            split='test', # TODO : change back to val, but ww can directly monitor what we will get :)
-            sample_full_image=True,
-            return_alphas=False
-        )
-        scene_extent = train_dataset.cameras_extent # taken from gsplat code
-        # Scene extend from bbox poses
-        scene_bbox = train_dataset.get_bbox()
-    elif conf.dataset.type == 'colmap':
-        train_dataset = ColmapDataset(
-            conf.path, 
-            split='train', 
-            sample_full_image=conf.dataset.train.sample_full_image, 
-            batch_size=conf.dataset.train.batch_size,
-            downsample_factor=conf.dataset.downsample_factor,
-            ray_jitter=ray_jitter
-        )
-        val_dataset = ColmapDataset(
-            conf.path,
-            split='val',
-            sample_full_image=True,
-            downsample_factor=conf.dataset.downsample_factor
-        )
-        scene_extent = train_dataset.cameras_extent # taken from gsplat code
-        # Scene extend from bbox poses
-        scene_bbox = train_dataset.get_bbox()
-    elif conf.dataset.type == 'ngp':
-        train_dataset = NGPDataset(
-            conf.path, 
-            split='train', 
-            sample_full_image=conf.dataset.train.sample_full_image, 
-            batch_size=conf.dataset.train.batch_size,
-            batch_size_lidar=conf.dataset.train.batch_size // 4 if conf.loss.use_lidardistance else 0,
-            use_lidar=True,
-            use_dynamic_masks=True,
-            use_aux=conf.dataset.get("use_aux_data", False)
-        )
-        val_dataset = NGPDataset(
-            conf.path,
-            split='val',
-            sample_full_image=True,
-            val_downsample=5,
-            val_frame_subsample=5,
-            use_aux=conf.dataset.get("use_aux_data", False)
-        )
-        pc = train_dataset.get_point_cloud(step_frame=10)
+    match conf.dataset.type:
+        case 'nerf':
+            train_dataset = NeRFDataset(
+                conf.path, 
+                split='train', 
+                sample_full_image=conf.dataset.train.sample_full_image, 
+                batch_size=conf.dataset.train.batch_size,
+                return_alphas=True,
+                ray_jitter=ray_jitter
+            )
+            val_dataset = NeRFDataset(
+                conf.path,
+                split='test', # TODO : change back to val, but ww can directly monitor what we will get :)
+                sample_full_image=True,
+                return_alphas=False
+            )
+            scene_extent = train_dataset.cameras_extent # taken from gsplat code
+            # Scene extend from bbox poses
+            scene_bbox = train_dataset.get_bbox()
+        case 'colmap':
+            train_dataset = ColmapDataset(
+                conf.path, 
+                split='train', 
+                sample_full_image=conf.dataset.train.sample_full_image, 
+                batch_size=conf.dataset.train.batch_size,
+                downsample_factor=conf.dataset.downsample_factor,
+                ray_jitter=ray_jitter
+            )
+            val_dataset = ColmapDataset(
+                conf.path,
+                split='val',
+                sample_full_image=True,
+                downsample_factor=conf.dataset.downsample_factor
+            )
+            scene_extent = train_dataset.cameras_extent # taken from gsplat code
+            # Scene extend from bbox poses
+            scene_bbox = train_dataset.get_bbox()
+        case 'ngp':
+            train_dataset = NGPDataset(
+                conf.path, 
+                split='train', 
+                sample_full_image=conf.dataset.train.sample_full_image, 
+                batch_size=conf.dataset.train.batch_size,
+                batch_size_lidar=conf.dataset.train.batch_size // 4 if conf.loss.use_lidardistance else 0,
+                use_lidar=True,
+                use_dynamic_masks=~conf.dataset.train.sample_full_image,
+                use_aux=conf.dataset.get("use_aux_data", False)
+            )
+            val_dataset = NGPDataset(
+                conf.path,
+                split='val',
+                sample_full_image=True,
+                val_downsample=5,
+                val_frame_subsample=5,
+                use_aux=conf.dataset.get("use_aux_data", False)
+            )
+            pc = PointCloud.from_sequence(list(train_dataset.get_point_clouds(step_frame=10, non_dynamic_points_only=True)), device="cpu")
 
-        # Scene extend from bbox of point-cloud
-        scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
-        scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0]) #TODO implement as in colmap dataset and nerf dataset
-    elif conf.dataset.type == 'ncore':
-        # TODO: add all of the dataset parameters to config
-        duration_sec = 2.0
-        n_train_sample_timepoints = 5
+            # Scene extend from bbox of point-cloud
+            scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
+            scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0]) #TODO implement as in colmap dataset and nerf dataset
+        case 'ncore':
+            # TODO: add all of the dataset parameters to config
+            duration_sec = 2.0
+            n_train_sample_timepoints = 5
 
-        train_dataset = NCoreDataset(
-            conf.path, 
-            split='train', 
-            duration_sec=duration_sec,
-            n_train_sample_timepoints=n_train_sample_timepoints,
-            n_train_sample_lidar_rays=1024 if conf.loss.use_lidardistance else 0
-        )
-        val_dataset = NCoreDataset(
-            conf.path,
-            split='val',
-            duration_sec=duration_sec,
-        )
-        pc = PointCloud.from_sequence(list(train_dataset.get_point_clouds(step_frame=10, non_dynamic_points_only=True)), device="cpu")
-        
-        # Scene extend from bbox of point-cloud
-        scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
-        scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0]) #TODO implement as in colmap dataset and nerf dataset
+            train_dataset = NCoreDataset(
+                conf.path, 
+                split='train', 
+                duration_sec=duration_sec,
+                n_train_sample_timepoints=n_train_sample_timepoints,
+                n_train_sample_lidar_rays=1024 if conf.loss.use_lidardistance else 0
+            )
+            val_dataset = NCoreDataset(
+                conf.path,
+                split='val',
+                duration_sec=duration_sec,
+            )
+            pc = PointCloud.from_sequence(list(train_dataset.get_point_clouds(step_frame=10, non_dynamic_points_only=True)), device="cpu")
+            
+            # Scene extend from bbox of point-cloud
+            scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
+            scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0]) #TODO implement as in colmap dataset and nerf dataset
 
-        # Dataset produces NCoreBatch requiring dedicated collate_fns
-        train_collate_fn = NCoreBatch.collate_fn
-        val_collate_fn = NCoreBatch.collate_fn
-    else:
-        raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp", "ncore"]. ')
+            # Dataset produces NCoreBatch requiring dedicated collate_fns
+            train_collate_fn = NCoreBatch.collate_fn
+            val_collate_fn = NCoreBatch.collate_fn
+        case _:
+            raise ValueError(f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "ngp", "ncore"]. ')
 
     train_dataloader = torch.utils.data.DataLoader(train_dataset, num_workers=conf.num_workers, batch_size=1, shuffle=True, collate_fn=train_collate_fn)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=conf.num_workers, batch_size=1, shuffle=False, collate_fn=val_collate_fn)
@@ -171,30 +173,36 @@ def main(conf: DictConfig) -> None:
         global_step = checkpoint['global_step']
 
     else: # Initialize
-
-        if conf.initialization.method == 'colmap':
-            observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
-            model.init_from_colmap(conf.path, observer_points)
-
-        elif conf.initialization.method == 'point_cloud':
-            observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
-            ply_path = None
-            try:
-                ply_path = os.path.join(conf.path, "point_cloud.ply")
-                model.init_from_pretrained_point_cloud(ply_path)
-            except FileNotFoundError as e:
-                logging.exception(e)
-                raise e
-         
-        elif conf.initialization.method == 'random':
-            model.init_from_random_point_cloud(num_gsplat=conf.initialization.num_gaussians)
-
-        elif conf.initialization.method == 'lidar':
-            assert conf.dataset.type in ['ngp', 'ncore'], 'can only initialize from lidar with the NGPDataset / NCoreDataset'
-            observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
-            model.init_from_lidar(pc, observer_points) 
-        else:
-           raise ValueError(f"unrecognized initialization.method {conf.initialization.method}, choose from [colmap, point_cloud, random]")
+        match conf.initialization.method:
+            case 'colmap':
+                observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
+                model.init_from_colmap(conf.path, observer_points)
+            case 'point_cloud':
+                observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
+                ply_path = None
+                try:
+                    ply_path = os.path.join(conf.path, "point_cloud.ply")
+                    model.init_from_pretrained_point_cloud(ply_path)
+                except FileNotFoundError as e:
+                    logging.exception(e)
+                    raise e           
+            case'random':
+                model.init_from_random_point_cloud(num_gsplat=conf.initialization.num_gaussians)
+            case 'lidar':
+                assert conf.dataset.type in ['ngp', 'ncore'], 'can only initialize from lidar with the NGPDataset / NCoreDataset'
+                observer_points = torch.tensor(train_dataset.get_observer_points(), dtype=torch.float32, device=DEFAULT_DEVICE)
+                model.init_from_lidar(pc, observer_points) 
+            case 'auxiliary':
+                model.init_from_auxiliary_data(dataset=train_dataset,
+                                               scene_bbox=scene_bbox,
+                                               spacing=conf.initialization.spacing,
+                                               hit_count_threshold=0,
+                                               sky_step_frame=conf.initialization.sky_step_frame,
+                                               sky_step_pixel=conf.initialization.sky_step_pixel,
+                                               pc_step_frame=conf.initialization.pc_step_frame,
+                                               pc_step_points=conf.initialization.pc_step_points)
+            case _:
+                raise ValueError(f"unrecognized initialization.method {conf.initialization.method}, choose from [colmap, point_cloud, random, auxiliary]")
 
         model.build_bvh()
         model.setup_optimizer()
@@ -235,7 +243,7 @@ def main(conf: DictConfig) -> None:
         if conf.model.log_rolling_buffers:
             model.reset_rolling_buffers()
 
-        if epoch_idx > 0 and epoch_idx % val_frequency == 0:
+        if (epoch_idx > 0 or conf.validate_first) and epoch_idx % val_frequency == 0:
                 val_iteration = 0
                 with tqdm(val_dataloader) as pbar:
                     pbar.set_description("Validation:" )
@@ -357,10 +365,12 @@ def main(conf: DictConfig) -> None:
                 # Make a scheduler step
                 model.scheduler_step(global_step)
 
+                # Logging
                 psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
                 global_step += 1
                 pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
-                writer.add_scalar("psnr/train", psnr, global_step)
+                if global_step > 0 and global_step % conf.log_frequency == 0:
+                    writer.add_scalar("psnr/train", psnr, global_step)
 
                 recorder.record_train_step(model, global_step, it_start.elapsed_time(it_end),
                                            loss_l1, loss_ssim, loss, psnr)
@@ -377,10 +387,12 @@ def main(conf: DictConfig) -> None:
                     model.densify_gaussians(scene_extent=scene_extent)
                     scene_updated = True
 
-                # Prune the Gaussians 
+                # Prune the Gaussians based on their opacity
                 if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
                     model.prune_gaussians_opacity()
-                
+                    scene_updated = True
+
+                # Prune the Gaussians based on their contribution weight
                 if global_step > conf.model.prune_weight.start_iteration and global_step < conf.model.prune_weight.end_iteration and global_step % conf.model.prune_weight.frequency == 0:
                     if conf.model.log_rolling_buffers:
                         model.prune_gaussians_weight()
@@ -391,6 +403,11 @@ def main(conf: DictConfig) -> None:
                     model.prune_needles()
                     scene_updated = True
                     
+                # Prune the sky Gaussians
+                if isinstance(model.background,SkyMlp) and global_step > conf.model.prune_sky_mlp.start_iteration and global_step < conf.model.prune_sky_mlp.end_iteration and global_step % conf.model.prune_sky_mlp.frequency == 0:
+                    model.prune_sky_gaussians(train_dataset.get_sky_rays(step_frame=conf.model.prune_sky_mlp.step_frame,step_pixel=conf.model.prune_sky_mlp.step_pixel))
+                    scene_updated = True
+
                 # Decay the density values
                 if global_step > conf.model.density_decay.start_iteration and global_step < conf.model.density_decay.end_iteration and global_step % conf.model.density_decay.frequency == 0:
                     model.decay_density()
@@ -408,6 +425,7 @@ def main(conf: DictConfig) -> None:
                 if scene_updated or (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
                     model.build_bvh()
 
+                # Updating the GUI
                 if gui is not None:
                     if gui.live_update:
                         if scene_updated or model.get_positions().requires_grad:
@@ -419,6 +437,7 @@ def main(conf: DictConfig) -> None:
                     while not gui.viz_do_train:
                         ps.frame_tick()
 
+                # Optimizer step
                 with torch.cuda.nvtx.range("backpropagation"):
                     model.optimizer.step()
                     model.optimizer.zero_grad()

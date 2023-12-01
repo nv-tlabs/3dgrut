@@ -10,6 +10,8 @@ num_workers: 8
 use_wandb: false
 record_training: true
 test_last: false
+validate_first: False
+log_frequency: 1
 
 model:
   density_activation: sigmoid
@@ -81,6 +83,13 @@ model:
     start_iteration: -1
     end_iteration: -1
     min_scale_threshold: 1e-6
+
+  prune_sky_mlp: 
+    frequency: 100 # Opacity reset interval in 3DGS default value 3000
+    start_iteration: -1
+    end_iteration: -1
+    step_pixel: 10
+    step_frame: 10
 
 checkpoint:
   frequency: 10000

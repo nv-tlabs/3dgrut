@@ -19,7 +19,7 @@ def make(name:str, config):
         case "skip-background":
             return SkipBackground(config=config)
         case _  : 
-            raise NotImplementedError(f"background {name} not implemented, choice must be in [sky-mlp, background-color, skip-background]")
+            raise ValueError(f"background {name} not supported, choice must be in [sky-mlp, background-color, skip-background]")
 
 
 DEFAULT_DEVICE = 'cuda'
