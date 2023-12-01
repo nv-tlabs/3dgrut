@@ -63,11 +63,13 @@ ACTIVATION_DICT: dict[str, Callable[..., torch.Tensor]] = {
     "sigmoid": torch.sigmoid,
     "exp": torch.exp,
     "normalize": torch.nn.functional.normalize,
+    "none": lambda x : x,
     }
          
 INVERSE_ACTIVATION_DICT: dict[str, Callable[..., torch.Tensor]] = {
     "sigmoid": inverse_sigmoid,
     "exp": torch.log,
+    "none": lambda x : x,
     }
 
 

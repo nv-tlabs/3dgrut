@@ -279,7 +279,7 @@ class MixtureOfGaussians(torch.nn.Module):
         rots = torch.zeros((num_gsplat, 4), device=self.device)
         rots[:, 0] = 1
 
-        opacities = inverse_sigmoid(0.1 * torch.ones((num_gsplat, 1), dtype=dtype, device=self.device))
+        opacities = self.density_activation_inv(0.1 * torch.ones((num_gsplat, 1), dtype=dtype, device=self.device))
 
         self.positions = torch.nn.Parameter(fused_point_cloud)  # type: ignore
         self.rotation = torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
@@ -561,7 +561,12 @@ class MixtureOfGaussians(torch.nn.Module):
         self.density = optimizable_tensors["density"]
 
     def reset_density(self):
-        updated_densities = inverse_sigmoid(torch.min(self.get_density(), torch.ones_like(self.density) * self.new_max_density))
+        updated_densities = self.density_activation_inv(torch.min(self.get_density(), torch.ones_like(self.density) * self.new_max_density))
+        optimizable_tensors = self.replace_tensor_to_optimizer(updated_densities, "density")
+        self.density = optimizable_tensors["density"]
+
+    def clamp_density(self):
+        updated_densities = torch.clamp(self.get_density(), min=1e-4, max=1.-1e-4)
         optimizable_tensors = self.replace_tensor_to_optimizer(updated_densities, "density")
         self.density = optimizable_tensors["density"]
 
