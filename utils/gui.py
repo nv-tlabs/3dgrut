@@ -52,6 +52,8 @@ class GUI:
         self.live_update = True # if disabled , will skip rendering updates to accelerate background training loop
         self.viz_render_styles = ['color', 'density', 'distance']
         self.viz_render_style_ind = 0
+        self.viz_render_method_overrides = ['none', 'optix', 'torch']
+        self.viz_render_method_override_ind = 0
         self.viz_curr_render_size = None
         self.viz_curr_render_style_ind = None
         self.viz_render_color_buffer = None
@@ -126,7 +128,13 @@ class GUI:
 
         # Render a frame
         with torch.no_grad():
-            outputs = self.model(rays_ori, rays_dir, train=self.viz_render_train_view)
+
+            # optionally override which method is used for rendering, usually does nothing
+            force_method = self.viz_render_method_overrides[self.viz_render_method_override_ind]
+            if force_method == 'none':
+                force_method = None
+
+            outputs = self.model(rays_ori, rays_dir, train=self.viz_render_train_view, force_method=force_method)
 
         return outputs['pred_rgb'], outputs['pred_opacity'], outputs['pred_dist']
 
@@ -257,6 +265,8 @@ class GUI:
             changed, self.viz_render_subsample = psim.InputInt("Subsample Factor", self.viz_render_subsample, 1)
             if changed:
                 self.viz_render_subsample = max(self.viz_render_subsample, 1)
+            
+            _, self.viz_render_method_override_ind = psim.Combo("Render Method Override", self.viz_render_method_override_ind, self.viz_render_method_overrides)
             
             _, self.viz_render_train_view = psim.Checkbox("render w/ train=True", self.viz_render_train_view)
 
