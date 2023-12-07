@@ -113,13 +113,16 @@ def main(conf: DictConfig) -> None:
         logging.warning("The selected experiment name already exists and the checkpoints could be overwritten!")
 
     recorder = TrainingRecorder(enabled=conf.record_training)
+    object_name = TrainingRecorder.get_run_name(conf.path)
+    run_name = f'{object_name}-' + TrainingRecorder.get_timestamp()
     if conf.use_wandb:
         import wandb
-        object_name = TrainingRecorder.get_run_name(conf.path)
-        run_name = f'{object_name}-' + TrainingRecorder.get_timestamp()
         wandb.init(config=OmegaConf.to_container(conf), project='3dgrt', group=conf.experiment_name, name=run_name)
         wandb.tensorboard.patch(root_logdir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None, save=False)
     writer = SummaryWriter(log_dir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None)
+    out_dir = os.path.join(writer.get_logdir(), run_name) if conf.experiment_name else writer.get_logdir()
+    os.makedirs(out_dir, exist_ok=True)
+
     it_start = torch.cuda.Event(enable_timing=True)
     it_end = torch.cuda.Event(enable_timing=True)
 
@@ -291,7 +294,8 @@ def main(conf: DictConfig) -> None:
                     if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
                         parameters = model.get_model_parameters()
                         parameters |= {"global_step": global_step, "epoch": epoch_idx}
-                        torch.save(parameters, os.path.join(writer.get_logdir(), f"ckpt_{global_step}.pt"))
+                        os.makedirs(os.path.join(out_dir,  f"ours_{int(global_step)}"), exist_ok=True)
+                        torch.save(parameters, os.path.join(out_dir,  f"ours_{int(global_step)}", f"ckpt_{global_step}.pt"))
 
                 # Densify the Gaussians
                 if global_step > conf.model.densify.start_iteration and  global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
@@ -407,7 +411,14 @@ def main(conf: DictConfig) -> None:
         model=model
     )
 
+    # Updating the GUI
+    if gui is not None:
+        gui.training_done = True
+        while gui.viz_final:
+            ps.frame_tick()
+
     if conf.test_last:
+        logging.info(f"running on test set...")
         if train_dataloader is not None:
             del train_dataloader
         if val_dataloader is not None:
@@ -418,11 +429,11 @@ def main(conf: DictConfig) -> None:
             del val_dataset
         parameters = model.get_model_parameters()
         parameters |= {"global_step": global_step, "epoch": n_epochs-1}
-        last_ckpt_path = os.path.join(writer.get_logdir(), "ckpt_last.pt")
+        last_ckpt_path = os.path.join(out_dir, "ckpt_last.pt")
         torch.save(parameters, last_ckpt_path)
         renderer = Renderer.from_preloaded_model(
             model=model,
-            out_dir=writer.get_logdir(),
+            out_dir=out_dir,
             path=conf.path,
             save_gt=False,
             writer=writer,
