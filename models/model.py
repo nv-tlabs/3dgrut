@@ -128,7 +128,7 @@ class MixtureOfGaussians(torch.nn.Module):
                 sph_degree = 0, # Dummy, dynamically controlled
                 gaussian_sigma_threshold = self.conf.render.gaussian_sigma_threshold,
                 min_transmittance = self.conf.render.min_transmittance,
-                max_hits_returned=128,
+                max_hits_returned=self.conf.render.max_hits_returned,
             )
         )
 
