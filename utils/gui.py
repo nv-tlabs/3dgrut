@@ -48,6 +48,8 @@ class GUI:
 
         # viz stateful parameters & options
         self.viz_do_train = False
+        self.viz_final = True
+        self.training_done = False
         self.viz_bbox = False
         self.live_update = True # if disabled , will skip rendering updates to accelerate background training loop
         self.viz_render_styles = ['color', 'density', 'distance']
@@ -240,12 +242,16 @@ class GUI:
         # Create a little ImGUI UI
 
         psim.SetNextItemOpen(True, psim.ImGuiCond_FirstUseEver)
-        if psim.TreeNode("Training"):
-            _, self.viz_do_train = psim.Checkbox("Train", self.viz_do_train)
+        if self.training_done:
             psim.SameLine()
-            _, self.live_update = psim.Checkbox("Update View", self.live_update)
-
-            psim.TreePop()
+            if(psim.Button("Continue")):
+                self.viz_final = False
+        else:
+            if psim.TreeNode("Training"):
+                _, self.viz_do_train = psim.Checkbox("Train", self.viz_do_train)
+                psim.SameLine()
+                _, self.live_update = psim.Checkbox("Update View", self.live_update)
+                psim.TreePop()
 
         psim.SetNextItemOpen(True, psim.ImGuiCond_FirstUseEver)
         if psim.TreeNode("Render"):
