@@ -74,7 +74,7 @@ model:
   reset_density:
     frequency: 3000 # Opacity reset interval in 3DGS default value 3000
     start_iteration: 0
-    end_iteration: ${n_iterations}
+    end_iteration: 15000
     # This parameter is hardcoded in the 3DGS to 0.01
     new_max_density: 0.01 # The density of the all the Gaussians will be set to min(density, this) 
 
