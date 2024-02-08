@@ -118,3 +118,44 @@ Running this command creates a new directory called `grid_search_jobs` containin
 `python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml  run_job_array grid_search_jobs`
 
 _This could also be achieve in one step, by adding the `--run` flag to the `generate_job_array` command._
+
+
+
+
+### Sample commands to run on NeRF Synthetic scenes
+
+```
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/lego  with_gui=True
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/lego use_wandb=True experiment_name=test-wandb record_training=true test_last=True
+```
+
+Fine-tuning from 3DGS
+
+```
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/lego  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/hotdog  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/chair  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/drums  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/ficus  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/materials  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/mic  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/ship  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
+```
+
+### Running the finetuning experiments on ngc
+
+```
+rm utils/ngc/grid_search_configs/grid_search/*
+EXP_NAME="Ashkan-Feb7-L2-Loss"
+python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
+python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array finetune.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
+```
+
+running the ablations
+
+```
+rm utils/ngc/grid_search_configs/grid_search/*
+EXP_NAME="Ashkan-Feb7-L2-Loss"
+python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
+python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array ablations.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
+```

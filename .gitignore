@@ -26,3 +26,6 @@ libs/ray_utils/external/
 libs/ray_utils/build/
 libs/ray_utils/ray_utils.egg-info/
 libs/ray_utils/dist/
+
+finetune.txt
+ablations.txt
