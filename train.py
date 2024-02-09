@@ -208,15 +208,18 @@ def main(conf: DictConfig) -> None:
                     loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
                     writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
 
-                    # if conf.loss.use_ssim and ~error_buffer_batch and conf.dataset.train.get("sample_full_image", False):
-                    #     loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
-                    #     loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
-                    #     writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
-                    # else:
-                    #     loss_ssim = None
-                    #     loss = loss_l1
-                    loss_ssim = None
-                    loss = torch.nn.MSELoss()(outputs['pred_rgb'], rgb_gt)
+                    if conf.loss.use_l2:
+                        loss_ssim = None
+                        loss_l2 = torch.nn.MSELoss()(outputs['pred_rgb'], rgb_gt) * conf.loss.lambda_l2
+                        loss = loss_l2
+                        writer.add_scalar("loss_l2/train", loss_l2.item(), global_step)
+                    elif conf.loss.use_ssim and ~error_buffer_batch and conf.dataset.train.get("sample_full_image", False):
+                        loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
+                        loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
+                        writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
+                    else:
+                        loss_ssim = None
+                        loss = loss_l1
 
                     if conf.loss.use_lidardistance and conf.loss.lambda_lidardistance > 0.0:
                         lidar_rays_ori = gpu_batch["lidar_rays_ori"]

@@ -157,7 +157,9 @@ render:
     gaussian_evaluation: geometric # either 'geometric' or 'analytic'
 
 loss:
-  use_ssim: True
+  use_l2: true
+  lambda_l2: 1.0
+  use_ssim: False
   lambda_ssim: 0.2
 
   # Scale-regularization, preventing needle-like geometries
