@@ -181,7 +181,7 @@ class TrainingRecorder:
         writer.add_scalar("grad_statistics/position/grad_pos_x_std", self.train_info_dict['grad_pos_x_std'][-1])
         writer.add_scalar("grad_statistics/position/grad_pos_y_std", self.train_info_dict['grad_pos_y_std'][-1])
         writer.add_scalar("grad_statistics/position/grad_pos_z_std", self.train_info_dict['grad_pos_z_std'][-1])
-        writer.add_scalar("grad_statistics/position/grad_pos_z_norm", self.train_info_dict['grad_pos_norm'][-1])
+        writer.add_scalar("grad_statistics/position/grad_pos_norm", self.train_info_dict['grad_pos_norm'][-1])
 
         writer.add_scalar("grad_statistics/scale/grad_scale_x_mean", self.train_info_dict['grad_scale_x_mean'][-1])
         writer.add_scalar("grad_statistics/scale/grad_scale_y_mean", self.train_info_dict['grad_scale_y_mean'][-1])
@@ -189,7 +189,7 @@ class TrainingRecorder:
         writer.add_scalar("grad_statistics/scale/grad_scale_x_std", self.train_info_dict['grad_scale_x_std'][-1])
         writer.add_scalar("grad_statistics/scale/grad_scale_y_std", self.train_info_dict['grad_scale_y_std'][-1])
         writer.add_scalar("grad_statistics/scale/grad_scale_z_std", self.train_info_dict['grad_scale_z_std'][-1])
-        writer.add_scalar("grad_statistics/scale/grad_scale_z_norm", self.train_info_dict['grad_scale_norm'][-1])
+        writer.add_scalar("grad_statistics/scale/grad_scale_norm", self.train_info_dict['grad_scale_norm'][-1])
 
         writer.add_scalar("grad_statistics/rotation/grad_rot_x_mean", self.train_info_dict['grad_rot_x_mean'][-1])
         writer.add_scalar("grad_statistics/rotation/grad_rot_y_mean", self.train_info_dict['grad_rot_y_mean'][-1])
@@ -200,7 +200,7 @@ class TrainingRecorder:
         writer.add_scalar("grad_statistics/rotation/grad_rot_z_std", self.train_info_dict['grad_rot_z_std'][-1])
         writer.add_scalar("grad_statistics/rotation/grad_rot_w_std", self.train_info_dict['grad_rot_w_std'][-1])
         writer.add_scalar("grad_statistics/rotation/grad_rot_w_std", self.train_info_dict['grad_rot_w_std'][-1])
-        writer.add_scalar("grad_statistics/rotation/grad_rot_w_norm", self.train_info_dict['grad_rot_norm'][-1])
+        writer.add_scalar("grad_statistics/rotation/grad_rot_norm", self.train_info_dict['grad_rot_norm'][-1])
         self._buffered_updates = False
 
     def _get_gaussians_info(self, gaussians):
