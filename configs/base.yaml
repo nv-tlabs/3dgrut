@@ -53,8 +53,8 @@ model:
     frequency: 100 # densification_interval in 3DGS with default value 100
     start_iteration: 500 # densify_from_iter in 3DGS default value 500
     end_iteration: 15000 # densify_until_iter in 3DGS default value 15_000
-    clone_grad_threshold: 0.00001 # Called densify_grad_threshold in 3DGS with default value 0.0002
-    split_grad_threshold: 0.00001 # Called densify_grad_threshold in 3DGS with default value 0.0002
+    clone_grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
+    split_grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
     relative_size_threshold: 0.01 # Gaussians larger than relative_size_threshold * scene_extent will be split not cloned. Called percent_dense in 3DGS with default value 0.01
     error_ratio_threshold: 0.5
     split:

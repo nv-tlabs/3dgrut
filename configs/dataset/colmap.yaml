@@ -3,7 +3,7 @@
   
   train:
     batch_size: 8192
-    sample_full_image: false
+    sample_full_image: True
 
     ray_jittering:
         type: none

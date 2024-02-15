@@ -656,6 +656,16 @@ class MixtureOfGaussians(torch.nn.Module):
                 self.positional_grad_norm_accum = torch.zeros((num_gaussians,1), dtype=torch.float, device=self.device)
                 self.positional_grad_norm_denom = torch.zeros((num_gaussians,1), dtype=torch.int, device=self.device)
 
+    # @torch.cuda.nvtx.range("update-gradient-buffer")
+    # def update_gradient_buffer(self, rays_ori, rays_dir):
+    #     assert self.conf.model.densify.method == 'gradient-buffer'
+    #     hit_cts = self.get_hit_counts(rays_ori, rays_dir)
+    #     mask = (hit_cts > 0).squeeze()
+
+    #     assert self.positions.grad is not None
+    #     self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask], dim=-1, keepdim=True)
+    #     self.positional_grad_norm_denom[mask] += 1
+                
     @torch.cuda.nvtx.range("update-gradient-buffer")
     def update_gradient_buffer(self, rays_ori, rays_dir):
         assert self.conf.model.densify.method == 'gradient-buffer'
@@ -663,8 +673,18 @@ class MixtureOfGaussians(torch.nn.Module):
         mask = (hit_cts > 0).squeeze()
 
         assert self.positions.grad is not None
-        self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask], dim=-1, keepdim=True)
+        distance_to_camera = (self.positions[mask] - rays_ori[0, 0, 0]).pow(2).sum(dim=1).pow(0.5)[..., None]
+
+        self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask] * (distance_to_camera + 1), dim=-1, keepdim=True) / 2
         self.positional_grad_norm_denom[mask] += 1
+
+        # if global_step % 100 == 0:
+        #     import matplotlib.pyplot as plt
+        #     plt.scatter(distance_to_camera.detach().cpu(), torch.norm(self.positions.grad[mask] * (distance_to_camera + 1), dim=-1, keepdim=True)[:, 0].detach().cpu(), label="Ours - scaled")
+        #     plt.scatter(distance_to_camera.detach().cpu(), torch.norm(self.positions.grad[mask], dim=-1, keepdim=True)[:, 0].detach().cpu(), label="Ours")
+        #     plt.legend()
+        #     plt.savefig("test.png")
+        #     plt.clf()
 
     @torch.cuda.nvtx.range("update_rolling_buffers")
     def update_rolling_buffers(self, gaussian_errors, gaussian_weights):
