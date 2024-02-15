@@ -1,5 +1,6 @@
 path: ???
 experiment_name: ""
+group_name: ""
 resume: ""
 out_dir: "runs"
 n_iterations: 30000

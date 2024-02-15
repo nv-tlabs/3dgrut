@@ -97,6 +97,32 @@ class TrainingRecorder:
         self.train_info_dict['rot_y_std'].append(model.get_rotation().std(dim=0)[1].item())
         self.train_info_dict['rot_z_std'].append(model.get_rotation().std(dim=0)[2].item())
         self.train_info_dict['rot_w_std'].append(model.get_rotation().std(dim=0)[3].item())
+
+        self.train_info_dict['grad_pos_x_mean'].append(model.positions.grad.mean(dim=0)[0].item())
+        self.train_info_dict['grad_pos_y_mean'].append(model.positions.grad.mean(dim=0)[1].item())
+        self.train_info_dict['grad_pos_z_mean'].append(model.positions.grad.mean(dim=0)[2].item())
+        self.train_info_dict['grad_pos_x_std'].append(model.positions.grad.std(dim=0)[0].item())
+        self.train_info_dict['grad_pos_y_std'].append(model.positions.grad.std(dim=0)[1].item())
+        self.train_info_dict['grad_pos_z_std'].append(model.positions.grad.std(dim=0)[2].item())
+        self.train_info_dict['grad_pos_norm'].append(model.positions.grad.norm(dim=1).mean().item())
+
+        self.train_info_dict['grad_scale_x_mean'].append(model.scale.grad.mean(dim=0)[0].item())
+        self.train_info_dict['grad_scale_y_mean'].append(model.scale.grad.mean(dim=0)[1].item())
+        self.train_info_dict['grad_scale_z_mean'].append(model.scale.grad.mean(dim=0)[2].item())
+        self.train_info_dict['grad_scale_x_std'].append(model.scale.grad.std(dim=0)[0].item())
+        self.train_info_dict['grad_scale_y_std'].append(model.scale.grad.std(dim=0)[1].item())
+        self.train_info_dict['grad_scale_z_std'].append(model.scale.grad.std(dim=0)[2].item())
+        self.train_info_dict['grad_scale_norm'].append(model.scale.grad.norm(dim=1).mean().item())
+
+        self.train_info_dict['grad_rot_x_mean'].append(model.rotation.grad.mean(dim=0)[0].item())
+        self.train_info_dict['grad_rot_y_mean'].append(model.rotation.grad.mean(dim=0)[1].item())
+        self.train_info_dict['grad_rot_z_mean'].append(model.rotation.grad.mean(dim=0)[2].item())
+        self.train_info_dict['grad_rot_w_mean'].append(model.rotation.grad.mean(dim=0)[3].item())
+        self.train_info_dict['grad_rot_x_std'].append(model.rotation.grad.std(dim=0)[0].item())
+        self.train_info_dict['grad_rot_y_std'].append(model.rotation.grad.std(dim=0)[1].item())
+        self.train_info_dict['grad_rot_z_std'].append(model.rotation.grad.std(dim=0)[2].item())
+        self.train_info_dict['grad_rot_w_std'].append(model.rotation.grad.std(dim=0)[3].item())
+        self.train_info_dict['grad_rot_norm'].append(model.rotation.grad.norm(dim=1).mean().item())
         self._buffered_updates = True
 
     @torch.cuda.nvtx.range("report_statistics")
@@ -148,6 +174,33 @@ class TrainingRecorder:
         writer.add_scalar("g_statistics/rotation/rot_y_std", self.train_info_dict['rot_y_std'][-1])
         writer.add_scalar("g_statistics/rotation/rot_z_std", self.train_info_dict['rot_z_std'][-1])
         writer.add_scalar("g_statistics/rotation/rot_w_std", self.train_info_dict['rot_w_std'][-1])
+
+        writer.add_scalar("grad_statistics/position/grad_pos_x_mean", self.train_info_dict['grad_pos_x_mean'][-1])
+        writer.add_scalar("grad_statistics/position/grad_pos_y_mean", self.train_info_dict['grad_pos_y_mean'][-1])
+        writer.add_scalar("grad_statistics/position/grad_pos_z_mean", self.train_info_dict['grad_pos_z_mean'][-1])
+        writer.add_scalar("grad_statistics/position/grad_pos_x_std", self.train_info_dict['grad_pos_x_std'][-1])
+        writer.add_scalar("grad_statistics/position/grad_pos_y_std", self.train_info_dict['grad_pos_y_std'][-1])
+        writer.add_scalar("grad_statistics/position/grad_pos_z_std", self.train_info_dict['grad_pos_z_std'][-1])
+        writer.add_scalar("grad_statistics/position/grad_pos_z_norm", self.train_info_dict['grad_pos_norm'][-1])
+
+        writer.add_scalar("grad_statistics/scale/grad_scale_x_mean", self.train_info_dict['grad_scale_x_mean'][-1])
+        writer.add_scalar("grad_statistics/scale/grad_scale_y_mean", self.train_info_dict['grad_scale_y_mean'][-1])
+        writer.add_scalar("grad_statistics/scale/grad_scale_z_mean", self.train_info_dict['grad_scale_z_mean'][-1])
+        writer.add_scalar("grad_statistics/scale/grad_scale_x_std", self.train_info_dict['grad_scale_x_std'][-1])
+        writer.add_scalar("grad_statistics/scale/grad_scale_y_std", self.train_info_dict['grad_scale_y_std'][-1])
+        writer.add_scalar("grad_statistics/scale/grad_scale_z_std", self.train_info_dict['grad_scale_z_std'][-1])
+        writer.add_scalar("grad_statistics/scale/grad_scale_z_norm", self.train_info_dict['grad_scale_norm'][-1])
+
+        writer.add_scalar("grad_statistics/rotation/grad_rot_x_mean", self.train_info_dict['grad_rot_x_mean'][-1])
+        writer.add_scalar("grad_statistics/rotation/grad_rot_y_mean", self.train_info_dict['grad_rot_y_mean'][-1])
+        writer.add_scalar("grad_statistics/rotation/grad_rot_z_mean", self.train_info_dict['grad_rot_z_mean'][-1])
+        writer.add_scalar("grad_statistics/rotation/grad_rot_w_mean", self.train_info_dict['grad_rot_w_mean'][-1])
+        writer.add_scalar("grad_statistics/rotation/grad_rot_x_std", self.train_info_dict['grad_rot_x_std'][-1])
+        writer.add_scalar("grad_statistics/rotation/grad_rot_y_std", self.train_info_dict['grad_rot_y_std'][-1])
+        writer.add_scalar("grad_statistics/rotation/grad_rot_z_std", self.train_info_dict['grad_rot_z_std'][-1])
+        writer.add_scalar("grad_statistics/rotation/grad_rot_w_std", self.train_info_dict['grad_rot_w_std'][-1])
+        writer.add_scalar("grad_statistics/rotation/grad_rot_w_std", self.train_info_dict['grad_rot_w_std'][-1])
+        writer.add_scalar("grad_statistics/rotation/grad_rot_w_norm", self.train_info_dict['grad_rot_norm'][-1])
         self._buffered_updates = False
 
     def _get_gaussians_info(self, gaussians):
