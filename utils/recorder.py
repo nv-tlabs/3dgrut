@@ -123,6 +123,10 @@ class TrainingRecorder:
         self.train_info_dict['grad_rot_z_std'].append(model.rotation.grad.std(dim=0)[2].item())
         self.train_info_dict['grad_rot_w_std'].append(model.rotation.grad.std(dim=0)[3].item())
         self.train_info_dict['grad_rot_norm'].append(model.rotation.grad.norm(dim=1).mean().item())
+
+        self.train_info_dict['grad_opacity_mean'].append(model.density.grad.mean().item())
+        self.train_info_dict['grad_opacity_std'].append(model.density.grad.std().item())
+        self.train_info_dict['grad_opacity_norm'].append(model.density.grad.norm(dim=1).mean().item())
         self._buffered_updates = True
 
     @torch.cuda.nvtx.range("report_statistics")
@@ -201,6 +205,10 @@ class TrainingRecorder:
         writer.add_scalar("grad_statistics/rotation/grad_rot_w_std", self.train_info_dict['grad_rot_w_std'][-1])
         writer.add_scalar("grad_statistics/rotation/grad_rot_w_std", self.train_info_dict['grad_rot_w_std'][-1])
         writer.add_scalar("grad_statistics/rotation/grad_rot_norm", self.train_info_dict['grad_rot_norm'][-1])
+
+        writer.add_scalar("grad_statistics/opacity/grad_opacity_mean", self.train_info_dict['grad_opacity_mean'][-1])
+        writer.add_scalar("grad_statistics/opacity/grad_opacity_std", self.train_info_dict['grad_opacity_std'][-1])
+        writer.add_scalar("grad_statistics/opacity/grad_opacity_norm", self.train_info_dict['grad_opacity_norm'][-1])
         self._buffered_updates = False
 
     def _get_gaussians_info(self, gaussians):
