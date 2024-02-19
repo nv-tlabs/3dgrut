@@ -675,7 +675,7 @@ class MixtureOfGaussians(torch.nn.Module):
         assert self.positions.grad is not None
         distance_to_camera = (self.positions[mask] - rays_ori[0, 0, 0]).pow(2).sum(dim=1).pow(0.5)[..., None]
 
-        self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask] * (distance_to_camera + 1), dim=-1, keepdim=True) / 2
+        self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask] * distance_to_camera, dim=-1, keepdim=True) / 2
         self.positional_grad_norm_denom[mask] += 1
 
         # if global_step % 100 == 0:
