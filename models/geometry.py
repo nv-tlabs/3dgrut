@@ -6,6 +6,31 @@ import sklearn.neighbors
 import torch
 
 
+def nearest_neighbors(pts_src, k=2):
+
+    pts_src_np = to_np(pts_src)
+
+    # distance from a point set to itself
+    pts_target = pts_src
+    pts_target_np = pts_src_np
+
+    # Build the tree
+    kd_tree = sklearn.neighbors.KDTree(pts_target_np)
+
+    # Query it 
+    _, neighbors = kd_tree.query(pts_src_np, k=k)
+
+    # Mask out self element
+    mask = neighbors != np.arange(neighbors.shape[0])[:, np.newaxis]
+
+    # make sure we mask out exactly one element in each row, in rare case of many duplicate points
+    mask[np.sum(mask, axis=1) == mask.shape[1], -1] = False
+    neighbors = neighbors[mask].reshape((neighbors.shape[0], k - 1))
+
+    # recompute distances in torch, so the function is differentiable
+    neigh_inds = torch.tensor(neighbors, device=pts_src.device, dtype=torch.int64)
+    return neigh_inds
+
 def nearest_neighbor_dist_cpuKD(pts_src, pts_target=None):
     """
     Compute the distance to the nearest neighbor, using a CPU kd-tree

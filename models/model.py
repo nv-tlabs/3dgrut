@@ -11,7 +11,7 @@ from utils.misc import to_torch, get_activation_function, inverse_sigmoid, get_s
     sh_degree_to_num_features, sh_degree_to_specular_dim
 from datasets.colmap_utils import read_next_bytes
 from datasets.utils import PointCloud
-from models.geometry import nearest_neighbor_dist_cpuKD
+from models.geometry import nearest_neighbor_dist_cpuKD, nearest_neighbors
 from utils.misc import to_np
 import models.background as background
 from models.render_utils import evaluate_rays, RGB2SH
@@ -698,7 +698,7 @@ class MixtureOfGaussians(torch.nn.Module):
             self.densify_positional_grad(scene_extent)
         elif self.conf.model.densify.method == "error":
             self.clone_gaussians_error()
-
+    
     def densify_positional_grad(self, scene_extent):
         assert self.optimizer is not None, "Optimizer need to be initialized before splitting and cloning the Gaussians"
         assert self.get_positions().requires_grad, "Trying to perform split and clone but the positions are not being optimized"
@@ -713,8 +713,14 @@ class MixtureOfGaussians(torch.nn.Module):
                         positional_grad_norm = torch.norm(self.optimizer.state.get(group['params'][0], None)["exp_avg"], dim=-1)
 
             case 'gradient-buffer':
-                # gsplat implementation
+                # # gsplat implementation
+                # positional_grad_norm = self.positional_grad_norm_accum / self.positional_grad_norm_denom
+                # positional_grad_norm[positional_grad_norm.isnan()] = 0.0 
+
                 positional_grad_norm = self.positional_grad_norm_accum / self.positional_grad_norm_denom
+                neighbor_indices = nearest_neighbors(self.positions, k=8)
+                neighbor_grad_norm_max, _ = positional_grad_norm[neighbor_indices, :].norm(dim=-1).max(dim=-1)
+                positional_grad_norm = positional_grad_norm / neighbor_grad_norm_max[..., None]
                 positional_grad_norm[positional_grad_norm.isnan()] = 0.0 
             case _:
                 raise ValueError(f"densify.method {self.conf.model.densify.method} not supported")
