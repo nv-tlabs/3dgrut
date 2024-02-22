@@ -148,7 +148,7 @@ python train.py --config-name apps/colmap.yaml path=data/tandt/truck with_gui=Tr
 
 ```
 rm utils/ngc/grid_search_configs/grid_search/*
-EXP_NAME="Ashkan-Feb9-L2-Loss"
+EXP_NAME="Ashkan-Feb21-L2-finetune"
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array grid_search/finetune.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
 ```
@@ -164,7 +164,7 @@ running the ablations
 
 ```
 rm utils/ngc/grid_search_configs/grid_search/*
-EXP_NAME="Ashkan-Feb7-L2-Loss"
+EXP_NAME="Ashkan-Feb21-l1-ssim-knn-grad-thresh"
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array grid_search/ablations.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
 ```

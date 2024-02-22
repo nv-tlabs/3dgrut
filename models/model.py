@@ -718,7 +718,10 @@ class MixtureOfGaussians(torch.nn.Module):
                 # positional_grad_norm[positional_grad_norm.isnan()] = 0.0 
 
                 positional_grad_norm = self.positional_grad_norm_accum / self.positional_grad_norm_denom
-                neighbor_indices = nearest_neighbors(self.positions, k=8)
+                try:
+                    neighbor_indices = nearest_neighbors(self.positions, k=8)
+                except:
+                    breakpoint()
                 neighbor_grad_norm_max, _ = positional_grad_norm[neighbor_indices, :].norm(dim=-1).max(dim=-1)
                 positional_grad_norm = positional_grad_norm / neighbor_grad_norm_max[..., None]
                 positional_grad_norm[positional_grad_norm.isnan()] = 0.0 

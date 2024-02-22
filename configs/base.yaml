@@ -160,7 +160,7 @@ render:
 loss:
   use_l2: true
   lambda_l2: 1.0
-  use_ssim: False
+  use_ssim: false
   lambda_ssim: 0.2
 
   # Scale-regularization, preventing needle-like geometries
