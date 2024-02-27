@@ -232,7 +232,7 @@ extern "C" __global__ void __raygen__rg()
                         //
                         // ===> d_hitT / d_gsqdist = weight / (2*gdist)
                         // ===> d_gsqdist / d_grds =  2 * grds
-                        const float3 grdsRayHitGrd = ((2 * grds * weight) / (2 * gdist)) * rayHitGrd[k][j];
+                        const float3 grdsRayHitGrd = gsqdist > 0.0f ? ((2 * grds * weight) / (2 * gdist)) * rayHitGrd[k][j] : make_float3(0.0f);
 
                         // ---> grds = gscl * grd * dot(grd, -1 * gro)
                         //

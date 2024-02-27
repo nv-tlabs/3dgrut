@@ -713,17 +713,8 @@ class MixtureOfGaussians(torch.nn.Module):
                         positional_grad_norm = torch.norm(self.optimizer.state.get(group['params'][0], None)["exp_avg"], dim=-1)
 
             case 'gradient-buffer':
-                # # gsplat implementation
-                # positional_grad_norm = self.positional_grad_norm_accum / self.positional_grad_norm_denom
-                # positional_grad_norm[positional_grad_norm.isnan()] = 0.0 
-
+                # gsplat implementation
                 positional_grad_norm = self.positional_grad_norm_accum / self.positional_grad_norm_denom
-                try:
-                    neighbor_indices = nearest_neighbors(self.positions, k=8)
-                except:
-                    breakpoint()
-                neighbor_grad_norm_max, _ = positional_grad_norm[neighbor_indices, :].norm(dim=-1).max(dim=-1)
-                positional_grad_norm = positional_grad_norm / neighbor_grad_norm_max[..., None]
                 positional_grad_norm[positional_grad_norm.isnan()] = 0.0 
             case _:
                 raise ValueError(f"densify.method {self.conf.model.densify.method} not supported")
@@ -867,6 +858,21 @@ class MixtureOfGaussians(torch.nn.Module):
             n_before = mask.shape[0]
             n_prune = n_before - mask.sum()
             print(f"Weight-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
+
+        self.prune_gaussians(mask)
+
+    def prune_gaussians_scale(self, dataset):
+        cam_normals = torch.from_numpy(dataset.poses[:, :3, 2]).to(self.device)
+        similarities = torch.matmul(self.positions, cam_normals.T)
+        cam_dists = similarities.min(dim=1)[0].clamp(min=1e-8)
+        ratio = self.get_scale().min(dim=1)[0] / cam_dists * dataset.intrinsic[0].max()
+
+        # Prune the Gaussians based on their weight
+        mask = ratio >= self.conf.model.prune_scale.threshold
+        if self.conf.model.print_stats:
+            n_before = mask.shape[0]
+            n_prune = n_before - mask.sum()
+            print(f"Scale-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
 
         self.prune_gaussians(mask)
     

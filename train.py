@@ -318,6 +318,11 @@ def main(conf: DictConfig) -> None:
                         model.prune_gaussians_weight()
                     scene_updated = True
 
+                # Prune the Gaussians based on their scales
+                if global_step > conf.model.prune_scale.start_iteration and global_step < conf.model.prune_scale.end_iteration and global_step % conf.model.prune_scale.frequency == 0:
+                    model.prune_gaussians_scale(train_dataset)
+                    scene_updated = True
+
                 # Prune the needle Gaussians 
                 if global_step > conf.model.prune_needles.start_iteration and global_step < conf.model.prune_needles.end_iteration and global_step % conf.model.prune_needles.frequency == 0:
                     model.prune_needles()

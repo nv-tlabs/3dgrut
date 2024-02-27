@@ -47,15 +47,15 @@ model:
     color: black # one of [black, white, random] needs to be defined if name == background-color
 
   log_rolling_buffers: false # needs to be set as true if densify.method == error
-  print_stats: false
+  print_stats: true
 
   densify:
     method: gradient-buffer # one of [adam, gradient-buffer, error]
     frequency: 300 # densification_interval in 3DGS with default value 100
     start_iteration: 500 # densify_from_iter in 3DGS default value 500
     end_iteration: 15000 # densify_until_iter in 3DGS default value 15_000
-    clone_grad_threshold: 1.0 # Called densify_grad_threshold in 3DGS with default value 0.0002
-    split_grad_threshold: 1.0 # Called densify_grad_threshold in 3DGS with default value 0.0002
+    clone_grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
+    split_grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
     relative_size_threshold: 0.01 # Gaussians larger than relative_size_threshold * scene_extent will be split not cloned. Called percent_dense in 3DGS with default value 0.01
     error_ratio_threshold: 0.5
     split:
@@ -73,6 +73,12 @@ model:
     start_iteration: -1
     end_iteration: -1
     weight_threshold : 0.5
+
+  prune_scale:
+    frequency: 100
+    start_iteration: -1
+    end_iteration: -1
+    threshold: 1.0
 
   # Start and end iteration are not used in 3DGS
   reset_density:
@@ -113,7 +119,7 @@ optimizer:
     positions:  
       lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.00016
     density:
-      lr: 0.05 # 3DGS value: 0.05
+      lr: 0.02 # 3DGS value: 0.05
     features_albedo:
       lr: 0.0025 # 3DGS value: 0.0025
     features_specular:
@@ -158,9 +164,9 @@ render:
     gaussian_evaluation: geometric # either 'geometric' or 'analytic'
 
 loss:
-  use_l2: true
+  use_l2: false
   lambda_l2: 1.0
-  use_ssim: false
+  use_ssim: true
   lambda_ssim: 0.2
 
   # Scale-regularization, preventing needle-like geometries
