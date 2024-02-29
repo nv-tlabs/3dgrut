@@ -119,7 +119,7 @@ optimizer:
     positions:  
       lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.00016
     density:
-      lr: 0.02 # 3DGS value: 0.05
+      lr: 0.05 # 3DGS value: 0.05
     features_albedo:
       lr: 0.0025 # 3DGS value: 0.0025
     features_specular:
@@ -152,7 +152,7 @@ render:
   topk_hits: False
   patch_size: 1
   gaussian_sigma_threshold: 3.0
-  min_transmittance: 0.03
+  min_transmittance: 0.01
   max_hits_returned: 128 
   
   optix: {} # optix-specific render settings

@@ -669,8 +669,7 @@ class MixtureOfGaussians(torch.nn.Module):
     @torch.cuda.nvtx.range("update-gradient-buffer")
     def update_gradient_buffer(self, rays_ori, rays_dir):
         assert self.conf.model.densify.method == 'gradient-buffer'
-        hit_cts = self.get_hit_counts(rays_ori, rays_dir)
-        mask = (hit_cts > 0).squeeze()
+        mask = (self.positions.grad != 0).max(dim=1)[0]
 
         assert self.positions.grad is not None
         distance_to_camera = (self.positions[mask] - rays_ori[0, 0, 0]).pow(2).sum(dim=1).pow(0.5)[..., None]
