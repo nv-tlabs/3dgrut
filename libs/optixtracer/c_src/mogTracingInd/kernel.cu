@@ -190,18 +190,21 @@ extern "C" __global__ void __raygen__rg()
                         const float3 gcrod = cross(grd, gro);
                         const float grayDir = dot(gcrod, gcrod);
                         const float gres = expf(-0.5 * grayDir);
-                        const float galpha = gres * gdns;
+                        const float galpha = fminf(gres * gdns, params.alphaMaxValue);
 
-                        const float weight = galpha * rayTrm[k][j];
+                        if ((gres > params.hitMinGaussianResponse) && (galpha > params.alphaMinThreshold))
+                        {
+                            const float weight = galpha * rayTrm[k][j];
 
-                        hitDistance += p.ahHitTable[i].x * weight;
-                        rayTrm[k][j] *= (1 - galpha);
+                            hitDistance += p.ahHitTable[i].x * weight;
+                            rayTrm[k][j] *= (1 - galpha);
+                            
+                            transmit = fmaxf(transmit, rayTrm[k][j]);
                         
-                        transmit = fmaxf(transmit, rayTrm[k][j]);
-                       
-                        // store the only output we actually care about
-                        if(numHits < MoGTracingMaxHitsReturned) {
-                          params.rayHitInd[idx.z][y][x][numHits] = gId;
+                            // store the only output we actually care about
+                            if(numHits < MoGTracingMaxHitsReturned) {
+                            params.rayHitInd[idx.z][y][x][numHits] = gId;
+                            }
                         }
                     }
                 }

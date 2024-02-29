@@ -195,46 +195,25 @@ extern "C" __global__ void __raygen__rg()
                         const float3 grd = safe_normalize(grdu);
                         const float3 gcrod = cross(grd, gro);
                         const float grayDir = dot(gcrod, gcrod);
-                        float gres = expf(-0.5 * grayDir);
+                        const float gres = expf(-0.5 * grayDir);
+                        const float galpha = fminf(gres * gdns, params.alphaMaxValue);
 
-                        // alternative computation
-                        // const float hitT = fabs(dot(gro, grdu) / dot(grdu, grdu));
-                        // // const float hitT = getRayGaussianHit(gro,grd,gscl);
-                        // const float3 rh = rayOri[k][j] + rayDir[k][j] * hitT;
-                        // const float3 grh = giscl * ((rh - gpos) * grotMat);
-                        // const float grhd = expf(-0.5 * dot(grh, grh));
-                        // gres = grhd;
-
-                        if (gres > params.hitMinGaussianResponse)
+                        if ((gres > params.hitMinGaussianResponse) && (galpha > params.alphaMinThreshold))
                         {
-
-                            const float galpha = gres * gdns;
-
                             const float weight = galpha * rayTrm[k][j];
 
                             // Distance to the gaussian center projection on the ray
-                            const float hitT = getRayGaussianHit(gro,grd,gscl);
-
-                            // Compute world space normal
-                            // const float ellispoidRadius = 3.0;
-                            // const float isHit = dot(grd, -1 * gro);
-                            // const float isSqHitSurf = isHit - sqrtf(ellispoidRadius * ellispoidRadius - grayDir);
-                            // const float3 isNormal = safe_normalize(gro + grd * isSqHitSurf);
-                            // const float3 wordlNormal = safe_normalize((gscl * isNormal) * invGrotMat);
-
-                            const float3 lightDir = safe_normalize(make_float3(0.3, 0.2, 0.5));
+                            const float hitT = getRayGaussianHit(gro, grd, gscl);
 
                             atomicAdd(&params.mogWeightSum[gId][0], weight);
 
                             rayRad[k][j] += grad * weight;
-                            // float3 grd_disp = (wordlNormal + 1) * 0.5;
-                            // rayRad[k][j] = grd_disp; //make_float3(0.0,0.0,0.789); // * fmaxf(dot(wordlNormal,
-                            // lightDir),0.1);
                             rayHit[k][j] += hitT * weight;
                             rayTrm[k][j] *= (1 - galpha);
                         }
-                        transmit = fmaxf(transmit, rayTrm[k][j]);
                     }
+
+                    transmit = fmaxf(transmit, rayTrm[k][j]);
                 }
             }
         }

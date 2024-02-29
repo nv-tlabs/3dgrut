@@ -434,6 +434,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> trace_mog
 
     paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
+    paramsHost.alphaMaxValue = 0.99f;
+    paramsHost.alphaMinThreshold = 1.0f / 255.0f;
 
     paramsHost.aabb = stateWrapper.pState->gasAABB;
     paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, stateWrapper.pState->maxNumSlabs);
@@ -536,6 +538,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 
     paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
+    paramsHost.alphaMaxValue = 0.99f;
+    paramsHost.alphaMinThreshold = 1.0f / 255.0f;
 
     paramsHost.aabb = stateWrapper.pState->gasAABB;
     paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, stateWrapper.pState->maxNumSlabs);
@@ -598,6 +602,8 @@ std::tuple<torch::Tensor> trace_mog_inds(OptiXStateWrapper& stateWrapper,
 
     paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
+    paramsHost.alphaMaxValue = 0.99f;
+    paramsHost.alphaMinThreshold = 1.0f / 255.0f;
 
     paramsHost.aabb = stateWrapper.pState->gasAABB;
     paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, stateWrapper.pState->maxNumSlabs);
@@ -644,6 +650,8 @@ torch::Tensor count_mog_hits(OptiXStateWrapper& stateWrapper,
 
     paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
+    paramsHost.alphaMaxValue = 0.99f;
+    paramsHost.alphaMinThreshold = 1.0f / 255.0f;
 
     paramsHost.aabb = stateWrapper.pState->gasAABB;
     paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, stateWrapper.pState->maxNumSlabs);

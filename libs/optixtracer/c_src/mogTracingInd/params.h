@@ -32,6 +32,7 @@ struct MoGIndTracingParams
     uint2 frameBounds;
     
     unsigned int frameNumber;
-    unsigned int gPrimNumTri;
-    float2 padding;
+    float alphaMaxValue;
+    float alphaMinThreshold;
+    float padding;
 };
