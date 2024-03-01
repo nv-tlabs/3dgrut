@@ -152,7 +152,7 @@ render:
   topk_hits: False
   patch_size: 1
   gaussian_sigma_threshold: 3.0
-  min_transmittance: 0.01
+  min_transmittance: 0.0001
   max_hits_returned: 128 
   
   optix: {} # optix-specific render settings
