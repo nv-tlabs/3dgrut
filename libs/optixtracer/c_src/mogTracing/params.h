@@ -38,9 +38,9 @@ struct MoGTracingParams
     uint2 frameBounds;
     
     unsigned int frameNumber;
+    int gPrimNumTri;
     float alphaMaxValue;
     float alphaMinThreshold;
-    float padding;
 };
 
 struct MoGTracingBwdParams
@@ -76,12 +76,8 @@ struct MoGTracingBwdParams
     uint2 frameBounds;
     
     unsigned int frameNumber;
-<<<<<<< HEAD
-    unsigned int gPrimNumTri;
-    float2 padding;
-=======
+    int gPrimNumTri;
     float alphaMaxValue;
     float alphaMinThreshold;
-    float padding;
->>>>>>> 977066f (Add alpha clamping/filtering)
+  
 };

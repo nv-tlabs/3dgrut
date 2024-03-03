@@ -28,6 +28,11 @@ struct RayPayload
     float2 ahHitTable[MoGTracingAHMaxNumHitPerSlab]; // hit data : x = hitT, y = gId
 };
 
+static __device__ __inline__ float getGaussianIndex(uint32_t primitiveIndex)
+{
+    return MoGCustomPrimitive ? primitiveIndex : primitiveIndex / params.gPrimNumTri;
+}
+
 static __device__ __inline__ float2 intersectAABB(const OptixAabb &aabb, const float3 &rayOri, const float3 &rayDir)
 {
     const float3 t0 = (make_float3(aabb.minX, aabb.minY, aabb.minZ) - rayOri) / rayDir;
@@ -418,7 +423,7 @@ extern "C" __global__ void __anyhit__ah()
     float2 *ahHitTablePtr =
         reinterpret_cast<float2 *>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
     unsigned int ahNumHits = optixGetPayload_0();
-    const unsigned int gId = optixGetPrimitiveIndex() / MOGPrimNumTri;
+    const unsigned int gId = getGaussianIndex(optixGetPrimitiveIndex());
     const float hitT = MoGTracingHitMode == MOGTracingGaussianHit ? computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params) : optixGetRayTmax();
     if (hitT < ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x)
     {
