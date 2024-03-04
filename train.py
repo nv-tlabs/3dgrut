@@ -347,8 +347,10 @@ def main(conf: DictConfig) -> None:
                     model.increase_num_active_features()
 
                 # Update the BVH if required
-                if scene_updated or (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
-                    model.build_bvh()
+                if scene_updated:
+                    model.build_bvh(full_build=True)
+                elif (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
+                    model.build_bvh(full_build=False)
 
                 # Updating the GUI
                 if gui is not None:

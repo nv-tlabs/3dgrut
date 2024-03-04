@@ -535,8 +535,8 @@ class MixtureOfGaussians(torch.nn.Module):
         for name, value in optimizable_tensors.items():
             setattr(self, name, value)
 
-    def build_bvh(self):
-        optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), True)
+    def build_bvh(self, full_build=True):
+        optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), full_build)
 
     def increase_num_active_features(self) -> None:
         self.n_active_features = min(self.max_n_features, self.n_active_features + self.feature_dim_increase_step)
