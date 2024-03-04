@@ -208,7 +208,12 @@ def main(conf: DictConfig) -> None:
                     loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
                     writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
 
-                    if conf.loss.use_ssim and ~error_buffer_batch and conf.dataset.train.get("sample_full_image", False):
+                    if conf.loss.use_l2:
+                        loss_ssim = None
+                        loss_l2 = torch.nn.MSELoss()(outputs['pred_rgb'], rgb_gt) * conf.loss.lambda_l2
+                        loss = loss_l2
+                        writer.add_scalar("loss_l2/train", loss_l2.item(), global_step)
+                    elif conf.loss.use_ssim and ~error_buffer_batch and conf.dataset.train.get("sample_full_image", False):
                         loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
                         loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
                         writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
@@ -313,6 +318,11 @@ def main(conf: DictConfig) -> None:
                         model.prune_gaussians_weight()
                     scene_updated = True
 
+                # Prune the Gaussians based on their scales
+                if global_step > conf.model.prune_scale.start_iteration and global_step < conf.model.prune_scale.end_iteration and global_step % conf.model.prune_scale.frequency == 0:
+                    model.prune_gaussians_scale(train_dataset)
+                    scene_updated = True
+
                 # Prune the needle Gaussians 
                 if global_step > conf.model.prune_needles.start_iteration and global_step < conf.model.prune_needles.end_iteration and global_step % conf.model.prune_needles.frequency == 0:
                     model.prune_needles()
@@ -337,8 +347,10 @@ def main(conf: DictConfig) -> None:
                     model.increase_num_active_features()
 
                 # Update the BVH if required
-                if scene_updated or (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
-                    model.build_bvh()
+                if scene_updated:
+                    model.build_bvh(full_build=True)
+                elif (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
+                    model.build_bvh(full_build=False)
 
                 # Updating the GUI
                 if gui is not None:

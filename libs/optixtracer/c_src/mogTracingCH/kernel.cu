@@ -72,7 +72,7 @@ extern "C" __global__ void __raygen__rg()
         {
             break;
         }
-        const uint32_t gId = p.triId / MOGPrimNumTri;
+        const uint32_t gId = p.triId / params.gPrimNumTri;
 
         const float gdns = params.mogDns[gId][0];
         const float3 gpos = make_float3(params.mogPos[gId][0], params.mogPos[gId][1], params.mogPos[gId][2]);

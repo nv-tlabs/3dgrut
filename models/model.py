@@ -11,7 +11,7 @@ from utils.misc import to_torch, get_activation_function, inverse_sigmoid, get_s
     sh_degree_to_num_features, sh_degree_to_specular_dim
 from datasets.colmap_utils import read_next_bytes
 from datasets.utils import PointCloud
-from models.geometry import nearest_neighbor_dist_cpuKD
+from models.geometry import nearest_neighbor_dist_cpuKD, nearest_neighbors
 from utils.misc import to_np
 import models.background as background
 from models.render_utils import evaluate_rays, RGB2SH
@@ -535,8 +535,8 @@ class MixtureOfGaussians(torch.nn.Module):
         for name, value in optimizable_tensors.items():
             setattr(self, name, value)
 
-    def build_bvh(self):
-        optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), True)
+    def build_bvh(self, full_build=True):
+        optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), full_build)
 
     def increase_num_active_features(self) -> None:
         self.n_active_features = min(self.max_n_features, self.n_active_features + self.feature_dim_increase_step)
@@ -656,15 +656,34 @@ class MixtureOfGaussians(torch.nn.Module):
                 self.positional_grad_norm_accum = torch.zeros((num_gaussians,1), dtype=torch.float, device=self.device)
                 self.positional_grad_norm_denom = torch.zeros((num_gaussians,1), dtype=torch.int, device=self.device)
 
+    # @torch.cuda.nvtx.range("update-gradient-buffer")
+    # def update_gradient_buffer(self, rays_ori, rays_dir):
+    #     assert self.conf.model.densify.method == 'gradient-buffer'
+    #     hit_cts = self.get_hit_counts(rays_ori, rays_dir)
+    #     mask = (hit_cts > 0).squeeze()
+
+    #     assert self.positions.grad is not None
+    #     self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask], dim=-1, keepdim=True)
+    #     self.positional_grad_norm_denom[mask] += 1
+                
     @torch.cuda.nvtx.range("update-gradient-buffer")
     def update_gradient_buffer(self, rays_ori, rays_dir):
         assert self.conf.model.densify.method == 'gradient-buffer'
-        hit_cts = self.get_hit_counts(rays_ori, rays_dir)
-        mask = (hit_cts > 0).squeeze()
+        mask = (self.positions.grad != 0).max(dim=1)[0]
 
         assert self.positions.grad is not None
-        self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask], dim=-1, keepdim=True)
+        distance_to_camera = (self.positions[mask] - rays_ori[0, 0, 0]).pow(2).sum(dim=1).pow(0.5)[..., None]
+
+        self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask] * distance_to_camera, dim=-1, keepdim=True) / 2
         self.positional_grad_norm_denom[mask] += 1
+
+        # if global_step % 100 == 0:
+        #     import matplotlib.pyplot as plt
+        #     plt.scatter(distance_to_camera.detach().cpu(), torch.norm(self.positions.grad[mask] * (distance_to_camera + 1), dim=-1, keepdim=True)[:, 0].detach().cpu(), label="Ours - scaled")
+        #     plt.scatter(distance_to_camera.detach().cpu(), torch.norm(self.positions.grad[mask], dim=-1, keepdim=True)[:, 0].detach().cpu(), label="Ours")
+        #     plt.legend()
+        #     plt.savefig("test.png")
+        #     plt.clf()
 
     @torch.cuda.nvtx.range("update_rolling_buffers")
     def update_rolling_buffers(self, gaussian_errors, gaussian_weights):
@@ -678,7 +697,7 @@ class MixtureOfGaussians(torch.nn.Module):
             self.densify_positional_grad(scene_extent)
         elif self.conf.model.densify.method == "error":
             self.clone_gaussians_error()
-
+    
     def densify_positional_grad(self, scene_extent):
         assert self.optimizer is not None, "Optimizer need to be initialized before splitting and cloning the Gaussians"
         assert self.get_positions().requires_grad, "Trying to perform split and clone but the positions are not being optimized"
@@ -838,6 +857,21 @@ class MixtureOfGaussians(torch.nn.Module):
             n_before = mask.shape[0]
             n_prune = n_before - mask.sum()
             print(f"Weight-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
+
+        self.prune_gaussians(mask)
+
+    def prune_gaussians_scale(self, dataset):
+        cam_normals = torch.from_numpy(dataset.poses[:, :3, 2]).to(self.device)
+        similarities = torch.matmul(self.positions, cam_normals.T)
+        cam_dists = similarities.min(dim=1)[0].clamp(min=1e-8)
+        ratio = self.get_scale().min(dim=1)[0] / cam_dists * dataset.intrinsic[0].max()
+
+        # Prune the Gaussians based on their weight
+        mask = ratio >= self.conf.model.prune_scale.threshold
+        if self.conf.model.print_stats:
+            n_before = mask.shape[0]
+            n_prune = n_before - mask.sum()
+            print(f"Scale-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
 
         self.prune_gaussians(mask)
     

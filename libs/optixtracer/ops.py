@@ -173,6 +173,10 @@ def trace_mog_inds(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_d
     )
     return ray_hits
 
+@torch.cuda.nvtx.range("get_mog_primitives")
+def get_mog_primitives(optix_ctx):
+    return _plugin.get_mog_primitives(optix_ctx.cpp_wrapper)
+
 #----------------------------------------------------------------------------
 #
 @torch.cuda.nvtx.range("build_mog_bvh")
@@ -198,10 +202,19 @@ class OptixMogPipeline(IntEnum):
     TRACING_DEFAULT = 1
     TRACING_MLAT = 2
     TRACING_MBOIT = 4
- 
+
+class OptixMogPrimitive(IntEnum):
+    TRACING_ICOSAHEDRON = 0
+    TRACING_OCTAHEDRON = 1
+    TRACING_TETRAHEDRON = 2
+    TRACING_DIAMOND = 3,
+    TRACING_SPHERE = 4,
+    TRACING_CUSTOM = 5
+
 @dataclass
 class OptixMogTracingParams:
     pipeline : int=OptixMogPipeline.TRACING_DEFAULT # Tracing algo
+    primitive_type : int=OptixMogPrimitive.TRACING_ICOSAHEDRON # enveloping primitive
     hit_mode : int=0            # Intersection distance : 0 = distance to the first hit triangle, 1 = distance to the projection of aussian center on the ray 
     max_hit_per_slab: int=32    # Size of the array of sorted gaussian per-slabs
     max_num_slabs: int=64       # Number of slabs along the diagonal of the scene AABB
@@ -220,6 +233,7 @@ class OptiXContext:
             os.path.dirname(__file__), 
             torch.utils.cpp_extension.CUDA_HOME,
             int(params.pipeline),
+            int(params.primitive_type),
             params.hit_mode,
             params.max_hit_per_slab,
             params.max_num_slabs,

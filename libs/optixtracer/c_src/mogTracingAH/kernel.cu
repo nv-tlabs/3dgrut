@@ -17,6 +17,7 @@ extern "C"
     __constant__ MoGTracingParams params;
 }
 
+static constexpr bool MoGCustomPrimitive = (MOGTRACING_PRIMITIVE_TYPE == 5);
 static constexpr unsigned int MoGTracingHitMode = MOGTRACING_HIT_MODE;
 static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = MOGTRACING_MAXNUMHITS_PER_SLAB;
 static constexpr unsigned int MOGTracingPatchSize = MOGTRACING_PATCH_SIZE;
@@ -26,6 +27,11 @@ struct RayPayload
     unsigned int ahNumHits; // number of valid hits in ahHitTable
     float2 ahHitTable[MoGTracingAHMaxNumHitPerSlab]; // hit data : x = hitT, y = gId
 };
+
+static __device__ __inline__ float getGaussianIndex(uint32_t primitiveIndex)
+{
+    return MoGCustomPrimitive ? primitiveIndex : primitiveIndex / params.gPrimNumTri;
+}
 
 static __device__ __inline__ float getRayGaussianHit(const float3& gro, const float3& grd, const float3& gscl)
 {
@@ -122,9 +128,10 @@ extern "C" __global__ void __raygen__rg()
             p.ahHitTable[i] = make_float2(1e9, 1e9);
         }
 
-        // TODO : add a GOOD ray jittering scheme over the patch (not bounded by the convex hull of the rayDirs if possible)
-        const float3 sampleRayOri = rayOri[MOGTracingPatchSize/2][MOGTracingPatchSize/2];
-        const float3 sampleRayDir = rayDir[MOGTracingPatchSize/2][MOGTracingPatchSize/2];
+        // TODO : add a GOOD ray jittering scheme over the patch (not bounded by the convex hull of the rayDirs if
+        // possible)
+        const float3 sampleRayOri = rayOri[MOGTracingPatchSize / 2][MOGTracingPatchSize / 2];
+        const float3 sampleRayDir = rayDir[MOGTracingPatchSize / 2][MOGTracingPatchSize / 2];
 
         trace(&p, sampleRayOri, sampleRayDir, startT + epsT, startT + slabSpacing);
         if (p.ahNumHits == 0)
@@ -160,7 +167,10 @@ extern "C" __global__ void __raygen__rg()
             // project ray in the gaussian
             float33 grotMat;
             rotationMatrix(make_float4(grot.x, grot.y, grot.z, grot.w), grotMat);
+            float33 invGrotMat;
+            invRotationMatrix(make_float4(grot.x, grot.y, grot.z, grot.w), invGrotMat);
             const float3 giscl = make_float3(1 / gscl.x, 1 / gscl.y, 1 / gscl.z);
+
 
             // NB : this is an approximation : we are using the sampleRayOri instead of the real rayOri we factorizing
             // the sph computation
@@ -186,21 +196,24 @@ extern "C" __global__ void __raygen__rg()
                         const float3 gcrod = cross(grd, gro);
                         const float grayDir = dot(gcrod, gcrod);
                         const float gres = expf(-0.5 * grayDir);
-                        const float galpha = gres * gdns;
+                        const float galpha = fminf(gres * gdns, params.alphaMaxValue);
 
-                        const float weight = galpha * rayTrm[k][j];
-                        
-                        // Distance to the gaussian center projection on the ray
-                        const float hitT = getRayGaussianHit(gro,grd,gscl);
-                        
-                        atomicAdd(&params.mogWeightSum[gId][0], weight);
+                        if ((gres > params.hitMinGaussianResponse) && (galpha > params.alphaMinThreshold))
+                        {
+                            const float weight = galpha * rayTrm[k][j];
 
-                        rayRad[k][j] += grad * weight;
-                        rayHit[k][j] += hitT * weight;
-                        rayTrm[k][j] *= (1 - galpha);
+                            // Distance to the gaussian center projection on the ray
+                            const float hitT = getRayGaussianHit(gro, grd, gscl);
 
-                        transmit = fmaxf(transmit, rayTrm[k][j]);
+                            atomicAdd(&params.mogWeightSum[gId][0], weight);
+
+                            rayRad[k][j] += grad * weight;
+                            rayHit[k][j] += hitT * weight;
+                            rayTrm[k][j] *= (1 - galpha);
+                        }
                     }
+
+                    transmit = fmaxf(transmit, rayTrm[k][j]);
                 }
             }
         }
@@ -223,6 +236,41 @@ extern "C" __global__ void __raygen__rg()
     }
 }
 
+extern "C" __global__ void __intersection__is()
+{
+    const float3 ro = optixGetWorldRayOrigin();
+    const float3 rd = optixGetWorldRayDirection();
+
+    const float tmin = optixGetRayTmin();
+    const float tmax = optixGetRayTmax();
+
+    const unsigned int gId = getGaussianIndex(optixGetPrimitiveIndex());
+
+    const float3 gPos = make_float3(params.mogPos[gId][0], params.mogPos[gId][1], params.mogPos[gId][2]);
+    const float4 gRot =
+        make_float4(params.mogRot[gId][0], params.mogRot[gId][1], params.mogRot[gId][2], params.mogRot[gId][3]);
+    const float3 gScl = make_float3(params.mogScl[gId][0], params.mogScl[gId][1], params.mogScl[gId][2]);
+
+    float33 rot;
+    rotationMatrix(make_float4(gRot.x, gRot.y, gRot.z, gRot.w), rot);
+    const float3 giscl = make_float3(1 / gScl.x, 1 / gScl.y, 1 / gScl.z);
+    const float3 gro = giscl * ((ro - gPos) * rot);
+    const float3 grdu = giscl * ((rd * rot));
+    const float t = fabs(dot(gro, grdu) / dot(grdu, grdu));
+
+    if (t > tmin && t < tmax)
+    {
+        const float3 grd = safe_normalize(grdu);
+        const float gdns = params.mogDns[gId][0];
+        const float3 gcrod = cross(grd, gro);
+        const float gres = expf(-0.5 * dot(gcrod, gcrod));
+        if (gres > params.hitMinGaussianResponse)
+        {
+            optixReportIntersection(t, 0);
+        }
+    }
+}
+
 extern "C" __global__ void __anyhit__ah()
 {
     const unsigned int ahHitTablePtr0 = optixGetPayload_1();
@@ -230,10 +278,10 @@ extern "C" __global__ void __anyhit__ah()
     float2* ahHitTablePtr =
         reinterpret_cast<float2*>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
     unsigned int ahNumHits = optixGetPayload_0();
-    const unsigned int gId = optixGetPrimitiveIndex() / MOGPrimNumTri;
-    const float hitT = MoGTracingHitMode == MOGTracingGaussianHit ?
-                           computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params) :
-                           optixGetRayTmax();
+    const unsigned int gId = getGaussianIndex(optixGetPrimitiveIndex());
+    const float hitT = (MoGCustomPrimitive || MoGTracingHitMode != MOGTracingGaussianHit) ?
+                           optixGetRayTmax() :
+                           computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params);
     if (hitT < ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x)
     {
         float2 ahHit = { hitT, uint_as_float(gId) };

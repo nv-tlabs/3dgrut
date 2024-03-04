@@ -1,5 +1,6 @@
 path: ???
 experiment_name: ""
+group_name: ""
 resume: ""
 out_dir: "runs"
 n_iterations: 30000
@@ -12,6 +13,9 @@ record_training: true
 test_last: false
 validate_first: False
 log_frequency: 1
+use_deterministic_algorithms: False
+use_fixed_random_seed: False
+fixed_random_seed: 0
 
 model:
   density_activation: sigmoid
@@ -43,11 +47,11 @@ model:
     color: black # one of [black, white, random] needs to be defined if name == background-color
 
   log_rolling_buffers: false # needs to be set as true if densify.method == error
-  print_stats: false
+  print_stats: true
 
   densify:
-    method: adam # one of [adam, gradient-buffer, error]
-    frequency: 100 # densification_interval in 3DGS with default value 100
+    method: gradient-buffer # one of [adam, gradient-buffer, error]
+    frequency: 300 # densification_interval in 3DGS with default value 100
     start_iteration: 500 # densify_from_iter in 3DGS default value 500
     end_iteration: 15000 # densify_until_iter in 3DGS default value 15_000
     clone_grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
@@ -70,11 +74,17 @@ model:
     end_iteration: -1
     weight_threshold : 0.5
 
+  prune_scale:
+    frequency: 100
+    start_iteration: -1
+    end_iteration: -1
+    threshold: 1.0
+
   # Start and end iteration are not used in 3DGS
   reset_density:
     frequency: 3000 # Opacity reset interval in 3DGS default value 3000
     start_iteration: 0
-    end_iteration: 15000
+    end_iteration: ${model.densify.end_iteration}
     # This parameter is hardcoded in the 3DGS to 0.01
     new_max_density: 0.01 # The density of the all the Gaussians will be set to min(density, this) 
 
@@ -134,14 +144,15 @@ scheduler:
     type: skip
 
 render:
-  method: optix
-  hit_mode: 0
+  method : optix
+  hit_mode : 0
+  primitive_type : icosahedron
   max_hit_per_slab: 32
   max_num_slabs: 64
   topk_hits: False
   patch_size: 1
   gaussian_sigma_threshold: 3.0
-  min_transmittance: 0.03
+  min_transmittance: 0.0001
   max_hits_returned: 128 
   
   optix: {} # optix-specific render settings
@@ -153,7 +164,9 @@ render:
     gaussian_evaluation: geometric # either 'geometric' or 'analytic'
 
 loss:
-  use_ssim: True
+  use_l2: false
+  lambda_l2: 1.0
+  use_ssim: true
   lambda_ssim: 0.2
 
   # Scale-regularization, preventing needle-like geometries

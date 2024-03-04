@@ -194,7 +194,7 @@ extern "C" __global__ void __anyhit__ah()
     float2* ahHitTablePtr =
         reinterpret_cast<float2*>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
     unsigned int ahNumHits = optixGetPayload_0();
-    const unsigned int gId = optixGetPrimitiveIndex() / MOGPrimNumTri;
+    const unsigned int gId = optixGetPrimitiveIndex() / params.gPrimNumTri;
     const float hitT = MoGTracingHitMode == MOGTracingGaussianHit ?
                            computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params) :
                            optixGetRayTmax();

@@ -65,6 +65,9 @@ computeColorFromSH(int deg, const float3& gpos, const float3& rori, uint32_t gId
         }
     }
     rad += 0.5f;
+    // TODO : redefine explu as 
+    // explu_alpha(x) = x if x >= alpha
+    //                = exp(x/alpha + log(alpha) -1) otherwise
     return clamped ? make_float3(rad.x > SHRadMinBound ? rad.x : expf(rad.x - SHRadMinBound) * SHRadMinBound,
                                  rad.y > SHRadMinBound ? rad.y : expf(rad.y - SHRadMinBound) * SHRadMinBound,
                                  rad.z > SHRadMinBound ? rad.z : expf(rad.z - SHRadMinBound) * SHRadMinBound) :

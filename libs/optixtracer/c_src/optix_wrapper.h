@@ -29,7 +29,10 @@ struct OptiXState
     float minTransmittance;
     uint32_t maxHitsReturned;
     
-    uint32_t gPrimNumTri; ///< number of triangles per gaussian primitive
+    uint32_t gNum;         ///< current number of gaussians 
+    uint32_t gPrimType;    ///< type of the prim [0 : octahedron 1 : tetrahedron]
+    uint32_t gPrimNumVert; ///< number of vertices per gaussian primitive
+    uint32_t gPrimNumTri;  ///< number of triangles per gaussian primitive
     CUdeviceptr gPrimVrt; ///< buffer containing the vertices of the gaussian primitive
     CUdeviceptr gPrimTri; ///< buffer containing the vertices index of the gaussian primitive triangles
     CUdeviceptr gPrimAABB; ///< buffer containing the gaussians AABB to be usedwith custom primitives
@@ -84,6 +87,7 @@ public:
         const std::string& cuda_path,
         uint32_t hitMode,
         uint32_t pipeline,
+        uint32_t primitiveType,
         uint32_t maxHitsPerSlab,
         uint32_t maxNumSlabs,
         bool topKHits,

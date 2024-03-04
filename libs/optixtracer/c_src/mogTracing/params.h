@@ -11,27 +11,7 @@
 #include "../accessor.h"
 
 #include <optix.h>
-
-enum MOGTracingMode
-{
-    MOGTracingModeNone = 0,
-    MOGTracingGaussianHit = 1<<0, ///< use the position on the ray with highest gaussian response
-    MOGTracingDefaultMode = MOGTracingModeNone
-};
-
-static constexpr int MOGPrimNumVert = 6; ///< octaHedron have 6 vertices
-static constexpr int MOGPrimNumTri = 8; ///< octaHedron have 8 triangles
-
-enum MOGTracingPipeline
-{
-    MOGTracingPipelineCH = 0,
-    MOGTracingPipelineAH = 1,
-    MOGTracingPipelineIS = 2,
-    MOGTracingPipelineMLAT = 3,
-    MOGTracingPipelineMBOIT = 4,
-    MOGTracingPipelineHC = 5,
-    MOGTracingPipelineInd = 6,
-};
+#include "paramDefs.h"
 
 struct MoGTracingParams
 {
@@ -58,7 +38,9 @@ struct MoGTracingParams
     uint2 frameBounds;
     
     unsigned int frameNumber;
-    float3 padding;
+    int gPrimNumTri;
+    float alphaMaxValue;
+    float alphaMinThreshold;
 };
 
 struct MoGTracingBwdParams
@@ -94,5 +76,8 @@ struct MoGTracingBwdParams
     uint2 frameBounds;
     
     unsigned int frameNumber;
-    float3 padding;
+    int gPrimNumTri;
+    float alphaMaxValue;
+    float alphaMinThreshold;
+  
 };
