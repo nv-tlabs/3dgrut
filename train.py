@@ -26,6 +26,8 @@ from utils.recorder import TrainingRecorder
 from render import Renderer
 sys.path.append(os.path.dirname(os.path.dirname(os.getcwd())))
 
+import gzip
+import msgpack
 
 DEFAULT_DEVICE = torch.device('cuda')
 
@@ -480,6 +482,23 @@ def main(conf: DictConfig) -> None:
         gui.training_done = True
         while gui.viz_final:
             ps.frame_tick()
+
+    # Export the mixture-of-3d-gaussians in mogt file
+    if conf.export_ingp_last:
+        mogt_path = os.path.join(out_dir, "export_last.ingp")
+        logging.info(f"exporting mogt file to {mogt_path}...")
+        mogt_config = {}
+        mogt_config["nre_data"] = { "version": "0.0.1", "model": "mogt"}
+        mogt_config["mog_num"] = model.get_positions().shape[0]
+        mogt_config["mog_sph_degree"] = model.max_n_features
+        mogt_config["mog_positions"] = model.get_positions().flatten().cpu().detach().numpy().tobytes()
+        mogt_config["mog_scales"] = model.get_scale().flatten().cpu().detach().numpy().tobytes()
+        mogt_config["mog_rotations"] = model.get_rotation().flatten().cpu().detach().numpy().tobytes()
+        mogt_config["mog_densities"] = model.get_density().flatten().cpu().detach().numpy().tobytes()
+        mogt_config["mog_features"] = model.get_features().flatten().cpu().detach().numpy().tobytes()
+        with gzip.open(ingp_filepath := mogt_path, "wb") as f:
+            packed = msgpack.packb(mogt_config)
+            f.write(packed)
 
     if conf.test_last:
         logging.info(f"running on test set...")

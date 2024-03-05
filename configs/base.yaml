@@ -11,6 +11,7 @@ num_workers: 8
 use_wandb: false
 wandb_project: "3dgrt"
 record_training: true
+export_ingp_last: false
 test_last: false
 validate_first: False
 log_frequency: 1
