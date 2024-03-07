@@ -536,7 +536,8 @@ class MixtureOfGaussians(torch.nn.Module):
             setattr(self, name, value)
 
     def build_bvh(self, full_build=True):
-        optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), full_build)
+        with torch.cuda.nvtx.range(f"build-bvh-full-build-{full_build}"):
+            optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), full_build)
 
     def increase_num_active_features(self) -> None:
         self.n_active_features = min(self.max_n_features, self.n_active_features + self.feature_dim_increase_step)
@@ -668,14 +669,21 @@ class MixtureOfGaussians(torch.nn.Module):
                 
     @torch.cuda.nvtx.range("update-gradient-buffer")
     def update_gradient_buffer(self, rays_ori, rays_dir):
-        assert self.conf.model.densify.method == 'gradient-buffer'
-        mask = (self.positions.grad != 0).max(dim=1)[0]
+        with torch.cuda.nvtx.range(f"getting-the-hit-mask"):
+            assert self.conf.model.densify.method == 'gradient-buffer'
+            mask = (self.positions.grad != 0).max(dim=1)[0]
 
-        assert self.positions.grad is not None
-        distance_to_camera = (self.positions[mask] - rays_ori[0, 0, 0]).pow(2).sum(dim=1).pow(0.5)[..., None]
-
-        self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask] * distance_to_camera, dim=-1, keepdim=True) / 2
-        self.positional_grad_norm_denom[mask] += 1
+        if self.conf.model.densify.distance_based_scaling:
+            with torch.cuda.nvtx.range(f"getting-gaussian-to-camera-distances"):
+                assert self.positions.grad is not None
+                distance_to_camera = (self.positions[mask] - rays_ori[0, 0, 0]).norm(dim=1, keepdim=True)
+            with torch.cuda.nvtx.range(f"accumulating-gradients"):
+                self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask] * distance_to_camera, dim=-1, keepdim=True) / 2
+                self.positional_grad_norm_denom[mask] += 1
+        else:
+            with torch.cuda.nvtx.range(f"accumulating-gradients"):
+                self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask], dim=-1, keepdim=True)
+                self.positional_grad_norm_denom[mask] += 1
 
         # if global_step % 100 == 0:
         #     import matplotlib.pyplot as plt

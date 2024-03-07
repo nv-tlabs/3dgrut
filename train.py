@@ -201,22 +201,28 @@ def main(conf: DictConfig) -> None:
                     # Check if alphas are given and if the background is a fix color
                     if isinstance(model.background, BackgroundColor):
                         if "alpha" in gpu_batch:
-                            alpha = gpu_batch["alpha"]
-                            rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
+                            with torch.cuda.nvtx.range(f"handling-bg-color"):
+                                alpha = gpu_batch["alpha"]
+                                rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
 
                     # Compute the loss
-                    loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
-                    writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
+                    with torch.cuda.nvtx.range(f"loss-l1"):
+                        loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
+                    if conf.enable_writer:
+                        writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
 
                     if conf.loss.use_l2:
-                        loss_ssim = None
-                        loss_l2 = torch.nn.MSELoss()(outputs['pred_rgb'], rgb_gt) * conf.loss.lambda_l2
-                        loss = loss_l2
-                        writer.add_scalar("loss_l2/train", loss_l2.item(), global_step)
+                        with torch.cuda.nvtx.range(f"loss-l2"):
+                            loss_ssim = None
+                            loss_l2 = torch.nn.MSELoss()(outputs['pred_rgb'], rgb_gt) * conf.loss.lambda_l2
+                            loss = loss_l2
+                            if conf.enable_writer:
+                                writer.add_scalar("loss_l2/train", loss_l2.item(), global_step)
                     elif conf.loss.use_ssim and ~error_buffer_batch and conf.dataset.train.get("sample_full_image", False):
                         loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
                         loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
-                        writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
+                        if conf.enable_writer:
+                            writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
                     else:
                         loss_ssim = None
                         loss = loss_l1
@@ -233,7 +239,8 @@ def main(conf: DictConfig) -> None:
                         loss_lidar = torch.nn.L1Loss(reduction="mean")(outputs_lidar['pred_dist'], lidar_dist_gt) 
                         loss += conf.loss.lambda_lidardistance * loss_lidar
                         
-                        writer.add_scalar("loss_lidar/train", loss_lidar.item(), global_step)
+                        if conf.enable_writer:
+                            writer.add_scalar("loss_lidar/train", loss_lidar.item(), global_step)
 
                     if conf.loss.use_scalereg and conf.loss.lambda_scalereg > 0.0:
                         # Regularization to prevent needle-like degenerate geometries (excessive ratio of largest to smallest scale)
@@ -243,7 +250,8 @@ def main(conf: DictConfig) -> None:
                         scale_ratio = torch.log(max_scales) - torch.log(min_scales) # positive value, larger means bigger ratio
                         loss_scalereg = torch.mean(torch.square(scale_ratio))
                         loss += conf.loss.lambda_scalereg * loss_scalereg
-                        writer.add_scalar("loss_scalereg/train", loss_scalereg.item(), global_step)
+                        if conf.enable_writer:
+                            writer.add_scalar("loss_scalereg/train", loss_scalereg.item(), global_step)
 
                     if conf.model.lambda_background > 0.0:
                         assert "sky_mask" in gpu_batch, "Sky ray mask missing for background-loss evaluation"
@@ -252,7 +260,8 @@ def main(conf: DictConfig) -> None:
                         foreground_mask[gpu_batch['sky_mask']] = 0.0
                         loss_background = torch.nn.functional.mse_loss(outputs["pred_opacity"], foreground_mask)
                         loss += conf.model.lambda_background * loss_background
-                        writer.add_scalar("loss_background/train", loss_background.item(), global_step)
+                        if conf.enable_writer:
+                            writer.add_scalar("loss_background/train", loss_background.item(), global_step)
     
                 # backpropagate the gradients and update the parameters
                 with torch.cuda.nvtx.range("backward"):
@@ -282,17 +291,20 @@ def main(conf: DictConfig) -> None:
                 # Make a scheduler step
                 model.scheduler_step(global_step)
 
-                # Logging
-                with torch.cuda.nvtx.range(f"criterions_psnr"):
-                    psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
                 global_step += 1
-                pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
-                if global_step > 0 and global_step % conf.log_frequency == 0:
-                    writer.add_scalar("psnr/train", psnr, global_step)
 
-                recorder.record_train_step(model, global_step, it_start.elapsed_time(it_end),
-                                           loss_l1, loss_ssim, loss, psnr)
-                recorder.report_statistics(writer=writer)
+                # Logging
+                if conf.enable_writer:
+                    with torch.cuda.nvtx.range(f"criterions_psnr"):
+                        psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
+                    pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
+                    if conf.enable_writer and global_step > 0 and global_step % conf.log_frequency == 0:
+                        writer.add_scalar("psnr/train", psnr, global_step)
+
+                if conf.enable_writer:
+                    recorder.record_train_step(model, global_step, it_start.elapsed_time(it_end),
+                                            loss_l1, loss_ssim, loss, psnr)
+                    recorder.report_statistics(writer=writer)
 
                 # Save the checkpoint
                 with torch.cuda.nvtx.range(f"ckpt_save"):
