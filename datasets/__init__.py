@@ -22,7 +22,8 @@ def make(name:str, config, ray_jitter):
                 config.path,
                 split='val',
                 sample_full_image=True,
-                return_alphas=False
+                return_alphas=False, 
+                bg_color=config.model.background.color
             )
         case 'colmap':
             train_dataset = ColmapDataset(

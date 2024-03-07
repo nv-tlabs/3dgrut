@@ -13,7 +13,9 @@ from utils.misc import to_np
 
 class NeRFDataset(Dataset):
     def __init__(self, root_dir, split='train', sample_full_image=False, batch_size=8192, return_alphas=False,
-                 ray_jitter=None, **kwargs):
+                 ray_jitter=None, bg_color=None, **kwargs):
+        self.bg_color = bg_color
+
         self.root_dir = root_dir 
         self.split = split
         
@@ -73,14 +75,13 @@ class NeRFDataset(Dataset):
             c2w[:, 1:3] *= -1 # [right up back] to [right down front]
             cam_centers.append(c2w[:3, 3])
             self.poses += [c2w]
-
             try:
                 img_path = os.path.join(self.root_dir, f"{frame['file_path']}.png")
                 if self.return_alphas:
-                    img, alpha = read_image(img_path, self.img_wh, return_alpha=True)
+                    img, alpha = read_image(img_path, self.img_wh, return_alpha=True, bg_color=self.bg_color)
                     self.alphas.append(alpha)
                 else:
-                    img = read_image(img_path, self.img_wh, return_alpha=False)
+                    img = read_image(img_path, self.img_wh, return_alpha=False, bg_color=self.bg_color)
 
 
                 self.rgbs += [img]

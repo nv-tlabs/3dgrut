@@ -9,3 +9,7 @@ defaults:
 
 # overwrite of default parameters
 val_frequency: 5000
+
+model:
+  background:
+    color: white

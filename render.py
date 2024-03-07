@@ -16,8 +16,6 @@ from datasets.ncore_utils import Batch as NCoreBatch
 
 from torchmetrics import PeakSignalNoiseRatio
 
-BACKGROUND_COLOR = torch.zeros((3,), dtype=torch.float32, device='cuda')
-
 
 class Renderer:
     def __init__(self, model, conf, global_step, out_dir, path="", save_gt=True, writer=None) -> None:
@@ -35,6 +33,13 @@ class Renderer:
         self.dataloader = self.create_test_dataloader(conf)
         self.writer = writer
 
+        if conf.model.background.color == "black":
+            self.bg_color = torch.zeros((3,), dtype=torch.float32, device='cuda')
+        elif conf.model.background.color == "white":
+            self.bg_color = torch.ones((3,), dtype=torch.float32, device='cuda')
+        else:
+            assert False, f"{conf.model.background.color} is not a supported background color."
+
     def create_test_dataloader(self, conf):
         val_collate_fn = None
         # Create the dataset
@@ -45,7 +50,8 @@ class Renderer:
                     split='test',
                     sample_full_image=True,
                     batch_size=1,
-                    return_alphas=True
+                    return_alphas=True, 
+                    # bg_color=conf.model.background.color
                 )
             case 'colmap':
                 dataset = ColmapDataset(
@@ -157,7 +163,7 @@ class Renderer:
 
 
                     if "alpha" in gpu_batch:
-                        rgb_gt = rgb_gt * gpu_batch["alpha"] + BACKGROUND_COLOR * (1 - gpu_batch["alpha"])
+                        rgb_gt = rgb_gt * gpu_batch["alpha"] + self.bg_color * (1 - gpu_batch["alpha"])
                     if self.save_gt:
                         torchvision.utils.save_image(rgb_gt.squeeze(0).permute(2,0,1), os.path.join(output_path_gt, '{0:05d}'.format(iteration) + ".png"))
 
