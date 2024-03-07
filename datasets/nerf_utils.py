@@ -69,15 +69,21 @@ def get_rays(directions, c2w):
     return rays_o, rays_d
 
 
-def read_image(img_path, img_wh, return_alpha=False):
+def read_image(img_path, img_wh, return_alpha=False, bg_color=None):
     img = imageio.imread(img_path).astype(np.float32)/255.0
     # img[..., :3] = srgb_to_linear(img[..., :3])
     if img.shape[2] == 4: # blend A to RGB
         if return_alpha:
             alpha= img[:,:,-1]
+
+        if bg_color is None:
             img = img[..., :3]
+        elif bg_color == "black":
+            img = img[..., :3] * img[..., -1:]
+        elif bg_color == "white":
+            img = img[..., :3] * img[..., -1:] + (1 - img[..., -1:])
         else:
-            img = img[..., :3]*img[..., -1:]
+            assert False, f"{bg_color} is not a supported background color."
 
     img = cv2.resize(img, img_wh)
     img = rearrange(img, 'h w c -> (h w) c')

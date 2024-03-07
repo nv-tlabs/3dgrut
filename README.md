@@ -155,7 +155,7 @@ python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_ar
 
 ```
 rm utils/ngc/grid_search_configs/grid_search/*
-EXP_NAME="Ashkan-Mar4-bvh-16"
+EXP_NAME="Ashkan-Mar6-30000"
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array grid_search/random_init.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
 ```
