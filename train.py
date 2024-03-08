@@ -18,7 +18,7 @@ import datasets
 from models import antialiasing
 from models.model import MixtureOfGaussians
 from models.background import BackgroundColor
-from datasets.utils import move_to_gpu, PointCloud
+from datasets.utils import move_to_gpu, PointCloud, MultiEpochsDataLoader
 from models.losses import ssim
 from models.background import SkyMlp
 from utils.gui import GUI
@@ -45,7 +45,7 @@ def main(conf: DictConfig) -> None:
     ray_jitter = antialiasing.make(conf.dataset.train.ray_jittering.type, conf)
     train_dataset, val_dataset, train_collate_fn, val_collate_fn = datasets.make(name=conf.dataset.type, config=conf, ray_jitter=ray_jitter)
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, num_workers=conf.num_workers, batch_size=1, shuffle=True, collate_fn=train_collate_fn)
+    train_dataloader = MultiEpochsDataLoader(train_dataset, num_workers=conf.num_workers, batch_size=1, shuffle=True, collate_fn=train_collate_fn)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=conf.num_workers, batch_size=1, shuffle=False, collate_fn=val_collate_fn)
 
     scene_extent = train_dataset.get_scene_extent()
