@@ -300,6 +300,8 @@ def main(conf: DictConfig) -> None:
                     pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
                     if conf.enable_writer and global_step > 0 and global_step % conf.log_frequency == 0:
                         writer.add_scalar("psnr/train", psnr, global_step)
+                else:
+                    pbar.set_postfix({'iteration': global_step})
 
                 if conf.enable_writer:
                     recorder.record_train_step(model, global_step, it_start.elapsed_time(it_end),
