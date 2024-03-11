@@ -137,7 +137,7 @@ def main(conf: DictConfig) -> None:
         val_frequency -= val_frequency % len(train_dataset) 
         logging.warning(f"setting val_frequency to {val_frequency}")
 
-
+    progress_bar = tqdm(range(conf.n_iterations), desc="Training progress")
     for epoch_idx in range(n_epochs):
         if conf.model.log_rolling_buffers:
             model.reset_rolling_buffers()
@@ -175,260 +175,261 @@ def main(conf: DictConfig) -> None:
 
                     recorder.record_metrics(iteration=global_step, psnr=val_psnr, loss=val_loss)
 
-        with tqdm(train_dataloader) as pbar:
-            for batch in pbar:
-                if ray_jitter is not None and conf.dataset.train.ray_jittering.start_iteration >= global_step:
-                    ray_jitter.enabled = True
-                with torch.cuda.nvtx.range(f"train.train_step_{global_step}"):
-                    it_start.record()
+        for batch in train_dataloader:
+            if ray_jitter is not None and conf.dataset.train.ray_jittering.start_iteration >= global_step:
+                ray_jitter.enabled = True
+            with torch.cuda.nvtx.range(f"train.train_step_{global_step}"):
+                it_start.record()
 
-                    error_buffer_batch = False
-                    # Sample a new batch from the error buffer (the actual batch from the dataloader will be skipped)
-                    if model.error_based_sampling and global_step > model.error_buffer_update_frequency and global_step % model.error_sampling_frequency == 0:
-                        batch = model.sample_from_error_buffer(batch["rays_ori"].shape[:-1])
-                        error_buffer_batch = True
+                error_buffer_batch = False
+                # Sample a new batch from the error buffer (the actual batch from the dataloader will be skipped)
+                if model.error_based_sampling and global_step > model.error_buffer_update_frequency and global_step % model.error_sampling_frequency == 0:
+                    batch = model.sample_from_error_buffer(batch["rays_ori"].shape[:-1])
+                    error_buffer_batch = True
 
-                    # Move data to GPU
-                    gpu_batch = move_to_gpu(batch)
-                    rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
-                    scene_updated = False
+                # Move data to GPU
+                gpu_batch = move_to_gpu(batch)
+                rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
+                scene_updated = False
 
-                    # Compute the outputs of a single batch
-                    error_target = torch.zeros_like(model.density)
-                    error_target.requires_grad = True
-                    outputs = model(rays_ori, rays_dir, error_target, train=True)
+                # Compute the outputs of a single batch
+                error_target = torch.zeros_like(model.density)
+                error_target.requires_grad = True
+                outputs = model(rays_ori, rays_dir, error_target, train=True)
 
-                    # Check if alphas are given and if the background is a fix color
-                    if isinstance(model.background, BackgroundColor):
-                        if "alpha" in gpu_batch:
-                            with torch.cuda.nvtx.range(f"handling-bg-color"):
-                                alpha = gpu_batch["alpha"]
-                                rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
+                # Check if alphas are given and if the background is a fix color
+                if isinstance(model.background, BackgroundColor):
+                    if "alpha" in gpu_batch:
+                        with torch.cuda.nvtx.range(f"handling-bg-color"):
+                            alpha = gpu_batch["alpha"]
+                            rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
 
-                    # Compute the loss
-                    with torch.cuda.nvtx.range(f"loss-l1"):
-                        loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
-                    if conf.enable_writer:
-                        writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
+                # Compute the loss
+                with torch.cuda.nvtx.range(f"loss-l1"):
+                    loss_l1 = torch.abs(outputs['pred_rgb'] - rgb_gt).mean()
+                if conf.enable_writer:
+                    writer.add_scalar("loss_l1/train", loss_l1.item(), global_step)
 
-                    if conf.loss.use_l2:
-                        with torch.cuda.nvtx.range(f"loss-l2"):
-                            loss_ssim = None
-                            loss_l2 = torch.nn.MSELoss()(outputs['pred_rgb'], rgb_gt) * conf.loss.lambda_l2
-                            loss = loss_l2
-                            if conf.enable_writer:
-                                writer.add_scalar("loss_l2/train", loss_l2.item(), global_step)
-                    elif conf.loss.use_ssim and ~error_buffer_batch and conf.dataset.train.get("sample_full_image", False):
-                        loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
-                        loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
-                        if conf.enable_writer:
-                            writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
-                    else:
+                if conf.loss.use_l2:
+                    with torch.cuda.nvtx.range(f"loss-l2"):
                         loss_ssim = None
-                        loss = loss_l1
-
-                    if conf.loss.use_lidardistance and conf.loss.lambda_lidardistance > 0.0:
-                        lidar_rays_ori = gpu_batch["lidar_rays_ori"]
-                        lidar_rays_dir = gpu_batch["lidar_rays_dir"]
-                        lidar_dist_gt = gpu_batch["lidar_dist_gt"]
-
-                        # Compute the outputs of the lidar rays
-                        outputs_lidar = model(lidar_rays_ori, lidar_rays_dir)
-
-                        # Compute distance loss
-                        loss_lidar = torch.nn.L1Loss(reduction="mean")(outputs_lidar['pred_dist'], lidar_dist_gt) 
-                        loss += conf.loss.lambda_lidardistance * loss_lidar
-                        
+                        loss_l2 = torch.nn.MSELoss()(outputs['pred_rgb'], rgb_gt) * conf.loss.lambda_l2
+                        loss = loss_l2
                         if conf.enable_writer:
-                            writer.add_scalar("loss_lidar/train", loss_lidar.item(), global_step)
-
-                    if conf.loss.use_scalereg and conf.loss.lambda_scalereg > 0.0:
-                        # Regularization to prevent needle-like degenerate geometries (excessive ratio of largest to smallest scale)
-                        scale = model.get_scale()
-                        min_scales = torch.min(scale, dim=-1).values
-                        max_scales = torch.max(scale, dim=-1).values
-                        scale_ratio = torch.log(max_scales) - torch.log(min_scales) # positive value, larger means bigger ratio
-                        loss_scalereg = torch.mean(torch.square(scale_ratio))
-                        loss += conf.loss.lambda_scalereg * loss_scalereg
-                        if conf.enable_writer:
-                            writer.add_scalar("loss_scalereg/train", loss_scalereg.item(), global_step)
-
-                    if conf.model.lambda_background > 0.0:
-                        assert "sky_mask" in gpu_batch, "Sky ray mask missing for background-loss evaluation"
-                        # Push all background rays to have opacity 0 and non-background rays to have opacity 1 withing the FV
-                        foreground_mask = torch.ones_like(outputs["pred_opacity"])
-                        foreground_mask[gpu_batch['sky_mask']] = 0.0
-                        loss_background = torch.nn.functional.mse_loss(outputs["pred_opacity"], foreground_mask)
-                        loss += conf.model.lambda_background * loss_background
-                        if conf.enable_writer:
-                            writer.add_scalar("loss_background/train", loss_background.item(), global_step)
-    
-                # backpropagate the gradients and update the parameters
-                with torch.cuda.nvtx.range("backward"):
-                    if conf.model.log_rolling_buffers:
-                        ray_err_abs = torch.abs(outputs['pred_rgb'] - rgb_gt)
-                        # horrible hacks to abuse gradients: distributing error statistics back to the
-                        # gaussians can be viewed as backprop'nig through a proxy weight
-                        fake_loss = loss + torch.sum(ray_err_abs.detach() * outputs['err_backprop_proxy'])
-                        fake_loss.backward()
-                    else:
-                        loss.backward()
-
-                # update densification buffer:
-                if global_step < conf.model.densify.end_iteration:
-                    if conf.model.log_rolling_buffers:
-                        model.update_rolling_buffers(error_target.grad, outputs['g_weights'])
-                    if conf.model.densify.method == 'gradient-buffer':
-                        model.update_gradient_buffer(rays_ori, rays_dir)
-
-
-                # clamp density
-                if global_step>0 and conf.model.density_activation == "none":
-                    model.clamp_density()
-
-                it_end.record()
-
-                # Make a scheduler step
-                model.scheduler_step(global_step)
-
-                global_step += 1
-
-                # Logging
-                if conf.enable_writer:
-                    with torch.cuda.nvtx.range(f"criterions_psnr"):
-                        psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
-                    pbar.set_postfix({'iteration': global_step, 'psnr': psnr, 'loss': loss.item()})
-                    if conf.enable_writer and global_step > 0 and global_step % conf.log_frequency == 0:
-                        writer.add_scalar("psnr/train", psnr, global_step)
+                            writer.add_scalar("loss_l2/train", loss_l2.item(), global_step)
+                elif conf.loss.use_ssim and ~error_buffer_batch and conf.dataset.train.get("sample_full_image", False):
+                    loss_ssim = ssim(torch.permute(outputs['pred_rgb'], (0, 3, 1, 2)), torch.permute(rgb_gt, (0, 3, 1, 2)))
+                    loss = (1.0 - conf.loss.lambda_ssim) * loss_l1 + conf.loss.lambda_ssim * (1.0 - loss_ssim)
+                    if conf.enable_writer:
+                        writer.add_scalar("loss_ssim/train", (1.0 - loss_ssim).item(), global_step)
                 else:
-                    pbar.set_postfix({'iteration': global_step})
+                    loss_ssim = None
+                    loss = loss_l1
 
-                if conf.enable_writer:
-                    recorder.record_train_step(model, global_step, it_start.elapsed_time(it_end),
-                                            loss_l1, loss_ssim, loss, psnr)
-                    recorder.report_statistics(writer=writer)
+                if conf.loss.use_lidardistance and conf.loss.lambda_lidardistance > 0.0:
+                    lidar_rays_ori = gpu_batch["lidar_rays_ori"]
+                    lidar_rays_dir = gpu_batch["lidar_rays_dir"]
+                    lidar_dist_gt = gpu_batch["lidar_dist_gt"]
 
-                # Save the checkpoint
-                with torch.cuda.nvtx.range(f"ckpt_save"):
-                    if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
-                        parameters = model.get_model_parameters()
-                        parameters |= {"global_step": global_step, "epoch": epoch_idx}
-                        os.makedirs(os.path.join(out_dir,  f"ours_{int(global_step)}"), exist_ok=True)
-                        torch.save(parameters, os.path.join(out_dir,  f"ours_{int(global_step)}", f"ckpt_{global_step}.pt"))
+                    # Compute the outputs of the lidar rays
+                    outputs_lidar = model(lidar_rays_ori, lidar_rays_dir)
 
-                # Densify the Gaussians
-                if global_step > conf.model.densify.start_iteration and  global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
-                    model.densify_gaussians(scene_extent=scene_extent)
-                    scene_updated = True
+                    # Compute distance loss
+                    loss_lidar = torch.nn.L1Loss(reduction="mean")(outputs_lidar['pred_dist'], lidar_dist_gt) 
+                    loss += conf.loss.lambda_lidardistance * loss_lidar
+                    
+                    if conf.enable_writer:
+                        writer.add_scalar("loss_lidar/train", loss_lidar.item(), global_step)
 
-                # Prune the Gaussians based on their opacity
-                if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
-                    model.prune_gaussians_opacity()
-                    scene_updated = True
+                if conf.loss.use_scalereg and conf.loss.lambda_scalereg > 0.0:
+                    # Regularization to prevent needle-like degenerate geometries (excessive ratio of largest to smallest scale)
+                    scale = model.get_scale()
+                    min_scales = torch.min(scale, dim=-1).values
+                    max_scales = torch.max(scale, dim=-1).values
+                    scale_ratio = torch.log(max_scales) - torch.log(min_scales) # positive value, larger means bigger ratio
+                    loss_scalereg = torch.mean(torch.square(scale_ratio))
+                    loss += conf.loss.lambda_scalereg * loss_scalereg
+                    if conf.enable_writer:
+                        writer.add_scalar("loss_scalereg/train", loss_scalereg.item(), global_step)
 
-                # Prune the Gaussians based on their contribution weight
-                if global_step > conf.model.prune_weight.start_iteration and global_step < conf.model.prune_weight.end_iteration and global_step % conf.model.prune_weight.frequency == 0:
-                    if conf.model.log_rolling_buffers:
-                        model.prune_gaussians_weight()
-                    scene_updated = True
+                if conf.model.lambda_background > 0.0:
+                    assert "sky_mask" in gpu_batch, "Sky ray mask missing for background-loss evaluation"
+                    # Push all background rays to have opacity 0 and non-background rays to have opacity 1 withing the FV
+                    foreground_mask = torch.ones_like(outputs["pred_opacity"])
+                    foreground_mask[gpu_batch['sky_mask']] = 0.0
+                    loss_background = torch.nn.functional.mse_loss(outputs["pred_opacity"], foreground_mask)
+                    loss += conf.model.lambda_background * loss_background
+                    if conf.enable_writer:
+                        writer.add_scalar("loss_background/train", loss_background.item(), global_step)
 
-                # Prune the Gaussians based on their scales
-                if global_step > conf.model.prune_scale.start_iteration and global_step < conf.model.prune_scale.end_iteration and global_step % conf.model.prune_scale.frequency == 0:
-                    model.prune_gaussians_scale(train_dataset)
-                    scene_updated = True
+            # backpropagate the gradients and update the parameters
+            with torch.cuda.nvtx.range("backward"):
+                if conf.model.log_rolling_buffers:
+                    ray_err_abs = torch.abs(outputs['pred_rgb'] - rgb_gt)
+                    # horrible hacks to abuse gradients: distributing error statistics back to the
+                    # gaussians can be viewed as backprop'nig through a proxy weight
+                    fake_loss = loss + torch.sum(ray_err_abs.detach() * outputs['err_backprop_proxy'])
+                    fake_loss.backward()
+                else:
+                    loss.backward()
 
-                # Prune the needle Gaussians 
-                if global_step > conf.model.prune_needles.start_iteration and global_step < conf.model.prune_needles.end_iteration and global_step % conf.model.prune_needles.frequency == 0:
-                    model.prune_needles()
-                    scene_updated = True
+            # update densification buffer:
+            if global_step < conf.model.densify.end_iteration:
+                if conf.model.log_rolling_buffers:
+                    model.update_rolling_buffers(error_target.grad, outputs['g_weights'])
+                if conf.model.densify.method == 'gradient-buffer':
+                    model.update_gradient_buffer(rays_ori, rays_dir)
 
-                # Prune the sky Gaussians
-                if isinstance(model.background,SkyMlp) and global_step > conf.model.prune_sky_mlp.start_iteration and global_step < conf.model.prune_sky_mlp.end_iteration and global_step % conf.model.prune_sky_mlp.frequency == 0:
-                    model.prune_sky_gaussians(train_dataset.get_sky_rays(step_frame=conf.model.prune_sky_mlp.step_frame,step_pixel=conf.model.prune_sky_mlp.step_pixel))
-                    scene_updated = True
 
-                # Decay the density values
-                if global_step > conf.model.density_decay.start_iteration and global_step < conf.model.density_decay.end_iteration and global_step % conf.model.density_decay.frequency == 0:
-                    model.decay_density()
+            # clamp density
+            if global_step>0 and conf.model.density_activation == "none":
+                model.clamp_density()
 
-                # Reset the Gaussian density 
-                if global_step > conf.model.reset_density.start_iteration and global_step < conf.model.reset_density.end_iteration and global_step % conf.model.reset_density.frequency == 0:
-                    model.reset_density()
+            it_end.record()
 
-                # SH: Every N its we increase the levels of SH up to a maximum degree
-                # MLP: Every N we further unmask additional dimensions
-                if model.progressive_training and global_step > 0 and global_step % model.feature_dim_increase_interval == 0:
-                    model.increase_num_active_features()
+            # Make a scheduler step
+            model.scheduler_step(global_step)
 
-                # Update the BVH if required
-                if scene_updated:
-                    model.build_bvh(full_build=True)
-                elif (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
-                    model.build_bvh(full_build=False)
+            global_step += 1
 
-                # Updating the GUI
-                if gui is not None:
-                    if gui.live_update:
-                        if scene_updated or model.get_positions().requires_grad:
-                            gui.update_cloud_viz()
-                        gui.update_render_view_viz()
+            # Logging
+            if conf.enable_writer:
+                with torch.cuda.nvtx.range(f"criterions_psnr"):
+                    psnr = criterions["psnr"](outputs['pred_rgb'], rgb_gt).item()
+                progress_bar.set_postfix({'psnr': psnr, 'loss': loss.item()})
+                progress_bar.update(1)
+                if global_step > 0 and global_step % conf.log_frequency == 0:
+                    writer.add_scalar("psnr/train", psnr, global_step)
+            elif global_step % 10 == 0:
+                progress_bar.set_postfix({'loss': loss.item()})
+                progress_bar.update(10)
 
+            if conf.enable_writer:
+                recorder.record_train_step(model, global_step, it_start.elapsed_time(it_end),
+                                        loss_l1, loss_ssim, loss, psnr)
+                recorder.report_statistics(writer=writer)
+
+            # Save the checkpoint
+            with torch.cuda.nvtx.range(f"ckpt_save"):
+                if global_step > 0 and global_step % conf.checkpoint.frequency == 0:
+                    parameters = model.get_model_parameters()
+                    parameters |= {"global_step": global_step, "epoch": epoch_idx}
+                    os.makedirs(os.path.join(out_dir,  f"ours_{int(global_step)}"), exist_ok=True)
+                    torch.save(parameters, os.path.join(out_dir,  f"ours_{int(global_step)}", f"ckpt_{global_step}.pt"))
+
+            # Densify the Gaussians
+            if global_step > conf.model.densify.start_iteration and  global_step < conf.model.densify.end_iteration and global_step % conf.model.densify.frequency == 0:
+                model.densify_gaussians(scene_extent=scene_extent)
+                scene_updated = True
+
+            # Prune the Gaussians based on their opacity
+            if global_step > conf.model.prune.start_iteration and global_step < conf.model.prune.end_iteration and global_step % conf.model.prune.frequency == 0:
+                model.prune_gaussians_opacity()
+                scene_updated = True
+
+            # Prune the Gaussians based on their contribution weight
+            if global_step > conf.model.prune_weight.start_iteration and global_step < conf.model.prune_weight.end_iteration and global_step % conf.model.prune_weight.frequency == 0:
+                if conf.model.log_rolling_buffers:
+                    model.prune_gaussians_weight()
+                scene_updated = True
+
+            # Prune the Gaussians based on their scales
+            if global_step > conf.model.prune_scale.start_iteration and global_step < conf.model.prune_scale.end_iteration and global_step % conf.model.prune_scale.frequency == 0:
+                model.prune_gaussians_scale(train_dataset)
+                scene_updated = True
+
+            # Prune the needle Gaussians 
+            if global_step > conf.model.prune_needles.start_iteration and global_step < conf.model.prune_needles.end_iteration and global_step % conf.model.prune_needles.frequency == 0:
+                model.prune_needles()
+                scene_updated = True
+
+            # Prune the sky Gaussians
+            if isinstance(model.background,SkyMlp) and global_step > conf.model.prune_sky_mlp.start_iteration and global_step < conf.model.prune_sky_mlp.end_iteration and global_step % conf.model.prune_sky_mlp.frequency == 0:
+                model.prune_sky_gaussians(train_dataset.get_sky_rays(step_frame=conf.model.prune_sky_mlp.step_frame,step_pixel=conf.model.prune_sky_mlp.step_pixel))
+                scene_updated = True
+
+            # Decay the density values
+            if global_step > conf.model.density_decay.start_iteration and global_step < conf.model.density_decay.end_iteration and global_step % conf.model.density_decay.frequency == 0:
+                model.decay_density()
+
+            # Reset the Gaussian density 
+            if global_step > conf.model.reset_density.start_iteration and global_step < conf.model.reset_density.end_iteration and global_step % conf.model.reset_density.frequency == 0:
+                model.reset_density()
+
+            # SH: Every N its we increase the levels of SH up to a maximum degree
+            # MLP: Every N we further unmask additional dimensions
+            if model.progressive_training and global_step > 0 and global_step % model.feature_dim_increase_interval == 0:
+                model.increase_num_active_features()
+
+            # Update the BVH if required
+            if scene_updated:
+                model.build_bvh(full_build=True)
+            elif (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
+                model.build_bvh(full_build=False)
+
+            # Updating the GUI
+            if gui is not None:
+                if gui.live_update:
+                    if scene_updated or model.get_positions().requires_grad:
+                        gui.update_cloud_viz()
+                    gui.update_render_view_viz()
+
+                ps.frame_tick()
+                while not gui.viz_do_train:
                     ps.frame_tick()
-                    while not gui.viz_do_train:
-                        ps.frame_tick()
 
-                # Optimizer step
-                with torch.cuda.nvtx.range("backpropagation"):
-                    model.optimizer.step()
-                    model.optimizer.zero_grad()
+            # Optimizer step
+            with torch.cuda.nvtx.range("backpropagation"):
+                model.optimizer.step()
+                model.optimizer.zero_grad()
 
-                # Update the error buffers with new values
-                if global_step > 0 and model.error_based_sampling and global_step % model.error_buffer_update_frequency == 0:
-                    with torch.cuda.nvtx.range(f"update_error_buffer[step {global_step}]"):
-                        ray_origins = []
-                        ray_directions = []
-                        rgbs = []
-                        alphas = []
-                        errors = []
+            # Update the error buffers with new values
+            if global_step > 0 and model.error_based_sampling and global_step % model.error_buffer_update_frequency == 0:
+                with torch.cuda.nvtx.range(f"update_error_buffer[step {global_step}]"):
+                    ray_origins = []
+                    ray_directions = []
+                    rgbs = []
+                    alphas = []
+                    errors = []
 
-                        model.build_bvh()
-                        ds_factor = model.error_downsampling_factor
-                        #TODO: implement random shift for downsampling
-                        with torch.no_grad():
-                            qbar = tqdm(range(len(train_dataset)))
-                            qbar.set_description("Computing error maps:" )
-                            for batch_idx in qbar:
-                                batch = train_dataset[batch_idx]
-                                gpu_batch = move_to_gpu(batch)
-                                rays_ori = gpu_batch["rays_ori"][::ds_factor, ::ds_factor, :].unsqueeze(0)
-                                rays_dir = gpu_batch["rays_dir"][::ds_factor, ::ds_factor, :].unsqueeze(0)
-                                rgb_gt = gpu_batch["rgb_gt"][::ds_factor, ::ds_factor, :].unsqueeze(0)
+                    model.build_bvh()
+                    ds_factor = model.error_downsampling_factor
+                    #TODO: implement random shift for downsampling
+                    with torch.no_grad():
+                        qbar = tqdm(range(len(train_dataset)))
+                        qbar.set_description("Computing error maps:" )
+                        for batch_idx in qbar:
+                            batch = train_dataset[batch_idx]
+                            gpu_batch = move_to_gpu(batch)
+                            rays_ori = gpu_batch["rays_ori"][::ds_factor, ::ds_factor, :].unsqueeze(0)
+                            rays_dir = gpu_batch["rays_dir"][::ds_factor, ::ds_factor, :].unsqueeze(0)
+                            rgb_gt = gpu_batch["rgb_gt"][::ds_factor, ::ds_factor, :].unsqueeze(0)
 
-                                # Append all the tensors
-                                ray_origins.append(rays_ori.reshape(-1,3).cpu())
-                                ray_directions.append(rays_dir.reshape(-1,3).cpu())
-                                rgbs.append(rgb_gt.reshape(-1,3).cpu())
+                            # Append all the tensors
+                            ray_origins.append(rays_ori.reshape(-1,3).cpu())
+                            ray_directions.append(rays_dir.reshape(-1,3).cpu())
+                            rgbs.append(rgb_gt.reshape(-1,3).cpu())
 
-                                # Compute the outputs of a single batch
-                                outputs = model(rays_ori, rays_dir)
+                            # Compute the outputs of a single batch
+                            outputs = model(rays_ori, rays_dir)
 
-                                # Check if alphas are given and if the background is a fix color
-                                if isinstance(model.background, BackgroundColor):
-                                    assert "alpha" in gpu_batch
-                                    alpha = gpu_batch["alpha"][::ds_factor, ::ds_factor, :].unsqueeze(0)
-                                    rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
-                                    alphas.append(alpha.reshape(-1,1).cpu())
+                            # Check if alphas are given and if the background is a fix color
+                            if isinstance(model.background, BackgroundColor):
+                                assert "alpha" in gpu_batch
+                                alpha = gpu_batch["alpha"][::ds_factor, ::ds_factor, :].unsqueeze(0)
+                                rgb_gt = rgb_gt * alpha + model.background.color * (1 - alpha)
+                                alphas.append(alpha.reshape(-1,1).cpu())
 
-                                # Compute the loss
-                                error_map = torch.abs(outputs['pred_rgb'] - rgb_gt).mean(dim=-1, keepdim=True)
-                                errors.append(error_map.reshape(-1,1))
+                            # Compute the loss
+                            error_map = torch.abs(outputs['pred_rgb'] - rgb_gt).mean(dim=-1, keepdim=True)
+                            errors.append(error_map.reshape(-1,1))
 
-                                if batch_idx == 0:
-                                    writer.add_image('image/error_map', error_map[-1].clip(0,1.0), global_step, dataformats='HWC')
+                            if batch_idx == 0:
+                                writer.add_image('image/error_map', error_map[-1].clip(0,1.0), global_step, dataformats='HWC')
 
-                        model.update_error_buffer(torch.vstack(ray_origins), torch.vstack(ray_directions),
-                                                torch.vstack(errors), torch.vstack(rgbs),
-                                                torch.vstack(alphas) if len(alphas) else None)
+                    model.update_error_buffer(torch.vstack(ray_origins), torch.vstack(ray_directions),
+                                              torch.vstack(errors), torch.vstack(rgbs),
+                                              torch.vstack(alphas) if len(alphas) else None)
         
     recorder.submit_recording(
         dataset=train_dataset,
