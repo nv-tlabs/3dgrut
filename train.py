@@ -117,7 +117,7 @@ def main(conf: DictConfig) -> None:
     run_name = f'{object_name}-' + TrainingRecorder.get_timestamp()
     if conf.use_wandb:
         import wandb
-        wandb.init(config=OmegaConf.to_container(conf), project='3dgrt', group=conf.experiment_name, name=run_name)
+        wandb.init(config=OmegaConf.to_container(conf), project=conf.wandb_project, group=conf.experiment_name, name=run_name)
         wandb.tensorboard.patch(root_logdir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None, save=False)
     writer = SummaryWriter(log_dir=f'{conf.out_dir}/{conf.experiment_name}' if conf.experiment_name else None)
     out_dir = os.path.join(writer.get_logdir(), run_name) if conf.experiment_name else writer.get_logdir()
