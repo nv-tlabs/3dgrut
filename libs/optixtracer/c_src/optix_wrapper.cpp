@@ -187,7 +187,8 @@ void createPipeline(const OptixDeviceContext context,
                     uint32_t flags,
                     OptixModule* module,
                     OptixPipeline* pipeline,
-                    OptixShaderBindingTable& sbt)
+                    OptixShaderBindingTable& sbt,
+                    uint32_t numPayloadValues = 3)
 {
     char log[2048];
 
@@ -201,7 +202,7 @@ void createPipeline(const OptixDeviceContext context,
 
         pipeline_compile_options.usesMotionBlur = false;
         pipeline_compile_options.traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
-        pipeline_compile_options.numPayloadValues = 3;
+        pipeline_compile_options.numPayloadValues = numPayloadValues;
         pipeline_compile_options.numAttributeValues = 0;
         pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE;
         pipeline_compile_options.pipelineLaunchParamsVariableName = "params";
@@ -432,6 +433,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path,
     if (pState)
     {
         defines.emplace_back("-DMOGTRACING_HIT_MODE=" + std::to_string(pState->hitMode));
+        defines.emplace_back("-DMOGTRACING_SAMPLING_MODE=" + std::to_string(pState->hitMode & MOGTracingSampling));
         defines.emplace_back("-DMOGTRACING_MAXNUMHITS_PER_SLAB=" + std::to_string(pState->maxHitsPerSlab));
         defines.emplace_back("-DMOGTRACING_PATCH_SIZE=" + std::to_string(pState->patchSize));
         defines.emplace_back("-DMOGTRACING_SPH_DEGREE=" + std::to_string(pState->sphDegree));
@@ -461,13 +463,13 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path,
     pState->pipelineMoGTracingAH = nullptr;
     pState->sbtMoGTracingAH = {};
     createPipeline(pState->context, path, cuda_path, defines, "mogTracingAH", sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH,
-                   &pState->moduleMoGTracingAH, &pState->pipelineMoGTracingAH, pState->sbtMoGTracingAH);
+                   &pState->moduleMoGTracingAH, &pState->pipelineMoGTracingAH, pState->sbtMoGTracingAH, hitMode & MOGTracingSampling ? 4 : 3);
 
     pState->moduleMoGTracingAHBwd = nullptr;
     pState->pipelineMoGTracingAHBwd = nullptr;
     pState->sbtMoGTracingAHBwd = {};
     createPipeline(pState->context, path, cuda_path, defines, "mogTracingAHBwd", sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH,
-                   &pState->moduleMoGTracingAHBwd, &pState->pipelineMoGTracingAHBwd, pState->sbtMoGTracingAHBwd);
+                   &pState->moduleMoGTracingAHBwd, &pState->pipelineMoGTracingAHBwd, pState->sbtMoGTracingAHBwd, hitMode & MOGTracingSampling ? 4 : 3);
 
     pState->moduleMoGTracingIS = nullptr;
     pState->pipelineMoGTracingIS = nullptr;
