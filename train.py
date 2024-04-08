@@ -226,6 +226,13 @@ def main(conf: DictConfig) -> None:
                     loss_ssim = None
                     loss = loss_l1
 
+                if conf.loss.lambda_reg_density > 0:
+                    with torch.cuda.nvtx.range(f"loss-reg-density"):
+                        loss_reg_density = torch.mean(torch.nn.ReLU()(1.0-torch.abs(2*model.get_density(True)-1)))
+                        loss += conf.loss.lambda_reg_density * loss_reg_density 
+                    if conf.enable_writer:
+                        writer.add_scalar("loss_reg_density/train", loss_reg_density.item(), global_step)
+
                 if conf.loss.use_lidardistance and conf.loss.lambda_lidardistance > 0.0:
                     lidar_rays_ori = gpu_batch["lidar_rays_ori"]
                     lidar_rays_dir = gpu_batch["lidar_rays_dir"]
@@ -261,6 +268,13 @@ def main(conf: DictConfig) -> None:
                     loss += conf.model.lambda_background * loss_background
                     if conf.enable_writer:
                         writer.add_scalar("loss_background/train", loss_background.item(), global_step)
+                elif conf.model.lambda_opacity > 0.0:
+                    with torch.cuda.nvtx.range(f"loss-opacity"):
+                        opacity_gt = torch.ones_like(outputs["pred_opacity"])
+                        loss_opacity = torch.abs(outputs["pred_opacity"] - opacity_gt).mean()
+                        loss += conf.model.lambda_opacity * loss_opacity
+                    if conf.enable_writer:
+                        writer.add_scalar("loss_opacity/train", loss_opacity.item(), global_step)                       
 
             # backpropagate the gradients and update the parameters
             with torch.cuda.nvtx.range("backward"):

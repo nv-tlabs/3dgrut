@@ -22,6 +22,7 @@ enable_writer: false
 model:
   density_activation: sigmoid
   scale_activation: exp
+  default_density: 0.1
   optimize_density: true
   optimize_features_albedo: true
   optimize_features_specular: true
@@ -37,6 +38,7 @@ model:
     increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
     
   lambda_background: 0.
+  lambda_opacity: 0.
 
   density_decay:
     gamma: 0.99
@@ -171,6 +173,7 @@ loss:
   lambda_l2: 1.0
   use_ssim: true
   lambda_ssim: 0.2
+  lambda_reg_density: 0.0
 
   # Scale-regularization, preventing needle-like geometries
   use_scalereg: False

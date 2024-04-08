@@ -200,7 +200,7 @@ extern "C" __global__ void __raygen__rg()
                         const float3 grd = safe_normalize(grdu);
                         const float3 gcrod = cross(grd, gro);
                         const float grayDist = dot(gcrod, gcrod);
-                        const float gres = expf(-0.5f * grayDist);
+                        const float gres = expf(-0.05f * grayDist * grayDist);
                         const float galpha = fminf(gres * gdns, params.alphaMaxValue);
 
                         if ((gres > params.hitMinGaussianResponse) && (galpha > params.alphaMinThreshold))
@@ -294,10 +294,10 @@ extern "C" __global__ void __raygen__rg()
                                         rayTrm[k][j] * (grad.z - residualRayRad.z) * rayRadGrd[k][j].z);
 
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-                            // ---> gres = exp(-0.5 * grayDist)
-                            // ===> d_gres / d_grayDist = -0.5 * exp(-0.5 * grayDist)
-                            //                          = -0.5 * gres
-                            const float grayDistGrd = -0.5f * gres * gresGrd;
+                            // ---> gres = exp(-0.05 * grayDist * grayDist)
+                            // ===> d_gres / d_grayDist = -0.2 * grayDist * sqrt(grayDist) * exp(-0.05 * grayDist * grayDist)
+                            //                          = -0.2 * gres
+                            const float grayDistGrd = -0.2f * grayDist * sqrtf(grayDist) * gres * gresGrd;
 
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                             // ---> grayDist = dot(gcrod, gcrod)

@@ -278,7 +278,7 @@ class MixtureOfGaussians(torch.nn.Module):
         rots = torch.zeros((num_gsplat, 4), device=self.device)
         rots[:, 0] = 1
 
-        opacities = self.density_activation_inv(0.1 * torch.ones((num_gsplat, 1), dtype=dtype, device=self.device))
+        opacities = self.density_activation_inv(self.conf.model.default_density * torch.ones((num_gsplat, 1), dtype=dtype, device=self.device))
 
         self.positions = torch.nn.Parameter(fused_point_cloud)  # type: ignore
         self.rotation = torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
@@ -337,7 +337,7 @@ class MixtureOfGaussians(torch.nn.Module):
         scales = self.scale_activation_inv(observation_scale)[:,None].repeat(1,3)
 
         # set density as a constant
-        opacities = self.density_activation_inv(torch.full((N,1), fill_value=0.1, dtype=dtype, device=self.device))
+        opacities = self.density_activation_inv(torch.full((N,1), fill_value=self.conf.model.default_density, dtype=dtype, device=self.device))
 
         # set colors, constant if they weren't given
         if colors is None:
@@ -453,7 +453,7 @@ class MixtureOfGaussians(torch.nn.Module):
         scales = self.scale_activation_inv(observation_scale)[:,None].repeat(1,3)
 
         # set density as a constant
-        opacities = self.density_activation_inv(torch.full((N,1), fill_value=0.1, dtype=dtype, device=self.device))
+        opacities = self.density_activation_inv(torch.full((N,1), fill_value=self.conf.model.default_density, dtype=dtype, device=self.device))
 
         # set color as a constant
         features_albedo = torch.rand((N, 3), dtype=dtype, device=self.device) / 255.0
