@@ -25,6 +25,7 @@ struct MoGTracingParams
     PackedTensorAccessor32<float, 4> rayRad; ///< output integrated ray radiance
     PackedTensorAccessor32<float, 4> rayDns; ///< output integrated ray density
     PackedTensorAccessor32<float, 4> rayHit; ///< output estimated ray hit distance
+    PackedTensorAccessor32<float, 4> rayHitsCount; ///< output (only in AH pipeline) number of hits per ray
     PackedTensorAccessor32<float, 2> mogHitCount; ///< output (only in HC pipeline) number of ray hits per mog
     PackedTensorAccessor32<float, 2> mogWeightSum; ///< output (only in AH pipeline) sum of all weights that a gaussian contributed during render pass
     OptixTraversableHandle handle;

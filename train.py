@@ -32,6 +32,13 @@ DEFAULT_DEVICE = torch.device('cuda')
 logging.addLevelName( logging.WARNING, "\033[1;31m%s\033[1;0m" % logging.getLevelName(logging.WARNING))
 logging.addLevelName( logging.ERROR, "\033[1;41m%s\033[1;0m" % logging.getLevelName(logging.ERROR))
 
+def jet_map(map:torch.Tensor, max_val: float) -> torch.Tensor:
+     vs = (map/max_val).clip(0,1)
+     return torch.concat([
+          (4.0 * (vs - 0.375)).clip(0,1) * (-4.0 * (vs - 1.125)).clip(0,1),
+          (4.0 * (vs - 0.125)).clip(0,1) * (-4.0 * (vs - 0.875)).clip(0,1),
+          (4.0 * vs + 0.5).clip(0,1) * (-4.0 * (vs - 0.625)).clip(0,1)],dim=2)
+
 @hydra.main(config_path="configs", version_base=None)
 def main(conf: DictConfig) -> None:
     # Run the training process
@@ -164,12 +171,19 @@ def main(conf: DictConfig) -> None:
                                 pbar.set_postfix({'iteration': val_iteration, 'psnr': val_psnr[-1], 'loss': val_loss[-1]})
 
                                 if val_iteration == 0:
+                                    writer.add_image('val_hits/val', jet_map(outputs['hits_count'][-1],conf.writer.max_num_hits), global_step, dataformats='HWC')
                                     writer.add_image('image/val', outputs['pred_rgb'][-1].clip(0,1.0), global_step, dataformats='HWC')
                                     writer.add_image('image/gt', rgb_gt[-1].clip(0,1.0), global_step, dataformats='HWC')
+                                    
                                 val_iteration += 1
 
                     writer.add_scalar("psnr/val", np.mean(val_psnr), global_step)
                     writer.add_scalar("loss_l1/val", np.mean(val_loss), global_step)
+
+                    writer.add_scalar("hits/min", outputs['hits_count'].min().cpu(), global_step)
+                    writer.add_scalar("hits/mean", outputs['hits_count'].mean().cpu(), global_step)
+                    writer.add_scalar("hits/std", outputs['hits_count'].std().cpu(), global_step)
+
 
                     print(f"Validation: {np.mean(val_psnr):.3f}")
 
@@ -196,6 +210,13 @@ def main(conf: DictConfig) -> None:
                 error_target = torch.zeros_like(model.density)
                 error_target.requires_grad = True
                 outputs = model(rays_ori, rays_dir, error_target, train=True)
+
+                # hits 
+                if global_step % conf.writer.hit_stat_frequency == 0:
+                    writer.add_scalar("train_hits/mean", outputs['hits_count'].mean().item(), global_step)
+                    writer.add_scalar("train_hits/std", outputs['hits_count'].std().item(), global_step)
+                    writer.add_scalar("train_hits/max", outputs['hits_count'].max().item(), global_step)
+                    writer.add_scalar("train_hits/min", outputs['hits_count'].min().item(), global_step)
 
                 # Check if alphas are given and if the background is a fix color
                 if isinstance(model.background, BackgroundColor):

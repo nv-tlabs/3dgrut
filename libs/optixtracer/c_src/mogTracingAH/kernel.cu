@@ -81,6 +81,7 @@ extern "C" __global__ void __raygen__rg()
     float3 rayRad[MOGTracingPatchSize][MOGTracingPatchSize];
     float rayTrm[MOGTracingPatchSize][MOGTracingPatchSize];
     float rayHit[MOGTracingPatchSize][MOGTracingPatchSize];
+    float rayHitsCount[MOGTracingPatchSize][MOGTracingPatchSize];
     const int startIdxX = idx.x * MOGTracingPatchSize;
     const int startIdxY = idx.y * MOGTracingPatchSize;
 
@@ -101,6 +102,7 @@ extern "C" __global__ void __raygen__rg()
             rayRad[j][i] = make_float3(0);
             rayTrm[j][i] = 1;
             rayHit[j][i] = 0;
+            rayHitsCount[j][i] = 0;
 
             const float2 sampleMinMaxT = intersectAABB(params.aabb, rayOri[j][i], rayDir[j][i]);
             minMaxT.x = fminf(minMaxT.x, sampleMinMaxT.x);
@@ -206,6 +208,7 @@ extern "C" __global__ void __raygen__rg()
                             const float hitT = getRayGaussianHit(gro, grd, gscl);
 
                             atomicAdd(&params.mogWeightSum[gId][0], weight);
+                            rayHitsCount[k][j] += 1.0f;
 
                             rayRad[k][j] += grad * weight;
                             rayHit[k][j] += hitT * weight;
@@ -232,6 +235,7 @@ extern "C" __global__ void __raygen__rg()
             params.rayRad[idx.z][y][x][2] = rayRad[j][i].z;
             params.rayDns[idx.z][y][x][0] = 1 - rayTrm[j][i];
             params.rayHit[idx.z][y][x][0] = rayHit[j][i];
+            params.rayHitsCount[idx.z][y][x][0] = rayHitsCount[j][i];
         }
     }
 }
