@@ -249,7 +249,7 @@ def main(conf: DictConfig) -> None:
 
                 if conf.loss.lambda_reg_density > 0:
                     with torch.cuda.nvtx.range(f"loss-reg-density"):
-                        loss_reg_density = torch.mean(torch.nn.ReLU()(1.0-torch.abs(2*model.get_density(True)-1)))
+                        loss_reg_density = torch.nn.functional.relu(1.0-torch.abs(2*model.get_density(True)-1),inplace=True).mean()
                         loss += conf.loss.lambda_reg_density * loss_reg_density 
                     if conf.enable_writer:
                         writer.add_scalar("loss_reg_density/train", loss_reg_density.item(), global_step)
