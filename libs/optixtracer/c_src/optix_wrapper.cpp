@@ -7,11 +7,11 @@
 // license agreement from NVIDIA CORPORATION is strictly prohibited.
 //
 #ifdef _MSC_VER
-#    pragma warning(push, 0)
-#    include <torch/extension.h>
-#    pragma warning(pop)
+#pragma warning(push, 0)
+#include <torch/extension.h>
+#pragma warning(pop)
 #else
-#    include <torch/extension.h>
+#include <torch/extension.h>
 #endif
 
 #include "common.h"
@@ -32,16 +32,16 @@
 #include <optix_stubs.h>
 
 // NVRTC compiler options
-#define CUDA_NVRTC_OPTIONS                                                                                             \
-    "-std=c++11", "-arch", "compute_70", "-use_fast_math", "-lineinfo", "-default-device", "-rdc", "true",             \
+#define CUDA_NVRTC_OPTIONS                                                                                 \
+    "-std=c++11", "-arch", "compute_70", "-use_fast_math", "-lineinfo", "-default-device", "-rdc", "true", \
         "-D__x86_64", "-D__OPTIX__"
 
-static void contextLogCB(unsigned int level, const char* tag, const char* message, void* /*cbdata */)
+static void contextLogCB(unsigned int level, const char *tag, const char *message, void * /*cbdata */)
 {
     std::cerr << "[" << std::setw(2) << level << "][" << std::setw(12) << tag << "]: " << message << "\n";
 }
 
-static bool readSourceFile(std::string& str, const std::string& filename)
+static bool readSourceFile(std::string &str, const std::string &filename)
 {
     // Try to open file
     std::ifstream file(filename.c_str(), std::ios::binary);
@@ -55,7 +55,7 @@ static bool readSourceFile(std::string& str, const std::string& filename)
     return false;
 }
 
-static void getCuStringFromFile(std::string& cu, const char* filename)
+static void getCuStringFromFile(std::string &cu, const char *filename)
 {
     // Try to get source code from file
     if (readSourceFile(cu, filename))
@@ -67,21 +67,21 @@ static void getCuStringFromFile(std::string& cu, const char* filename)
     throw std::runtime_error("Couldn't open source file " + std::string(filename));
 }
 
-static void getPtxFromCuString(std::string& ptx,
-                               const char* include_dir,
-                               const char* optix_include_dir,
-                               const char* cuda_include_dir,
-                               const char* cu_source,
-                               const char* name,
-                               const std::vector<std::string>& defines,
-                               const char** log_string)
+static void getPtxFromCuString(std::string &ptx,
+                               const char *include_dir,
+                               const char *optix_include_dir,
+                               const char *cuda_include_dir,
+                               const char *cu_source,
+                               const char *name,
+                               const std::vector<std::string> &defines,
+                               const char **log_string)
 {
     // Create program
     nvrtcProgram prog = 0;
     NVRTC_CHECK_ERROR(nvrtcCreateProgram(&prog, cu_source, name, 0, NULL, NULL));
 
     // Gather NVRTC options
-    std::vector<const char*> options;
+    std::vector<const char *> options;
 
     std::string sample_dir;
     sample_dir = std::string("-I") + include_dir;
@@ -93,18 +93,18 @@ static void getPtxFromCuString(std::string& ptx,
     include_dirs.push_back(std::string("-I") + optix_include_dir);
     include_dirs.push_back(std::string("-I") + cuda_include_dir);
 
-    for (const std::string& dir : include_dirs)
+    for (const std::string &dir : include_dirs)
     {
         options.push_back(dir.c_str());
     }
 
-    for (const std::string& def : defines)
+    for (const std::string &def : defines)
     {
         options.push_back(def.c_str());
     }
 
     // Collect NVRTC options
-    const char* compiler_options[] = { CUDA_NVRTC_OPTIONS };
+    const char *compiler_options[] = {CUDA_NVRTC_OPTIONS};
     std::copy(std::begin(compiler_options), std::end(compiler_options), std::back_inserter(options));
 
     // JIT compile CU to PTX
@@ -134,14 +134,14 @@ static void getPtxFromCuString(std::string& ptx,
     NVRTC_CHECK_ERROR(nvrtcDestroyProgram(&prog));
 }
 
-const char* getInputData(const char* filename,
-                         const char* include_dir,
-                         const char* optix_include_dir,
-                         const char* cuda_include_dir,
-                         const char* name,
-                         size_t& dataSize,
-                         const std::vector<std::string>& defines,
-                         const char** log)
+const char *getInputData(const char *filename,
+                         const char *include_dir,
+                         const char *optix_include_dir,
+                         const char *cuda_include_dir,
+                         const char *name,
+                         size_t &dataSize,
+                         const std::vector<std::string> &defines,
+                         const char **log)
 {
     if (log)
         *log = NULL;
@@ -180,14 +180,14 @@ enum CreatePipelineFlags
 };
 
 void createPipeline(const OptixDeviceContext context,
-                    const std::string& path,
-                    const std::string& cuda_path,
-                    const std::vector<std::string>& defines,
-                    const std::string& kernel_name,
+                    const std::string &path,
+                    const std::string &cuda_path,
+                    const std::vector<std::string> &defines,
+                    const std::string &kernel_name,
                     uint32_t flags,
-                    OptixModule* module,
-                    OptixPipeline* pipeline,
-                    OptixShaderBindingTable& sbt,
+                    OptixModule *module,
+                    OptixPipeline *pipeline,
+                    OptixShaderBindingTable &sbt,
                     uint32_t numPayloadValues = 3)
 {
     char log[2048];
@@ -222,17 +222,17 @@ void createPipeline(const OptixDeviceContext context,
         std::string optix_include_dir = path + "/include";
         std::string cuda_include_dir = cuda_path + "/include";
 
-        const char* input = getInputData(shaderFile.c_str(), includeDir.c_str(), optix_include_dir.c_str(),
-                                         cuda_include_dir.c_str(), "kernel", inputSize, defines, (const char**)&log);
+        const char *input = getInputData(shaderFile.c_str(), includeDir.c_str(), optix_include_dir.c_str(),
+                                         cuda_include_dir.c_str(), "kernel", inputSize, defines, (const char **)&log);
         size_t sizeof_log = sizeof(log);
 
         OPTIX_CHECK_LOG(optixModuleCreateFromPTX(
             context, &module_compile_options, &pipeline_compile_options, input, inputSize, log, &sizeof_log, module));
 
-        if ( !(flags & PipelineFlag_HasIS) && (flags & PipelineFlag_SpherePrim) )
+        if (!(flags & PipelineFlag_HasIS) && (flags & PipelineFlag_SpherePrim))
         {
-             OptixBuiltinISOptions isOptions = {OPTIX_PRIMITIVE_TYPE_SPHERE, 0, OPTIX_BUILD_FLAG_PREFER_FAST_TRACE, 0};
-             OPTIX_CHECK_LOG(optixBuiltinISModuleGet(context, &module_compile_options, &pipeline_compile_options, &isOptions, &builtinIsModule));
+            OptixBuiltinISOptions isOptions = {OPTIX_PRIMITIVE_TYPE_SPHERE, 0, OPTIX_BUILD_FLAG_PREFER_FAST_TRACE, 0};
+            OPTIX_CHECK_LOG(optixBuiltinISModuleGet(context, &module_compile_options, &pipeline_compile_options, &isOptions, &builtinIsModule));
         }
     }
 
@@ -320,7 +320,7 @@ void createPipeline(const OptixDeviceContext context,
                                             log, &sizeof_log, pipeline));
 
         OptixStackSizes stack_sizes = {};
-        for (auto& prog_group : program_groups)
+        for (auto &prog_group : program_groups)
         {
             OPTIX_CHECK(optixUtilAccumulateStackSizes(prog_group, &stack_sizes));
         }
@@ -345,27 +345,26 @@ void createPipeline(const OptixDeviceContext context,
     {
         CUdeviceptr raygen_record;
         const size_t raygen_record_size = sizeof(RayGenSbtRecord);
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&raygen_record), raygen_record_size));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&raygen_record), raygen_record_size));
         RayGenSbtRecord rg_sbt;
         OPTIX_CHECK(optixSbtRecordPackHeader(raygen_prog_group, &rg_sbt));
         CUDA_CHECK(
-            cudaMemcpy(reinterpret_cast<void*>(raygen_record), &rg_sbt, raygen_record_size, cudaMemcpyHostToDevice));
-
+            cudaMemcpy(reinterpret_cast<void *>(raygen_record), &rg_sbt, raygen_record_size, cudaMemcpyHostToDevice));
 
         CUdeviceptr miss_record;
         size_t miss_record_size = sizeof(MissSbtRecord);
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&miss_record), miss_record_size));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&miss_record), miss_record_size));
         MissSbtRecord ms_sbt;
         OPTIX_CHECK(optixSbtRecordPackHeader(miss_prog_group, &ms_sbt));
-        CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(miss_record), &ms_sbt, miss_record_size, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(reinterpret_cast<void *>(miss_record), &ms_sbt, miss_record_size, cudaMemcpyHostToDevice));
 
         CUdeviceptr hitgroup_record;
         size_t hitgroup_record_size = sizeof(HitGroupSbtRecord);
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&hitgroup_record), hitgroup_record_size));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&hitgroup_record), hitgroup_record_size));
         HitGroupSbtRecord hg_sbt;
         OPTIX_CHECK(optixSbtRecordPackHeader(hitgroup_prog_group, &hg_sbt));
         CUDA_CHECK(cudaMemcpy(
-            reinterpret_cast<void*>(hitgroup_record), &hg_sbt, hitgroup_record_size, cudaMemcpyHostToDevice));
+            reinterpret_cast<void *>(hitgroup_record), &hg_sbt, hitgroup_record_size, cudaMemcpyHostToDevice));
 
         sbt.raygenRecord = raygen_record;
         sbt.missRecordBase = miss_record;
@@ -377,8 +376,8 @@ void createPipeline(const OptixDeviceContext context,
     }
 }
 
-OptiXStateWrapper::OptiXStateWrapper(const std::string& path,
-                                     const std::string& cuda_path,
+OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
+                                     const std::string &cuda_path,
                                      uint32_t pipeline,
                                      uint32_t primitiveType,
                                      uint32_t hitMode,
@@ -446,8 +445,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path,
     }
 
     const uint sharedFlags =
-        (pState->gPrimType == MOGTracingSphere ? PipelineFlag_SpherePrim :
-                                                 (pState->gPrimType == MOGTracingCustom ? PipelineFlag_HasIS : 0));
+        (pState->gPrimType == MOGTracingSphere ? PipelineFlag_SpherePrim : (pState->gPrimType == MOGTracingCustom ? PipelineFlag_HasIS : 0));
 
     //
     // Create pipelines
@@ -508,58 +506,58 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string& path,
 OptiXStateWrapper::~OptiXStateWrapper(void)
 {
     OPTIX_CHECK(optixPipelineDestroy(pState->pipelineMoGTracingCH));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingCH.raygenRecord)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingCH.missRecordBase)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingCH.hitgroupRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingCH.raygenRecord)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingCH.missRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingCH.hitgroupRecordBase)));
     OPTIX_CHECK(optixModuleDestroy(pState->moduleMoGTracingCH));
 
     OPTIX_CHECK(optixPipelineDestroy(pState->pipelineMoGTracingAH));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingAH.raygenRecord)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingAH.missRecordBase)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingAH.hitgroupRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingAH.raygenRecord)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingAH.missRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingAH.hitgroupRecordBase)));
     OPTIX_CHECK(optixModuleDestroy(pState->moduleMoGTracingAH));
 
     OPTIX_CHECK(optixPipelineDestroy(pState->pipelineMoGTracingAHBwd));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingAHBwd.raygenRecord)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingAHBwd.missRecordBase)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingAHBwd.hitgroupRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingAHBwd.raygenRecord)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingAHBwd.missRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingAHBwd.hitgroupRecordBase)));
     OPTIX_CHECK(optixModuleDestroy(pState->moduleMoGTracingAHBwd));
 
     OPTIX_CHECK(optixPipelineDestroy(pState->pipelineMoGTracingIS));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingIS.raygenRecord)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingIS.missRecordBase)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingIS.hitgroupRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingIS.raygenRecord)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingIS.missRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingIS.hitgroupRecordBase)));
     OPTIX_CHECK(optixModuleDestroy(pState->moduleMoGTracingIS));
 
     OPTIX_CHECK(optixPipelineDestroy(pState->pipelineMoGTracingMLAT));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingMLAT.raygenRecord)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingMLAT.missRecordBase)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingMLAT.hitgroupRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingMLAT.raygenRecord)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingMLAT.missRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingMLAT.hitgroupRecordBase)));
     OPTIX_CHECK(optixModuleDestroy(pState->moduleMoGTracingMLAT));
 
     OPTIX_CHECK(optixPipelineDestroy(pState->pipelineMoGTracingMBOIT));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingMBOIT.raygenRecord)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingMBOIT.missRecordBase)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingMBOIT.hitgroupRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingMBOIT.raygenRecord)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingMBOIT.missRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingMBOIT.hitgroupRecordBase)));
     OPTIX_CHECK(optixModuleDestroy(pState->moduleMoGTracingMBOIT));
 
     OPTIX_CHECK(optixPipelineDestroy(pState->pipelineMoGTracingInd));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingInd.raygenRecord)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingInd.missRecordBase)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingInd.hitgroupRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingInd.raygenRecord)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingInd.missRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingInd.hitgroupRecordBase)));
     OPTIX_CHECK(optixModuleDestroy(pState->moduleMoGTracingInd));
 
     OPTIX_CHECK(optixPipelineDestroy(pState->pipelineMoGTracingHC));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingHC.raygenRecord)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingHC.missRecordBase)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->sbtMoGTracingHC.hitgroupRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingHC.raygenRecord)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingHC.missRecordBase)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->sbtMoGTracingHC.hitgroupRecordBase)));
     OPTIX_CHECK(optixModuleDestroy(pState->moduleMoGTracingHC));
 
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->gPrimVrt)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->gPrimTri)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->gPrimAABB)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->gPrimVrt)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->gPrimTri)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->gPrimAABB)));
 
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(pState->gasBuffer)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->gasBuffer)));
     OPTIX_CHECK(optixDeviceContextDestroy(pState->context));
     delete pState;
     printf("OptiXStateWrapper destructor \n");
