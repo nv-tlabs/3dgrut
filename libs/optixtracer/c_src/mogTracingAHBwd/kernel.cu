@@ -17,10 +17,12 @@ extern "C"
     __constant__ MoGTracingBwdParams params;
 }
 
+static constexpr bool MoGSurfPrimitive = (MOGTRACING_PRIMITIVE_TYPE == 6) || (MOGTRACING_PRIMITIVE_TYPE == 7);
 static constexpr bool MoGCustomPrimitive = (MOGTRACING_PRIMITIVE_TYPE == 5);
 static constexpr unsigned int MoGTracingHitMode = MOGTRACING_HIT_MODE;
 static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = MOGTRACING_MAXNUMHITS_PER_SLAB;
 static constexpr unsigned int MOGTracingPatchSize = MOGTRACING_PATCH_SIZE;
+static constexpr bool MoGUseGWeights = MOGTRACING_USE_GWEIGHTS;
 
 struct RayPayload
 {
@@ -58,7 +60,7 @@ static __device__ __inline__ void trace(
                tmax,                     // Max intersection distance
                0.0f,                     // rayTime -- used for motion blur
                OptixVisibilityMask(255), // Specify always visible
-               OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT | OPTIX_RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
+               OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT | (MoGSurfPrimitive ? OPTIX_RAY_FLAG_NONE : OPTIX_RAY_FLAG_CULL_BACK_FACING_TRIANGLES),
                0, // SBT offset   -- See SBT discussion
                1, // SBT stride   -- See SBT discussion
                0, // missSBTIndex -- See SBT discussion
@@ -378,7 +380,10 @@ extern "C" __global__ void __raygen__rg()
                             // error back projection
                             // THIS IS NOT REALLY A GRADIENT, the kernel is being abused to
                             // compute weight * error, since it shared the same computational structure as a gradient
-                            atomicAdd(&params.mogErrorBack[gId][0], weight * rayError[k][j]);
+                            if (MoGUseGWeights)
+                            {
+                                atomicAdd(&params.mogErrorBack[gId][0], weight * rayError[k][j]);
+                            }
 
                             rayTrm[k][j] = nextTransmit;
                         }
@@ -433,11 +438,11 @@ extern "C" __global__ void __anyhit__ah()
     float2 *ahHitTablePtr =
         reinterpret_cast<float2 *>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
     const unsigned int gId = getGaussianIndex(optixGetPrimitiveIndex());
-    const float hitT = (MoGCustomPrimitive || MoGTracingHitMode != MOGTracingGaussianHit) ? optixGetRayTmax() : computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params);
+    const float hitT = (MoGSurfPrimitive || MoGCustomPrimitive || MoGTracingHitMode != MOGTracingGaussianHit) ? optixGetRayTmax() : computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params);
     if (hitT < ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x)
     {
         unsigned int ahNumHits = optixGetPayload_0();
-        
+
 #if MOGTRACING_SAMPLING_MODE
         unsigned int rndSeed = optixGetPayload_3();
         const float sple = rnd(rndSeed);

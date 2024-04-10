@@ -388,7 +388,8 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
                                      uint32_t sphDegree,
                                      float gaussianSigmaThreshold,
                                      float minTransmittance,
-                                     uint32_t maxHitsReturned)
+                                     uint32_t maxHitsReturned,
+                                     bool useGWeights)
 {
     pState = new OptiXState();
     memset(pState, 0, sizeof(OptiXState));
@@ -422,9 +423,12 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
     pState->gaussianSigmaThreshold = gaussianSigmaThreshold;
     pState->minTransmittance = minTransmittance;
     pState->maxHitsReturned = maxHitsReturned;
+    pState->useGWeights = useGWeights;
 
     pState->gNum = 0;
     pState->gPrimType = primitiveType;
+    pState->gPrimNumVert = 0;
+    pState->gPrimNumTri = 0;
     pState->gPrimNumVert = 0;
     pState->gPrimNumTri = 0;
 
@@ -442,6 +446,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
         {
             defines.emplace_back("-DMOGTRACING_TOPK_HITS");
         }
+        defines.emplace_back("-DMOGTRACING_USE_GWEIGHTS=" + std::to_string(pState->useGWeights ? 1 : 0));
     }
 
     const uint sharedFlags =
@@ -557,8 +562,44 @@ OptiXStateWrapper::~OptiXStateWrapper(void)
     CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->gPrimTri)));
     CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->gPrimAABB)));
 
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->optixAabbPtr)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->paramsDevice)));
+
     CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->gasBuffer)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->gasBufferTmp)));
     OPTIX_CHECK(optixDeviceContextDestroy(pState->context));
+
     delete pState;
     printf("OptiXStateWrapper destructor \n");
+}
+
+void OptiXStateWrapper::reallocatePrimGeomBuffer(cudaStream_t cudaStream)
+{
+    if (pState)
+    {
+        if (pState->gPrimVrtSz < sizeof(float3) * pState->gPrimNumVert * pState->gNum)
+        {
+            CUDA_CHECK(cudaFreeAsync(reinterpret_cast<void *>(pState->gPrimVrt), cudaStream));
+            CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void **>(&pState->gPrimVrt),
+                                       sizeof(float3) * pState->gPrimNumVert * pState->gNum, cudaStream));
+            pState->gPrimVrtSz = sizeof(float3) * pState->gPrimNumVert * pState->gNum;
+        }
+        if (pState->gPrimTriSz < sizeof(int3) * pState->gPrimNumTri * pState->gNum)
+        {
+            CUDA_CHECK(cudaFreeAsync(reinterpret_cast<void *>(pState->gPrimTri), cudaStream));
+            CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void **>(&pState->gPrimTri),
+                                       sizeof(int3) * pState->gPrimNumTri * pState->gNum, cudaStream));
+            pState->gPrimTriSz = sizeof(int3) * pState->gPrimNumTri * pState->gNum;
+        }
+    }
+}
+
+void OptiXStateWrapper::reallocateParamsDevice(size_t sz, cudaStream_t cudaStream)
+{
+    if (pState && (pState->paramsDeviceSz < sz))
+    {
+        CUDA_CHECK(cudaFreeAsync(reinterpret_cast<void *>(pState->paramsDevice), cudaStream));
+        CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void **>(&pState->paramsDevice), sz, cudaStream));
+        pState->paramsDeviceSz = sz;
+    }
 }

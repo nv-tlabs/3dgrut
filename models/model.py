@@ -132,6 +132,7 @@ class MixtureOfGaussians(torch.nn.Module):
                 min_transmittance = self.conf.render.min_transmittance,
                 max_hits_returned=self.conf.render.max_hits_returned,
                 primitive_type = optixtracer.OptixMogTracingParams.primitive_type_from_str(self.conf.render.primitive_type),
+                use_g_weights = self.conf.model.prune_weight.end_iteration > self.conf.model.prune_weight.frequency,
             )
         )
 

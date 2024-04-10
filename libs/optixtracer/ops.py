@@ -230,6 +230,7 @@ class OptixMogTracingParams:
     gaussian_sigma_threshold: float=3.0 # sigma factor to decide the size of the octahedron enveloppe
     min_transmittance: float=0.03       # minimum transmittance at which we stop gathering gaussians
     max_hits_returned : int=64       # total number of hits returned
+    use_g_weights: bool=True    # are the gaussian weights used 
 
     @staticmethod
     def primitive_type_from_str(primitive_type:str):
@@ -281,7 +282,8 @@ class OptiXContext:
             params.sph_degree,
             params.gaussian_sigma_threshold,
             params.min_transmittance,
-            params.max_hits_returned
+            params.max_hits_returned,
+            params.use_g_weights
         )
     
     def set_sph_degree(self, degree:int):

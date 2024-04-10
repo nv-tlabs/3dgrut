@@ -8,6 +8,7 @@
 //
 #pragma once
 
+#include <cuda_runtime.h>
 #include <optix.h>
 #include <string>
 
@@ -16,7 +17,14 @@ struct OptiXState
     OptixDeviceContext context;
     OptixTraversableHandle gasHandle;
     CUdeviceptr gasBuffer;
+    size_t gasBufferSz;
+    CUdeviceptr gasBufferTmp;
+    size_t gasBufferTmpSz;
+
     OptixAabb gasAABB;
+    CUdeviceptr optixAabbPtr;
+    CUdeviceptr paramsDevice;
+    size_t paramsDeviceSz;
 
     uint32_t pipeline;
     uint32_t hitMode;
@@ -28,15 +36,19 @@ struct OptiXState
     float gaussianSigmaThreshold;
     float minTransmittance;
     uint32_t maxHitsReturned;
+    bool useGWeights;
 
     uint32_t gNum;         ///< current number of gaussians
     uint32_t gPrimType;    ///< type of the prim [0 : octahedron 1 : tetrahedron]
     uint32_t gPrimNumVert; ///< number of vertices per gaussian primitive
     uint32_t gPrimNumTri;  ///< number of triangles per gaussian primitive
     CUdeviceptr gPrimVrt;  ///< buffer containing the vertices of the gaussian primitive
-    CUdeviceptr gPrimTri;  ///< buffer containing the vertices index of the gaussian primitive triangles
+    size_t gPrimVrtSz;
+    CUdeviceptr gPrimTri; ///< buffer containing the vertices index of the gaussian primitive triangles
+    size_t gPrimTriSz;
     CUdeviceptr gPrimAABB; ///< buffer containing the gaussians AABB to be usedwith custom primitives
-
+    size_t gPrimAABBSz;
+    
     // closest hit forward pipeline : the scene is iteratively traced for a closest hit until a density threshold has been reached
     OptixPipeline pipelineMoGTracingCH;
     OptixShaderBindingTable sbtMoGTracingCH;
@@ -94,7 +106,8 @@ public:
         uint32_t sphDegree,
         float gaussianSigmaThreshold,
         float minTransmittance,
-        uint32_t maxHitsReturned);
+        uint32_t maxHitsReturned,
+        bool useGWeights);
     ~OptiXStateWrapper(void);
 
     void setSphDegree(int degree)
@@ -112,6 +125,9 @@ public:
             pState->pipeline = pipeline;
         }
     }
+
+    void reallocatePrimGeomBuffer(cudaStream_t stream);
+    void reallocateParamsDevice(size_t sz, cudaStream_t stream);
 
     OptiXState *pState;
 };
