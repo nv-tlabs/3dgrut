@@ -256,7 +256,7 @@ def main(conf: DictConfig) -> None:
                     if conf.enable_writer:
                         writer.add_scalar("loss_reg_density/train_loss", loss_reg_density.item(), global_step)
                         if global_step % 111 == 0: 
-                            writer.add_histogram("loss_reg_density/train_density",model.get_density(True).detach().cpu())
+                            writer.add_histogram("loss_reg_density/train_density",model.get_density(True), global_step)
 
                 if conf.loss.use_lidardistance and conf.loss.lambda_lidardistance > 0.0:
                     lidar_rays_ori = gpu_batch["lidar_rays_ori"]
