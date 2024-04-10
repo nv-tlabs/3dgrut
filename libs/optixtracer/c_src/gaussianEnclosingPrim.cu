@@ -82,6 +82,122 @@ __global__ void computeGaussianEnclosingOctaHedronKernel(
     }
 }
 
+constexpr uint32_t triHexaNumVrt = 6;
+constexpr uint32_t triHexaNumTri = 6;
+
+template <typename scalar_t>
+__global__ void computeGaussianEnclosingTriHexaKernel(
+    const uint32_t gNum,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
+    const float sigmaSclTh,
+    float3 *__restrict__ gPrimVrt,
+    int3 *__restrict__ gPrimTri,
+    OptixAabb *gPrimAABB)
+{
+    const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < gNum)
+    {
+        float33 rot;
+        invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
+        const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
+        const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
+
+        const float3 triHexaVrt[triHexaNumVrt] = {
+            make_float3(0, 0, -octaHedraDiag), make_float3(0, octaHedraDiag, 0), make_float3(-octaHedraDiag, 0, 0),
+            make_float3(0, -octaHedraDiag, 0), make_float3(octaHedraDiag, 0, 0), make_float3(0, 0, octaHedraDiag)};
+
+        const uint32_t sVertIdx = triHexaNumVrt * idx;
+        const uint32_t sTriIdx = triHexaNumTri * idx;
+#pragma unroll
+        for (int i = 0; i < triHexaNumVrt; ++i)
+        {
+            float3 &vrt = gPrimVrt[sVertIdx + i];
+            vrt = (triHexaVrt[i] * scl) * rot + trans;
+            if (gPrimAABB)
+            {
+                atomicMinFloat(&gPrimAABB[0].minX, vrt.x);
+                atomicMinFloat(&gPrimAABB[0].minY, vrt.y);
+                atomicMinFloat(&gPrimAABB[0].minZ, vrt.z);
+                atomicMaxFloat(&gPrimAABB[0].maxX, vrt.x);
+                atomicMaxFloat(&gPrimAABB[0].maxY, vrt.y);
+                atomicMaxFloat(&gPrimAABB[0].maxZ, vrt.z);
+            }
+        }
+
+        const int3 triHexaTri[triHexaNumTri] = {
+            make_int3(0, 1, 5), make_int3(0, 5, 3),
+            make_int3(0, 5, 4), make_int3(0, 2, 5),
+            make_int3(4, 1, 3), make_int3(2, 1, 3)};
+        const int3 triIdxOffset = make_int3(sVertIdx, sVertIdx, sVertIdx);
+
+#pragma unroll
+        for (int i = 0; i < triHexaNumTri; ++i)
+        {
+            gPrimTri[sTriIdx + i] = triHexaTri[i] + triIdxOffset;
+        }
+    }
+}
+
+constexpr uint32_t triSurfelNumVrt = 4;
+constexpr uint32_t triSurfelNumTri = 2;
+
+template <typename scalar_t>
+__global__ void computeGaussianEnclosingTriSurfelKernel(
+    const uint32_t gNum,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
+    const float sigmaSclTh,
+    float3 *__restrict__ gPrimVrt,
+    int3 *__restrict__ gPrimTri,
+    OptixAabb *gPrimAABB)
+{
+    const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < gNum)
+    {
+        float33 rot;
+        invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
+        const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
+        const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
+
+        const uint8_t axis = scl.y < scl.x ? (scl.z < scl.y ? 2 : 1) : (scl.z < scl.x ? 2 : 0);
+
+        const float3 triSurfelVrt[3][triSurfelNumVrt] = {
+            {make_float3(0, octaHedraDiag, 0), make_float3(0, -octaHedraDiag, 0), make_float3(0, 0, octaHedraDiag), make_float3(0, 0, -octaHedraDiag)},
+            {make_float3(0, 0, octaHedraDiag), make_float3(0, 0, -octaHedraDiag), make_float3(octaHedraDiag, 0, 0), make_float3(-octaHedraDiag, 0, 0)},
+            {make_float3(octaHedraDiag, 0, 0), make_float3(-octaHedraDiag, 0, 0), make_float3(0, octaHedraDiag, 0), make_float3(0, -octaHedraDiag, 0)}};
+
+        const uint32_t sVertIdx = triSurfelNumVrt * idx;
+        const uint32_t sTriIdx = triSurfelNumTri * idx;
+#pragma unroll
+        for (int i = 0; i < triSurfelNumVrt; ++i)
+        {
+            float3 &vrt = gPrimVrt[sVertIdx + i];
+            vrt = (triSurfelVrt[axis][i] * scl) * rot + trans;
+            if (gPrimAABB)
+            {
+                atomicMinFloat(&gPrimAABB[0].minX, vrt.x);
+                atomicMinFloat(&gPrimAABB[0].minY, vrt.y);
+                atomicMinFloat(&gPrimAABB[0].minZ, vrt.z);
+                atomicMaxFloat(&gPrimAABB[0].maxX, vrt.x);
+                atomicMaxFloat(&gPrimAABB[0].maxY, vrt.y);
+                atomicMaxFloat(&gPrimAABB[0].maxZ, vrt.z);
+            }
+        }
+
+        const int3 triSurfelTri[triSurfelNumTri] = {make_int3(0, 1, 2), make_int3(0, 1, 3)};
+        const int3 triIdxOffset = make_int3(sVertIdx, sVertIdx, sVertIdx);
+
+#pragma unroll
+        for (int i = 0; i < triSurfelNumTri; ++i)
+        {
+            gPrimTri[sTriIdx + i] = triSurfelTri[i] + triIdxOffset;
+        }
+    }
+}
+
 constexpr uint32_t tetraHedronNumVrt = 4;
 constexpr uint32_t tetraHedronNumTri = 4;
 //
@@ -433,10 +549,28 @@ __global__ void computeGaussianEnclosingAABBKernel(
     }
 }
 
+__global__ void generatePinholeCameraRaysKernel(int2 resolution, float2 tanFoV, const float4 *__restrict__ invViewMatrix, float3 *__restrict__ rayOri, float3 *__restrict__ rayDir)
+{
+    const uint32_t x = threadIdx.x + blockDim.x * blockIdx.x;
+    const uint32_t y = threadIdx.y + blockDim.y * blockIdx.y;
+
+    if ((x < resolution.x) && (y < resolution.y))
+    {
+        uint32_t idx = x * resolution.y + y; // CHECK HWC vs WHC
+        float3 dir = safe_normalize(float3{(x - 0.5f * resolution.x) * tanFoV.x, (y - 0.5f * resolution.y) * tanFoV.y, 1.0f});
+        rayDir[idx] = float3{
+            invViewMatrix[0].x * dir.x + invViewMatrix[0].y * dir.y + invViewMatrix[0].z * dir.z,
+            invViewMatrix[1].x * dir.x + invViewMatrix[1].y * dir.y + invViewMatrix[1].z * dir.z,
+            invViewMatrix[2].x * dir.x + invViewMatrix[2].y * dir.y + invViewMatrix[2].z * dir.z};
+        rayOri[idx] = make_float3(invViewMatrix[0].w, invViewMatrix[1].w, invViewMatrix[2].w);
+    }
+}
+
 inline __host__ uint32_t div_round_up(uint32_t val, uint32_t divisor)
 {
     return (val + divisor - 1) / divisor;
 }
+
 }
 
 void computeGaussianEnclosingOctaHedron(uint32_t gNum,
@@ -593,4 +727,56 @@ void computeGaussianEnclosingAABB(uint32_t gNum,
                                                 gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                 sigmaSclTh, gPrimAABB, gAABB);
                                         }));
+}
+
+void computeGaussianEnclosingTriHexa(uint32_t gNum,
+                                     torch::Tensor gPos,
+                                     torch::Tensor gRot,
+                                     torch::Tensor gScl,
+                                     float sigmaSclTh,
+                                     float3 *gPrimVrt,
+                                     int3 *gPrimTri,
+                                     OptixAabb *gPrimAABB,
+                                     cudaStream_t stream)
+{
+    const uint32_t threads = 1024;
+    const uint32_t blocks = div_round_up(static_cast<uint32_t>(gNum), threads);
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        gPos.type(), "computeGaussianEnclosingTriHexa", ([&]
+                                                         { computeGaussianEnclosingTriHexaKernel<scalar_t>
+                                                               <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                sigmaSclTh, gPrimVrt, gPrimTri, gPrimAABB); }));
+}
+
+void computeGaussianEnclosingTriSurfel(uint32_t gNum,
+                                       torch::Tensor gPos,
+                                       torch::Tensor gRot,
+                                       torch::Tensor gScl,
+                                       float sigmaSclTh,
+                                       float3 *gPrimVrt,
+                                       int3 *gPrimTri,
+                                       OptixAabb *gPrimAABB,
+                                       cudaStream_t stream)
+{
+    const uint32_t threads = 1024;
+    const uint32_t blocks = div_round_up(static_cast<uint32_t>(gNum), threads);
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        gPos.type(), "computeGaussianEnclosingTriSurfel", ([&]
+                                                           { computeGaussianEnclosingTriSurfelKernel<scalar_t>
+                                                                 <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                  gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                  gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                  sigmaSclTh, gPrimVrt, gPrimTri, gPrimAABB); }));
+}
+
+void generatePinholeCameraRays(int2 resolution, float2 tanFoV, const float4 *invViewMatrix, float3 *rayOri, float3 *rayDir, cudaStream_t stream)
+{
+    const dim3 threads = {32, 32, 1};
+    const dim3 blocks = {
+        div_round_up((uint32_t)resolution.x, threads.x), div_round_up((uint32_t)resolution.y, threads.y), 1};
+    generatePinholeCameraRaysKernel<<<blocks, threads, 0, stream>>>(resolution, tanFoV, invViewMatrix, rayOri, rayDir);
 }

@@ -8,4 +8,4 @@
 #
 from .ops import OptixMogPipeline, OptixMogPrimitive, OptixMogTracingParams, OptiXContext, build_mog_bvh, trace_mog, trace_mog_grad, trace_mog_inds, count_mog_hits, get_mog_primitives
 __all__ = ["OptixMogPipeline", "OptixMogPrimitive", "OptixMogTracingParams", "OptiXContext",
-           "build_mog_bvh", "trace_mog", "trace_mog_grad", "trace_mog_inds", "count_mog_hits", "get_mog_primitives"]
+           "build_mog_bvh", "trace_mog", "trace_mog_grad", "trace_mog_inds", "count_mog_hits", "get_mog_primitives", "create_camera_rays"]

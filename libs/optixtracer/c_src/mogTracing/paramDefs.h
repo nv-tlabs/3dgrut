@@ -24,6 +24,8 @@ enum MOGPrimitiveTypes
     MOGTracingDiamond,
     MOGTracingSphere,
     MOGTracingCustom,
+    MOGTracingTriHexa,
+    MOGTracingTriSurfel
 };
 
 enum MOGTracingPipeline

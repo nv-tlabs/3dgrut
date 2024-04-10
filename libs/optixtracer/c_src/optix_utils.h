@@ -30,6 +30,8 @@
         }                                                                      \
     } while( 0 )
 
+#define CUDA_CHECK_LAST()                                                      \
+    CUDA_CHECK(cudaGetLastError())
 
 #define OPTIX_CHECK( call )                                                    \
     do                                                                         \

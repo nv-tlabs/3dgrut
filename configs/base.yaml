@@ -165,7 +165,8 @@ render:
   patch_size: 1
   gaussian_sigma_threshold: 3.0
   min_transmittance: 0.001
-  max_hits_returned: 128 
+  max_hits_returned: 128
+  max_consecutive_bvh_update: 15 
   
   optix: {} # optix-specific render settings
   

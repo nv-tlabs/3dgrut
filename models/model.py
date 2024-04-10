@@ -29,6 +29,8 @@ class MixtureOfGaussians(torch.nn.Module):
         self.features_albedo = torch.nn.Parameter(torch.empty([0, 3]))  # Feature vector of the 0th order SH coefficients [n_gaussians, 3] (We split it into two due to different learning rates)
         self.features_specular = torch.nn.Parameter(torch.empty([0, 1]))  # Features of the higher order SH coefficients [n_gaussians, 3]
         
+        self.num_update_bvh = 0
+        
         if self.conf.model.log_rolling_buffers:
             self.rolling_error = torch.empty([0,1]) 
             self.rolling_weight_contrib = torch.empty([0,1]) 
@@ -129,6 +131,7 @@ class MixtureOfGaussians(torch.nn.Module):
                 gaussian_sigma_threshold = self.conf.render.gaussian_sigma_threshold,
                 min_transmittance = self.conf.render.min_transmittance,
                 max_hits_returned=self.conf.render.max_hits_returned,
+                primitive_type = optixtracer.OptixMogTracingParams.primitive_type_from_str(self.conf.render.primitive_type),
             )
         )
 
@@ -535,9 +538,11 @@ class MixtureOfGaussians(torch.nn.Module):
         for name, value in optimizable_tensors.items():
             setattr(self, name, value)
 
-    def build_bvh(self, full_build=True):
-        with torch.cuda.nvtx.range(f"build-bvh-full-build-{full_build}"):
-            optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), full_build)
+    def build_bvh(self, rebuild_bvh=True):
+        with torch.cuda.nvtx.range(f"build-bvh-full-build-{rebuild_bvh}"):
+            rebuild_bvh = rebuild_bvh or self.num_update_bvh >= self.conf.render.max_consecutive_bvh_update
+            optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), rebuild_bvh)
+            self.num_update_bvh = 0 if rebuild_bvh else self.num_update_bvh + 1
 
     def increase_num_active_features(self) -> None:
         self.n_active_features = min(self.max_n_features, self.n_active_features + self.feature_dim_increase_step)
