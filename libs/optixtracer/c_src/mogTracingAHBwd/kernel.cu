@@ -177,24 +177,6 @@ extern "C" __global__ void __raygen__rg()
             startT += slabSpacing;
         }
 
-#if MOGTRACING_SAMPLING_MODE
-// sort hit array
-#pragma unroll
-        for (int i = 0; i < MoGTracingAHMaxNumHitPerSlab - 1; ++i)
-        {
-            float2 h = p.ahHitTable[0];
-            for (int j = 1; j < (int)p.ahNumHits - i; ++j)
-            {
-                if (h.x > p.ahHitTable[j].x)
-                {
-                    float2 tmp = p.ahHitTable[j];
-                    p.ahHitTable[j] = h;
-                    h = tmp;
-                }
-            }
-        }
-#endif
-
         for (int i = 0; (i < p.ahNumHits) && (transmit > minTransmittance); i++)
         {
             transmit = 0.0f;
@@ -446,54 +428,28 @@ extern "C" __global__ void __intersection__is()
 
 extern "C" __global__ void __anyhit__ah()
 {
-#if MOGTRACING_SAMPLING_MODE
-    unsigned int ahNumHits = optixGetPayload_0();
-    if (ahNumHits < MoGTracingAHMaxNumHitPerSlab)
-    {
-        unsigned int rndSeed = optixGetPayload_3();
-        float sple = rnd(rndSeed);
-
-        const unsigned int gId = getGaussianIndex(optixGetPrimitiveIndex());
-        const float dns = params.mogDns[gId][0];
-
-        if (dns > sple)
-        {
-            const unsigned int ahHitTablePtr0 = optixGetPayload_1();
-            const unsigned int ahHitTablePtr1 = optixGetPayload_2();
-            float2 *ahHitTablePtr =
-                reinterpret_cast<float2 *>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
-            const float hitT = (MoGCustomPrimitive || MoGTracingHitMode != MOGTracingGaussianHit) ? optixGetRayTmax() : computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params);
-            ahHitTablePtr[ahNumHits] = {hitT, uint_as_float(gId)};
-            ahNumHits += 1;
-            optixSetPayload_0(ahNumHits);
-        }
-        // else
-        // {
-        //     sple = rnd(rndSeed);
-        //     if (dns > sple)
-        //     {
-        //         const unsigned int ahHitTablePtr0 = optixGetPayload_1();
-        //         const unsigned int ahHitTablePtr1 = optixGetPayload_2();
-        //         float2 *ahHitTablePtr =
-        //             reinterpret_cast<float2 *>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
-        //         const float hitT = (MoGCustomPrimitive || MoGTracingHitMode != MOGTracingGaussianHit) ? optixGetRayTmax() : computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params);
-        //         ahHitTablePtr[ahNumHits+(int)floor(sple*(MoGTracingAHMaxNumHitPerSlab-ahNumHits))] = {hitT, uint_as_float(gId)};
-        //     }
-        // }
-
-        optixSetPayload_3(rndSeed);
-        optixIgnoreIntersection();
-    }
-#else
     const unsigned int ahHitTablePtr0 = optixGetPayload_1();
     const unsigned int ahHitTablePtr1 = optixGetPayload_2();
     float2 *ahHitTablePtr =
         reinterpret_cast<float2 *>(static_cast<unsigned long long>(ahHitTablePtr0) << 32 | ahHitTablePtr1);
-    unsigned int ahNumHits = optixGetPayload_0();
     const unsigned int gId = getGaussianIndex(optixGetPrimitiveIndex());
     const float hitT = (MoGCustomPrimitive || MoGTracingHitMode != MOGTracingGaussianHit) ? optixGetRayTmax() : computeGHitDistance(gId, optixGetWorldRayOrigin(), optixGetWorldRayDirection(), params);
     if (hitT < ahHitTablePtr[MoGTracingAHMaxNumHitPerSlab - 1].x)
     {
+        unsigned int ahNumHits = optixGetPayload_0();
+        
+#if MOGTRACING_SAMPLING_MODE
+        unsigned int rndSeed = optixGetPayload_3();
+        const float sple = rnd(rndSeed);
+        optixSetPayload_3(rndSeed);
+        const float dns = params.mogDns[gId][0];
+        if (dns < sple)
+        {
+            optixIgnoreIntersection();
+            return;
+        }
+#endif
+
         float2 ahHit = {hitT, uint_as_float(gId)};
 #pragma unroll
         for (int i = 0; i < MoGTracingAHMaxNumHitPerSlab; ++i)
@@ -515,5 +471,4 @@ extern "C" __global__ void __anyhit__ah()
             optixIgnoreIntersection();
         }
     }
-#endif
 }

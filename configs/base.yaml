@@ -59,6 +59,7 @@ model:
 
   densify:
     method: gradient-buffer # one of [adam, gradient-buffer, error]
+    params: positions # one of [positions, features_albedo]
     distance_based_scaling: true # whether or not to scale the buffered gradients of Gaussians according to their distances to the camera
     frequency: 300 # densification_interval in 3DGS with default value 100
     start_iteration: 500 # densify_from_iter in 3DGS default value 500
@@ -69,6 +70,7 @@ model:
     error_ratio_threshold: 0.5
     split:
       n_gaussians: 2 # Hardcoded to 2 in 3DGS
+    share_density: false # share the original gaussian density among the new ones
 
   # They use the same values for pruning and densification so check the above values
   prune:
