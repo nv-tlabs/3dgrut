@@ -212,7 +212,7 @@ def main(conf: DictConfig) -> None:
                 # Compute the outputs of a single batch
                 error_target = torch.zeros_like(model.density)
                 error_target.requires_grad = True
-                outputs = model(rays_ori, rays_dir, error_target, train=True)
+                outputs = model(rays_ori, rays_dir, error_target, train=True, frame_id=global_step)
 
                 # hits 
                 if global_step % conf.writer.hit_stat_frequency == 0:
