@@ -16,6 +16,13 @@ enum MOGTracingMode
     MOGTracingDefaultMode = MOGTracingModeNone
 };
 
+enum MOGRenderOpts
+{
+    MOGRenderNone = 0,
+    MOGRenderUseGWeights = 1<<0, 
+    MOGRenderDefault = MOGRenderUseGWeights
+};
+
 enum MOGPrimitiveTypes
 {
     MOGTracingIcosaHedron,

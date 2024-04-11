@@ -389,7 +389,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
                                      float gaussianSigmaThreshold,
                                      float minTransmittance,
                                      uint32_t maxHitsReturned,
-                                     bool useGWeights)
+                                     uint32_t renderOpts)
 {
     pState = new OptiXState();
     memset(pState, 0, sizeof(OptiXState));
@@ -423,7 +423,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
     pState->gaussianSigmaThreshold = gaussianSigmaThreshold;
     pState->minTransmittance = minTransmittance;
     pState->maxHitsReturned = maxHitsReturned;
-    pState->useGWeights = useGWeights;
+    pState->renderOpts = renderOpts;
 
     pState->gNum = 0;
     pState->gPrimType = primitiveType;
@@ -446,7 +446,6 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
         {
             defines.emplace_back("-DMOGTRACING_TOPK_HITS");
         }
-        defines.emplace_back("-DMOGTRACING_USE_GWEIGHTS=" + std::to_string(pState->useGWeights ? 1 : 0));
     }
 
     const uint sharedFlags =

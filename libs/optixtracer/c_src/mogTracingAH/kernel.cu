@@ -22,7 +22,6 @@ static constexpr bool MoGCustomPrimitive = (MOGTRACING_PRIMITIVE_TYPE == 5);
 static constexpr unsigned int MoGTracingHitMode = MOGTRACING_HIT_MODE;
 static constexpr unsigned int MoGTracingAHMaxNumHitPerSlab = MOGTRACING_MAXNUMHITS_PER_SLAB;
 static constexpr unsigned int MOGTracingPatchSize = MOGTRACING_PATCH_SIZE;
-static constexpr bool MoGUseGWeights = MOGTRACING_USE_GWEIGHTS;
 struct RayPayload
 {
     unsigned int ahNumHits; // number of valid hits in ahHitTable
@@ -123,6 +122,7 @@ extern "C" __global__ void __raygen__rg()
 
     const float minTransmittance = params.minTransmittance;
     const int sphDegree = params.sphDegree;
+    const bool useGWeights = params.renderOpts & MOGRenderUseGWeights;
 
     float transmit = 1.0f;
     RayPayload p;

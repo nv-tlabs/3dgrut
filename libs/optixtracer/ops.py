@@ -211,11 +211,17 @@ class OptixMogPrimitive(IntEnum):
     TRACING_ICOSAHEDRON = 0
     TRACING_OCTAHEDRON = 1
     TRACING_TETRAHEDRON = 2
-    TRACING_DIAMOND = 3,
-    TRACING_SPHERE = 4,
-    TRACING_CUSTOM = 5,
-    TRACING_TRIHEXA = 6,
+    TRACING_DIAMOND = 3
+    TRACING_SPHERE = 4
+    TRACING_CUSTOM = 5
+    TRACING_TRIHEXA = 6
     TRACING_TRISURFEL = 7
+
+
+class OptixMogRenderOpts(IntEnum):
+  NONE = 0
+  USE_GWEIGHTS = 1
+  DEFAULT = USE_GWEIGHTS
 
 @dataclass
 class OptixMogTracingParams:
@@ -230,7 +236,7 @@ class OptixMogTracingParams:
     gaussian_sigma_threshold: float=3.0 # sigma factor to decide the size of the octahedron enveloppe
     min_transmittance: float=0.03       # minimum transmittance at which we stop gathering gaussians
     max_hits_returned : int=64       # total number of hits returned
-    use_g_weights: bool=True    # are the gaussian weights used 
+    default_render_opts: int=OptixMogRenderOpts.USE_GWEIGHTS # are the gaussian weights used 
 
     @staticmethod
     def primitive_type_from_str(primitive_type:str):
@@ -283,7 +289,7 @@ class OptiXContext:
             params.gaussian_sigma_threshold,
             params.min_transmittance,
             params.max_hits_returned,
-            params.use_g_weights
+            params.default_render_opts
         )
     
     def set_sph_degree(self, degree:int):
@@ -291,4 +297,7 @@ class OptiXContext:
 
     def set_pipeline(self, pipeline:int):
         self.cpp_wrapper.set_pipeline(pipeline)
+
+    def set_render_opts(self, opts:int):
+        self.cpp_wrapper.set_render_opts(opts)
 

@@ -42,6 +42,8 @@ struct MoGTracingParams
     int gPrimNumTri;
     float alphaMaxValue;
     float alphaMinThreshold;
+
+    uint32_t renderOpts;
 };
 
 struct MoGTracingBwdParams
@@ -80,5 +82,6 @@ struct MoGTracingBwdParams
     int gPrimNumTri;
     float alphaMaxValue;
     float alphaMinThreshold;
-  
+
+    uint32_t renderOpts;
 };
