@@ -206,7 +206,7 @@ extern "C" __global__ void __raygen__rg()
                         const float3 grd = safe_normalize(grdu);
                         const float3 gcrod = cross(grd, gro);
                         const float grayDir = dot(gcrod, gcrod);
-                        const float gres = expf(-0.05 * grayDir * grayDir);
+                        const float gres = expf(-0.0555f * grayDir * grayDir);
                         const float galpha = fminf(gres * gdns, params.alphaMaxValue);
 
                         if ((gres > params.hitMinGaussianResponse) && (galpha > params.alphaMinThreshold))
