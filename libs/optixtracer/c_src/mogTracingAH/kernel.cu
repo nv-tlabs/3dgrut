@@ -216,7 +216,7 @@ extern "C" __global__ void __raygen__rg()
                             // Distance to the gaussian center projection on the ray
                             const float hitT = getRayGaussianHit(gro, grd, gscl);
 
-                            if (MoGUseGWeights)
+                            if (useGWeights)
                             {
                                 atomicAdd(&params.mogWeightSum[gId][0], weight);
                             }
@@ -300,14 +300,17 @@ extern "C" __global__ void __anyhit__ah()
         unsigned int ahNumHits = optixGetPayload_0();
         
 #if MOGTRACING_SAMPLING_MODE
-        unsigned int rndSeed = optixGetPayload_3();
-        const float sple = rnd(rndSeed);
-        optixSetPayload_3(rndSeed);
-        const float dns = params.mogDns[gId][0];
-        if (dns < sple)
+        if (params.renderOpts & MOGRenderDnsHitSampling)
         {
-            optixIgnoreIntersection();
-            return;
+            unsigned int rndSeed = optixGetPayload_3();
+            const float sple = rnd(rndSeed);
+            optixSetPayload_3(rndSeed);
+            const float dns = params.mogDns[gId][0];
+            if (dns < sple)
+            {
+                optixIgnoreIntersection();
+                return;
+            }
         }
 #endif
 

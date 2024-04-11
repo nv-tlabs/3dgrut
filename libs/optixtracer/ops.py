@@ -74,9 +74,11 @@ if _plugin is None:
 # 
 class _trace_mog_func(torch.autograd.Function):
     @staticmethod 
-    def forward(ctx, optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, mog_err_target):
+    def forward(ctx, optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, mog_err_target):
         ray_radiance, ray_density, ray_hit_distance, hits_count, g_weights = _plugin.trace_mog(
             optix_ctx.cpp_wrapper,
+            frame_id,
+            render_opts,
             ray_ori,
             ray_dir,
             mog_pos,
@@ -86,6 +88,8 @@ class _trace_mog_func(torch.autograd.Function):
             mog_sph
         )
         ctx.save_for_backward(ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph)
+        ctx.frame_id = frame_id
+        ctx.render_opts = render_opts
         ctx.optix_ctx = optix_ctx
         err_backprop_proxy = torch.ones_like(ray_density) # used to abuse autograd
         return ray_radiance, ray_density, ray_hit_distance, hits_count, g_weights, err_backprop_proxy
@@ -96,6 +100,8 @@ class _trace_mog_func(torch.autograd.Function):
         ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph = ctx.saved_variables
         mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error = _plugin.trace_mog_bwd(
             optix_ctx.cpp_wrapper,
+            ctx.frame_id,
+            ctx.render_opts,
             ray_ori,
             ray_dir,
             ray_radiance,
@@ -111,12 +117,14 @@ class _trace_mog_func(torch.autograd.Function):
             ray_hit_distance_grd,
             ray_fake_err 
         )
-        return None, None, None, mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error
+        return None, None, None, None, None, mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error
 
 @torch.cuda.nvtx.range("trace_mog")
-def trace_mog(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, err_target):
+def trace_mog(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, err_target):
     ray_radiance, ray_density, ray_hit_distance, ray_hits_count, g_weights, err_backprop_proxy = _trace_mog_func.apply(
         optix_ctx,
+        frame_id,
+        render_opts,
         ray_ori.contiguous(),
         ray_dir.contiguous(),
         mog_pos.contiguous(),
@@ -129,9 +137,11 @@ def trace_mog(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, m
     return ray_radiance, ray_density, ray_hit_distance, ray_hits_count, g_weights, err_backprop_proxy
 
 @torch.cuda.nvtx.range("trace_mog_grad")
-def trace_mog_grad(optix_ctx, ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd):
+def trace_mog_grad(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd):
     return _plugin.trace_mog_bwd(
         optix_ctx.cpp_wrapper,
+        frame_id,
+        render_opts,
         ray_ori.contiguous(),
         ray_dir.contiguous(),
         ray_radiance.contiguous(),
@@ -221,7 +231,8 @@ class OptixMogPrimitive(IntEnum):
 class OptixMogRenderOpts(IntEnum):
   NONE = 0
   USE_GWEIGHTS = 1
-  DEFAULT = USE_GWEIGHTS
+  SAMPLING = 2
+  DEFAULT = NONE
 
 @dataclass
 class OptixMogTracingParams:
@@ -236,8 +247,7 @@ class OptixMogTracingParams:
     gaussian_sigma_threshold: float=3.0 # sigma factor to decide the size of the octahedron enveloppe
     min_transmittance: float=0.03       # minimum transmittance at which we stop gathering gaussians
     max_hits_returned : int=64       # total number of hits returned
-    default_render_opts: int=OptixMogRenderOpts.USE_GWEIGHTS # are the gaussian weights used 
-
+    
     @staticmethod
     def primitive_type_from_str(primitive_type:str):
         if primitive_type == 'icosahedron':
@@ -288,8 +298,7 @@ class OptiXContext:
             params.sph_degree,
             params.gaussian_sigma_threshold,
             params.min_transmittance,
-            params.max_hits_returned,
-            params.default_render_opts
+            params.max_hits_returned
         )
     
     def set_sph_degree(self, degree:int):
@@ -297,7 +306,3 @@ class OptiXContext:
 
     def set_pipeline(self, pipeline:int):
         self.cpp_wrapper.set_pipeline(pipeline)
-
-    def set_render_opts(self, opts:int):
-        self.cpp_wrapper.set_render_opts(opts)
-

@@ -56,7 +56,8 @@ def main(conf: DictConfig) -> None:
 
     train_dataloader = MultiEpochsDataLoader(train_dataset, num_workers=conf.num_workers, batch_size=1, shuffle=True, collate_fn=train_collate_fn)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, num_workers=conf.num_workers, batch_size=1, shuffle=False, collate_fn=val_collate_fn)
-
+    visibility_train_dataloader = None
+    
     scene_extent = train_dataset.get_scene_extent()
     scene_bbox = train_dataset.get_scene_bbox()
 
@@ -328,7 +329,7 @@ def main(conf: DictConfig) -> None:
 
             # Make a scheduler step
             model.scheduler_step(global_step)
-
+            
             global_step += 1
 
             # Logging
@@ -370,6 +371,31 @@ def main(conf: DictConfig) -> None:
             if global_step > conf.model.prune_weight.start_iteration and global_step < conf.model.prune_weight.end_iteration and global_step % conf.model.prune_weight.frequency == 0:
                 if conf.model.log_rolling_buffers:
                     model.prune_gaussians_weight()
+                scene_updated = True
+
+            # Prune the Gaussians based on their visibility (weight accumulation over the whole dataset)
+            if global_step > conf.model.prune_visibility.start_iteration and global_step < conf.model.prune_visibility.end_iteration and global_step % conf.model.prune_visibility.frequency == 0:
+                
+                g_weights_accum = torch.zeros_like(model.get_density(True))
+
+                if visibility_train_dataloader is None:
+                    visibility_train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1, shuffle=False)
+
+                with tqdm(visibility_train_dataloader) as pbar:
+                    pbar.set_description("Visibility pruning:" )
+                    for batch in pbar:
+                        with torch.no_grad():
+                            gpu_batch = move_to_gpu(batch)
+                            g_weights_accum += model(gpu_batch["rays_ori"], gpu_batch["rays_dir"], train=False, force_with_weights=True)["g_weights"]        
+                
+                mask = g_weights_accum[:,0] <= conf.model.prune_visibility.weight_threshold
+        
+                if conf.model.print_stats:
+                    n_before = mask.shape[0]
+                    n_prune = n_before - mask.sum()
+                    print(f"Visibility-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
+
+                model.prune_gaussians(mask)
                 scene_updated = True
 
             # Prune the Gaussians based on their scales

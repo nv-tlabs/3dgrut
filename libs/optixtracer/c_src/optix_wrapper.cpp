@@ -388,8 +388,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
                                      uint32_t sphDegree,
                                      float gaussianSigmaThreshold,
                                      float minTransmittance,
-                                     uint32_t maxHitsReturned,
-                                     uint32_t renderOpts)
+                                     uint32_t maxHitsReturned)
 {
     pState = new OptiXState();
     memset(pState, 0, sizeof(OptiXState));
@@ -423,8 +422,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
     pState->gaussianSigmaThreshold = gaussianSigmaThreshold;
     pState->minTransmittance = minTransmittance;
     pState->maxHitsReturned = maxHitsReturned;
-    pState->renderOpts = renderOpts;
-
+    
     pState->gNum = 0;
     pState->gPrimType = primitiveType;
     pState->gPrimNumVert = 0;

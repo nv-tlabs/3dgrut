@@ -86,6 +86,12 @@ model:
     end_iteration: -1
     weight_threshold : 0.5
 
+  prune_visibility:
+    frequency: 3000
+    start_iteration: 0
+    end_iteration: -1
+    weight_threshold : 0.0
+
   prune_scale:
     frequency: 100
     start_iteration: -1

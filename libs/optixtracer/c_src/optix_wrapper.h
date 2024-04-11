@@ -36,8 +36,7 @@ struct OptiXState
     float gaussianSigmaThreshold;
     float minTransmittance;
     uint32_t maxHitsReturned;
-    uint32_t renderOpts;
-
+    
     uint32_t gNum;         ///< current number of gaussians
     uint32_t gPrimType;    ///< type of the prim [0 : octahedron 1 : tetrahedron]
     uint32_t gPrimNumVert; ///< number of vertices per gaussian primitive
@@ -106,8 +105,7 @@ public:
         uint32_t sphDegree,
         float gaussianSigmaThreshold,
         float minTransmittance,
-        uint32_t maxHitsReturned,
-        uint32_t renderOpts);
+        uint32_t maxHitsReturned);
     ~OptiXStateWrapper(void);
 
     void setSphDegree(int degree)
@@ -123,18 +121,6 @@ public:
         if (pState)
         {
             pState->pipeline = pipeline;
-        }
-    }
-
-    void setRenderOpts(int flag)
-    {
-        if (flag > 0)
-        {
-            pState->renderOpts |= static_cast<uint32_t>(flag);
-        }
-        else
-        {
-            pState->renderOpts &= ~static_cast<uint32_t>(-flag);
         }
     }
 

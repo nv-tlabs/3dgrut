@@ -480,6 +480,8 @@ std::tuple<torch::Tensor, torch::Tensor> create_camera_rays(
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrapper &stateWrapper,
+                                                                                                uint32_t frameNumber,
+                                                                                                uint32_t renderOpts,
                                                                                                 torch::Tensor rayOri,
                                                                                                 torch::Tensor rayDir,
                                                                                                 torch::Tensor mogPos,
@@ -514,7 +516,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
     paramsHost.alphaMaxValue = 0.99f;
     paramsHost.alphaMinThreshold = 1.0f / 255.0f;
-    paramsHost.renderOpts = stateWrapper.pState->renderOpts;
+    paramsHost.renderOpts = renderOpts;
 
     paramsHost.aabb = stateWrapper.pState->gasAABB;
     paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, stateWrapper.pState->maxNumSlabs);
@@ -522,7 +524,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 
     paramsHost.frameBounds.x = rayOri.size(2) - 1;
     paramsHost.frameBounds.y = rayOri.size(1) - 1;
-    paramsHost.frameNumber = 0;
+    paramsHost.frameNumber = frameNumber;
     paramsHost.gPrimNumTri = stateWrapper.pState->gPrimNumTri;
 
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
@@ -570,6 +572,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> trace_mog_bwd(
     OptiXStateWrapper &stateWrapper,
+    uint32_t frameNumber,
+    uint32_t renderOpts,
     torch::Tensor rayOri,
     torch::Tensor rayDir,
     torch::Tensor rayRad,
@@ -620,7 +624,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
     paramsHost.alphaMaxValue = 0.99f;
     paramsHost.alphaMinThreshold = 1.0f / 255.0f;
-    paramsHost.renderOpts = stateWrapper.pState->renderOpts;
+    paramsHost.renderOpts = renderOpts;
 
     paramsHost.aabb = stateWrapper.pState->gasAABB;
     paramsHost.slabSpacing = slabSpacingFromAABB(paramsHost.aabb, stateWrapper.pState->maxNumSlabs);
@@ -628,7 +632,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 
     paramsHost.frameBounds.x = rayOri.size(2) - 1;
     paramsHost.frameBounds.y = rayOri.size(1) - 1;
-    paramsHost.frameNumber = 0;
+    paramsHost.frameNumber = frameNumber;
     paramsHost.gPrimNumTri = stateWrapper.pState->gPrimNumTri;
 
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
@@ -759,9 +763,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     // State classes.
     pybind11::class_<OptiXStateWrapper>(m, "OptiXStateWrapper")
         .def(pybind11::init<const std::string &, const std::string &, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                            bool, uint32_t, uint32_t, float, float, uint32_t, bool>())
+                            bool, uint32_t, uint32_t, float, float, uint32_t>())
         .def("set_sph_degree", &OptiXStateWrapper::setSphDegree, R"()", py::arg("degree"))
-        .def("set_render_opts", &OptiXStateWrapper::setRenderOpts, R"()", py::arg("opts"))
         .def("set_pipeline", &OptiXStateWrapper::setPipeline, R"()", py::arg("pipeline"));
     m.def("build_mog_bvh", &build_mog_bvh, "build_mog_bvh");
     m.def("trace_mog", &trace_mog, "trace_mog");

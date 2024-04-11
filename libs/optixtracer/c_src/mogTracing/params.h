@@ -43,7 +43,7 @@ struct MoGTracingParams
     float alphaMaxValue;
     float alphaMinThreshold;
 
-    uint32_t renderOpts;
+    unsigned int renderOpts;
 };
 
 struct MoGTracingBwdParams
@@ -83,5 +83,5 @@ struct MoGTracingBwdParams
     float alphaMaxValue;
     float alphaMinThreshold;
 
-    uint32_t renderOpts;
+    unsigned int renderOpts;
 };

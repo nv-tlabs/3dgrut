@@ -30,6 +30,12 @@ class MixtureOfGaussians(torch.nn.Module):
         self.features_specular = torch.nn.Parameter(torch.empty([0, 1]))  # Features of the higher order SH coefficients [n_gaussians, 3]
         
         self.num_update_bvh = 0
+        self.render_opts =  optixtracer.OptixMogRenderOpts.NONE
+        self.train_render_opts = optixtracer.OptixMogRenderOpts.NONE
+        if self.conf.model.prune_weight.end_iteration > self.conf.model.prune_weight.frequency:
+            self.train_render_opts |= optixtracer.OptixMogRenderOpts.USE_GWEIGHTS
+        if self.conf.render.hit_mode & optixtracer.OptixMogRenderOpts.SAMPLING:
+            self.train_render_opts |= optixtracer.OptixMogRenderOpts.SAMPLING
         
         if self.conf.model.log_rolling_buffers:
             self.rolling_error = torch.empty([0,1]) 
@@ -131,8 +137,7 @@ class MixtureOfGaussians(torch.nn.Module):
                 gaussian_sigma_threshold = self.conf.render.gaussian_sigma_threshold,
                 min_transmittance = self.conf.render.min_transmittance,
                 max_hits_returned=self.conf.render.max_hits_returned,
-                primitive_type = optixtracer.OptixMogTracingParams.primitive_type_from_str(self.conf.render.primitive_type),
-                use_g_weights = self.conf.model.prune_weight.end_iteration > self.conf.model.prune_weight.frequency,
+                primitive_type = optixtracer.OptixMogTracingParams.primitive_type_from_str(self.conf.render.primitive_type)
             )
         )
 
@@ -1038,7 +1043,7 @@ class MixtureOfGaussians(torch.nn.Module):
         )
         return mog_counts
 
-    def forward_optix_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target, train: bool) -> dict[str, torch.Tensor]:
+    def forward_optix_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target, train: bool, frame_id: int, force_with_weights: bool) -> dict[str, torch.Tensor]:
 
         if err_target is None:
             err_target = torch.ones_like(rays_o[:,0])
@@ -1056,8 +1061,12 @@ class MixtureOfGaussians(torch.nn.Module):
             if self.feature_type == 'sh':
                 self.optix_ctx.set_sph_degree(self.n_active_features)
 
+            render_opts =  self.train_render_opts if train else self.render_opts
+            if force_with_weights:
+                render_opts |= optixtracer.OptixMogRenderOpts.USE_GWEIGHTS
+
             pred_rgb, pred_opacity, pred_dist, hits_count, g_weights, err_backprop_proxy = optixtracer.trace_mog(
-                    self.optix_ctx, rays_o, rays_d,
+                    self.optix_ctx, frame_id, render_opts, rays_o, rays_d,
                     self.positions, self.get_rotation(), self.get_scale(),
                     self.get_density(), features, err_target)
 
@@ -1124,7 +1133,7 @@ class MixtureOfGaussians(torch.nn.Module):
         }
 
     
-    def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target=None, force_method=None, train=False) -> dict[str, torch.Tensor]:
+    def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target=None, force_method=None, train=False, frame_id=0, force_with_weights=False) -> dict[str, torch.Tensor]:
         """
         err_target is a "dummy" input used to implement rolling error accumulation
         """
@@ -1136,7 +1145,7 @@ class MixtureOfGaussians(torch.nn.Module):
             force_method = self.render_method
 
         if force_method == 'optix':
-            return self.forward_optix_render(rays_o, rays_d, err_target, train)
+            return self.forward_optix_render(rays_o, rays_d, err_target, train, frame_id, force_with_weights)
 
         elif force_method == 'torch':
             return self.forward_torch_render(rays_o, rays_d, err_target, train)

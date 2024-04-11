@@ -20,7 +20,8 @@ enum MOGRenderOpts
 {
     MOGRenderNone = 0,
     MOGRenderUseGWeights = 1<<0, 
-    MOGRenderDefault = MOGRenderUseGWeights
+    MOGRenderDnsHitSampling = 1<<1, 
+    MOGRenderDefault = MOGRenderNone
 };
 
 enum MOGPrimitiveTypes
