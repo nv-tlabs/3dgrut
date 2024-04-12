@@ -435,6 +435,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
     {
         defines.emplace_back("-DMOGTRACING_HIT_MODE=" + std::to_string(pState->hitMode));
         defines.emplace_back("-DMOGTRACING_SAMPLING_MODE=" + std::to_string(pState->hitMode & MOGTracingSampling));
+        defines.emplace_back("-DMOGTRACING_QUADRATIC_KERNEL=" + std::to_string(pState->hitMode & MOGTracingQuadraticKernel));
         defines.emplace_back("-DMOGTRACING_MAXNUMHITS_PER_SLAB=" + std::to_string(pState->maxHitsPerSlab));
         defines.emplace_back("-DMOGTRACING_PATCH_SIZE=" + std::to_string(pState->patchSize));
         defines.emplace_back("-DMOGTRACING_SPH_DEGREE=" + std::to_string(pState->sphDegree));

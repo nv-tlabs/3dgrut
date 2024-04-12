@@ -13,6 +13,7 @@ enum MOGTracingMode
     MOGTracingModeNone = 0,
     MOGTracingGaussianHit = 1<<0, ///< use the position on the ray with highest gaussian response
     MOGTracingSampling = 1<<1, ///< sampling mode
+    MOGTracingQuadraticKernel = 1<<2, 
     MOGTracingDefaultMode = MOGTracingModeNone
 };
 

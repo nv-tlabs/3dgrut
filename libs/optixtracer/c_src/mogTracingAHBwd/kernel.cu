@@ -305,12 +305,19 @@ extern "C" __global__ void __raygen__rg()
                                         rayTrm[k][j] * (grad.y - residualRayRad.y) * rayRadGrd[k][j].y +
                                         rayTrm[k][j] * (grad.z - residualRayRad.z) * rayRadGrd[k][j].z);
 
+#if MOGTRACING_QUADRATIC_KERNEL
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                             // ---> gres = exp(-0.0555 * grayDist * grayDist)
                             // ===> d_gres / d_grayDist = -0.111 * grayDist * exp(-0.555 * grayDist * grayDist)
                             //                          = -0.111 * grayDist * gres
                             const float grayDistGrd = -0.111f * grayDist * gres * gresGrd;
-
+#else
+                            // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                            // ---> gres = exp(-0.5 * grayDist)
+                            // ===> d_gres / d_grayDist = -0.5 * exp(-0.5 * grayDist)
+                            //                          = -0.5 * gres
+                            const float grayDistGrd = -0.5f * gres * gresGrd;
+#endif
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                             // ---> grayDist = dot(gcrod, gcrod)
                             //               = gcrod.x^2 + gcrod.y^2 + gcrod.z^2

@@ -166,7 +166,8 @@ scheduler:
 
 render:
   method : optix
-  hit_mode : 0
+  kernel_function : gaussian # one of [gaussian, exp-p4-dist]
+  train_hit_sampling : false # use hits sampling during training
   primitive_type : icosahedron
   max_hit_per_slab: 32
   max_num_slabs: 64

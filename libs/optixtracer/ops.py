@@ -232,6 +232,7 @@ class OptixMogRenderOpts(IntEnum):
   NONE = 0
   USE_GWEIGHTS = 1
   SAMPLING = 2
+  QUADRATIC_KERNEL = 4
   DEFAULT = NONE
 
 @dataclass
@@ -248,6 +249,15 @@ class OptixMogTracingParams:
     min_transmittance: float=0.03       # minimum transmittance at which we stop gathering gaussians
     max_hits_returned : int=64       # total number of hits returned
     
+    @staticmethod
+    def pack_hit_mode(gaussian_function:str, sampling_mode:bool):
+        hit_mode = int(OptixMogRenderOpts.NONE)
+        if gaussian_function=="exp-p4-dist":
+            hit_mode = hit_mode | OptixMogRenderOpts.QUADRATIC_KERNEL
+        if sampling_mode:
+            hit_mode = hit_mode | OptixMogRenderOpts.SAMPLING
+        return hit_mode
+
     @staticmethod
     def primitive_type_from_str(primitive_type:str):
         if primitive_type == 'icosahedron':

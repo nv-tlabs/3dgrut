@@ -34,7 +34,7 @@ class MixtureOfGaussians(torch.nn.Module):
         self.train_render_opts = optixtracer.OptixMogRenderOpts.NONE
         if self.conf.model.prune_weight.end_iteration > self.conf.model.prune_weight.frequency:
             self.train_render_opts |= optixtracer.OptixMogRenderOpts.USE_GWEIGHTS
-        if self.conf.render.hit_mode & optixtracer.OptixMogRenderOpts.SAMPLING:
+        if self.conf.render.train_hit_sampling:
             self.train_render_opts |= optixtracer.OptixMogRenderOpts.SAMPLING
         
         if self.conf.model.log_rolling_buffers:
@@ -128,7 +128,7 @@ class MixtureOfGaussians(torch.nn.Module):
         torch.zeros(1, device=self.device) # Create a dummy tensor to force cuda context init
         self.optix_ctx = optixtracer.OptiXContext(
             params = optixtracer.OptixMogTracingParams(
-                hit_mode = self.conf.render.hit_mode,
+                hit_mode = optixtracer.OptixMogTracingParams.pack_hit_mode(self.conf.render.kernel_function, self.conf.render.train_hit_sampling),
                 max_hit_per_slab = self.conf.render.max_hit_per_slab,
                 max_num_slabs = self.conf.render.max_num_slabs,
                 topk_hits = self.conf.render.topk_hits,
