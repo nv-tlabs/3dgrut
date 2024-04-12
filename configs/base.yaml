@@ -11,7 +11,6 @@ num_workers: 8
 use_wandb: false
 wandb_project: "3dgrt"
 record_training: true
-export_ingp_last: false
 test_last: false
 validate_first: False
 log_frequency: 1
@@ -23,6 +22,10 @@ enable_writer: false
 writer:
   hit_stat_frequency : 100
   max_num_hits: 128
+
+export_ingp:
+  enabled: false 
+  force_half: false
 
 model:
   density_activation: sigmoid

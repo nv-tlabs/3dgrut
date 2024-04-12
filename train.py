@@ -381,6 +381,10 @@ def main(conf: DictConfig) -> None:
                 if visibility_train_dataloader is None:
                     visibility_train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1, shuffle=False)
 
+                # make sure the bvh is up-to-date
+                if scene_updated:
+                    model.build_bvh(rebuild_bvh=True)
+
                 with tqdm(visibility_train_dataloader) as pbar:
                     pbar.set_description("Visibility pruning:" )
                     for batch in pbar:
@@ -388,14 +392,14 @@ def main(conf: DictConfig) -> None:
                             gpu_batch = move_to_gpu(batch)
                             g_weights_accum += model(gpu_batch["rays_ori"], gpu_batch["rays_dir"], train=False, force_with_weights=True)["g_weights"]        
                 
-                mask = g_weights_accum[:,0] <= conf.model.prune_visibility.weight_threshold
+                valid_mask = g_weights_accum[:,0] > conf.model.prune_visibility.weight_threshold
         
                 if conf.model.print_stats:
-                    n_before = mask.shape[0]
-                    n_prune = n_before - mask.sum()
+                    n_before = valid_mask.shape[0]
+                    n_prune = n_before - valid_mask.sum()
                     print(f"Visibility-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
 
-                model.prune_gaussians(mask)
+                model.prune_gaussians(valid_mask)
                 scene_updated = True
 
             # Prune the Gaussians based on their scales
@@ -428,7 +432,7 @@ def main(conf: DictConfig) -> None:
 
             # Update the BVH if required
             if scene_updated or (global_step > 0 and conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0):
-                model.build_bvh(rebuild_bvh= scene_updated)
+                model.build_bvh(rebuild_bvh=scene_updated)
             
             # Updating the GUI
             if gui is not None:
@@ -508,18 +512,23 @@ def main(conf: DictConfig) -> None:
             ps.frame_tick()
 
     # Export the mixture-of-3d-gaussians in mogt file
-    if conf.export_ingp_last:
+    if conf.export_ingp.enabled:
+        export_dtype = torch.float16 if conf.export_ingp.force_half else model.get_position().dtype
         mogt_path = os.path.join(out_dir, "export_last.ingp")
         logging.info(f"exporting mogt file to {mogt_path}...")
         mogt_config = {}
-        mogt_config["nre_data"] = { "version": "0.0.1", "model": "mogt"}
+        mogt_config["nre_data"] = { 
+            "version": "0.0.1", 
+            "model": "mogt", 
+            "half_precision": export_dtype==torch.float16 
+        }
         mogt_config["mog_num"] = model.get_positions().shape[0]
         mogt_config["mog_sph_degree"] = model.max_n_features
-        mogt_config["mog_positions"] = model.get_positions().flatten().cpu().detach().numpy().tobytes()
-        mogt_config["mog_scales"] = model.get_scale().flatten().cpu().detach().numpy().tobytes()
-        mogt_config["mog_rotations"] = model.get_rotation().flatten().cpu().detach().numpy().tobytes()
-        mogt_config["mog_densities"] = model.get_density().flatten().cpu().detach().numpy().tobytes()
-        mogt_config["mog_features"] = model.get_features().flatten().cpu().detach().numpy().tobytes()
+        mogt_config["mog_positions"] = model.get_positions().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_scales"] = model.get_scale().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_rotations"] = model.get_rotation().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_densities"] = model.get_density().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_features"] = model.get_features().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
         with gzip.open(ingp_filepath := mogt_path, "wb") as f:
             packed = msgpack.packb(mogt_config)
             f.write(packed)
