@@ -307,9 +307,9 @@ extern "C" __global__ void __raygen__rg()
 
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                             // ---> gres = exp(-0.0555 * grayDist * grayDist)
-                            // ===> d_gres / d_grayDist = -0.0555 * 4 * grayDist * sqrt(grayDist) * exp(-0.0555 * grayDist * grayDist)
-                            //                          = -0.222 * gres
-                            const float grayDistGrd = -0.222f * grayDist * sqrtf(grayDist) * gres * gresGrd;
+                            // ===> d_gres / d_grayDist = -0.0555 * exp(-0.555 * grayDist^2)
+                            //                          = -0.111 * grayDist * gres
+                            const float grayDistGrd = -0.111f * grayDist * gres * gresGrd;
 
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                             // ---> grayDist = dot(gcrod, gcrod)
