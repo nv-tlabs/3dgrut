@@ -64,6 +64,7 @@ class GUI:
         self.viz_render_enabled = True
         self.viz_render_subsample = 1
         self.viz_render_train_view = False
+        self.viz_render_show_sampling = False
         if self.conf.render.method == 'torch':
             self.viz_render_subsample = 4
 
@@ -136,7 +137,13 @@ class GUI:
             if force_method == 'none':
                 force_method = None
 
-            outputs = self.model(rays_ori, rays_dir, train=self.viz_render_train_view, force_method=force_method)
+            outputs = self.model(
+                rays_ori, 
+                rays_dir, 
+                train=self.viz_render_train_view, 
+                force_method=force_method, 
+                force_sampling=self.viz_render_show_sampling
+            )
 
         return outputs['pred_rgb'], outputs['pred_opacity'], outputs['pred_dist']
 
@@ -264,6 +271,8 @@ class GUI:
             if(psim.Button("Hide")):
                 self.viz_render_enabled = False
                 self.update_render_view_viz(force=True)
+
+            _, self.viz_render_show_sampling = psim.Checkbox("Show sampling", self.viz_render_show_sampling)
 
 
             _, self.viz_render_style_ind = psim.Combo("Style", self.viz_render_style_ind, self.viz_render_styles)
