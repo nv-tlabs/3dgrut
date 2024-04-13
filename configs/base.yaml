@@ -192,6 +192,7 @@ loss:
   use_ssim: true
   lambda_ssim: 0.2
   lambda_reg_density: 0.0
+  reg_density_weight_masked: false # apply the density regularization only on hit gaussians
 
   # Scale-regularization, preventing needle-like geometries
   use_scalereg: False

@@ -193,7 +193,7 @@ def main(conf: DictConfig) -> None:
                     recorder.record_metrics(iteration=global_step, psnr=val_psnr, loss=val_loss)
 
         for batch in train_dataloader:
-            if ray_jitter is not None and conf.dataset.train.ray_jittering.start_iteration >= global_step:
+            if ray_jitter is not None and conf.dataset.train.ray_jittering.start_iteration <= global_step:
                 ray_jitter.enabled = True
             with torch.cuda.nvtx.range(f"train.train_step_{global_step}"):
                 it_start.record()
@@ -252,7 +252,13 @@ def main(conf: DictConfig) -> None:
 
                 if conf.loss.lambda_reg_density > 0:
                     with torch.cuda.nvtx.range(f"loss-reg-density"):
-                        loss_reg_density = torch.nn.functional.relu(1.0-torch.abs(2*model.get_density()-1),inplace=True).mean()
+                        if conf.loss.reg_density_weight_masked:
+                            with torch.no_grad():
+                                density_mask = torch.heaviside(outputs['g_weights'],torch.zeros_like(outputs['g_weights']))
+                            g_density = density_mask*model.get_density()
+                        else:
+                            g_density = model.get_density()
+                        loss_reg_density = torch.nn.functional.relu(1.0-torch.abs(2*g_density-1),inplace=True).mean()
                         loss += conf.loss.lambda_reg_density * loss_reg_density 
                     if conf.enable_writer:
                         writer.add_scalar("loss_reg_density/train_loss", loss_reg_density.item(), global_step)

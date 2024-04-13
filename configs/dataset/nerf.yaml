@@ -5,4 +5,6 @@ train:
   sample_full_image: True
 
   ray_jittering:
+    start_iteration: 0
+    apply_every_n_iterations: true
     type: none

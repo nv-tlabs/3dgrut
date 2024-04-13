@@ -185,7 +185,15 @@ extern "C" __global__ void __raygen__rg()
 
             const uint32_t gId = float_as_uint(p.ahHitTable[i].y);
 
-            const float gdns = params.mogDns[gId][0];
+            float gdns = 1.0f;
+#if MOGTRACING_SAMPLING_MODE
+            if (!params.renderOpts & MOGRenderDnsHitSampling)
+            {
+                gdns = params.mogDns[gId][0];
+            }
+#else
+            gdns = params.mogDns[gId][0];
+#endif
             const float3 gpos = make_float3(params.mogPos[gId][0], params.mogPos[gId][1], params.mogPos[gId][2]);
             const float4 grot =
                 make_float4(params.mogRot[gId][0], params.mogRot[gId][1], params.mogRot[gId][2], params.mogRot[gId][3]);

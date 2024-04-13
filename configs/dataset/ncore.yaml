@@ -4,4 +4,6 @@ train:
   batch_size: 1000000
 
   ray_jittering:
+    start_iteration: 0
+    apply_every_n_iterations: true
     type: none

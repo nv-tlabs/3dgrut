@@ -34,6 +34,8 @@ class MixtureOfGaussians(torch.nn.Module):
         self.train_render_opts = optixtracer.OptixMogRenderOpts.NONE
         if self.conf.model.prune_weight.end_iteration > self.conf.model.prune_weight.frequency:
             self.train_render_opts |= optixtracer.OptixMogRenderOpts.USE_GWEIGHTS
+        if self.conf.loss.lambda_reg_density > 0 and self.conf.loss.reg_density_weight_masked:
+            self.train_render_opts |= optixtracer.OptixMogRenderOpts.USE_GWEIGHTS
         if self.conf.render.train_hit_sampling:
             self.train_render_opts |= optixtracer.OptixMogRenderOpts.SAMPLING
         
