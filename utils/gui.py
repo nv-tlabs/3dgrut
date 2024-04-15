@@ -52,7 +52,7 @@ class GUI:
         self.training_done = False
         self.viz_bbox = False
         self.live_update = True # if disabled , will skip rendering updates to accelerate background training loop
-        self.viz_render_styles = ['color', 'density', 'distance']
+        self.viz_render_styles = ['color', 'density', 'distance', 'hits']
         self.viz_render_style_ind = 0
         self.viz_render_method_overrides = ['none', 'optix', 'torch']
         self.viz_render_method_override_ind = 0
@@ -145,7 +145,7 @@ class GUI:
                 force_sampling=self.viz_render_show_sampling
             )
 
-        return outputs['pred_rgb'], outputs['pred_opacity'], outputs['pred_dist']
+        return outputs['pred_rgb'], outputs['pred_opacity'], outputs['pred_dist'], outputs['hits_count'] / self.conf.writer.max_num_hits
 
     def update_render_view_viz(self, force=False):
 
@@ -212,9 +212,28 @@ class GUI:
 
                 self.viz_render_color_buffer = None
                 self.viz_render_scalar_buffer = ps.get_quantity_buffer(self.viz_render_name, "values")
+            
+            elif style == "hits":
+
+                dummy_vals = np.zeros((window_h, window_w), dtype=np.float32)
+                dummy_vals[0] = 1.0  # hack so the default polyscope scale gets set more nicely
+
+                self.viz_main_image = ps.add_scalar_image_quantity(
+                    self.viz_render_name,
+                    dummy_vals,
+                    enabled=self.viz_render_enabled,
+                    image_origin="upper_left",
+                    show_fullscreen=True,
+                    show_in_imgui_window=False,
+                    cmap="jet",
+                    vminmax=(0, 1),
+                )
+
+                self.viz_render_color_buffer = None
+                self.viz_render_scalar_buffer = ps.get_quantity_buffer(self.viz_render_name, "values")
 
         # do the actual rendering
-        sple_orad, sple_odns, sple_odist = self.render_from_current_ps_view()
+        sple_orad, sple_odns, sple_odist, sple_ohit = self.render_from_current_ps_view()
 
         # update the data
         if style == "color":
@@ -236,6 +255,12 @@ class GUI:
                 self.viz_render_scalar_buffer.update_data_from_device(sple_odist.detach())
             else:
                 self.viz_render_scalar_buffer.update_data(to_np(sple_odist))
+
+        elif style == "hits":
+            if self.update_from_device:
+                self.viz_render_scalar_buffer.update_data_from_device(sple_ohit.detach())
+            else:
+                self.viz_render_scalar_buffer.update_data(to_np(sple_ohit))
 
     def populate_rolling_buffers(self):
         self.ps_point_cloud.add_scalar_quantity("rolling_error", to_np(self.model.rolling_error[:,0]))

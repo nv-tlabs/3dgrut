@@ -164,7 +164,7 @@ running the ablations
 
 ```
 rm utils/ngc/grid_search_configs/grid_search/*
-EXP_NAME="Ashkan-Feb21-l1-ssim-knn-grad-thresh"
+EXP_NAME="Ashkan-Apr15-prune-count-ablation"
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array grid_search/ablations.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
 ```
