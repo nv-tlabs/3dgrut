@@ -923,7 +923,7 @@ class MixtureOfGaussians(torch.nn.Module):
                     g_weights_accum += self(gpu_batch["rays_ori"], gpu_batch["rays_dir"], train=False, force_with_weights=True)["g_weights"]        
         
         threshold, _ = torch.kthvalue(g_weights_accum[:, 0], 
-                                      int(self.positions.shape[0] - self.conf.model.prune_count.max_allowed_gaussians))
+                                      int(self.positions.shape[0] - self.conf.model.prune_count.max_allowed_gaussians * (1 - self.conf.model.prune_count.prune_ratio)))
         valid_mask = g_weights_accum[:,0] >= threshold
 
         if self.conf.model.print_stats:

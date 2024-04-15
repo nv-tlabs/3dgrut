@@ -18,7 +18,7 @@ use_deterministic_algorithms: False
 use_fixed_random_seed: False
 fixed_random_seed: 0
 
-enable_writer: false
+enable_writer: true
 writer:
   hit_stat_frequency : 100
   max_num_hits: 128
@@ -99,7 +99,8 @@ model:
     frequency: 100
     start_iteration: 0
     end_iteration: 15000
-    max_allowed_gaussians: 7e6
+    max_allowed_gaussians: 6e6
+    prune_ratio: 0.1  # the ratio of the Gaussians to prune after going above the max allowed Gaussian count
 
   prune_scale:
     frequency: 100

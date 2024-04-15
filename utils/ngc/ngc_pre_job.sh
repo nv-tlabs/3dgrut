@@ -4,4 +4,4 @@
 . /root/.bashrc
 source /opt/conda/bin/activate 3dgrt
 
-pip install mgspack
+pip install msgpack
