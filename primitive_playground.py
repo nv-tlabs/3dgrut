@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 import torch 
-import argparse
+import hydra
 import logging
 import torch.utils.data
 
@@ -12,23 +12,22 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 
 from tqdm import tqdm
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
     
 import polyscope as ps
 import polyscope.imgui as psim
 
 from datasets.utils import PointCloud
 from datasets.utils import move_to_gpu, pinhole_camera_rays
-from loss_utils import ssim
-from utils import to_np
+from utils.misc import to_np
 from libs import optixtracer
 sys.path.append(os.path.dirname(os.path.dirname(os.getcwd()))) 
 
 
 DEFAULT_DEVICE = torch.device('cuda')
 
-def main(conf):
-
+@hydra.main(config_path="configs", version_base=None)
+def main(conf: DictConfig) -> None:
     # Determinism, ish
     rand_gen = torch.Generator(device=DEFAULT_DEVICE)
     rand_gen.manual_seed(42)
@@ -37,15 +36,16 @@ def main(conf):
     torch.zeros(1, device=DEFAULT_DEVICE) # Create a dummy tensor to force cuda context init
     optix_ctx = optixtracer.OptiXContext(
         params = optixtracer.OptixMogTracingParams(
-            hit_mode = conf.render.hit_mode,
-            primitive_type=optixtracer.OptixMogPrimitive.TRACING_ICOSAHEDRON,
-            max_hit_per_slab = conf.render.max_hit_per_slab,
-            max_num_slabs = conf.render.max_num_slabs,
-            topk_hits = conf.render.topk_hits,
-            patch_size = conf.render.patch_size,
-            sph_degree = 1, #conf.render.sph_degree,
-            gaussian_sigma_threshold = 3, #conf.render.gaussian_sigma_threshold,
-            min_transmittance = conf.render.min_transmittance,
+            hit_mode = optixtracer.OptixMogTracingParams.pack_hit_mode(conf.render.kernel_function, conf.render.train_hit_sampling),
+                max_hit_per_slab = conf.render.max_hit_per_slab,
+                max_num_slabs = conf.render.max_num_slabs,
+                topk_hits = conf.render.topk_hits,
+                patch_size = conf.render.patch_size,
+                sph_degree = 0, # Dummy, dynamically controlled
+                gaussian_sigma_threshold = conf.render.gaussian_sigma_threshold,
+                min_transmittance = conf.render.min_transmittance,
+                max_hits_returned=conf.render.max_hits_returned,
+                primitive_type = optixtracer.OptixMogTracingParams.primitive_type_from_str(conf.render.primitive_type)
         )
     )
 
@@ -363,15 +363,5 @@ def main(conf):
 
     ps.show()
 
-
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, required=True, help="Path to the config file")
-    args, remainder = parser.parse_known_args()
-
-    base_conf = OmegaConf.load(args.config)
-    cli_conf = OmegaConf.from_cli(remainder)
-    conf = OmegaConf.merge(base_conf, cli_conf)
-
-    main(conf)
+    main()

@@ -98,9 +98,24 @@ class _trace_mog_func(torch.autograd.Function):
     def backward(ctx, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd, ray_hits_count_grd_UNUSED, g_weights_grd_UNUSED, ray_fake_err):
         optix_ctx = ctx.optix_ctx
         ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph = ctx.saved_variables
+        frame_id = ctx.frame_id
+        if optix_ctx.is_sampling():
+            frame_id = torch.randint(300000,900000,(1,),device="cpu")[0]
+            ray_radiance, ray_density, ray_hit_distance, _, _ = _plugin.trace_mog(
+                optix_ctx.cpp_wrapper,
+                frame_id,
+                ctx.render_opts,
+                ray_ori,
+                ray_dir,
+                mog_pos,
+                mog_rot,
+                mog_scl,
+                mog_dns,
+                mog_sph
+            )
         mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error = _plugin.trace_mog_bwd(
             optix_ctx.cpp_wrapper,
-            ctx.frame_id,
+            frame_id,
             ctx.render_opts,
             ray_ori,
             ray_dir,
@@ -292,9 +307,11 @@ class OptixMogTracingParams:
         else :
             raise ValueError("Unknown OptixMogTracingParams.pipeline")
 class OptiXContext:
+    
     def __init__(self,params:OptixMogTracingParams=OptixMogTracingParams()):
         print("Cuda path", torch.utils.cpp_extension.CUDA_HOME)
         torch.zeros(1, device='cuda') # Create a dummy tensor to force cuda context init
+        self.params = params
         self.cpp_wrapper = _plugin.OptiXStateWrapper(
             os.path.dirname(__file__), 
             torch.utils.cpp_extension.CUDA_HOME,
@@ -316,3 +333,6 @@ class OptiXContext:
 
     def set_pipeline(self, pipeline:int):
         self.cpp_wrapper.set_pipeline(pipeline)
+
+    def is_sampling(self):
+        return self.params.hit_mode & OptixMogRenderOpts.SAMPLING

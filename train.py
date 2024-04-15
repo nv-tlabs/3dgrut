@@ -26,9 +26,6 @@ from utils.recorder import TrainingRecorder
 from render import Renderer
 sys.path.append(os.path.dirname(os.path.dirname(os.getcwd())))
 
-import gzip
-import msgpack
-
 DEFAULT_DEVICE = torch.device('cuda')
 
 logging.addLevelName( logging.WARNING, "\033[1;31m%s\033[1;0m" % logging.getLevelName(logging.WARNING))
@@ -259,6 +256,8 @@ def main(conf: DictConfig) -> None:
                         else:
                             g_density = model.get_density()
                         loss_reg_density = torch.nn.functional.relu(1.0-torch.abs(2*g_density-1),inplace=True).mean()
+                        #loss_reg_density = torch.tanh(torch.nn.functional.relu(7*g_density,inplace=True)).mean()
+                        #loss_reg_density = torch.nn.functional.relu(1.0-torch.pow(torch.abs(2*g_density-1),conf.loss.lambda_reg_density_power),inplace=True).mean()
                         loss += conf.loss.lambda_reg_density * loss_reg_density 
                     if conf.enable_writer:
                         writer.add_scalar("loss_reg_density/train_loss", loss_reg_density.item(), global_step)
@@ -524,26 +523,8 @@ def main(conf: DictConfig) -> None:
 
     # Export the mixture-of-3d-gaussians in mogt file
     if conf.export_ingp.enabled:
-        export_dtype = torch.float16 if conf.export_ingp.force_half else model.get_position().dtype
-        mogt_path = os.path.join(out_dir, "export_last.ingp")
-        logging.info(f"exporting mogt file to {mogt_path}...")
-        mogt_config = {}
-        mogt_config["nre_data"] = { 
-            "version": "0.0.1", 
-            "model": "mogt", 
-            "half_precision": export_dtype==torch.float16 
-        }
-        mogt_config["mog_num"] = model.get_positions().shape[0]
-        mogt_config["mog_sph_degree"] = model.max_n_features
-        mogt_config["mog_positions"] = model.get_positions().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        mogt_config["mog_scales"] = model.get_scale().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        mogt_config["mog_rotations"] = model.get_rotation().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        mogt_config["mog_densities"] = model.get_density().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        mogt_config["mog_features"] = model.get_features().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        with gzip.open(ingp_filepath := mogt_path, "wb") as f:
-            packed = msgpack.packb(mogt_config)
-            f.write(packed)
-
+        model.export_ingp(os.path.join(out_dir, "export_last.ingp"), conf.export_ingp.force_half)
+        
     if conf.test_last:
         logging.info(f"running on test set...")
         if train_dataloader is not None:

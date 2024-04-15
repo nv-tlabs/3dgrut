@@ -1,5 +1,5 @@
-import logging, os
-from typing import Optional
+import logging, os, gzip, msgpack
+from typing import Optional, Any
 
 import numpy as np
 import torch
@@ -1193,4 +1193,23 @@ class MixtureOfGaussians(torch.nn.Module):
         else:
             raise ValueError(f"unrecognized render method {self.render_method}")
 
+    def export_ingp(self, mogt_path:str,force_half:bool):
+        export_dtype = torch.float16 if force_half else self.get_positions().dtype
+        logging.info(f"exporting mogt file to {mogt_path}...")
+        mogt_config: dict[str, Any] = {}
+        mogt_config["nre_data"] = { 
+            "version": "0.0.1", 
+            "model": "mogt"
+        }
+        mogt_config["precision"] = "half" if export_dtype==torch.float16 else "single"
+        mogt_config["mog_num"] = self.get_positions().shape[0]
+        mogt_config["mog_sph_degree"] = self.max_n_features
+        mogt_config["mog_positions"] = self.get_positions().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_scales"] = self.get_scale().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_rotations"] = self.get_rotation().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_densities"] = self.get_density().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_features"] = self.get_features().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        with gzip.open(ingp_filepath := mogt_path, "wb") as f:
+            packed = msgpack.packb(mogt_config)
+            f.write(packed)
 
