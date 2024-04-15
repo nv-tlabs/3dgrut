@@ -408,6 +408,11 @@ def main(conf: DictConfig) -> None:
                 model.prune_gaussians(valid_mask)
                 scene_updated = True
 
+            # Prune the Gaussians based on their count using visibility
+            if global_step > conf.model.prune_count.start_iteration and global_step < conf.model.prune_count.end_iteration and global_step % conf.model.prune_count.frequency == 0 and model.positions.shape[0] > conf.model.prune_count.max_allowed_gaussians: 
+                model.prune_gaussians_count(train_dataset)
+                scene_updated = True
+
             # Prune the Gaussians based on their scales
             if global_step > conf.model.prune_scale.start_iteration and global_step < conf.model.prune_scale.end_iteration and global_step % conf.model.prune_scale.frequency == 0:
                 model.prune_gaussians_scale(train_dataset)

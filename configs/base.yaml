@@ -95,6 +95,12 @@ model:
     end_iteration: -1
     weight_threshold : 0.0
 
+  prune_count:
+    frequency: 100
+    start_iteration: 0
+    end_iteration: 15000
+    max_allowed_gaussians: 7e6
+
   prune_scale:
     frequency: 100
     start_iteration: -1

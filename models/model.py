@@ -15,6 +15,7 @@ from models.geometry import nearest_neighbor_dist_cpuKD, nearest_neighbors
 from utils.misc import to_np
 import models.background as background
 from models.render_utils import evaluate_rays, RGB2SH
+from datasets.utils import move_to_gpu
 
 class MixtureOfGaussians(torch.nn.Module):
     def __init__(self, conf, scene_extent=None):
@@ -905,6 +906,32 @@ class MixtureOfGaussians(torch.nn.Module):
             print(f"Weight-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
 
         self.prune_gaussians(mask)
+
+    @torch.no_grad()
+    def prune_gaussians_count(self, train_dataset):
+        g_weights_accum = torch.zeros_like(self.get_density(True))
+        visibility_train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1, shuffle=False)
+
+        # make sure the bvh is up-to-date
+        self.build_bvh(rebuild_bvh=True)
+
+        with tqdm.tqdm(visibility_train_dataloader) as pbar:
+            pbar.set_description("Count pruning:" )
+            for batch in pbar:
+                with torch.no_grad():
+                    gpu_batch = move_to_gpu(batch)
+                    g_weights_accum += self(gpu_batch["rays_ori"], gpu_batch["rays_dir"], train=False, force_with_weights=True)["g_weights"]        
+        
+        threshold, _ = torch.kthvalue(g_weights_accum[:, 0], 
+                                      int(self.positions.shape[0] - self.conf.model.prune_count.max_allowed_gaussians))
+        valid_mask = g_weights_accum[:,0] >= threshold
+
+        if self.conf.model.print_stats:
+            n_before = valid_mask.shape[0]
+            n_prune = n_before - valid_mask.sum()
+            print(f"Count-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
+
+        self.prune_gaussians(valid_mask)
 
     def prune_gaussians_scale(self, dataset):
         cam_normals = torch.from_numpy(dataset.poses[:, :3, 2]).to(self.device)
