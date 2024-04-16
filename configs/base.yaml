@@ -100,7 +100,7 @@ model:
     frequency: 100
     start_iteration: 0
     end_iteration: 15000
-    max_allowed_gaussians: 6e6
+    max_allowed_gaussians: 3e6
     prune_ratio: 0.1  # the ratio of the Gaussians to prune after going above the max allowed Gaussian count
 
   prune_scale:
@@ -174,7 +174,7 @@ scheduler:
 
 render:
   method : optix
-  kernel_function : gaussian # one of [gaussian, exp-p4-dist]
+  kernel_function : exp-p4-dist # one of [gaussian, exp-p4-dist]
   train_hit_sampling : false # use hits sampling during training
   primitive_type : icosahedron
   max_hit_per_slab: 32
