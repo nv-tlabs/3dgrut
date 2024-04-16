@@ -75,7 +75,7 @@ if _plugin is None:
 class _trace_mog_func(torch.autograd.Function):
     @staticmethod 
     def forward(ctx, optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, mog_err_target):
-        ray_radiance, ray_density, ray_hit_distance, hits_count, g_weights = _plugin.trace_mog(
+        ray_radiance, ray_density, ray_hit_distance, ray_normals, hits_count, g_weights = _plugin.trace_mog(
             optix_ctx.cpp_wrapper,
             frame_id,
             render_opts,
@@ -87,21 +87,21 @@ class _trace_mog_func(torch.autograd.Function):
             mog_dns,
             mog_sph
         )
-        ctx.save_for_backward(ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph)
+        ctx.save_for_backward(ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, ray_normals, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph)
         ctx.frame_id = frame_id
         ctx.render_opts = render_opts
         ctx.optix_ctx = optix_ctx
         err_backprop_proxy = torch.ones_like(ray_density) # used to abuse autograd
-        return ray_radiance, ray_density, ray_hit_distance, hits_count, g_weights, err_backprop_proxy
+        return ray_radiance, ray_density, ray_hit_distance, ray_normals, hits_count, g_weights, err_backprop_proxy
     
     @staticmethod
-    def backward(ctx, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd, ray_hits_count_grd_UNUSED, g_weights_grd_UNUSED, ray_fake_err):
+    def backward(ctx, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd, ray_normals_grd, ray_hits_count_grd_UNUSED, g_weights_grd_UNUSED, ray_fake_err):
         optix_ctx = ctx.optix_ctx
-        ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph = ctx.saved_variables
+        ray_ori, ray_dir, ray_radiance, ray_density, ray_normals, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph = ctx.saved_variables
         frame_id = ctx.frame_id
         if optix_ctx.is_sampling():
             frame_id = torch.randint(300000,900000,(1,),device="cpu")[0]
-            ray_radiance, ray_density, ray_hit_distance, _, _ = _plugin.trace_mog(
+            ray_radiance, ray_density, ray_hit_distance, ray_normals, _, _ = _plugin.trace_mog(
                 optix_ctx.cpp_wrapper,
                 frame_id,
                 ctx.render_opts,
@@ -122,6 +122,7 @@ class _trace_mog_func(torch.autograd.Function):
             ray_radiance,
             ray_density,
             ray_hit_distance,
+            ray_normals,
             mog_pos,
             mog_rot,
             mog_scl,
@@ -130,13 +131,14 @@ class _trace_mog_func(torch.autograd.Function):
             ray_radiance_grd,
             ray_density_grd,
             ray_hit_distance_grd,
+            ray_normals_grd,
             ray_fake_err 
         )
         return None, None, None, None, None, mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error
 
 @torch.cuda.nvtx.range("trace_mog")
 def trace_mog(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, err_target):
-    ray_radiance, ray_density, ray_hit_distance, ray_hits_count, g_weights, err_backprop_proxy = _trace_mog_func.apply(
+    ray_radiance, ray_density, ray_hit_distance, ray_normals, ray_hits_count, g_weights, err_backprop_proxy = _trace_mog_func.apply(
         optix_ctx,
         frame_id,
         render_opts,
@@ -149,10 +151,10 @@ def trace_mog(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_r
         mog_sph.contiguous(),
         err_target
     )
-    return ray_radiance, ray_density, ray_hit_distance, ray_hits_count, g_weights, err_backprop_proxy
+    return ray_radiance, ray_density, ray_hit_distance, ray_normals, ray_hits_count, g_weights, err_backprop_proxy
 
 @torch.cuda.nvtx.range("trace_mog_grad")
-def trace_mog_grad(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd):
+def trace_mog_grad(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, ray_normals, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd, ray_normals_grd):
     return _plugin.trace_mog_bwd(
         optix_ctx.cpp_wrapper,
         frame_id,
@@ -162,6 +164,7 @@ def trace_mog_grad(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, ray_radia
         ray_radiance.contiguous(),
         ray_density.contiguous(),
         ray_hit_distance.contiguous(),
+        ray_normals.contiguous(),
         mog_pos.contiguous(),
         mog_rot.contiguous(),
         mog_scl.contiguous(),
@@ -169,7 +172,8 @@ def trace_mog_grad(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, ray_radia
         mog_sph.contiguous(),
         ray_radiance_grd.contiguous(),
         ray_density_grd.contiguous(),
-        ray_hit_distance_grd.contiguous()
+        ray_hit_distance_grd.contiguous(),
+        ray_normals_grd.contiguous()
     )
 
 @torch.cuda.nvtx.range("count_mog_hits")

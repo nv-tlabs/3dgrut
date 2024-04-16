@@ -201,7 +201,7 @@ def main(conf: DictConfig) -> None:
     ps.set_length_scale(s)
 
     # viz stateful parameters & options
-    viz_render_styles = ['color', 'density', 'distance']
+    viz_render_styles = ['color', 'density', 'distance', 'normals']
     viz_render_style_ind = 0
     viz_curr_render_size = None
     viz_curr_render_style_ind = None
@@ -255,11 +255,11 @@ def main(conf: DictConfig) -> None:
 
         with torch.no_grad():
 
-            pred_orad, pred_opacity, pred_dist, _, _, _ = optixtracer.trace_mog(optix_ctx, 0, optixtracer.OptixMogRenderOpts.DEFAULT,
+            pred_orad, pred_opacity, pred_dist, pred_nrm, _, _, _ = optixtracer.trace_mog(optix_ctx, 0, optixtracer.OptixMogRenderOpts.DEFAULT,
                     rays_ori, rays_dir,
                     gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features_flat, None)
 
-        return pred_orad, pred_opacity, pred_dist
+        return pred_orad, pred_opacity, pred_dist, pred_nrm
 
     def update_render_view_viz():
         nonlocal viz_curr_render_size, viz_curr_render_style_ind, viz_render_color_buffer, viz_render_scalar_buffer
@@ -273,7 +273,7 @@ def main(conf: DictConfig) -> None:
             viz_curr_render_style_ind = viz_render_style_ind
             viz_curr_render_size = (window_w, window_h)
 
-            if style == "color":
+            if style == "color" or style == "normals":
 
                 dummy_image = np.zeros((window_h, window_w, 4), dtype=np.float32)
 
@@ -329,7 +329,7 @@ def main(conf: DictConfig) -> None:
 
 
         # do the actual rendering
-        sple_orad, sple_odns, sple_odist = render_from_current_ps_view()
+        sple_orad, sple_odns, sple_odist, sple_onrm = render_from_current_ps_view()
 
         # print(f"rad max: {sple_orad.max()} dens max: {sple_odns.max()}")
 
@@ -345,6 +345,13 @@ def main(conf: DictConfig) -> None:
         
         elif style == "distance":
             viz_render_scalar_buffer.update_data_from_device(sple_odist.detach())
+
+        elif style == "normals":
+            sple_onrm = 0.5 * (sple_onrm + 1.0)
+            # append 1s for alpha
+            sple_onrm = torch.cat((sple_onrm + 0.001, sple_odns), dim=-1)
+            # sple_orad = torch.cat((sple_orad, sple_orad[...,0:1]), dim=-1)
+            viz_render_color_buffer.update_data_from_device(sple_onrm.detach())
 
 
     def ps_ui_callback():

@@ -1096,7 +1096,7 @@ class MixtureOfGaussians(torch.nn.Module):
             if force_sampling:
                 render_opts |= optixtracer.OptixMogRenderOpts.SAMPLING
 
-            pred_rgb, pred_opacity, pred_dist, hits_count, g_weights, err_backprop_proxy = optixtracer.trace_mog(
+            pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count, g_weights, err_backprop_proxy = optixtracer.trace_mog(
                     self.optix_ctx, frame_id, render_opts, rays_o, rays_d,
                     self.positions, self.get_rotation(), self.get_scale(),
                     self.get_density(), features, err_target)
@@ -1107,6 +1107,7 @@ class MixtureOfGaussians(torch.nn.Module):
             'pred_rgb': pred_rgb,
             'pred_opacity': pred_opacity,
             'pred_dist': pred_dist,
+            'pred_normals': pred_normals,
             'hits_count': hits_count,
             'g_weights': g_weights,
             'err_backprop_proxy': err_backprop_proxy,

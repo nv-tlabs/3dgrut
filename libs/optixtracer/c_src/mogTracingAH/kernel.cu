@@ -86,6 +86,7 @@ extern "C" __global__ void __raygen__rg()
     float3 rayRad[MOGTracingPatchSize][MOGTracingPatchSize];
     float rayTrm[MOGTracingPatchSize][MOGTracingPatchSize];
     float rayHit[MOGTracingPatchSize][MOGTracingPatchSize];
+    float3 rayNrm[MOGTracingPatchSize][MOGTracingPatchSize];
     float rayHitsCount[MOGTracingPatchSize][MOGTracingPatchSize];
     const int startIdxX = idx.x * MOGTracingPatchSize;
     const int startIdxY = idx.y * MOGTracingPatchSize;
@@ -107,6 +108,7 @@ extern "C" __global__ void __raygen__rg()
             rayRad[j][i] = make_float3(0);
             rayTrm[j][i] = 1;
             rayHit[j][i] = 0;
+            rayNrm[j][i] = make_float3(0);
             rayHitsCount[j][i] = 0;
 
             const float2 sampleMinMaxT = intersectAABB(params.aabb, rayOri[j][i], rayDir[j][i]);
@@ -218,9 +220,9 @@ extern "C" __global__ void __raygen__rg()
                         float grayDist = 0;
                         if (MoGSurfPrimitive)
                         {
-                            const float3 surfelNm = fetchSurfelNm<MOGTRACING_PRIMITIVE_TYPE>(primId%params.gPrimNumTri);
+                            const float3 surfelNm = fetchSurfelNm<MOGTRACING_PRIMITIVE_TYPE>(primId % params.gPrimNumTri);
                             const float ghitT = -dot(surfelNm, gro) / dot(surfelNm, grd);
-                            const float3 grds =  gscl * grd * ghitT;
+                            const float3 grds = gscl * grd * ghitT;
                             hitT = sqrtf(dot(grds, grds));
                             const float3 ghitPos = gro + grd * ghitT;
                             grayDist = dot(ghitPos, ghitPos);
@@ -257,6 +259,22 @@ extern "C" __global__ void __raygen__rg()
                             rayRad[k][j] += grad * weight;
                             rayHit[k][j] += hitT * weight;
                             rayTrm[k][j] *= (1 - galpha);
+
+                            if (MoGSurfPrimitive)
+                            {
+                                float3 surfelNm = fetchSurfelNm<MOGTRACING_PRIMITIVE_TYPE>(primId % params.gPrimNumTri);
+                                // resolve direction ambiguities
+                                if (dot(surfelNm, grd) > 0)
+                                {
+                                    surfelNm *= -1.0f;
+                                }
+                                rayNrm[k][j] += safe_normalize(surfelNm * gscl * invGrotMat) * weight;
+                            }
+                            else
+                            {
+                                constexpr float ellispoidSqRadius = 9.0;
+                                rayNrm[k][j] += safe_normalize((gro + grd * (dot(grd, -1 * gro) * sqrtf(ellispoidSqRadius - grayDist))) * gscl * invGrotMat);
+                            }
                         }
                     }
 
@@ -279,6 +297,10 @@ extern "C" __global__ void __raygen__rg()
             params.rayRad[idx.z][y][x][2] = rayRad[j][i].z;
             params.rayDns[idx.z][y][x][0] = 1 - rayTrm[j][i];
             params.rayHit[idx.z][y][x][0] = rayHit[j][i];
+            rayNrm[j][i] = safe_normalize(rayNrm[j][i]);
+            params.rayNrm[idx.z][y][x][0] = rayNrm[j][i].x;
+            params.rayNrm[idx.z][y][x][1] = rayNrm[j][i].y;
+            params.rayNrm[idx.z][y][x][2] = rayNrm[j][i].z;
             params.rayHitsCount[idx.z][y][x][0] = rayHitsCount[j][i];
         }
     }

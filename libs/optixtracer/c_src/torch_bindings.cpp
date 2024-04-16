@@ -479,21 +479,22 @@ std::tuple<torch::Tensor, torch::Tensor> create_camera_rays(
     return std::tuple<torch::Tensor, torch::Tensor>(rayOri, rayDir);
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrapper &stateWrapper,
-                                                                                                uint32_t frameNumber,
-                                                                                                uint32_t renderOpts,
-                                                                                                torch::Tensor rayOri,
-                                                                                                torch::Tensor rayDir,
-                                                                                                torch::Tensor mogPos,
-                                                                                                torch::Tensor mogRot,
-                                                                                                torch::Tensor mogScl,
-                                                                                                torch::Tensor mogDns,
-                                                                                                torch::Tensor mogSph)
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrapper &stateWrapper,
+                                                                                                               uint32_t frameNumber,
+                                                                                                               uint32_t renderOpts,
+                                                                                                               torch::Tensor rayOri,
+                                                                                                               torch::Tensor rayDir,
+                                                                                                               torch::Tensor mogPos,
+                                                                                                               torch::Tensor mogRot,
+                                                                                                               torch::Tensor mogScl,
+                                                                                                               torch::Tensor mogDns,
+                                                                                                               torch::Tensor mogSph)
 {
     const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
     torch::Tensor rayRad = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 3}, opts);
     torch::Tensor rayDns = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 1}, opts);
     torch::Tensor rayHit = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 1}, opts);
+    torch::Tensor rayNrm = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 3}, opts);
     torch::Tensor rayHitsCount = torch::zeros({rayOri.size(0), rayOri.size(1), rayOri.size(2), 1}, opts);
     torch::Tensor mogWeightSum = torch::zeros({mogDns.size(0), mogDns.size(1)}, opts);
 
@@ -509,6 +510,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.rayRad = packed_accessor32<float, 4>(rayRad);
     paramsHost.rayDns = packed_accessor32<float, 4>(rayDns);
     paramsHost.rayHit = packed_accessor32<float, 4>(rayHit);
+    paramsHost.rayNrm = packed_accessor32<float, 4>(rayNrm);
     paramsHost.rayHitsCount = packed_accessor32<float, 4>(rayHitsCount);
     paramsHost.mogWeightSum = packed_accessor32<float, 2>(mogWeightSum);
 
@@ -567,7 +569,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 
     CUDA_CHECK_LAST();
 
-    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(rayRad, rayDns, rayHit, rayHitsCount, mogWeightSum);
+    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(rayRad, rayDns, rayHit, rayNrm, rayHitsCount, mogWeightSum);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> trace_mog_bwd(
@@ -579,6 +581,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     torch::Tensor rayRad,
     torch::Tensor rayDns,
     torch::Tensor rayHit,
+    torch::Tensor rayNrm,
     torch::Tensor mogPos,
     torch::Tensor mogRot,
     torch::Tensor mogScl,
@@ -587,6 +590,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     torch::Tensor rayRadGrd,
     torch::Tensor rayDnsGrd,
     torch::Tensor rayHitGrd,
+    torch::Tensor rayNrmGrd,
     torch::Tensor rayError)
 {
     const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
@@ -604,6 +608,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.rayRad = packed_accessor32<float, 4>(rayRad);
     paramsHost.rayDns = packed_accessor32<float, 4>(rayDns);
     paramsHost.rayHit = packed_accessor32<float, 4>(rayHit);
+    paramsHost.rayNrm = packed_accessor32<float, 4>(rayNrm);
     paramsHost.mogPos = packed_accessor32<float, 2>(mogPos);
     paramsHost.mogRot = packed_accessor32<float, 2>(mogRot);
     paramsHost.mogScl = packed_accessor32<float, 2>(mogScl);
@@ -612,6 +617,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.rayRadGrd = packed_accessor32<float, 4>(rayRadGrd);
     paramsHost.rayDnsGrd = packed_accessor32<float, 4>(rayDnsGrd);
     paramsHost.rayHitGrd = packed_accessor32<float, 4>(rayHitGrd);
+    paramsHost.rayNrmGrd = packed_accessor32<float, 4>(rayNrmGrd);
     paramsHost.rayError = packed_accessor32<float, 4>(rayError);
     paramsHost.mogPosGrd = packed_accessor32<float, 2>(mogPosGrd);
     paramsHost.mogRotGrd = packed_accessor32<float, 2>(mogRotGrd);
