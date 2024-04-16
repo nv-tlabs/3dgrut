@@ -26,6 +26,7 @@ writer:
 export_ingp:
   enabled: false 
   force_half: false
+  checkpoint: ""
 
 model:
   density_activation: sigmoid

@@ -305,7 +305,7 @@ class MixtureOfGaussians(torch.nn.Module):
             self.set_optimizable_parameters()
         self.validate_fields()
 
-    def init_from_checkpoint(self, checkpoint: dict, setup_optimizer=True):
+    def init_from_checkpoint(self, checkpoint: dict, setup_optimizer=True, export_only=False):
         self.positions = checkpoint["positions"]
         self.rotation = checkpoint["rotation"]
         self.scale = checkpoint["scale"]
@@ -315,6 +315,9 @@ class MixtureOfGaussians(torch.nn.Module):
         self.n_active_features = checkpoint["n_active_features"]
         self.max_n_features = checkpoint["max_n_features"]
         self.scene_extent = checkpoint["scene_extent"]
+
+        if export_only:
+            return
 
         if self.progressive_training:
             self.feature_dim_increase_interval = checkpoint["feature_dim_increase_interval"]

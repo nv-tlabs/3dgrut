@@ -40,6 +40,16 @@ def jet_map(map:torch.Tensor, max_val: float) -> torch.Tensor:
 
 @hydra.main(config_path="configs", version_base=None)
 def main(conf: DictConfig) -> None:
+
+    if conf.export_ingp.checkpoint:
+        logging.info(f"Exporting a pretrained checkpoint from {conf.export_ingp.checkpoint}!")
+        model = MixtureOfGaussians(conf)
+        model.set_optix_context()
+        checkpoint = torch.load(conf.export_ingp.checkpoint)
+        model.init_from_checkpoint(checkpoint, export_only=True)
+        model.export_ingp("/tmp/export_resume.ingp", conf.export_ingp.force_half)
+        exit()
+
     # Run the training process
     n_iterations = conf.n_iterations
     val_frequency = conf.val_frequency
