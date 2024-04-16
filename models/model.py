@@ -287,7 +287,7 @@ class MixtureOfGaussians(torch.nn.Module):
 
         dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(fused_point_cloud), 1e-3)
         scales = torch.log(dist)[..., None].repeat(1, 3)
-        rots = torch.zeros((num_gsplat, 4), device=self.device)
+        rots = torch.rand((num_gsplat, 4), device=self.device)
         rots[:, 0] = 1
 
         opacities = self.density_activation_inv(self.conf.model.default_density * torch.ones((num_gsplat, 1), dtype=dtype, device=self.device))

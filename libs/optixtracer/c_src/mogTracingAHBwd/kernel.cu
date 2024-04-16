@@ -29,7 +29,7 @@ struct RayPayload
 #if MOGTRACING_SAMPLING_MODE
     unsigned int rndSeed;
 #endif
-    float2 ahHitTable[MoGTracingAHMaxNumHitPerSlab]; // hit data : x = hitT, y = gId
+    float2 ahHitTable[MoGTracingAHMaxNumHitPerSlab]; // hit data : x = hitT, y = primId
 };
 
 static __device__ __inline__ float getGaussianIndex(uint32_t primitiveIndex)
@@ -183,7 +183,8 @@ extern "C" __global__ void __raygen__rg()
         {
             transmit = 0.0f;
 
-            const uint32_t gId = float_as_uint(p.ahHitTable[i].y);
+            const uint32_t primId = float_as_uint(p.ahHitTable[i].y);
+            const uint32_t gId = getGaussianIndex(primId);
 
             float gdns = 1.0f;
 #if MOGTRACING_SAMPLING_MODE
@@ -218,8 +219,20 @@ extern "C" __global__ void __raygen__rg()
                         const float3 rayDirR = rayDir[k][j] * grotMat;
                         const float3 grdu = giscl * rayDirR;
                         const float3 grd = safe_normalize(grdu);
-                        const float3 gcrod = cross(grd, gro);
-                        const float grayDist = dot(gcrod, gcrod);
+                        float grayDist;
+                        if (MoGSurfPrimitive)
+                        {
+                            const float3 surfelNm = fetchSurfelNm<MOGTRACING_PRIMITIVE_TYPE>(primId%params.gPrimNumTri);
+                            const float ghitT = -dot(surfelNm, gro) / dot(surfelNm, grd);
+                            const float3 ghitPos = gro + grd * ghitT;
+                            grayDist = dot(ghitPos, ghitPos);
+                        }
+                        else
+                        {
+                            const float3 gcrod = cross(grd, gro);
+                            grayDist = dot(gcrod, gcrod);
+                        }
+
 #if MOGTRACING_QUADRATIC_KERNEL
                         const float gres = expf(-0.0555f * grayDist * grayDist);
 #else
@@ -330,23 +343,64 @@ extern "C" __global__ void __raygen__rg()
                             //                          = -0.5 * gres
                             const float grayDistGrd = -0.5f * gres * gresGrd;
 #endif
-                            // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-                            // ---> grayDist = dot(gcrod, gcrod)
-                            //               = gcrod.x^2 + gcrod.y^2 + gcrod.z^2
-                            // ===> d_grayDist / d_gcrod = 2*gcrod
-                            const float3 gcrodGrd = 2 * gcrod * grayDistGrd;
+                            
+                            float3 grdGrd, groGrd;
+                            if (MoGSurfPrimitive)
+                            {
+                                const float3 surfelNm = fetchSurfelNm<MOGTRACING_PRIMITIVE_TYPE>(primId%params.gPrimNumTri);
+                                const float doSurfelGro = dot(surfelNm, gro);
+                                const float dotSurfelGrd = dot(surfelNm, grd); // cannot be null otherwise no hit
+                                const float ghitT = -doSurfelGro / dotSurfelGrd;
+                                const float3 ghitPos = gro + grd * ghitT;
 
-                            // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-                            // ---> gcrod = cross(grd, gro)
-                            // ---> gcrod.x = grd.y * gro.z - grd.z * gro.y
-                            // ---> gcrod.y = grd.z * gro.x - grd.x * gro.z
-                            // ---> gcrod.z = grd.x * gro.y - grd.y * gro.x
-                            const float3 grdGrd = make_float3(gcrodGrd.z * gro.y - gcrodGrd.y * gro.z,
-                                                              gcrodGrd.x * gro.z - gcrodGrd.z * gro.x,
-                                                              gcrodGrd.y * gro.x - gcrodGrd.x * gro.y);
-                            const float3 groGrd = make_float3(gcrodGrd.y * grd.z - gcrodGrd.z * grd.y,
-                                                              gcrodGrd.z * grd.x - gcrodGrd.x * grd.z,
-                                                              gcrodGrd.x * grd.y - gcrodGrd.y * grd.x);
+                                // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                                // ---> grayDist = dot(ghitPos, ghitPos)
+                                //               = ghitPos.x^2 + ghitPos.y^2 + ghitPos.z^2
+                                // ===> d_grayDist / d_ghitPos = 2*ghitPos
+                                const float3 ghitPosGrd = 2 * ghitPos * grayDistGrd;
+
+                                // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                                // ---> ghitPos = gro + grd * ghitT
+                                //
+                                // ===> d_ghitPos / d_gro = 1
+                                // ===> d_ghitPos / d_grd = ghitT
+                                groGrd = ghitPosGrd;
+                                grdGrd = ghitT * ghitPosGrd;
+                                // ===> d_ghitPos / d_ghitT = grd
+                                const float ghitTGrd = sum(grd * ghitPosGrd);
+
+                                // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                                // ---> ghitT = -dot(surfelNm, gro) / dot(surfNm, grd)
+                                //
+                                // ===> d_ghitT / d_gro = -surfelNm / dot(surfNm, grd)
+                                // ===> d_ghitT / d_dotSurfelGrd = dot(surfelNm, gro) / dotSurfelGrd^2
+                                groGrd += (-surfelNm * ghitTGrd) /  dotSurfelGrd;
+                                const float dotSurfelGrdGrd = (doSurfelGro * ghitTGrd) /  (dotSurfelGrd * dotSurfelGrd);
+                                // ===> d_dotSurfelGrd / d_grd = surfelNm
+                                grdGrd += surfelNm * dotSurfelGrdGrd;
+                            }
+                            else
+                            {
+                                const float3 gcrod = cross(grd, gro);
+
+                                // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                                // ---> grayDist = dot(gcrod, gcrod)
+                                //               = gcrod.x^2 + gcrod.y^2 + gcrod.z^2
+                                // ===> d_grayDist / d_gcrod = 2*gcrod
+                                const float3 gcrodGrd = 2 * gcrod * grayDistGrd;
+
+                                // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                                // ---> gcrod = cross(grd, gro)
+                                // ---> gcrod.x = grd.y * gro.z - grd.z * gro.y
+                                // ---> gcrod.y = grd.z * gro.x - grd.x * gro.z
+                                // ---> gcrod.z = grd.x * gro.y - grd.y * gro.x
+                                grdGrd = make_float3(gcrodGrd.z * gro.y - gcrodGrd.y * gro.z,
+                                                     gcrodGrd.x * gro.z - gcrodGrd.z * gro.x,
+                                                     gcrodGrd.y * gro.x - gcrodGrd.x * gro.y);
+                                groGrd = make_float3(gcrodGrd.y * grd.z - gcrodGrd.z * grd.y,
+                                                     gcrodGrd.z * grd.x - gcrodGrd.x * grd.z,
+                                                     gcrodGrd.x * grd.y - gcrodGrd.y * grd.x);
+                            }
 
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                             // ---> gro = (1/gscl)*gposcr
@@ -477,7 +531,7 @@ extern "C" __global__ void __anyhit__ah()
         }
 #endif
 
-        float2 ahHit = {hitT, uint_as_float(gId)};
+        float2 ahHit = {hitT, uint_as_float(optixGetPrimitiveIndex())};
 #pragma unroll
         for (int i = 0; i < MoGTracingAHMaxNumHitPerSlab; ++i)
         {

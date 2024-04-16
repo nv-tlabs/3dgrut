@@ -142,7 +142,7 @@ namespace
     constexpr uint32_t triSurfelNumVrt = 4;
     constexpr uint32_t triSurfelNumTri = 2;
 
-    template <typename scalar_t>
+    template <typename scalar_t, bool minScaleAxis = false>
     __global__ void computeGaussianEnclosingTriSurfelKernel(
         const uint32_t gNum,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
@@ -161,7 +161,7 @@ namespace
             const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
             const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
-            const uint8_t axis = scl.y < scl.x ? (scl.z < scl.y ? 2 : 1) : (scl.z < scl.x ? 2 : 0);
+            const uint8_t axis = minScaleAxis ? (scl.y < scl.x ? (scl.z < scl.y ? 2 : 1) : (scl.z < scl.x ? 2 : 0)) : 2;
 
             const float3 triSurfelVrt[3][triSurfelNumVrt] = {
                 {make_float3(0, octaHedraDiag, 0), make_float3(0, -octaHedraDiag, 0), make_float3(0, 0, octaHedraDiag), make_float3(0, 0, -octaHedraDiag)},

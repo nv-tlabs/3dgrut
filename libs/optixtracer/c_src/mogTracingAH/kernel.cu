@@ -28,7 +28,7 @@ struct RayPayload
 #if MOGTRACING_SAMPLING_MODE
     unsigned int rndSeed;
 #endif
-    float2 ahHitTable[MoGTracingAHMaxNumHitPerSlab]; // hit data : x = hitT, y = gId
+    float2 ahHitTable[MoGTracingAHMaxNumHitPerSlab]; // hit data : x = hitT, y = primId
 };
 
 static __device__ __inline__ float getGaussianIndex(uint32_t primitiveIndex)
@@ -168,7 +168,8 @@ extern "C" __global__ void __raygen__rg()
         {
             transmit = 0.0f;
 
-            const uint32_t gId = float_as_uint(p.ahHitTable[i].y);
+            const uint32_t primId = float_as_uint(p.ahHitTable[i].y);
+            const uint32_t gId = getGaussianIndex(primId);
 
             float gdns = 1.0f;
 #if MOGTRACING_SAMPLING_MODE
@@ -212,12 +213,28 @@ extern "C" __global__ void __raygen__rg()
                         const float3 rayDirR = rayDir[k][j] * grotMat;
                         const float3 grdu = giscl * rayDirR;
                         const float3 grd = safe_normalize(grdu);
-                        const float3 gcrod = cross(grd, gro);
-                        const float grayDir = dot(gcrod, gcrod);
+
+                        float hitT;
+                        float grayDist = 0;
+                        if (MoGSurfPrimitive)
+                        {
+                            const float3 surfelNm = fetchSurfelNm<MOGTRACING_PRIMITIVE_TYPE>(primId%params.gPrimNumTri);
+                            const float ghitT = -dot(surfelNm, gro) / dot(surfelNm, grd);
+                            const float3 grds =  gscl * grd * ghitT;
+                            hitT = sqrtf(dot(grds, grds));
+                            const float3 ghitPos = gro + grd * ghitT;
+                            grayDist = dot(ghitPos, ghitPos);
+                        }
+                        else
+                        {
+                            const float3 gcrod = cross(grd, gro);
+                            grayDist = dot(gcrod, gcrod);
+                        }
+
 #if MOGTRACING_QUADRATIC_KERNEL
-                        const float gres = expf(-0.0555f * grayDir * grayDir);
+                        const float gres = expf(-0.0555f * grayDist * grayDist);
 #else
-                        const float gres = expf(-0.5f * grayDir);
+                        const float gres = expf(-0.5f * grayDist);
 #endif
                         const float galpha = fminf(gres * gdns, params.alphaMaxValue);
 
@@ -225,8 +242,11 @@ extern "C" __global__ void __raygen__rg()
                         {
                             const float weight = galpha * rayTrm[k][j];
 
-                            // Distance to the gaussian center projection on the ray
-                            const float hitT = getRayGaussianHit(gro, grd, gscl);
+                            if (!MoGSurfPrimitive)
+                            {
+                                // Distance to the gaussian center projection on the ray
+                                hitT = getRayGaussianHit(gro, grd, gscl);
+                            }
 
                             if (useGWeights)
                             {
@@ -326,7 +346,7 @@ extern "C" __global__ void __anyhit__ah()
         }
 #endif
 
-        float2 ahHit = {hitT, uint_as_float(gId)};
+        float2 ahHit = {hitT, uint_as_float(optixGetPrimitiveIndex())};
 #pragma unroll
         for (int i = 0; i < MoGTracingAHMaxNumHitPerSlab; ++i)
         {
