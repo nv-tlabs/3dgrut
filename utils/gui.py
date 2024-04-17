@@ -54,6 +54,7 @@ class GUI:
         self.live_update = True # if disabled , will skip rendering updates to accelerate background training loop
         self.viz_render_styles = ['color', 'density', 'distance', 'hits', 'normals']
         self.viz_render_style_ind = 0
+        self.viz_render_style_scale = 1.0
         self.viz_render_method_overrides = ['none', 'optix', 'torch']
         self.viz_render_method_override_ind = 0
         self.viz_curr_render_size = None
@@ -256,9 +257,9 @@ class GUI:
 
         elif style == "distance":
             if self.update_from_device:
-                self.viz_render_scalar_buffer.update_data_from_device(sple_odist.detach())
+                self.viz_render_scalar_buffer.update_data_from_device(sple_odist.detach()*self.viz_render_style_scale)
             else:
-                self.viz_render_scalar_buffer.update_data(to_np(sple_odist))
+                self.viz_render_scalar_buffer.update_data(to_np(sple_odist*self.viz_render_style_scale))
 
         elif style == "hits":
             if self.update_from_device:
@@ -320,6 +321,9 @@ class GUI:
             _, self.viz_render_show_sampling = psim.Checkbox("Show sampling", self.viz_render_show_sampling)
             
             _, self.viz_render_style_ind = psim.Combo("Style", self.viz_render_style_ind, self.viz_render_styles)
+            if self.viz_render_styles[self.viz_render_style_ind] == "distance":
+                psim.SameLine()
+                _, self.viz_render_style_scale = psim.InputFloat("scale", self.viz_render_style_scale, 0.01); 
 
             changed, self.viz_render_subsample = psim.InputInt("Subsample Factor", self.viz_render_subsample, 1)
             if changed:
