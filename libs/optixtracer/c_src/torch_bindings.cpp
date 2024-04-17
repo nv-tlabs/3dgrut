@@ -60,11 +60,6 @@ namespace
         return maxNumSlabs > 0 ? sqrt(aabbDiag_x * aabbDiag_x + aabbDiag_y * aabbDiag_y + aabbDiag_z * aabbDiag_z) / maxNumSlabs : 1e9;
     }
 
-    inline float minGaussianResponse(const float s)
-    {
-        return exp(-0.5f * s * s);
-    }
-
     class TraceFile
     {
     public:
@@ -99,7 +94,9 @@ void computeGaussianEnclosingIcosaHedron(uint32_t gNum,
                                          torch::Tensor gPos,
                                          torch::Tensor gRot,
                                          torch::Tensor gScl,
-                                         float sigmaSclTh,
+                                         torch::Tensor gDns,
+                                         float kernelMinResponse,
+                                         uint32_t opts,
                                          float3 *gPrimVrt,
                                          int3 *gPrimTri,
                                          OptixAabb *gPrimAABB,
@@ -109,7 +106,9 @@ void computeGaussianEnclosingOctaHedron(uint32_t gNum,
                                         torch::Tensor gPos,
                                         torch::Tensor gRot,
                                         torch::Tensor gScl,
-                                        float sigmaSclTh,
+                                        torch::Tensor gDns,
+                                        float kernelMinResponse,
+                                        uint32_t opts,
                                         float3 *gPrimVrt,
                                         int3 *gPrimTri,
                                         OptixAabb *gPrimAABB,
@@ -119,7 +118,9 @@ void computeGaussianEnclosingTriHexa(uint32_t gNum,
                                      torch::Tensor gPos,
                                      torch::Tensor gRot,
                                      torch::Tensor gScl,
-                                     float sigmaSclTh,
+                                     torch::Tensor gDns,
+                                     float kernelMinResponse,
+                                     uint32_t opts,
                                      float3 *gPrimVrt,
                                      int3 *gPrimTri,
                                      OptixAabb *gPrimAABB,
@@ -129,7 +130,9 @@ void computeGaussianEnclosingTriSurfel(uint32_t gNum,
                                        torch::Tensor gPos,
                                        torch::Tensor gRot,
                                        torch::Tensor gScl,
-                                       float sigmaSclTh,
+                                       torch::Tensor gDns,
+                                       float kernelMinResponse,
+                                       uint32_t opts,
                                        float3 *gPrimVrt,
                                        int3 *gPrimTri,
                                        OptixAabb *gPrimAABB,
@@ -139,7 +142,9 @@ void computeGaussianEnclosingTetraHedron(uint32_t gNum,
                                          torch::Tensor gPos,
                                          torch::Tensor gRot,
                                          torch::Tensor gScl,
-                                         float sigmaSclTh,
+                                         torch::Tensor gDns,
+                                         float kernelMinResponse,
+                                         uint32_t opts,
                                          float3 *gPrimVrt,
                                          int3 *gPrimTri,
                                          OptixAabb *gPrimAABB,
@@ -149,7 +154,9 @@ void computeGaussianEnclosingDiamond(uint32_t gNum,
                                      torch::Tensor gPos,
                                      torch::Tensor gRot,
                                      torch::Tensor gScl,
-                                     float sigmaSclTh,
+                                     torch::Tensor gDns,
+                                     float kernelMinResponse,
+                                     uint32_t opts,
                                      float3 *gPrimVrt,
                                      int3 *gPrimTri,
                                      OptixAabb *gPrimAABB,
@@ -159,7 +166,9 @@ void computeGaussianEnclosingSphere(uint32_t gNum,
                                     torch::Tensor gPos,
                                     torch::Tensor gRot,
                                     torch::Tensor gScl,
-                                    float sigmaSclTh,
+                                    torch::Tensor gDns,
+                                    float kernelMinResponse,
+                                    uint32_t opts,
                                     float3 *gPrimCenter,
                                     float *gPrimRadius,
                                     OptixAabb *gPrimAABB,
@@ -169,7 +178,9 @@ void computeGaussianEnclosingAABB(uint32_t gNum,
                                   torch::Tensor gPos,
                                   torch::Tensor gRot,
                                   torch::Tensor gScl,
-                                  float sigmaSclTh,
+                                  torch::Tensor gDns,
+                                  float kernelMinResponse,
+                                  uint32_t opts,
                                   OptixAabb *gPrimAABB,
                                   OptixAabb *gAABB,
                                   cudaStream_t stream);
@@ -194,6 +205,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
                    torch::Tensor mogPos,
                    torch::Tensor mogRot,
                    torch::Tensor mogScl,
+                   torch::Tensor mogDns,
                    unsigned int rebuild)
 {
     const uint32_t gNum = mogPos.size(0);
@@ -232,7 +244,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
         stateWrapper.pState->gPrimNumVert = 0;
         stateWrapper.pState->gPrimNumTri = 0;
 
-        computeGaussianEnclosingAABB(gNum, mogPos, mogRot, mogScl, stateWrapper.pState->gaussianSigmaThreshold,
+        computeGaussianEnclosingAABB(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                      reinterpret_cast<OptixAabb *>(stateWrapper.pState->gPrimAABB),
                                      reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr), cudaStream);
 
@@ -262,7 +274,8 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 20;
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingIcosaHedron(gNum, mogPos, mogRot, mogScl, stateWrapper.pState->gaussianSigmaThreshold,
+            computeGaussianEnclosingIcosaHedron(gNum, mogPos, mogRot, mogScl,
+                                                mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                                 reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                                 reinterpret_cast<int3 *>(stateWrapper.pState->gPrimTri),
                                                 reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr), cudaStream);
@@ -273,7 +286,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 8;
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingOctaHedron(gNum, mogPos, mogRot, mogScl, stateWrapper.pState->gaussianSigmaThreshold,
+            computeGaussianEnclosingOctaHedron(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                                reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                                reinterpret_cast<int3 *>(stateWrapper.pState->gPrimTri),
                                                reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr),
@@ -286,7 +299,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 6;
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingTriHexa(gNum, mogPos, mogRot, mogScl, stateWrapper.pState->gaussianSigmaThreshold,
+            computeGaussianEnclosingTriHexa(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                             reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                             reinterpret_cast<int3 *>(stateWrapper.pState->gPrimTri),
                                             reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr),
@@ -299,7 +312,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 2;
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingTriSurfel(gNum, mogPos, mogRot, mogScl, stateWrapper.pState->gaussianSigmaThreshold,
+            computeGaussianEnclosingTriSurfel(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                               reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                               reinterpret_cast<int3 *>(stateWrapper.pState->gPrimTri),
                                               reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr),
@@ -312,7 +325,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 4;
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingTetraHedron(gNum, mogPos, mogRot, mogScl, stateWrapper.pState->gaussianSigmaThreshold,
+            computeGaussianEnclosingTetraHedron(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                                 reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                                 reinterpret_cast<int3 *>(stateWrapper.pState->gPrimTri),
                                                 reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr), cudaStream);
@@ -323,7 +336,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 1; // number of primtive per gaussians
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingSphere(gNum, mogPos, mogRot, mogScl, stateWrapper.pState->gaussianSigmaThreshold,
+            computeGaussianEnclosingSphere(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                            reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                            reinterpret_cast<float *>(stateWrapper.pState->gPrimTri),
                                            reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr), cudaStream);
@@ -334,7 +347,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 6;
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingDiamond(gNum, mogPos, mogRot, mogScl, stateWrapper.pState->gaussianSigmaThreshold,
+            computeGaussianEnclosingDiamond(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                             reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                             reinterpret_cast<int3 *>(stateWrapper.pState->gPrimTri),
                                             reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr), cudaStream);
@@ -515,7 +528,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.mogWeightSum = packed_accessor32<float, 2>(mogWeightSum);
 
     paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
-    paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
+    paramsHost.hitMinGaussianResponse = stateWrapper.pState->minKernelResponse;
     paramsHost.alphaMaxValue = 0.99f;
     paramsHost.alphaMinThreshold = 1.0f / 255.0f;
     paramsHost.renderOpts = renderOpts;
@@ -640,7 +653,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.mogErrorBack = packed_accessor32<float, 2>(mogErrorBack);
 
     paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
-    paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
+    paramsHost.hitMinGaussianResponse = stateWrapper.pState->minKernelResponse;
     paramsHost.alphaMaxValue = 0.99f;
     paramsHost.alphaMinThreshold = 1.0f / 255.0f;
     paramsHost.renderOpts = renderOpts;
@@ -704,7 +717,7 @@ std::tuple<torch::Tensor> trace_mog_inds(OptiXStateWrapper &stateWrapper,
     paramsHost.rayHitInd = packed_accessor32<int, 4>(rayHitInd);
 
     paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
-    paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
+    paramsHost.hitMinGaussianResponse = stateWrapper.pState->minKernelResponse;
     paramsHost.alphaMaxValue = 0.99f;
     paramsHost.alphaMinThreshold = 1.0f / 255.0f;
 
@@ -751,7 +764,7 @@ torch::Tensor count_mog_hits(OptiXStateWrapper &stateWrapper,
     paramsHost.mogHitCount = packed_accessor32<float, 2>(mogHitCount);
 
     paramsHost.minTransmittance = stateWrapper.pState->minTransmittance;
-    paramsHost.hitMinGaussianResponse = minGaussianResponse(stateWrapper.pState->gaussianSigmaThreshold);
+    paramsHost.hitMinGaussianResponse = stateWrapper.pState->minKernelResponse;
     paramsHost.alphaMaxValue = 0.99f;
     paramsHost.alphaMinThreshold = 1.0f / 255.0f;
 

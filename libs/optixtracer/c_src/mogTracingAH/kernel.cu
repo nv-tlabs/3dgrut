@@ -233,7 +233,7 @@ extern "C" __global__ void __raygen__rg()
                             grayDist = dot(gcrod, gcrod);
                         }
 
-#if MOGTRACING_QUADRATIC_KERNEL
+#if MOGTRACING_TESSERACTIC_KERNEL
                         const float gres = expf(-0.0555f * grayDist * grayDist);
 #else
                         const float gres = expf(-0.5f * grayDist);

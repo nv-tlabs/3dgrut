@@ -15,7 +15,7 @@
 struct OptiXState
 {
     cudaEvent_t timingEvents[2];
-    
+
     OptixDeviceContext context;
     OptixTraversableHandle gasHandle;
     CUdeviceptr gasBuffer;
@@ -35,7 +35,7 @@ struct OptiXState
     bool topKHits;
     uint32_t patchSize;
     uint32_t sphDegree;
-    float gaussianSigmaThreshold;
+    float minKernelResponse;
     float minTransmittance;
     uint32_t maxHitsReturned;
     
@@ -105,7 +105,7 @@ public:
         bool topKHits,
         uint32_t patchSize,
         uint32_t sphDegree,
-        float gaussianSigmaThreshold,
+        float minKernelResponse,
         float minTransmittance,
         uint32_t maxHitsReturned);
     ~OptiXStateWrapper(void);

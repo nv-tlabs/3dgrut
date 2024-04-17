@@ -7,6 +7,7 @@
 // license agreement from NVIDIA CORPORATION is strictly prohibited.
 //
 #include "math_utils.h"
+#include "mogTracing/paramDefs.h"
 
 #include <torch/extension.h>
 
@@ -16,6 +17,12 @@
 
 namespace
 {
+    __device__ inline float kernelScale(float density, float minResponse, uint32_t opts)
+    {
+        const float scale = opts & MOGTracingAdaptiveKernelClamping ? density : 1.0f;
+        return scale <= minResponse ? 0.0f : (opts & MOGTracingTesseracticKernel ? powf(logf(scale / minResponse) / 0.0555f, 0.25f) : sqrtf(logf(scale / minResponse) / 0.5f));
+    }
+
     constexpr uint32_t octaHedronNumVrt = 6;
     constexpr uint32_t octaHedronNumTri = 8;
     //
@@ -32,7 +39,9 @@ namespace
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
-        const float sigmaSclTh,
+        const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gDns,
+        const float kernelMinResponse,
+        const uint32_t opts,
         float3 *__restrict__ gPrimVrt,
         int3 *__restrict__ gPrimTri,
         OptixAabb *gPrimAABB)
@@ -45,18 +54,19 @@ namespace
 
             float33 rot;
             invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
-            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
+            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]);
             const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
             const float3 octaHedronVrt[octaHedronNumVrt] = {
                 make_float3(0, 0, -octaHedraDiag), make_float3(0, octaHedraDiag, 0), make_float3(-octaHedraDiag, 0, 0),
                 make_float3(0, -octaHedraDiag, 0), make_float3(octaHedraDiag, 0, 0), make_float3(0, 0, octaHedraDiag)};
 
+            const float3 kscl = kernelScale(gDns[idx][0], kernelMinResponse, opts) * scl;
 #pragma unroll
             for (int i = 0; i < octaHedronNumVrt; ++i)
             {
                 float3 &vrt = gPrimVrt[sVertIdx + i];
-                vrt = (octaHedronVrt[i] * scl) * rot + trans;
+                vrt = (octaHedronVrt[i] * kscl) * rot + trans;
                 if (gPrimAABB)
                 {
                     atomicMinFloat(&gPrimAABB[0].minX, vrt.x);
@@ -90,7 +100,9 @@ namespace
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
-        const float sigmaSclTh,
+        const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gDns,
+        const float kernelMinResponse,
+        const uint32_t opts,
         float3 *__restrict__ gPrimVrt,
         int3 *__restrict__ gPrimTri,
         OptixAabb *gPrimAABB)
@@ -100,7 +112,7 @@ namespace
         {
             float33 rot;
             invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
-            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
+            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]);
             const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
             const float3 triHexaVrt[triHexaNumVrt] = {
@@ -109,11 +121,12 @@ namespace
 
             const uint32_t sVertIdx = triHexaNumVrt * idx;
             const uint32_t sTriIdx = triHexaNumTri * idx;
+            const float3 kscl = kernelScale(gDns[idx][0], kernelMinResponse, opts) * scl;
 #pragma unroll
             for (int i = 0; i < triHexaNumVrt; ++i)
             {
                 float3 &vrt = gPrimVrt[sVertIdx + i];
-                vrt = (triHexaVrt[i] * scl) * rot + trans;
+                vrt = (triHexaVrt[i] * kscl) * rot + trans;
                 if (gPrimAABB)
                 {
                     atomicMinFloat(&gPrimAABB[0].minX, vrt.x);
@@ -148,7 +161,9 @@ namespace
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
-        const float sigmaSclTh,
+        const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gDns,
+        const float kernelMinResponse,
+        const uint32_t opts,
         float3 *__restrict__ gPrimVrt,
         int3 *__restrict__ gPrimTri,
         OptixAabb *gPrimAABB)
@@ -158,7 +173,7 @@ namespace
         {
             float33 rot;
             invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
-            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
+            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]);
             const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
             const uint8_t axis = minScaleAxis ? (scl.y < scl.x ? (scl.z < scl.y ? 2 : 1) : (scl.z < scl.x ? 2 : 0)) : 2;
@@ -170,11 +185,12 @@ namespace
 
             const uint32_t sVertIdx = triSurfelNumVrt * idx;
             const uint32_t sTriIdx = triSurfelNumTri * idx;
+            const float3 kscl = kernelScale(gDns[idx][0], kernelMinResponse, opts) * scl;
 #pragma unroll
             for (int i = 0; i < triSurfelNumVrt; ++i)
             {
                 float3 &vrt = gPrimVrt[sVertIdx + i];
-                vrt = (triSurfelVrt[axis][i] * scl) * rot + trans;
+                vrt = (triSurfelVrt[axis][i] * kscl) * rot + trans;
                 if (gPrimAABB)
                 {
                     atomicMinFloat(&gPrimAABB[0].minX, vrt.x);
@@ -223,7 +239,9 @@ namespace
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
-        const float sigmaSclTh,
+        const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gDns,
+        const float kernelMinResponse,
+        const uint32_t opts,
         float3 *__restrict__ gPrimVrt,
         int3 *__restrict__ gPrimTri,
         OptixAabb *gPrimAABB)
@@ -236,7 +254,7 @@ namespace
 
             float33 rot;
             invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
-            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
+            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]);
             const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
             const float3 tetraHedronVrt[tetraHedronNumVrt] = {
@@ -245,11 +263,12 @@ namespace
                 make_float3(0, 0, tetraHedraHeight - tetraHedraInRadius),
                 make_float3(0.5 * tetraHedraEdge, -tetraHedraFaceInRadius, -1)};
 
+            const float3 kscl = kernelScale(gDns[idx][0], kernelMinResponse, opts) * scl;
 #pragma unroll
             for (int i = 0; i < tetraHedronNumVrt; ++i)
             {
                 float3 &vrt = gPrimVrt[sVertIdx + i];
-                vrt = (tetraHedronVrt[i] * scl) * rot + trans;
+                vrt = (tetraHedronVrt[i] * kscl) * rot + trans;
                 if (gPrimAABB)
                 {
                     atomicMinFloat(&gPrimAABB[0].minX, vrt.x);
@@ -297,7 +316,9 @@ namespace
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
-        const float sigmaSclTh,
+        const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gDns,
+        const float kernelMinResponse,
+        const uint32_t opts,
         float3 *__restrict__ gPrimVrt,
         int3 *__restrict__ gPrimTri,
         OptixAabb *gPrimAABB)
@@ -310,7 +331,7 @@ namespace
 
             float33 rot;
             invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
-            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
+            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]);
             const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
             const float3 diamondVrt[diamondNumVrt] = {make_float3(0, diamondHeight, 0), make_float3(0, -diamondHeight, 0),
@@ -318,11 +339,12 @@ namespace
                                                       make_float3(0, 0, diamondFaceHeight - 1),
                                                       make_float3(0.5 * diamondEdge, 0, -1)};
 
+            const float3 kscl = kernelScale(gDns[idx][0], kernelMinResponse, opts) * scl;
 #pragma unroll
             for (int i = 0; i < diamondNumVrt; ++i)
             {
                 float3 &vrt = gPrimVrt[sVertIdx + i];
-                vrt = (diamondVrt[i] * scl) * rot + trans;
+                vrt = (diamondVrt[i] * kscl) * rot + trans;
                 if (gPrimAABB)
                 {
                     atomicMinFloat(&gPrimAABB[0].minX, vrt.x);
@@ -354,7 +376,9 @@ namespace
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
-        const float sigmaSclTh,
+        const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gDns,
+        const float kernelMinResponse,
+        const uint32_t opts,
         float3 *__restrict__ gPrimCenter,
         float *__restrict__ gPrimRadius,
         OptixAabb *gPrimAABB)
@@ -363,7 +387,7 @@ namespace
         if (idx < gNum)
         {
             gPrimCenter[idx] = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
-            gPrimRadius[idx] = fmaxf(gScl[idx][0], fmaxf(gScl[idx][1], gScl[idx][2])) * sigmaSclTh;
+            gPrimRadius[idx] = fmaxf(gScl[idx][0], fmaxf(gScl[idx][1], gScl[idx][2])) * kernelScale(gDns[idx][0], kernelMinResponse, opts);
 
             if (gPrimAABB)
             {
@@ -430,7 +454,9 @@ namespace
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
-        const float sigmaSclTh,
+        const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gDns,
+        const float kernelMinResponse,
+        const uint32_t opts,
         float3 *__restrict__ gPrimVrt,
         int3 *__restrict__ gPrimTri,
         OptixAabb *gPrimAABB)
@@ -443,7 +469,7 @@ namespace
 
             float33 rot;
             invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
-            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh * icosaVrtScale;
+            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]);
             const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
             const float3 icosaHedronVrt[icosaHedronNumVrt] = {
@@ -452,6 +478,7 @@ namespace
                 make_float3(goldenRatio, 0, 1), make_float3(0, -1, goldenRatio), make_float3(-1, -goldenRatio, 0),
                 make_float3(0, -1, -goldenRatio), make_float3(goldenRatio, 0, -1), make_float3(1, -goldenRatio, 0)};
 
+            const float3 kscl = kernelScale(gDns[idx][0], kernelMinResponse, opts) * scl * icosaVrtScale;
 #pragma unroll
             for (int i = 0; i < icosaHedronNumVrt; ++i)
             {
@@ -492,7 +519,9 @@ namespace
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
         const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
-        const float sigmaSclTh,
+        const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gDns,
+        const float kernelMinResponse,
+        const uint32_t opts,
         OptixAabb *__restrict__ gPrimAABB,
         OptixAabb *gAABB)
     {
@@ -501,7 +530,7 @@ namespace
         {
             float33 rot;
             invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
-            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]) * sigmaSclTh;
+            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]);
             const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
             const float3 aabbVrt[aabbNumVrt] = {make_float3(-1, -1, -1), make_float3(-1, -1, 1), make_float3(-1, 1, -1),
@@ -509,10 +538,11 @@ namespace
                                                 make_float3(1, 1, -1), make_float3(1, 1, 1)};
 
             OptixAabb &aabb = gPrimAABB[idx];
+            const float3 kscl = kernelScale(gDns[idx][0], kernelMinResponse, opts) * scl;
 #pragma unroll
             for (int i = 0; i < aabbNumVrt; ++i)
             {
-                const float3 vrt = (aabbVrt[i] * scl) * rot + trans;
+                const float3 vrt = (aabbVrt[i] * kscl) * rot + trans;
                 if (i == 0)
                 {
                     aabb.minX = vrt.x;
@@ -573,7 +603,9 @@ void computeGaussianEnclosingOctaHedron(uint32_t gNum,
                                         torch::Tensor gPos,
                                         torch::Tensor gRot,
                                         torch::Tensor gScl,
-                                        float sigmaSclTh,
+                                        torch::Tensor gDns,
+                                        float kernelMinResponse,
+                                        uint32_t opts,
                                         float3 *gPrimVrt,
                                         int3 *gPrimTri,
                                         OptixAabb *gPrimAABB,
@@ -588,14 +620,17 @@ void computeGaussianEnclosingOctaHedron(uint32_t gNum,
                                                                   <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                    gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                    gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                                                                                                   sigmaSclTh, gPrimVrt, gPrimTri, gPrimAABB); }));
+                                                                                                   gDns.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                   kernelMinResponse, opts, gPrimVrt, gPrimTri, gPrimAABB); }));
 }
 
 void computeGaussianEnclosingIcosaHedron(uint32_t gNum,
                                          torch::Tensor gPos,
                                          torch::Tensor gRot,
                                          torch::Tensor gScl,
-                                         float sigmaSclTh,
+                                         torch::Tensor gDns,
+                                         float kernelMinResponse,
+                                         uint32_t opts,
                                          float3 *gPrimVrt,
                                          int3 *gPrimTri,
                                          OptixAabb *gPrimAABB,
@@ -610,14 +645,17 @@ void computeGaussianEnclosingIcosaHedron(uint32_t gNum,
                                                                    <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                     gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                     gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                                                                                                    sigmaSclTh, gPrimVrt, gPrimTri, gPrimAABB); }));
+                                                                                                    gDns.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                    kernelMinResponse, opts, gPrimVrt, gPrimTri, gPrimAABB); }));
 }
 
 void computeGaussianEnclosingTetraHedron(uint32_t gNum,
                                          torch::Tensor gPos,
                                          torch::Tensor gRot,
                                          torch::Tensor gScl,
-                                         float sigmaSclTh,
+                                         torch::Tensor gDns,
+                                         float kernelMinResponse,
+                                         uint32_t opts,
                                          float3 *gPrimVrt,
                                          int3 *gPrimTri,
                                          OptixAabb *gPrimAABB,
@@ -632,14 +670,17 @@ void computeGaussianEnclosingTetraHedron(uint32_t gNum,
                                                                    <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                     gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                     gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                                                                                                    sigmaSclTh, gPrimVrt, gPrimTri, gPrimAABB); }));
+                                                                                                    gDns.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                    kernelMinResponse, opts, gPrimVrt, gPrimTri, gPrimAABB); }));
 }
 
 void computeGaussianEnclosingDiamond(uint32_t gNum,
                                      torch::Tensor gPos,
                                      torch::Tensor gRot,
                                      torch::Tensor gScl,
-                                     float sigmaSclTh,
+                                     torch::Tensor gDns,
+                                     float kernelMinResponse,
+                                     uint32_t opts,
                                      float3 *gPrimVrt,
                                      int3 *gPrimTri,
                                      OptixAabb *gPrimAABB,
@@ -654,14 +695,17 @@ void computeGaussianEnclosingDiamond(uint32_t gNum,
                                                                <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                 gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                 gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                                                                                                sigmaSclTh, gPrimVrt, gPrimTri, gPrimAABB); }));
+                                                                                                gDns.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                kernelMinResponse, opts, gPrimVrt, gPrimTri, gPrimAABB); }));
 }
 
 void computeGaussianEnclosingSphere(uint32_t gNum,
                                     torch::Tensor gPos,
                                     torch::Tensor gRot,
                                     torch::Tensor gScl,
-                                    float sigmaSclTh,
+                                    torch::Tensor gDns,
+                                    float kernelMinResponse,
+                                    uint32_t opts,
                                     float3 *gPrimCenter,
                                     float *gPrimRadius,
                                     OptixAabb *gPrimAABB,
@@ -676,7 +720,8 @@ void computeGaussianEnclosingSphere(uint32_t gNum,
                                                               <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                                                                                               sigmaSclTh, gPrimCenter, gPrimRadius, gPrimAABB); }));
+                                                                                               gDns.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                               kernelMinResponse, opts, gPrimCenter, gPrimRadius, gPrimAABB); }));
 }
 
 void copyGaussianEnclosingPrimitives(uint32_t gNum,
@@ -702,7 +747,9 @@ void computeGaussianEnclosingAABB(uint32_t gNum,
                                   torch::Tensor gPos,
                                   torch::Tensor gRot,
                                   torch::Tensor gScl,
-                                  float sigmaSclTh,
+                                  torch::Tensor gDns,
+                                  float kernelMinResponse,
+                                  uint32_t opts,
                                   OptixAabb *gPrimAABB,
                                   OptixAabb *gAABB,
                                   cudaStream_t stream)
@@ -715,14 +762,17 @@ void computeGaussianEnclosingAABB(uint32_t gNum,
                                                                                             gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                             gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                             gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                                                                                            sigmaSclTh, gPrimAABB, gAABB); }));
+                                                                                            gDns.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                            kernelMinResponse, opts, gPrimAABB, gAABB); }));
 }
 
 void computeGaussianEnclosingTriHexa(uint32_t gNum,
                                      torch::Tensor gPos,
                                      torch::Tensor gRot,
                                      torch::Tensor gScl,
-                                     float sigmaSclTh,
+                                     torch::Tensor gDns,
+                                     float kernelMinResponse,
+                                     uint32_t opts,
                                      float3 *gPrimVrt,
                                      int3 *gPrimTri,
                                      OptixAabb *gPrimAABB,
@@ -737,14 +787,17 @@ void computeGaussianEnclosingTriHexa(uint32_t gNum,
                                                                <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                 gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                 gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                                                                                                sigmaSclTh, gPrimVrt, gPrimTri, gPrimAABB); }));
+                                                                                                gDns.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                kernelMinResponse, opts, gPrimVrt, gPrimTri, gPrimAABB); }));
 }
 
 void computeGaussianEnclosingTriSurfel(uint32_t gNum,
                                        torch::Tensor gPos,
                                        torch::Tensor gRot,
                                        torch::Tensor gScl,
-                                       float sigmaSclTh,
+                                       torch::Tensor gDns,
+                                       float kernelMinResponse,
+                                       uint32_t opts,
                                        float3 *gPrimVrt,
                                        int3 *gPrimTri,
                                        OptixAabb *gPrimAABB,
@@ -759,7 +812,8 @@ void computeGaussianEnclosingTriSurfel(uint32_t gNum,
                                                                  <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                   gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                                                                                                   gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                                                                                                  sigmaSclTh, gPrimVrt, gPrimTri, gPrimAABB); }));
+                                                                                                  gDns.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                  kernelMinResponse, opts, gPrimVrt, gPrimTri, gPrimAABB); }));
 }
 
 void generatePinholeCameraRays(int2 resolution, float2 tanFoV, const float4 *invViewMatrix, float3 *rayOri, float3 *rayDir, cudaStream_t stream)

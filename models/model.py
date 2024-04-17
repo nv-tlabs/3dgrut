@@ -131,13 +131,17 @@ class MixtureOfGaussians(torch.nn.Module):
         torch.zeros(1, device=self.device) # Create a dummy tensor to force cuda context init
         self.optix_ctx = optixtracer.OptiXContext(
             params = optixtracer.OptixMogTracingParams(
-                hit_mode = optixtracer.OptixMogTracingParams.pack_hit_mode(self.conf.render.kernel_function, self.conf.render.train_hit_sampling),
+                hit_mode = optixtracer.OptixMogTracingParams.pack_hit_mode(
+                    self.conf.render.kernel_function, 
+                    self.conf.render.train_hit_sampling, 
+                    self.conf.render.adaptive_kernel_clamping
+                ),
                 max_hit_per_slab = self.conf.render.max_hit_per_slab,
                 max_num_slabs = self.conf.render.max_num_slabs,
                 topk_hits = self.conf.render.topk_hits,
                 patch_size = self.conf.render.patch_size,
                 sph_degree = 0, # Dummy, dynamically controlled
-                gaussian_sigma_threshold = self.conf.render.gaussian_sigma_threshold,
+                min_kernel_response = self.conf.render.min_kernel_response,
                 min_transmittance = self.conf.render.min_transmittance,
                 max_hits_returned=self.conf.render.max_hits_returned,
                 primitive_type = optixtracer.OptixMogTracingParams.primitive_type_from_str(self.conf.render.primitive_type)
@@ -549,8 +553,15 @@ class MixtureOfGaussians(torch.nn.Module):
 
     def build_bvh(self, rebuild_bvh=True):
         with torch.cuda.nvtx.range(f"build-bvh-full-build-{rebuild_bvh}"):
-            rebuild_bvh = rebuild_bvh or self.num_update_bvh >= self.conf.render.max_consecutive_bvh_update
-            optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), rebuild_bvh)
+            rebuild_bvh = rebuild_bvh or self.conf.adaptive_kernel_clamping or self.num_update_bvh >= self.conf.render.max_consecutive_bvh_update
+            optixtracer.build_mog_bvh(
+                self.optix_ctx, 
+                self.positions, 
+                self.rotation_activation(self.rotation), 
+                self.scale_activation(self.scale), 
+                self.density_activation(self.density), 
+                rebuild_bvh
+            )
             self.num_update_bvh = 0 if rebuild_bvh else self.num_update_bvh + 1
 
     def increase_num_active_features(self) -> None:

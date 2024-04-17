@@ -218,6 +218,7 @@ def build_mog_bvh(
         mog_pos,
         mog_rot,
         mog_scl,
+        mog_dns,
         rebuild
 ):
     _plugin.build_mog_bvh(
@@ -225,6 +226,7 @@ def build_mog_bvh(
         mog_pos.view(-1, 3).contiguous(),
         mog_rot.view(-1, 4).contiguous(),
         mog_scl.view(-1, 3).contiguous(),
+        mog_dns.view(-1, 1).contiguous(),
         rebuild
     )
 
@@ -249,10 +251,11 @@ class OptixMogPrimitive(IntEnum):
 
 class OptixMogRenderOpts(IntEnum):
   NONE = 0
-  USE_GWEIGHTS = 1
-  SAMPLING = 2
-  QUADRATIC_KERNEL = 4
-  ENABLE_TIMING = 8
+  USE_GWEIGHTS = 1 # MOGRenderUseGWeights
+  SAMPLING = 2 # MOGTracingSampling / MOGRenderDnsHitSampling
+  TESSERACTIC_KERNEL = 4 # MOGTracingTesseracticKernel / MOGRenderTesseracticKernel
+  ENABLE_TIMING = 8 # MOGRenderEnableTiming
+  ADAPTIVE_KERNEL_SAMPLING = 8 # MOGTracingAdaptiveKernelClamping
   DEFAULT = NONE
 
 @dataclass
@@ -265,17 +268,19 @@ class OptixMogTracingParams:
     topk_hits: bool=False       # If true do not respawn rays, just keep the first max_hit_per_slab gaussians
     patch_size: int=1           # tile size (best performances achieve with 3 but need COHERENT rays inputs)
     sph_degree: int=3           # spherical harmonics degree
-    gaussian_sigma_threshold: float=3.0 # sigma factor to decide the size of the octahedron enveloppe
-    min_transmittance: float=0.03       # minimum transmittance at which we stop gathering gaussians
+    min_kernel_response: float=0.0113 # minimum kernel response which decide the size of the primitive enveloppe
+    min_transmittance: float=0.001   # minimum transmittance at which we stop gathering gaussians
     max_hits_returned : int=64       # total number of hits returned
     
     @staticmethod
-    def pack_hit_mode(gaussian_function:str, sampling_mode:bool):
+    def pack_hit_mode(gaussian_function:str, sampling_mode:bool, adaptive_kernel_clamping: bool):
         hit_mode = int(OptixMogRenderOpts.NONE)
         if gaussian_function=="exp-p4-dist":
-            hit_mode = hit_mode | OptixMogRenderOpts.QUADRATIC_KERNEL
+            hit_mode = hit_mode | OptixMogRenderOpts.TESSERACTIC_KERNEL
         if sampling_mode:
             hit_mode = hit_mode | OptixMogRenderOpts.SAMPLING
+        if adaptive_kernel_clamping:
+            hit_mode = hit_mode | OptixMogRenderOpts.ADAPTIVE_KERNEL_SAMPLING
         return hit_mode
 
     @staticmethod
@@ -328,7 +333,7 @@ class OptiXContext:
             params.topk_hits,
             params.patch_size,
             params.sph_degree,
-            params.gaussian_sigma_threshold,
+            params.min_kernel_response,
             params.min_transmittance,
             params.max_hits_returned
         )

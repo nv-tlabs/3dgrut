@@ -386,7 +386,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
                                      bool topKHits,
                                      uint32_t patchSize,
                                      uint32_t sphDegree,
-                                     float gaussianSigmaThreshold,
+                                     float minKernelResponse,
                                      float minTransmittance,
                                      uint32_t maxHitsReturned)
 {
@@ -422,7 +422,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
     pState->topKHits = topKHits;
     pState->patchSize = patchSize;
     pState->sphDegree = sphDegree;
-    pState->gaussianSigmaThreshold = gaussianSigmaThreshold;
+    pState->minKernelResponse = minKernelResponse;
     pState->minTransmittance = minTransmittance;
     pState->maxHitsReturned = maxHitsReturned;
     
@@ -438,7 +438,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
     {
         defines.emplace_back("-DMOGTRACING_HIT_MODE=" + std::to_string(pState->hitMode));
         defines.emplace_back("-DMOGTRACING_SAMPLING_MODE=" + std::to_string(pState->hitMode & MOGTracingSampling));
-        defines.emplace_back("-DMOGTRACING_QUADRATIC_KERNEL=" + std::to_string(pState->hitMode & MOGTracingQuadraticKernel));
+        defines.emplace_back("-DMOGTRACING_TESSERACTIC_KERNEL=" + std::to_string(pState->hitMode & MOGTracingTesseracticKernel));
         defines.emplace_back("-DMOGTRACING_MAXNUMHITS_PER_SLAB=" + std::to_string(pState->maxHitsPerSlab));
         defines.emplace_back("-DMOGTRACING_PATCH_SIZE=" + std::to_string(pState->patchSize));
         defines.emplace_back("-DMOGTRACING_SPH_DEGREE=" + std::to_string(pState->sphDegree));

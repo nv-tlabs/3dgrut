@@ -13,7 +13,8 @@ enum MOGTracingMode
     MOGTracingModeNone = 0,
     MOGTracingGaussianHit = 1<<0, ///< use the position on the ray with highest gaussian response
     MOGTracingSampling = 1<<1, ///< sampling mode
-    MOGTracingQuadraticKernel = 1<<2, 
+    MOGTracingTesseracticKernel = 1<<2, 
+    MOGTracingAdaptiveKernelClamping = 1<<3, 
     MOGTracingDefaultMode = MOGTracingModeNone
 };
 
@@ -22,7 +23,7 @@ enum MOGRenderOpts
     MOGRenderNone = 0,
     MOGRenderUseGWeights = 1<<0, 
     MOGRenderDnsHitSampling = 1<<1, 
-    MOGRenderQuadraticKernel = 1<<2, 
+    MOGRenderTesseracticKernel = 1<<2, 
     MOGRenderEnableTiming = 1<<3, 
     MOGRenderDefault = MOGRenderNone
 };

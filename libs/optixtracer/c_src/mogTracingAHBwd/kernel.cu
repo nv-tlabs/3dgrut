@@ -233,7 +233,7 @@ extern "C" __global__ void __raygen__rg()
                             grayDist = dot(gcrod, gcrod);
                         }
 
-#if MOGTRACING_QUADRATIC_KERNEL
+#if MOGTRACING_TESSERACTIC_KERNEL
                         const float gres = expf(-0.0555f * grayDist * grayDist);
 #else
                         const float gres = expf(-0.5f * grayDist);
@@ -330,7 +330,7 @@ extern "C" __global__ void __raygen__rg()
                                         rayTrm[k][j] * (grad.y - residualRayRad.y) * rayRadGrd[k][j].y +
                                         rayTrm[k][j] * (grad.z - residualRayRad.z) * rayRadGrd[k][j].z);
 
-#if MOGTRACING_QUADRATIC_KERNEL
+#if MOGTRACING_TESSERACTIC_KERNEL
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                             // ---> gres = exp(-0.0555 * grayDist * grayDist)
                             // ===> d_gres / d_grayDist = -0.111 * grayDist * exp(-0.555 * grayDist * grayDist)

@@ -36,16 +36,20 @@ def main(conf: DictConfig) -> None:
     torch.zeros(1, device=DEFAULT_DEVICE) # Create a dummy tensor to force cuda context init
     optix_ctx = optixtracer.OptiXContext(
         params = optixtracer.OptixMogTracingParams(
-            hit_mode = optixtracer.OptixMogTracingParams.pack_hit_mode(conf.render.kernel_function, conf.render.train_hit_sampling),
-                max_hit_per_slab = conf.render.max_hit_per_slab,
-                max_num_slabs = conf.render.max_num_slabs,
-                topk_hits = conf.render.topk_hits,
-                patch_size = conf.render.patch_size,
-                sph_degree = 0, # Dummy, dynamically controlled
-                gaussian_sigma_threshold = conf.render.gaussian_sigma_threshold,
-                min_transmittance = conf.render.min_transmittance,
-                max_hits_returned=conf.render.max_hits_returned,
-                primitive_type = optixtracer.OptixMogTracingParams.primitive_type_from_str(conf.render.primitive_type)
+            hit_mode = optixtracer.OptixMogTracingParams.pack_hit_mode(
+                conf.render.kernel_function, 
+                conf.render.train_hit_sampling,
+                conf.render.adaptive_kernel_clamping
+            ),
+            max_hit_per_slab = conf.render.max_hit_per_slab,
+            max_num_slabs = conf.render.max_num_slabs,
+            topk_hits = conf.render.topk_hits,
+            patch_size = conf.render.patch_size,
+            sph_degree = 0, # Dummy, dynamically controlled
+            min_kernel_response = conf.render.min_kernel_response,
+            min_transmittance = conf.render.min_transmittance,
+            max_hits_returned=conf.render.max_hits_returned,
+            primitive_type = optixtracer.OptixMogTracingParams.primitive_type_from_str(conf.render.primitive_type)
         )
     )
 
@@ -80,7 +84,7 @@ def main(conf: DictConfig) -> None:
         gauss_features = torch.cat((gauss_features, new_feat), dim=0)
         gauss_rot = torch.nn.functional.normalize(gauss_rot, dim=-1)
 
-        optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, True)
+        optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, gauss_den, True)
         gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
         torch.cuda.current_stream().synchronize()
         
@@ -100,7 +104,7 @@ def main(conf: DictConfig) -> None:
         gauss_scale = gauss_scale[:-1,:]
         gauss_features = gauss_features[:-1,...]
         
-        optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, True)
+        optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, gauss_den, True)
         gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
         torch.cuda.current_stream().synchronize()
         
@@ -178,7 +182,7 @@ def main(conf: DictConfig) -> None:
 
         if any_changed:
             gauss_rot = torch.nn.functional.normalize(gauss_rot, dim=-1)
-            optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, True)
+            optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, gauss_den, True)
             gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
             torch.cuda.current_stream().synchronize()
 
