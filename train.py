@@ -47,7 +47,7 @@ def main(conf: DictConfig) -> None:
         model.set_optix_context()
         checkpoint = torch.load(conf.export_ingp.checkpoint)
         model.init_from_checkpoint(checkpoint, export_only=True)
-        model.export_ingp("/tmp/export_resume.ingp", conf.export_ingp.force_half)
+        model.export_ingp(conf.export_ingp.checkpoint_outpath, conf.export_ingp.force_half)
         exit()
 
     # Run the training process
@@ -165,6 +165,10 @@ def main(conf: DictConfig) -> None:
                     pbar.set_description("Validation:" )
                     val_psnr = []
                     val_loss = []
+                    val_inference_time = []
+                    val_hits_min = []
+                    val_hits_max = []
+                    val_hits_mean = []
                     for batch in pbar:
                         with torch.cuda.nvtx.range(f"train.validation_step_{global_step}"):
                             with torch.no_grad():
@@ -172,11 +176,17 @@ def main(conf: DictConfig) -> None:
                                 rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
 
                                 # Compute the outputs of a single batch
+                                it_start.record()
                                 outputs = model(rays_ori, rays_dir, train=False)
+                                it_end.record()
 
                                 # Compute the loss
                                 val_loss.append(torch.abs(outputs['pred_rgb'] - rgb_gt).mean().item())
                                 val_psnr.append(criterions["psnr"](outputs['pred_rgb'], rgb_gt).item())
+                                val_hits_min.append(outputs['hits_count'].min().cpu())
+                                val_hits_max.append(outputs['hits_count'].max().cpu())
+                                val_hits_mean.append(outputs['hits_count'].mean().cpu())
+                                val_inference_time.append( it_start.elapsed_time(it_end))
 
                                 pbar.set_postfix({'iteration': val_iteration, 'psnr': val_psnr[-1], 'loss': val_loss[-1]})
 
@@ -190,10 +200,12 @@ def main(conf: DictConfig) -> None:
                     writer.add_scalar("psnr/val", np.mean(val_psnr), global_step)
                     writer.add_scalar("loss_l1/val", np.mean(val_loss), global_step)
 
-                    writer.add_scalar("hits/min", outputs['hits_count'].min().cpu(), global_step)
-                    writer.add_scalar("hits/mean", outputs['hits_count'].mean().cpu(), global_step)
-                    writer.add_scalar("hits/std", outputs['hits_count'].std().cpu(), global_step)
+                    writer.add_scalar("hits/min", np.mean(val_hits_min), global_step)
+                    writer.add_scalar("hits/max", np.mean(val_hits_min), global_step)
+                    writer.add_scalar("hits/mean", np.mean(val_hits_min), global_step)
 
+                    writer.add_scalar("time/val/inference",  np.mean(val_inference_time), global_step)
+                    
 
                     print(f"Validation: {np.mean(val_psnr):.3f}")
 

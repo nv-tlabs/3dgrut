@@ -27,6 +27,7 @@ export_ingp:
   enabled: false 
   force_half: false
   checkpoint: ""
+  checkpoint_outpath: "/tmp/export_checkpoint.ingp"
 
 model:
   density_activation: sigmoid

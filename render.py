@@ -146,6 +146,11 @@ class Renderer:
             os.makedirs(output_path_gt, exist_ok=True)
         
         psnr = []
+
+        it_start = torch.cuda.Event(enable_timing=True)
+        it_end = torch.cuda.Event(enable_timing=True)
+        inference_time = []
+
         iteration = 0
         with tqdm(self.dataloader) as pbar:
             for batch in pbar:
@@ -153,7 +158,9 @@ class Renderer:
                     gpu_batch = move_to_gpu(batch)
                     rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
                     # Compute the outputs of a single batch
+                    it_start.record()
                     outputs = self.model(rays_ori, rays_dir)
+                    it_end.record()
                     
                     # The values are already alpha composited with the background
                     rgb_pred = outputs['pred_rgb']
@@ -170,17 +177,22 @@ class Renderer:
                     # Compute the loss
                     psnr.append(criterions["psnr"](rgb_pred, rgb_gt).item())
 
+                    # Record the time
+                    inference_time.append( it_start.elapsed_time(it_end))
+
                     pbar.set_postfix({'iteration': iteration, 'psnr': psnr[-1]})
                     iteration += 1
 
             mean_psnr = np.mean(psnr)
             std_psnr = np.std(psnr)
+            mean_inference_time = np.mean(inference_time)
 
-            print(f"PSNR : {mean_psnr}, std: f{std_psnr}")
+            print(f"PSNR : {mean_psnr}, std: f{std_psnr} inference time: {mean_inference_time}ms")
             
             if self.writer is not None:
                 self.writer.add_scalar("psnr/test", mean_psnr, self.global_step)
-            return mean_psnr, std_psnr
+                self.writer.add_scalar("time/test/inference", mean_inference_time, self.global_step)
+            return mean_psnr, std_psnr, mean_inference_time
 
 if __name__ == "__main__":
     # Set up command line argument parser
