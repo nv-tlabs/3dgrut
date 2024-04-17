@@ -553,7 +553,7 @@ class MixtureOfGaussians(torch.nn.Module):
 
     def build_bvh(self, rebuild_bvh=True):
         with torch.cuda.nvtx.range(f"build-bvh-full-build-{rebuild_bvh}"):
-            rebuild_bvh = rebuild_bvh or self.conf.adaptive_kernel_clamping or self.num_update_bvh >= self.conf.render.max_consecutive_bvh_update
+            rebuild_bvh = rebuild_bvh or self.conf.render.adaptive_kernel_clamping or self.num_update_bvh >= self.conf.render.max_consecutive_bvh_update
             optixtracer.build_mog_bvh(
                 self.optix_ctx, 
                 self.positions, 
