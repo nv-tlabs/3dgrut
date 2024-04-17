@@ -395,6 +395,9 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
 
     char log[2048]; // For error reporting from OptiX creation functions
 
+    cudaEventCreate(&pState->timingEvents[0]);
+    cudaEventCreate(&pState->timingEvents[1]);
+
     // create OptiX context
     pState->context = nullptr;
     {
@@ -566,6 +569,9 @@ OptiXStateWrapper::~OptiXStateWrapper(void)
     CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->gasBuffer)));
     CUDA_CHECK(cudaFree(reinterpret_cast<void *>(pState->gasBufferTmp)));
     OPTIX_CHECK(optixDeviceContextDestroy(pState->context));
+
+    cudaEventDestroy(pState->timingEvents[0]);
+    cudaEventDestroy(pState->timingEvents[1]);
 
     delete pState;
     printf("OptiXStateWrapper destructor \n");

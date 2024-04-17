@@ -26,8 +26,10 @@ writer:
 export_ingp:
   enabled: false 
   force_half: false
-  checkpoint: ""
-  checkpoint_outpath: "/tmp/export_checkpoint.ingp"
+  path: ""
+import_ingp:
+  enabled: false 
+  path: ""
 
 model:
   density_activation: sigmoid

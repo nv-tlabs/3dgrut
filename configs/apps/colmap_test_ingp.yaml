@@ -1,0 +1,13 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base.yaml
+  - /dataset: colmap
+  - /initialization: colmap
+  - _self_
+
+n_iterations: 0
+test_last: true
+import_ingp:
+  enabled: true

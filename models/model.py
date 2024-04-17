@@ -305,7 +305,7 @@ class MixtureOfGaussians(torch.nn.Module):
             self.set_optimizable_parameters()
         self.validate_fields()
 
-    def init_from_checkpoint(self, checkpoint: dict, setup_optimizer=True, export_only=False):
+    def init_from_checkpoint(self, checkpoint: dict, setup_optimizer=True):
         self.positions = checkpoint["positions"]
         self.rotation = checkpoint["rotation"]
         self.scale = checkpoint["scale"]
@@ -315,9 +315,6 @@ class MixtureOfGaussians(torch.nn.Module):
         self.n_active_features = checkpoint["n_active_features"]
         self.max_n_features = checkpoint["max_n_features"]
         self.scene_extent = checkpoint["scene_extent"]
-
-        if export_only:
-            return
 
         if self.progressive_training:
             self.feature_dim_increase_interval = checkpoint["feature_dim_increase_interval"]
@@ -1075,7 +1072,7 @@ class MixtureOfGaussians(torch.nn.Module):
         )
         return mog_counts
 
-    def forward_optix_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target, train: bool, frame_id: int, force_with_weights: bool, force_sampling: bool) -> dict[str, torch.Tensor]:
+    def forward_optix_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target, train: bool, frame_id: int, force_with_weights: bool, force_sampling: bool, enable_timing: bool) -> dict[str, torch.Tensor]:
 
         if err_target is None:
             err_target = torch.ones_like(rays_o[:,0])
@@ -1098,8 +1095,10 @@ class MixtureOfGaussians(torch.nn.Module):
                 render_opts |= optixtracer.OptixMogRenderOpts.USE_GWEIGHTS
             if force_sampling:
                 render_opts |= optixtracer.OptixMogRenderOpts.SAMPLING
+            if enable_timing:
+                render_opts |= optixtracer.OptixMogRenderOpts.ENABLE_TIMING
 
-            pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count, g_weights, err_backprop_proxy = optixtracer.trace_mog(
+            pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count, g_weights, err_backprop_proxy, inference_time = optixtracer.trace_mog(
                     self.optix_ctx, frame_id, render_opts, rays_o, rays_d,
                     self.positions, self.get_rotation(), self.get_scale(),
                     self.get_density(), features, err_target)
@@ -1114,6 +1113,7 @@ class MixtureOfGaussians(torch.nn.Module):
             'hits_count': hits_count,
             'g_weights': g_weights,
             'err_backprop_proxy': err_backprop_proxy,
+            'inference_time': inference_time
         }
     
     def forward_torch_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target: torch.Tensor, train: bool) -> dict[str, torch.Tensor]:
@@ -1177,7 +1177,8 @@ class MixtureOfGaussians(torch.nn.Module):
         train=False, 
         frame_id=0, 
         force_with_weights=False,
-        force_sampling=False) -> dict[str, torch.Tensor]:
+        force_sampling=False,
+        enable_timing=False) -> dict[str, torch.Tensor]:
         """
         err_target is a "dummy" input used to implement rolling error accumulation
         """
@@ -1189,7 +1190,7 @@ class MixtureOfGaussians(torch.nn.Module):
             force_method = self.render_method
 
         if force_method == 'optix':
-            return self.forward_optix_render(rays_o, rays_d, err_target, train, frame_id, force_with_weights, force_sampling)
+            return self.forward_optix_render(rays_o, rays_d, err_target, train, frame_id, force_with_weights, force_sampling, enable_timing)
 
         elif force_method == 'torch':
             return self.forward_torch_render(rays_o, rays_d, err_target, train)
@@ -1217,3 +1218,31 @@ class MixtureOfGaussians(torch.nn.Module):
             packed = msgpack.packb(mogt_config)
             f.write(packed)
 
+    @torch.no_grad()
+    def init_from_ingp(self, ingp_path):
+        with gzip.open(ingp_path, 'rb') as f:
+            mogt_config = msgpack.unpackb(f.read())
+        mog_num = mogt_config["mog_num"]
+        self.n_active_features = self.max_n_features = mogt_config["mog_sph_degree"]
+        import_dtype = np.float16 if mogt_config["precision"] == "half" else np.float32
+        positions =  torch.from_numpy(np.frombuffer(mogt_config["mog_positions"], dtype=import_dtype)).to(device=self.device).reshape(mog_num,3)
+        scales =  torch.from_numpy(np.frombuffer(mogt_config["mog_scales"], dtype=import_dtype)).to(device=self.device).reshape(mog_num,3)
+        densities =  torch.from_numpy(np.frombuffer(mogt_config["mog_densities"], dtype=import_dtype)).to(device=self.device).reshape(mog_num,1)
+        rotations =  torch.from_numpy(np.frombuffer(mogt_config["mog_rotations"], dtype=import_dtype)).to(device=self.device).reshape(mog_num,4)
+        n_features = sh_degree_to_specular_dim(self.max_n_features)
+        features =  torch.from_numpy(np.frombuffer(mogt_config["mog_features"], dtype=import_dtype)).to(device=self.device).reshape(mog_num,n_features+3)
+        features_albedo, features_specular = torch.split(features,[3,n_features], dim=1)
+
+        self.positions = torch.nn.Parameter(positions)
+        self.rotation = torch.nn.Parameter(rotations)
+        self.scale = torch.nn.Parameter(self.scale_activation_inv(scales))
+        self.density = torch.nn.Parameter(self.density_activation_inv(densities))
+        self.features_albedo = torch.nn.Parameter(features_albedo)
+        self.features_specular = torch.nn.Parameter(features_specular)
+
+        self.n_active_features = self.max_n_features
+        
+        self.init_densification_buffer()
+        self.set_optimizable_parameters()
+        self.setup_optimizer()
+        self.validate_fields()

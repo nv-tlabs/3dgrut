@@ -146,9 +146,6 @@ class Renderer:
             os.makedirs(output_path_gt, exist_ok=True)
         
         psnr = []
-
-        it_start = torch.cuda.Event(enable_timing=True)
-        it_end = torch.cuda.Event(enable_timing=True)
         inference_time = []
 
         iteration = 0
@@ -158,9 +155,7 @@ class Renderer:
                     gpu_batch = move_to_gpu(batch)
                     rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
                     # Compute the outputs of a single batch
-                    it_start.record()
-                    outputs = self.model(rays_ori, rays_dir)
-                    it_end.record()
+                    outputs = self.model(rays_ori, rays_dir, enable_timing=True)
                     
                     # The values are already alpha composited with the background
                     rgb_pred = outputs['pred_rgb']
@@ -178,7 +173,7 @@ class Renderer:
                     psnr.append(criterions["psnr"](rgb_pred, rgb_gt).item())
 
                     # Record the time
-                    inference_time.append( it_start.elapsed_time(it_end))
+                    inference_time.append(outputs["inference_time"])
 
                     pbar.set_postfix({'iteration': iteration, 'psnr': psnr[-1]})
                     iteration += 1

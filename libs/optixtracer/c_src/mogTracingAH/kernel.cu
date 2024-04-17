@@ -272,7 +272,7 @@ extern "C" __global__ void __raygen__rg()
                             }
                             else
                             {
-                                constexpr float ellispoidSqRadius = 9.0;
+                                constexpr float ellispoidSqRadius = 9.0f;
                                 rayNrm[k][j] += safe_normalize((gro + grd * (dot(grd, -1 * gro) - sqrtf(ellispoidSqRadius - grayDist))) * gscl * invGrotMat) * weight;
                             }
                         }

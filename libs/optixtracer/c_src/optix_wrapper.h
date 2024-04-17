@@ -14,6 +14,8 @@
 
 struct OptiXState
 {
+    cudaEvent_t timingEvents[2];
+    
     OptixDeviceContext context;
     OptixTraversableHandle gasHandle;
     CUdeviceptr gasBuffer;

@@ -75,7 +75,7 @@ if _plugin is None:
 class _trace_mog_func(torch.autograd.Function):
     @staticmethod 
     def forward(ctx, optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, mog_err_target):
-        ray_radiance, ray_density, ray_hit_distance, ray_normals, hits_count, g_weights = _plugin.trace_mog(
+        ray_radiance, ray_density, ray_hit_distance, ray_normals, hits_count, g_weights, inference_time = _plugin.trace_mog(
             optix_ctx.cpp_wrapper,
             frame_id,
             render_opts,
@@ -92,10 +92,10 @@ class _trace_mog_func(torch.autograd.Function):
         ctx.render_opts = render_opts
         ctx.optix_ctx = optix_ctx
         err_backprop_proxy = torch.ones_like(ray_density) # used to abuse autograd
-        return ray_radiance, ray_density, ray_hit_distance, ray_normals, hits_count, g_weights, err_backprop_proxy
+        return ray_radiance, ray_density, ray_hit_distance, ray_normals, hits_count, g_weights, err_backprop_proxy, inference_time
     
     @staticmethod
-    def backward(ctx, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd, ray_normals_grd, ray_hits_count_grd_UNUSED, g_weights_grd_UNUSED, ray_fake_err):
+    def backward(ctx, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd, ray_normals_grd, ray_hits_count_grd_UNUSED, g_weights_grd_UNUSED, ray_fake_err, inference_time_UNUSED):
         optix_ctx = ctx.optix_ctx
         ray_ori, ray_dir, ray_radiance, ray_density, ray_normals, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph = ctx.saved_variables
         frame_id = ctx.frame_id
@@ -138,7 +138,7 @@ class _trace_mog_func(torch.autograd.Function):
 
 @torch.cuda.nvtx.range("trace_mog")
 def trace_mog(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, err_target):
-    ray_radiance, ray_density, ray_hit_distance, ray_normals, ray_hits_count, g_weights, err_backprop_proxy = _trace_mog_func.apply(
+    ray_radiance, ray_density, ray_hit_distance, ray_normals, ray_hits_count, g_weights, err_backprop_proxy, inference_time = _trace_mog_func.apply(
         optix_ctx,
         frame_id,
         render_opts,
@@ -151,7 +151,7 @@ def trace_mog(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_r
         mog_sph.contiguous(),
         err_target
     )
-    return ray_radiance, ray_density, ray_hit_distance, ray_normals, ray_hits_count, g_weights, err_backprop_proxy
+    return ray_radiance, ray_density, ray_hit_distance, ray_normals, ray_hits_count, g_weights, err_backprop_proxy, inference_time
 
 @torch.cuda.nvtx.range("trace_mog_grad")
 def trace_mog_grad(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, ray_normals, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd, ray_normals_grd):
@@ -252,6 +252,7 @@ class OptixMogRenderOpts(IntEnum):
   USE_GWEIGHTS = 1
   SAMPLING = 2
   QUADRATIC_KERNEL = 4
+  ENABLE_TIMING = 8
   DEFAULT = NONE
 
 @dataclass

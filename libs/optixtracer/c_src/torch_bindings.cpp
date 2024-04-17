@@ -197,9 +197,9 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
                    unsigned int rebuild)
 {
     const uint32_t gNum = mogPos.size(0);
-    
+
     const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
-    
+
     if (!rebuild && (stateWrapper.pState->gNum != gNum))
     {
         std::cerr << "ERROR:: cannot refit GAS with a different number of gaussian" << std::endl;
@@ -479,16 +479,16 @@ std::tuple<torch::Tensor, torch::Tensor> create_camera_rays(
     return std::tuple<torch::Tensor, torch::Tensor>(rayOri, rayDir);
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> trace_mog(OptiXStateWrapper &stateWrapper,
-                                                                                                               uint32_t frameNumber,
-                                                                                                               uint32_t renderOpts,
-                                                                                                               torch::Tensor rayOri,
-                                                                                                               torch::Tensor rayDir,
-                                                                                                               torch::Tensor mogPos,
-                                                                                                               torch::Tensor mogRot,
-                                                                                                               torch::Tensor mogScl,
-                                                                                                               torch::Tensor mogDns,
-                                                                                                               torch::Tensor mogSph)
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, float> trace_mog(OptiXStateWrapper &stateWrapper,
+                                                                                                                      uint32_t frameNumber,
+                                                                                                                      uint32_t renderOpts,
+                                                                                                                      torch::Tensor rayOri,
+                                                                                                                      torch::Tensor rayDir,
+                                                                                                                      torch::Tensor mogPos,
+                                                                                                                      torch::Tensor mogRot,
+                                                                                                                      torch::Tensor mogScl,
+                                                                                                                      torch::Tensor mogDns,
+                                                                                                                      torch::Tensor mogSph)
 {
     const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
     torch::Tensor rayRad = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 3}, opts);
@@ -497,7 +497,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     torch::Tensor rayNrm = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 3}, opts);
     torch::Tensor rayHitsCount = torch::zeros({rayOri.size(0), rayOri.size(1), rayOri.size(2), 1}, opts);
     torch::Tensor mogWeightSum = torch::zeros({mogDns.size(0), mogDns.size(1)}, opts);
-
+    float timing = -1;
     MoGTracingParams paramsHost;
     paramsHost.handle = stateWrapper.pState->gasHandle;
     paramsHost.rayOri = packed_accessor32<float, 4>(rayOri);
@@ -532,6 +532,12 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
 
     stateWrapper.reallocateParamsDevice(sizeof(paramsHost), cudaStream);
+
+    if (renderOpts & MOGRenderEnableTiming)
+    {
+        cudaEventRecord(stateWrapper.pState->timingEvents[0], cudaStream);
+    }
+
     CUDA_CHECK(cudaMemcpyAsync(
         reinterpret_cast<void *>(stateWrapper.pState->paramsDevice), &paramsHost, sizeof(paramsHost), cudaMemcpyHostToDevice, cudaStream));
 
@@ -567,9 +573,16 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
                                 div_round_up(rayRad.size(1), stateWrapper.pState->patchSize), rayRad.size(0)));
     }
 
+    if (renderOpts & MOGRenderEnableTiming)
+    {
+        cudaEventRecord(stateWrapper.pState->timingEvents[1], cudaStream);
+        cudaEventSynchronize(stateWrapper.pState->timingEvents[1]);
+        cudaEventElapsedTime(&timing, stateWrapper.pState->timingEvents[0], stateWrapper.pState->timingEvents[1]);
+    }
+
     CUDA_CHECK_LAST();
 
-    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(rayRad, rayDns, rayHit, rayNrm, rayHitsCount, mogWeightSum);
+    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, float>(rayRad, rayDns, rayHit, rayNrm, rayHitsCount, mogWeightSum, timing);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> trace_mog_bwd(

@@ -41,14 +41,6 @@ def jet_map(map:torch.Tensor, max_val: float) -> torch.Tensor:
 @hydra.main(config_path="configs", version_base=None)
 def main(conf: DictConfig) -> None:
 
-    if conf.export_ingp.checkpoint:
-        logging.info(f"Exporting a pretrained checkpoint from {conf.export_ingp.checkpoint}!")
-        model = MixtureOfGaussians(conf)
-        model.set_optix_context()
-        checkpoint = torch.load(conf.export_ingp.checkpoint)
-        model.init_from_checkpoint(checkpoint, export_only=True)
-        model.export_ingp(conf.export_ingp.checkpoint_outpath, conf.export_ingp.force_half)
-        exit()
 
     # Run the training process
     n_iterations = conf.n_iterations
@@ -77,7 +69,12 @@ def main(conf: DictConfig) -> None:
         checkpoint = torch.load(conf.resume)
         model.init_from_checkpoint(checkpoint)
         global_step = checkpoint['global_step']
-
+    elif conf.import_ingp.enabled:
+        ingp_path = conf.import_ingp.path if conf.import_ingp.path else f'{conf.out_dir}/{conf.experiment_name}/export_last.inpg'
+        logging.info(f"Loading a pretrained ingp model from {ingp_path}!")
+        model.init_from_ingp(ingp_path)
+        model.build_bvh()
+        global_step = 0
     else: # Initialize
         match conf.initialization.method:
             case 'colmap':
@@ -140,6 +137,7 @@ def main(conf: DictConfig) -> None:
     out_dir = os.path.join(writer.get_logdir(), run_name) if conf.experiment_name else writer.get_logdir()
     os.makedirs(out_dir, exist_ok=True)
 
+    # Preformance events
     it_start = torch.cuda.Event(enable_timing=True)
     it_end = torch.cuda.Event(enable_timing=True)
 
@@ -176,17 +174,15 @@ def main(conf: DictConfig) -> None:
                                 rays_ori, rays_dir, rgb_gt = gpu_batch["rays_ori"], gpu_batch["rays_dir"], gpu_batch["rgb_gt"]
 
                                 # Compute the outputs of a single batch
-                                it_start.record()
-                                outputs = model(rays_ori, rays_dir, train=False)
-                                it_end.record()
-
+                                outputs = model(rays_ori, rays_dir, train=False, enable_timing=True)
+                                
                                 # Compute the loss
                                 val_loss.append(torch.abs(outputs['pred_rgb'] - rgb_gt).mean().item())
                                 val_psnr.append(criterions["psnr"](outputs['pred_rgb'], rgb_gt).item())
                                 val_hits_min.append(outputs['hits_count'].min().cpu())
                                 val_hits_max.append(outputs['hits_count'].max().cpu())
                                 val_hits_mean.append(outputs['hits_count'].mean().cpu())
-                                val_inference_time.append( it_start.elapsed_time(it_end))
+                                val_inference_time.append(outputs['inference_time'])
 
                                 pbar.set_postfix({'iteration': val_iteration, 'psnr': val_psnr[-1], 'loss': val_loss[-1]})
 
@@ -545,6 +541,7 @@ def main(conf: DictConfig) -> None:
 
     # Export the mixture-of-3d-gaussians in mogt file
     if conf.export_ingp.enabled:
+        ingp_path = conf.export_ingp.path if conf.export_ingp.path else os.path.join(out_dir, "export_last.ingp")
         model.export_ingp(os.path.join(out_dir, "export_last.ingp"), conf.export_ingp.force_half)
         
     if conf.test_last:

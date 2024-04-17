@@ -255,7 +255,7 @@ def main(conf: DictConfig) -> None:
 
         with torch.no_grad():
 
-            pred_orad, pred_opacity, pred_dist, pred_nrm, _, _, _ = optixtracer.trace_mog(optix_ctx, 0, optixtracer.OptixMogRenderOpts.DEFAULT,
+            pred_orad, pred_opacity, pred_dist, pred_nrm, _, _, _, _ = optixtracer.trace_mog(optix_ctx, 0, optixtracer.OptixMogRenderOpts.DEFAULT,
                     rays_ori, rays_dir,
                     gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features_flat, None)
 

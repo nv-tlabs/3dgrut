@@ -22,6 +22,8 @@ enum MOGRenderOpts
     MOGRenderNone = 0,
     MOGRenderUseGWeights = 1<<0, 
     MOGRenderDnsHitSampling = 1<<1, 
+    MOGRenderQuadraticKernel = 1<<2, 
+    MOGRenderEnableTiming = 1<<3, 
     MOGRenderDefault = MOGRenderNone
 };
 
