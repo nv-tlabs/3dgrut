@@ -262,9 +262,9 @@ class GUI:
 
         elif style == "distance":
             if self.update_from_device:
-                self.viz_render_scalar_buffer.update_data_from_device(sple_odist.detach()*self.viz_render_style_scale)
+                self.viz_render_scalar_buffer.update_data_from_device((sple_odist.detach()*self.viz_render_style_scale) / torch.clamp(sple_odns,min=1e-06))
             else:
-                self.viz_render_scalar_buffer.update_data(to_np(sple_odist*self.viz_render_style_scale))
+                self.viz_render_scalar_buffer.update_data(to_np((sple_odist*self.viz_render_style_scale) / torch.clamp(sple_odns,min=1e-06)))
 
         elif style == "hits":
             if self.update_from_device:
