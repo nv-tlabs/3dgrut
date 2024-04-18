@@ -626,7 +626,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     torch::Tensor mogDnsGrd = torch::zeros({mogDns.size(0), mogDns.size(1)}, opts);
     torch::Tensor mogSphGrd = torch::zeros({mogSph.size(0), mogSph.size(1)}, opts);
     torch::Tensor mogErrorBack = torch::zeros({mogDns.size(0), 1}, opts);
-    torch::Tensor mogPosGrdSq = torch::zeros({mogPos.size(0), mogPos.size(1)}, opts);
+    torch::Tensor mogPosGrdSq = torch::zeros({mogPos.size(0), 1}, opts);
 
     MoGTracingBwdParams paramsHost;
     paramsHost.handle = stateWrapper.pState->gasHandle;

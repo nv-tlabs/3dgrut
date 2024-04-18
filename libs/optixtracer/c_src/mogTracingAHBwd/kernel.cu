@@ -290,8 +290,8 @@ extern "C" __global__ void __raygen__rg()
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                             // compute the gradient wrt to the sph coefficients and position (through the sph view
                             // direction)
-                            const float3 grad =
-                                computeColorFromSHBwd(sphDegree, rayOri[k][j], gId, gpos, weight, rayRadGrd[k][j], params);
+                            float3 gradPosGrd = make_float3(0);
+                            const float3 grad = computeColorFromSHBwd(sphDegree, rayOri[k][j], gId, gpos, weight, rayRadGrd[k][j], params, gradPosGrd);
 
                             // >>> rayRadiance = accumulatedRayRad + weigth * rayRad + (1-galpha)*transmit * residualRayRad
                             const float3 rayRad = weight * grad;
@@ -422,13 +422,12 @@ extern "C" __global__ void __raygen__rg()
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                             // ---> gposc = rayOri - gpos
                             // ===> d_gposc / d_gpos = -1
-                            atomicAdd(&params.mogPosGrd[gId][0], -gposcGrd.x);
-                            atomicAdd(&params.mogPosGrd[gId][1], -gposcGrd.y);
-                            atomicAdd(&params.mogPosGrd[gId][2], -gposcGrd.z);
+                            const float3 rayMoGPosGrd = gradPosGrd - gposcGrd;
+                            atomicAdd(&params.mogPosGrd[gId][0], rayMoGPosGrd.x);
+                            atomicAdd(&params.mogPosGrd[gId][1], rayMoGPosGrd.y);
+                            atomicAdd(&params.mogPosGrd[gId][2], rayMoGPosGrd.z);
 
-                            atomicAdd(&params.mogPosGrdSq[gId][0], gposcGrd.x * gposcGrd.x);
-                            atomicAdd(&params.mogPosGrdSq[gId][1], gposcGrd.y * gposcGrd.y);
-                            atomicAdd(&params.mogPosGrdSq[gId][2], gposcGrd.z * gposcGrd.z);
+                            atomicAdd(&params.mogPosGrdSq[gId][0], length(rayMoGPosGrd));
 
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                             // ---> grd = safe_normalize(grdu)

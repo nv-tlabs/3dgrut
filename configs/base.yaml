@@ -67,7 +67,7 @@ model:
 
   densify:
     method: gradient-buffer # one of [adam, gradient-buffer, error]
-    params: positions # one of [positions, positions_squared, features_albedo]
+    params: positions # one of [positions, positions_gradient_norm, features_albedo]
     distance_based_scaling: true # whether or not to scale the buffered gradients of Gaussians according to their distances to the camera
     frequency: 300 # densification_interval in 3DGS with default value 100
     start_iteration: 500 # densify_from_iter in 3DGS default value 500

@@ -425,7 +425,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
     pState->minKernelResponse = minKernelResponse;
     pState->minTransmittance = minTransmittance;
     pState->maxHitsReturned = maxHitsReturned;
-
+    
     pState->gNum = 0;
     pState->gPrimType = primitiveType;
     pState->gPrimNumVert = 0;

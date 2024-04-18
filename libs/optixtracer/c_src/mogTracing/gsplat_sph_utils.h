@@ -12,15 +12,15 @@ static constexpr float SHRadMinBound = 0.001f;
 // Spherical harmonics coefficients
 static constexpr float SH_C0 = 0.28209479177387814f;
 static constexpr float SH_C1 = 0.4886025119029199f;
-static constexpr float SH_C2[] = { 1.0925484305920792f, -1.0925484305920792f, 0.31539156525252005f,
-                                   -1.0925484305920792f, 0.5462742152960396f };
-static constexpr float SH_C3[] = { -0.5900435899266435f, 2.890611442640554f, -0.4570457994644658f, 0.3731763325901154f,
-                                   -0.4570457994644658f, 1.445305721320277f, -0.5900435899266435f };
+static constexpr float SH_C2[] = {1.0925484305920792f, -1.0925484305920792f, 0.31539156525252005f,
+                                  -1.0925484305920792f, 0.5462742152960396f};
+static constexpr float SH_C3[] = {-0.5900435899266435f, 2.890611442640554f, -0.4570457994644658f, 0.3731763325901154f,
+                                  -0.4570457994644658f, 1.445305721320277f, -0.5900435899266435f};
 
 // TODO : rewrite and optimize
 
 template <typename TParams>
-inline __device__ float3 getSphCoeff(TParams& params, int gId, int idx)
+inline __device__ float3 getSphCoeff(TParams &params, int gId, int idx)
 {
     const int off = idx * 3;
     return make_float3(params.mogSph[gId][off + 0], params.mogSph[gId][off + 1], params.mogSph[gId][off + 2]);
@@ -28,7 +28,7 @@ inline __device__ float3 getSphCoeff(TParams& params, int gId, int idx)
 
 template <typename TParams>
 static __device__ float3
-computeColorFromSH(int deg, const float3& gpos, const float3& rori, uint32_t gId, TParams& params, bool clamped = true)
+computeColorFromSH(int deg, const float3 &gpos, const float3 &rori, uint32_t gId, TParams &params, bool clamped = true)
 {
     // The implementation is loosely based on code for
     // "Differentiable Point-Based Radiance Fields for
@@ -65,17 +65,17 @@ computeColorFromSH(int deg, const float3& gpos, const float3& rori, uint32_t gId
         }
     }
     rad += 0.5f;
-    // TODO : redefine explu as 
+    // TODO : redefine explu as
     // explu_alpha(x) = x if x >= alpha
     //                = exp(x/alpha + log(alpha) -1) otherwise
     return clamped ? make_float3(rad.x > SHRadMinBound ? rad.x : expf(rad.x - SHRadMinBound) * SHRadMinBound,
                                  rad.y > SHRadMinBound ? rad.y : expf(rad.y - SHRadMinBound) * SHRadMinBound,
-                                 rad.z > SHRadMinBound ? rad.z : expf(rad.z - SHRadMinBound) * SHRadMinBound) :
-                     rad;
+                                 rad.z > SHRadMinBound ? rad.z : expf(rad.z - SHRadMinBound) * SHRadMinBound)
+                   : rad;
 }
 
 template <typename TParams>
-inline __device__ void addSphCoeffGrd(TParams& params, int gId, int idx, const float3& val)
+inline __device__ void addSphCoeffGrd(TParams &params, int gId, int idx, const float3 &val)
 {
     const int off = idx * 3;
     atomicAdd(&params.mogSphGrd[gId][off + 0], val.x);
@@ -85,15 +85,15 @@ inline __device__ void addSphCoeffGrd(TParams& params, int gId, int idx, const f
 
 template <typename TParams>
 __device__ float3 computeColorFromSHBwd(
-    int deg, const float3& rori, uint32_t gId, const float3& gpos, float weight, const float3& rayRadGrd, TParams& params)
+    int deg, const float3 &rori, uint32_t gId, const float3 &gpos, float weight, const float3 &rayRadGrd, TParams &params, float3 &dL_dmean)
 {
     // radiance unclamped
     const float3 gradu = computeColorFromSH(deg, gpos, rori, gId, params, false);
 
     // clamped radiance
-    const float3 grad = make_float3(gradu.x > SHRadMinBound ? gradu.x : expf(gradu.x - SHRadMinBound) * SHRadMinBound,
-                                    gradu.y > SHRadMinBound ? gradu.y : expf(gradu.y - SHRadMinBound) * SHRadMinBound,
-                                    gradu.z > SHRadMinBound ? gradu.z : expf(gradu.z - SHRadMinBound) * SHRadMinBound);
+    float3 grad = make_float3(gradu.x > SHRadMinBound ? gradu.x : expf(gradu.x - SHRadMinBound) * SHRadMinBound,
+                              gradu.y > SHRadMinBound ? gradu.y : expf(gradu.y - SHRadMinBound) * SHRadMinBound,
+                              gradu.z > SHRadMinBound ? gradu.z : expf(gradu.z - SHRadMinBound) * SHRadMinBound);
 
     //
     float3 dL_dRGB = rayRadGrd;
@@ -204,19 +204,14 @@ __device__ float3 computeColorFromSHBwd(
         const float3 dL_ddir = make_float3(dot(dRGBdx, dL_dRGB), dot(dRGBdy, dL_dRGB), dot(dRGBdz, dL_dRGB));
 
         // Account for normalization of direction
-        const float3 dL_dmean = safe_normalize_bw(sphdiru, dL_ddir);
+        dL_dmean += safe_normalize_bw(sphdiru, dL_ddir);
 
-        // Gradients of loss w.r.t. Gaussian means, but only the portion
-        // that is caused because the mean affects the view-dependent color.
-        // Additional mean gradient is accumulated in below methods.
-        atomicAdd(&params.mogPosGrd[gId][0], dL_dmean.x);
-        atomicAdd(&params.mogPosGrd[gId][1], dL_dmean.y);
-        atomicAdd(&params.mogPosGrd[gId][2], dL_dmean.z);
-
-        atomicAdd(&params.mogPosGrdSq[gId][0], dL_dmean.x*dL_dmean.x);
-        atomicAdd(&params.mogPosGrdSq[gId][1], dL_dmean.y*dL_dmean.y);
-        atomicAdd(&params.mogPosGrdSq[gId][2], dL_dmean.z*dL_dmean.z);
-
+        // // Gradients of loss w.r.t. Gaussian means, but only the portion
+        // // that is caused because the mean affects the view-dependent color.
+        // // Additional mean gradient is accumulated in below methods.
+        // atomicAdd(&params.mogPosGrd[gId][0], dL_dmean.x);
+        // atomicAdd(&params.mogPosGrd[gId][1], dL_dmean.y);
+        // atomicAdd(&params.mogPosGrd[gId][2], dL_dmean.z);
     }
 
     return grad;
