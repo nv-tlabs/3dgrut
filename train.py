@@ -197,8 +197,8 @@ def main(conf: DictConfig) -> None:
                     writer.add_scalar("loss_l1/val", np.mean(val_loss), global_step)
 
                     writer.add_scalar("hits/min", np.mean(val_hits_min), global_step)
-                    writer.add_scalar("hits/max", np.mean(val_hits_min), global_step)
-                    writer.add_scalar("hits/mean", np.mean(val_hits_min), global_step)
+                    writer.add_scalar("hits/max", np.mean(val_hits_max), global_step)
+                    writer.add_scalar("hits/mean", np.mean(val_hits_mean), global_step)
 
                     writer.add_scalar("time/val/inference",  np.mean(val_inference_time), global_step)
                     
