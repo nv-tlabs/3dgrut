@@ -32,9 +32,9 @@
 #include <optix_stubs.h>
 
 // NVRTC compiler options
-#define CUDA_NVRTC_OPTIONS                                                                                 \
-    "-std=c++11", "-arch", "compute_70", "-use_fast_math", "-lineinfo", "-default-device", "-rdc", "true", \
-        "-D__x86_64", "-D__OPTIX__"
+#define CUDA_NVRTC_OPTIONS                                                                                                                 \
+    "-std=c++14", "-arch", "compute_75", "-use_fast_math", "-lineinfo", "--extra-device-vectorization", "-default-device", "-rdc", "true", \
+        "-D__OPTIX__"
 
 static void contextLogCB(unsigned int level, const char *tag, const char *message, void * /*cbdata */)
 {
@@ -197,7 +197,7 @@ void createPipeline(const OptixDeviceContext context,
     {
         OptixModuleCompileOptions module_compile_options = {};
         module_compile_options.maxRegisterCount = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT;
-        module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT;
+        module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_LEVEL_3;
         module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_MINIMAL;
 
         pipeline_compile_options.usesMotionBlur = false;
@@ -425,7 +425,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
     pState->minKernelResponse = minKernelResponse;
     pState->minTransmittance = minTransmittance;
     pState->maxHitsReturned = maxHitsReturned;
-    
+
     pState->gNum = 0;
     pState->gPrimType = primitiveType;
     pState->gPrimNumVert = 0;

@@ -30,6 +30,8 @@ class MixtureOfGaussians(torch.nn.Module):
         self.features_albedo = torch.nn.Parameter(torch.empty([0, 3]))  # Feature vector of the 0th order SH coefficients [n_gaussians, 3] (We split it into two due to different learning rates)
         self.features_specular = torch.nn.Parameter(torch.empty([0, 1]))  # Features of the higher order SH coefficients [n_gaussians, 3]
         
+        self.pos_grad_squared = None
+
         self.num_update_bvh = 0
         self.render_opts =  optixtracer.OptixMogRenderOpts.NONE
         self.train_render_opts = optixtracer.OptixMogRenderOpts.NONE
@@ -705,6 +707,8 @@ class MixtureOfGaussians(torch.nn.Module):
         match self.conf.model.densify.params:
             case 'positions':
                 params_grad = self.positions.grad
+            case 'positions_squared':
+                params_grad = self.pos_grad_squared.grad
             case "features_albedo":
                 params_grad = self.features_albedo.grad
                 
@@ -753,6 +757,8 @@ class MixtureOfGaussians(torch.nn.Module):
         match params_name:
             case 'positions':
                 assert self.get_positions().requires_grad, "Trying to perform split and clone but the positions are not being optimized"
+            case 'positions_squared':
+                assert self.pos_grad_squared is not None and self.pos_grad_squared.requires_grad, "Trying to perform split and clone but the positions squared are not available"
             case "features_albedo":
                 assert self.get_features().requires_grad, "Trying to perform split and clone but the positions are not being optimized"
             case _:
@@ -1090,6 +1096,9 @@ class MixtureOfGaussians(torch.nn.Module):
         if err_target is None:
             err_target = torch.ones_like(rays_o[:,0])
 
+        self.pos_grad_squared = torch.ones_like(self.positions)
+        self.pos_grad_squared.requires_grad = self.conf.model.densify.params == 'positions_squared'
+        
         num_gsplats = self.positions.shape[0]
         with torch.cuda.nvtx.range(f"model.forward({num_gsplats} gaussians)"):
             # The feature mask zeros out feature dims the model shouldn't use yet.
@@ -1114,7 +1123,7 @@ class MixtureOfGaussians(torch.nn.Module):
             pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count, g_weights, err_backprop_proxy, inference_time = optixtracer.trace_mog(
                     self.optix_ctx, frame_id, render_opts, rays_o, rays_d,
                     self.positions, self.get_rotation(), self.get_scale(),
-                    self.get_density(), features, err_target)
+                    self.get_density(), features, err_target, self.pos_grad_squared)
 
             pred_rgb, pred_opacity = self.background(rays_d, pred_rgb, pred_opacity, train)
 

@@ -71,6 +71,7 @@ struct MoGTracingBwdParams
     PackedTensorAccessor32<float, 2> mogDnsGrd; ///< output gaussians density (opacity) gradient
     PackedTensorAccessor32<float, 2> mogSphGrd; ///< output gaussians spherical harmonics coeffs gradient
     PackedTensorAccessor32<float, 2> mogErrorBack; ///< output gaussians rayError*weight
+    PackedTensorAccessor32<float, 2> mogPosGrdSq; ///< output gaussians position squared gradient
     OptixTraversableHandle handle;
 
     OptixAabb aabb;

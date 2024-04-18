@@ -74,7 +74,7 @@ if _plugin is None:
 # 
 class _trace_mog_func(torch.autograd.Function):
     @staticmethod 
-    def forward(ctx, optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, mog_err_target):
+    def forward(ctx, optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, mog_err_target, mog_pos_grd_sq_target):
         ray_radiance, ray_density, ray_hit_distance, ray_normals, hits_count, g_weights, inference_time = _plugin.trace_mog(
             optix_ctx.cpp_wrapper,
             frame_id,
@@ -113,7 +113,7 @@ class _trace_mog_func(torch.autograd.Function):
                 mog_dns,
                 mog_sph
             )
-        mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error = _plugin.trace_mog_bwd(
+        mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error, mop_pos_grd_sq = _plugin.trace_mog_bwd(
             optix_ctx.cpp_wrapper,
             frame_id,
             ctx.render_opts,
@@ -134,10 +134,10 @@ class _trace_mog_func(torch.autograd.Function):
             ray_normals_grd,
             ray_fake_err 
         )
-        return None, None, None, None, None, mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error
+        return None, None, None, None, None, mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error, mop_pos_grd_sq
 
 @torch.cuda.nvtx.range("trace_mog")
-def trace_mog(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, err_target):
+def trace_mog(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, err_target, mog_pos_grd_sq):
     ray_radiance, ray_density, ray_hit_distance, ray_normals, ray_hits_count, g_weights, err_backprop_proxy, inference_time = _trace_mog_func.apply(
         optix_ctx,
         frame_id,
@@ -149,7 +149,8 @@ def trace_mog(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_r
         mog_scl.contiguous(),
         mog_dns.contiguous(),
         mog_sph.contiguous(),
-        err_target
+        err_target,
+        mog_pos_grd_sq
     )
     return ray_radiance, ray_density, ray_hit_distance, ray_normals, ray_hits_count, g_weights, err_backprop_proxy, inference_time
 

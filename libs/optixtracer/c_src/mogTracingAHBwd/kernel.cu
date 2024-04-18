@@ -222,7 +222,7 @@ extern "C" __global__ void __raygen__rg()
                         float grayDist;
                         if (MoGSurfPrimitive)
                         {
-                            const float3 surfelNm = fetchSurfelNm<MOGTRACING_PRIMITIVE_TYPE>(primId%params.gPrimNumTri);
+                            const float3 surfelNm = fetchSurfelNm<MOGTRACING_PRIMITIVE_TYPE>(primId % params.gPrimNumTri);
                             const float ghitT = -dot(surfelNm, gro) / dot(surfelNm, grd);
                             const float3 ghitPos = gro + grd * ghitT;
                             grayDist = dot(ghitPos, ghitPos);
@@ -343,11 +343,11 @@ extern "C" __global__ void __raygen__rg()
                             //                          = -0.5 * gres
                             const float grayDistGrd = -0.5f * gres * gresGrd;
 #endif
-                            
+
                             float3 grdGrd, groGrd;
                             if (MoGSurfPrimitive)
                             {
-                                const float3 surfelNm = fetchSurfelNm<MOGTRACING_PRIMITIVE_TYPE>(primId%params.gPrimNumTri);
+                                const float3 surfelNm = fetchSurfelNm<MOGTRACING_PRIMITIVE_TYPE>(primId % params.gPrimNumTri);
                                 const float doSurfelGro = dot(surfelNm, gro);
                                 const float dotSurfelGrd = dot(surfelNm, grd); // cannot be null otherwise no hit
                                 const float ghitT = -doSurfelGro / dotSurfelGrd;
@@ -374,8 +374,8 @@ extern "C" __global__ void __raygen__rg()
                                 //
                                 // ===> d_ghitT / d_gro = -surfelNm / dot(surfNm, grd)
                                 // ===> d_ghitT / d_dotSurfelGrd = dot(surfelNm, gro) / dotSurfelGrd^2
-                                groGrd += (-surfelNm * ghitTGrd) /  dotSurfelGrd;
-                                const float dotSurfelGrdGrd = (doSurfelGro * ghitTGrd) /  (dotSurfelGrd * dotSurfelGrd);
+                                groGrd += (-surfelNm * ghitTGrd) / dotSurfelGrd;
+                                const float dotSurfelGrdGrd = (doSurfelGro * ghitTGrd) / (dotSurfelGrd * dotSurfelGrd);
                                 // ===> d_dotSurfelGrd / d_grd = surfelNm
                                 grdGrd += surfelNm * dotSurfelGrdGrd;
                             }
@@ -425,6 +425,10 @@ extern "C" __global__ void __raygen__rg()
                             atomicAdd(&params.mogPosGrd[gId][0], -gposcGrd.x);
                             atomicAdd(&params.mogPosGrd[gId][1], -gposcGrd.y);
                             atomicAdd(&params.mogPosGrd[gId][2], -gposcGrd.z);
+
+                            atomicAdd(&params.mogPosGrdSq[gId][0], gposcGrd.x * gposcGrd.x);
+                            atomicAdd(&params.mogPosGrdSq[gId][1], gposcGrd.y * gposcGrd.y);
+                            atomicAdd(&params.mogPosGrdSq[gId][2], gposcGrd.z * gposcGrd.z);
 
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                             // ---> grd = safe_normalize(grdu)

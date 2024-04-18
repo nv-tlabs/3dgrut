@@ -261,7 +261,7 @@ def main(conf: DictConfig) -> None:
 
             pred_orad, pred_opacity, pred_dist, pred_nrm, _, _, _, _ = optixtracer.trace_mog(optix_ctx, 0, optixtracer.OptixMogRenderOpts.DEFAULT,
                     rays_ori, rays_dir,
-                    gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features_flat, None)
+                    gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features_flat, None, None)
 
         return pred_orad, pred_opacity, pred_dist, pred_nrm
 

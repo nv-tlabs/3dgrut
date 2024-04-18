@@ -212,6 +212,11 @@ __device__ float3 computeColorFromSHBwd(
         atomicAdd(&params.mogPosGrd[gId][0], dL_dmean.x);
         atomicAdd(&params.mogPosGrd[gId][1], dL_dmean.y);
         atomicAdd(&params.mogPosGrd[gId][2], dL_dmean.z);
+
+        atomicAdd(&params.mogPosGrdSq[gId][0], dL_dmean.x*dL_dmean.x);
+        atomicAdd(&params.mogPosGrdSq[gId][1], dL_dmean.y*dL_dmean.y);
+        atomicAdd(&params.mogPosGrdSq[gId][2], dL_dmean.z*dL_dmean.z);
+
     }
 
     return grad;
