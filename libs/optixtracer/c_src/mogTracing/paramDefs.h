@@ -15,6 +15,8 @@ enum MOGTracingMode
     MOGTracingSampling = 1<<1, ///< sampling mode
     MOGTracingTesseracticKernel = 1<<2, 
     MOGTracingAdaptiveKernelClamping = 1<<3, 
+    MOGTracingWithNormals = 1<<4,
+    MOGTracingWithHitCounts = 1<<5,
     MOGTracingDefaultMode = MOGTracingModeNone
 };
 

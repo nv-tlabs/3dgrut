@@ -25,4 +25,7 @@ render:
   min_kernel_response: 0.0113
   adaptive_kernel_clamping: true
   min_transmittance: 0.001 
+  enable_normals: False
+  enable_hitcounts: False
+  
 

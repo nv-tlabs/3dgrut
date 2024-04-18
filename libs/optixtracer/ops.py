@@ -256,6 +256,8 @@ class OptixMogRenderOpts(IntEnum):
   TESSERACTIC_KERNEL = 4 # MOGTracingTesseracticKernel / MOGRenderTesseracticKernel
   ENABLE_TIMING = 8 # MOGRenderEnableTiming
   ADAPTIVE_KERNEL_SAMPLING = 8 # MOGTracingAdaptiveKernelClamping
+  ENABLE_NORMALS = 16 # MOGTracingWithNormals
+  ENABLE_HITCOUNTS = 32 # MOGTracingWithHitCounts
   DEFAULT = NONE
 
 @dataclass
@@ -273,7 +275,7 @@ class OptixMogTracingParams:
     max_hits_returned : int=64       # total number of hits returned
     
     @staticmethod
-    def pack_hit_mode(gaussian_function:str, sampling_mode:bool, adaptive_kernel_clamping: bool):
+    def pack_hit_mode(gaussian_function:str, sampling_mode:bool, adaptive_kernel_clamping: bool, enable_normals: bool, enable_hitcounts: bool):
         hit_mode = int(OptixMogRenderOpts.NONE)
         if gaussian_function=="exp-p4-dist":
             hit_mode = hit_mode | OptixMogRenderOpts.TESSERACTIC_KERNEL
@@ -281,6 +283,10 @@ class OptixMogTracingParams:
             hit_mode = hit_mode | OptixMogRenderOpts.SAMPLING
         if adaptive_kernel_clamping:
             hit_mode = hit_mode | OptixMogRenderOpts.ADAPTIVE_KERNEL_SAMPLING
+        if enable_normals:
+            hit_mode = hit_mode | OptixMogRenderOpts.ENABLE_NORMALS
+        if enable_hitcounts:
+            hit_mode = hit_mode | OptixMogRenderOpts.ENABLE_HITCOUNTS
         return hit_mode
 
     @staticmethod

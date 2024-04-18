@@ -86,8 +86,12 @@ extern "C" __global__ void __raygen__rg()
     float3 rayRad[MOGTracingPatchSize][MOGTracingPatchSize];
     float rayTrm[MOGTracingPatchSize][MOGTracingPatchSize];
     float rayHit[MOGTracingPatchSize][MOGTracingPatchSize];
+#if MOGTRACING_WITH_NORMALS
     float3 rayNrm[MOGTracingPatchSize][MOGTracingPatchSize];
+#endif
+#if MOGTRACING_WITH_HITCOUNTS
     float rayHitsCount[MOGTracingPatchSize][MOGTracingPatchSize];
+#endif
     const int startIdxX = idx.x * MOGTracingPatchSize;
     const int startIdxY = idx.y * MOGTracingPatchSize;
 
@@ -108,8 +112,12 @@ extern "C" __global__ void __raygen__rg()
             rayRad[j][i] = make_float3(0);
             rayTrm[j][i] = 1;
             rayHit[j][i] = 0;
+#if MOGTRACING_WITH_NORMALS
             rayNrm[j][i] = make_float3(0);
+#endif
+#if MOGTRACING_WITH_HITCOUNTS
             rayHitsCount[j][i] = 0;
+#endif
 
             const float2 sampleMinMaxT = intersectAABB(params.aabb, rayOri[j][i], rayDir[j][i]);
             minMaxT.x = fminf(minMaxT.x, sampleMinMaxT.x);
@@ -254,12 +262,12 @@ extern "C" __global__ void __raygen__rg()
                             {
                                 atomicAdd(&params.mogWeightSum[gId][0], weight);
                             }
-                            rayHitsCount[k][j] += 1.0f;
 
                             rayRad[k][j] += grad * weight;
-                            rayHit[k][j] += hitT * weight;
                             rayTrm[k][j] *= (1 - galpha);
+                            rayHit[k][j] += hitT * weight;
 
+#if MOGTRACING_WITH_NORMALS
                             if (MoGSurfPrimitive)
                             {
                                 float3 surfelNm = fetchSurfelNm<MOGTRACING_PRIMITIVE_TYPE>(primId % params.gPrimNumTri);
@@ -275,6 +283,10 @@ extern "C" __global__ void __raygen__rg()
                                 constexpr float ellispoidSqRadius = 9.0f;
                                 rayNrm[k][j] += safe_normalize((gro + grd * (dot(grd, -1 * gro) - sqrtf(ellispoidSqRadius - grayDist))) * gscl * invGrotMat) * weight;
                             }
+#endif
+#if MOGTRACING_WITH_HITCOUNTS
+                            rayHitsCount[k][j] += 1.0f;
+#endif
                         }
                     }
 
@@ -297,11 +309,15 @@ extern "C" __global__ void __raygen__rg()
             params.rayRad[idx.z][y][x][2] = rayRad[j][i].z;
             params.rayDns[idx.z][y][x][0] = 1 - rayTrm[j][i];
             params.rayHit[idx.z][y][x][0] = rayHit[j][i];
+#if MOGTRACING_WITH_NORMALS
             rayNrm[j][i] = safe_normalize(rayNrm[j][i]);
             params.rayNrm[idx.z][y][x][0] = rayNrm[j][i].x;
             params.rayNrm[idx.z][y][x][1] = rayNrm[j][i].y;
             params.rayNrm[idx.z][y][x][2] = rayNrm[j][i].z;
+#endif
+#if MOGTRACING_WITH_HITCOUNTS
             params.rayHitsCount[idx.z][y][x][0] = rayHitsCount[j][i];
+#endif
         }
     }
 }

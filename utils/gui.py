@@ -66,8 +66,11 @@ class GUI:
         self.viz_render_subsample = 1
         self.viz_render_train_view = False
         self.viz_render_show_sampling = False
-        self.viz_render_show_timing = False
+        self.viz_render_show_details = False
         self.render_timing = 0
+        self.render_width = 1920
+        self.render_width = 1080
+
         if self.conf.render.method == 'torch':
             self.viz_render_subsample = 4
 
@@ -146,9 +149,11 @@ class GUI:
                 train=self.viz_render_train_view, 
                 force_method=force_method, 
                 force_sampling=self.viz_render_show_sampling,
-                enable_timing=self.viz_render_show_timing
+                enable_timing=self.viz_render_show_details
             )
             self.render_timing = outputs['inference_time']
+            self.render_width = rays_ori.shape[2]
+            self.render_height = rays_ori.shape[1]
 
         return outputs['pred_rgb'], outputs['pred_opacity'], outputs['pred_dist'], outputs['pred_normals'], outputs['hits_count'] / self.conf.writer.max_num_hits
 
@@ -313,10 +318,10 @@ class GUI:
                 self.viz_render_enabled = False
                 self.update_render_view_viz(force=True)
 
-            _, self.viz_render_show_timing = psim.Checkbox("Show timing", self.viz_render_show_timing)
-            if self.viz_render_show_timing:
+            _, self.viz_render_show_details = psim.Checkbox("Infos", self.viz_render_show_details)
+            if self.viz_render_show_details:
                 psim.SameLine()
-                psim.InputFloat("ms.", self.render_timing); 
+                psim.Text(f"({self.render_width}x{self.render_height}) @ {self.render_timing} ms."); 
 
             _, self.viz_render_show_sampling = psim.Checkbox("Show sampling", self.viz_render_show_sampling)
             

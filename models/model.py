@@ -134,7 +134,9 @@ class MixtureOfGaussians(torch.nn.Module):
                 hit_mode = optixtracer.OptixMogTracingParams.pack_hit_mode(
                     self.conf.render.kernel_function, 
                     self.conf.render.train_hit_sampling, 
-                    self.conf.render.adaptive_kernel_clamping
+                    self.conf.render.adaptive_kernel_clamping,
+                    self.conf.render.enable_normals,
+                    self.conf.render.enable_hitcounts
                 ),
                 max_hit_per_slab = self.conf.render.max_hit_per_slab,
                 max_num_slabs = self.conf.render.max_num_slabs,
