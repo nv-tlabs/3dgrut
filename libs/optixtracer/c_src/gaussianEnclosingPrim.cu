@@ -483,7 +483,7 @@ namespace
             for (int i = 0; i < icosaHedronNumVrt; ++i)
             {
                 float3 &vrt = gPrimVrt[sVertIdx + i];
-                vrt = (icosaHedronVrt[i] * scl) * rot + trans;
+                vrt = (icosaHedronVrt[i] * kscl) * rot + trans;
                 if (gPrimAABB)
                 {
                     atomicMinFloat(&gPrimAABB[0].minX, vrt.x);
