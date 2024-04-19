@@ -15,6 +15,8 @@ from datasets.ncore_dataset import NCoreDataset
 from datasets.ncore_utils import Batch as NCoreBatch
 
 from torchmetrics import PeakSignalNoiseRatio
+from torchmetrics.image import StructuralSimilarityIndexMeasure
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 
 class Renderer:
@@ -136,7 +138,9 @@ class Renderer:
 
     def render_all(self):
         # Criterions that we log during training
-        criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda")}
+        criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda"), 
+                      "ssim": StructuralSimilarityIndexMeasure(data_range=1.0).to("cuda"), 
+                      "lpips": LearnedPerceptualImagePatchSimilarity(net_type="vgg").to("cuda")}
 
         output_path_renders = os.path.join(self.out_dir, f"ours_{int(self.global_step)}", "renders")
         os.makedirs(output_path_renders, exist_ok=True)
@@ -146,6 +150,8 @@ class Renderer:
             os.makedirs(output_path_gt, exist_ok=True)
         
         psnr = []
+        ssim = []
+        lpips = []
         inference_time = []
 
         iteration = 0
@@ -171,6 +177,8 @@ class Renderer:
 
                     # Compute the loss
                     psnr.append(criterions["psnr"](rgb_pred, rgb_gt).item())
+                    ssim.append(criterions["ssim"](rgb_pred.permute(0, 3, 1, 2), rgb_gt.permute(0, 3, 1, 2)).item())
+                    lpips.append(criterions["lpips"](rgb_pred.permute(0, 3, 1, 2), rgb_gt.permute(0, 3, 1, 2)).item())
 
                     # Record the time
                     inference_time.append(outputs["inference_time"])
@@ -179,13 +187,17 @@ class Renderer:
                     iteration += 1
 
             mean_psnr = np.mean(psnr)
+            mean_ssim = np.mean(ssim)
+            mean_lpips = np.mean(lpips)
             std_psnr = np.std(psnr)
             mean_inference_time = np.mean(inference_time)
 
-            print(f"PSNR : {mean_psnr}, std: f{std_psnr} inference time: {mean_inference_time}ms")
+            print(f"PSNR : {mean_psnr}, SSIM : {mean_ssim}, LPIPS: {mean_lpips} , std: f{std_psnr} inference time: {mean_inference_time}ms")
             
             if self.writer is not None:
                 self.writer.add_scalar("psnr/test", mean_psnr, self.global_step)
+                self.writer.add_scalar("ssim/test", mean_ssim, self.global_step)
+                self.writer.add_scalar("lpips/test", mean_lpips, self.global_step)
                 self.writer.add_scalar("time/test/inference", mean_inference_time, self.global_step)
             return mean_psnr, std_psnr, mean_inference_time
 

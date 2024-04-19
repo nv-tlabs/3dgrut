@@ -7,6 +7,8 @@ import torch.utils.data
 import hydra
 
 from torchmetrics import PeakSignalNoiseRatio
+from torchmetrics.image import StructuralSimilarityIndexMeasure
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
@@ -120,7 +122,9 @@ def main(conf: DictConfig) -> None:
     n_epochs = int(n_iterations/train_dataset.__len__())
 
     # Criterions that we log during training
-    criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda")}
+    criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda"), 
+                  "ssim": StructuralSimilarityIndexMeasure(data_range=1.0).to("cuda"), 
+                  "lpips": LearnedPerceptualImagePatchSimilarity(net_type="vgg").to("cuda")}
 
     # Initialize the tensorboard writer
     if conf.experiment_name and os.path.exists(f'{conf.out_dir}/{conf.experiment_name}'):
@@ -162,6 +166,8 @@ def main(conf: DictConfig) -> None:
                 with tqdm(val_dataloader) as pbar:
                     pbar.set_description("Validation:" )
                     val_psnr = []
+                    val_ssim = []
+                    val_lpips = []
                     val_loss = []
                     val_inference_time = []
                     val_hits_min = []
@@ -179,6 +185,8 @@ def main(conf: DictConfig) -> None:
                                 # Compute the loss
                                 val_loss.append(torch.abs(outputs['pred_rgb'] - rgb_gt).mean().item())
                                 val_psnr.append(criterions["psnr"](outputs['pred_rgb'], rgb_gt).item())
+                                val_ssim.append(criterions["ssim"](outputs['pred_rgb'].permute(0, 3, 1, 2), rgb_gt.permute(0, 3, 1, 2)).item())
+                                val_lpips.append(criterions["lpips"](outputs['pred_rgb'].permute(0, 3, 1, 2), rgb_gt.permute(0, 3, 1, 2)).item())
                                 val_hits_min.append(outputs['hits_count'].min().cpu())
                                 val_hits_max.append(outputs['hits_count'].max().cpu())
                                 val_hits_mean.append(outputs['hits_count'].mean().cpu())
@@ -194,6 +202,8 @@ def main(conf: DictConfig) -> None:
                                 val_iteration += 1
 
                     writer.add_scalar("psnr/val", np.mean(val_psnr), global_step)
+                    writer.add_scalar("ssim/val", np.mean(val_ssim), global_step)
+                    writer.add_scalar("lpips/val", np.mean(val_lpips), global_step)
                     writer.add_scalar("loss_l1/val", np.mean(val_loss), global_step)
 
                     writer.add_scalar("hits/min", np.mean(val_hits_min), global_step)
