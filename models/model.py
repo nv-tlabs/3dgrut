@@ -679,8 +679,8 @@ class MixtureOfGaussians(torch.nn.Module):
                 self.rolling_weight_contrib = checkpoint["rolling_weight_contrib"]
 
             if self.conf.model.densify.method == 'gradient-buffer':
-                self.densify_grad_norm_accum = checkpoint["densify_grad_norm_accum"]
-                self.densify_grad_norm_denom = checkpoint["densify_grad_norm_denom"]
+                self.densify_grad_norm_accum = checkpoint["densify_grad_norm_accum"][0]
+                self.densify_grad_norm_denom = checkpoint["densify_grad_norm_denom"][0]
         else: 
             if self.conf.model.log_rolling_buffers:
                 num_gaussians = self.positions.shape[0]

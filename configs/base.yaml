@@ -151,7 +151,7 @@ optimizer:
     positions:  
       lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.00016
     density:
-      lr: 0.05 # 3DGS value: 0.05
+      lr: 0.09 # 3DGS value: 0.05
     features_albedo:
       lr: 0.0025 # 3DGS value: 0.0025
     features_specular:
