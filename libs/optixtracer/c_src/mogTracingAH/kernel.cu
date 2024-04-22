@@ -195,6 +195,14 @@ extern "C" __global__ void __raygen__rg()
                 make_float4(params.mogRot[gId][0], params.mogRot[gId][1], params.mogRot[gId][2], params.mogRot[gId][3]);
             const float3 gscl = make_float3(params.mogScl[gId][0], params.mogScl[gId][1], params.mogScl[gId][2]);
 
+            float3 sphCoefficients[MOGTRACING_MAX_NUM_RADIANCE_SPH_COEFFS];
+#pragma unroll
+            for (unsigned int j = 0; j < MOGTRACING_MAX_NUM_RADIANCE_SPH_COEFFS; ++j)
+            {
+                const int off = j * 3;
+                sphCoefficients[j] = make_float3(params.mogSph[gId][off + 0], params.mogSph[gId][off + 1], params.mogSph[gId][off + 2]);
+            }
+
             // project ray in the gaussian
             float33 grotMat;
             rotationMatrix(make_float4(grot.x, grot.y, grot.z, grot.w), grotMat);
@@ -215,8 +223,6 @@ extern "C" __global__ void __raygen__rg()
 
                     if (rayTrm[k][j] > minTransmittance)
                     {
-                        const float3 grad = computeColorFromSH(sphDegree, gpos, rayOri[k][j], gId, params);
-
                         const float3 gposc = (rayOri[k][j] - gpos);
                         const float3 gposcr = (gposc * grotMat);
                         const float3 gro = giscl * gposcr;
@@ -262,6 +268,8 @@ extern "C" __global__ void __raygen__rg()
                             {
                                 atomicAdd(&params.mogWeightSum[gId][0], weight);
                             }
+
+                            const float3 grad = computeColorFromSH(sphDegree, &sphCoefficients[0], gpos, rayOri[k][j]);
 
                             rayRad[k][j] += grad * weight;
                             rayTrm[k][j] *= (1 - galpha);

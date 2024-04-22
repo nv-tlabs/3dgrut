@@ -228,8 +228,28 @@ def build_mog_bvh(
         mog_rot.view(-1, 4).contiguous(),
         mog_scl.view(-1, 3).contiguous(),
         mog_dns.view(-1, 1).contiguous(),
-        rebuild
+        rebuild or not optix_ctx.allow_bvh_update(),
+        optix_ctx.allow_bvh_update()
     )
+
+#----------------------------------------------------------------------------
+#
+@torch.cuda.nvtx.range("morton3d_layout")
+def mog_morton3d_layout(
+        optix_ctx,
+        mog_pos,
+        resolution
+):
+    # m3d_grid_cell contains the number of gaussian for every morton3d cells (cells are indexed from 1 to n+1)
+    # mog_m3d_cell contains both the cell id and the id within its cell for each gaussians
+    m3d_grid_cell, mog_m3d_cell = _plugin.mog_morton3d_layout(
+        optix_ctx.cpp_wrapper,
+        mog_pos.view(-1, 3),
+        resolution
+    )
+    return torch.cumsum(m3d_grid_cell,dim=0)[mog_m3d_cell[:,0],0] + mog_m3d_cell[:,1]
+
+
 
 #----------------------------------------------------------------------------
 #
@@ -259,6 +279,7 @@ class OptixMogRenderOpts(IntEnum):
   ADAPTIVE_KERNEL_SAMPLING = 8 # MOGTracingAdaptiveKernelClamping
   ENABLE_NORMALS = 16 # MOGTracingWithNormals
   ENABLE_HITCOUNTS = 32 # MOGTracingWithHitCounts
+  ENABLE_BVH_UPDATE = 64
   DEFAULT = NONE
 
 @dataclass
@@ -276,7 +297,7 @@ class OptixMogTracingParams:
     max_hits_returned : int=64       # total number of hits returned
     
     @staticmethod
-    def pack_hit_mode(gaussian_function:str, sampling_mode:bool, adaptive_kernel_clamping: bool, enable_normals: bool, enable_hitcounts: bool):
+    def pack_hit_mode(gaussian_function:str, sampling_mode:bool, adaptive_kernel_clamping: bool, enable_normals: bool, enable_hitcounts: bool, enable_bvh_update: bool):
         hit_mode = int(OptixMogRenderOpts.NONE)
         if gaussian_function=="exp-p4-dist":
             hit_mode = hit_mode | OptixMogRenderOpts.TESSERACTIC_KERNEL
@@ -288,6 +309,8 @@ class OptixMogTracingParams:
             hit_mode = hit_mode | OptixMogRenderOpts.ENABLE_NORMALS
         if enable_hitcounts:
             hit_mode = hit_mode | OptixMogRenderOpts.ENABLE_HITCOUNTS
+        if enable_bvh_update:
+            hit_mode = hit_mode | OptixMogRenderOpts.ENABLE_BVH_UPDATE
         return hit_mode
 
     @staticmethod
@@ -353,3 +376,9 @@ class OptiXContext:
 
     def is_sampling(self):
         return self.params.hit_mode & OptixMogRenderOpts.SAMPLING
+    
+    def allow_bvh_update(self):
+        return self.params.hit_mode & OptixMogRenderOpts.ENABLE_BVH_UPDATE
+    
+    def get_primitive_aabb(self):
+        return self.cpp_wrapper.get_aabb()

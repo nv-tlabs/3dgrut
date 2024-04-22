@@ -81,7 +81,7 @@ struct MoGTracingBwdParams
     float hitMinGaussianResponse;
     unsigned int sphDegree;
     uint2 frameBounds;
-    
+
     unsigned int frameNumber;
     int gPrimNumTri;
     float alphaMaxValue;

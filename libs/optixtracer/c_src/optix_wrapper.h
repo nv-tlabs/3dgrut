@@ -34,6 +34,7 @@ struct OptiXState
     uint32_t maxNumSlabs;
     bool topKHits;
     uint32_t patchSize;
+    uint32_t maxSphDegree;
     uint32_t sphDegree;
     float minKernelResponse;
     float minTransmittance;
@@ -114,7 +115,7 @@ public:
     {
         if (pState)
         {
-            pState->sphDegree = degree;
+            pState->sphDegree = std::min<uint32_t>(pState->maxSphDegree, degree);
         }
     }
 
@@ -124,6 +125,17 @@ public:
         {
             pState->pipeline = pipeline;
         }
+    }
+
+    std::tuple<float, float, float, float, float, float> getAABB()
+    {
+        if (pState)
+        {
+            const OptixAabb& aabb = pState->gasAABB;
+            return std::tuple<float, float, float, float, float, float>(aabb.minX, aabb.minY, aabb.minZ, aabb.maxX, aabb.maxY, aabb.maxZ);
+        }
+        return std::tuple<float, float, float, float, float, float>(0.0f,0.0f,0.0f,0.0f,0.0f,0.0f);
+
     }
 
     void reallocatePrimGeomBuffer(cudaStream_t stream);

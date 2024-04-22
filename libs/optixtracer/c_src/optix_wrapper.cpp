@@ -421,11 +421,12 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
     pState->maxNumSlabs = maxNumSlabs;
     pState->topKHits = topKHits;
     pState->patchSize = patchSize;
+    pState->maxSphDegree = 3;
     pState->sphDegree = sphDegree;
     pState->minKernelResponse = minKernelResponse;
     pState->minTransmittance = minTransmittance;
     pState->maxHitsReturned = maxHitsReturned;
-    
+
     pState->gNum = 0;
     pState->gPrimType = primitiveType;
     pState->gPrimNumVert = 0;
@@ -443,7 +444,7 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
         defines.emplace_back("-DMOGTRACING_WITH_HITCOUNTS=" + std::to_string(pState->hitMode & MOGTracingWithHitCounts));
         defines.emplace_back("-DMOGTRACING_MAXNUMHITS_PER_SLAB=" + std::to_string(pState->maxHitsPerSlab));
         defines.emplace_back("-DMOGTRACING_PATCH_SIZE=" + std::to_string(pState->patchSize));
-        defines.emplace_back("-DMOGTRACING_SPH_DEGREE=" + std::to_string(pState->sphDegree));
+        defines.emplace_back("-DMOGTRACING_MAX_NUM_RADIANCE_SPH_COEFFS=" + std::to_string((pState->maxSphDegree + 1) * (pState->maxSphDegree + 1)));
         defines.emplace_back("-DMOGTRACING_MAX_HITS_RETURNED=" + std::to_string(pState->maxHitsReturned));
         defines.emplace_back("-DMOGTRACING_PRIMITIVE_TYPE=" + std::to_string(pState->gPrimType));
         if (pState->topKHits)
@@ -458,12 +459,12 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
     //
     // Create pipelines
     //
-    pState->moduleMoGTracingCH = nullptr;
-    pState->pipelineMoGTracingCH = nullptr;
-    pState->sbtMoGTracingCH = {};
-    createPipeline(pState->context, path, cuda_path, defines, "mogTracingCH",
-                   sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasMS | PipelineFlag_HasCH, &pState->moduleMoGTracingCH,
-                   &pState->pipelineMoGTracingCH, pState->sbtMoGTracingCH);
+    // pState->moduleMoGTracingCH = nullptr;
+    // pState->pipelineMoGTracingCH = nullptr;
+    // pState->sbtMoGTracingCH = {};
+    // createPipeline(pState->context, path, cuda_path, defines, "mogTracingCH",
+    //                sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasMS | PipelineFlag_HasCH, &pState->moduleMoGTracingCH,
+    //                &pState->pipelineMoGTracingCH, pState->sbtMoGTracingCH);
 
     pState->moduleMoGTracingAH = nullptr;
     pState->pipelineMoGTracingAH = nullptr;
@@ -477,24 +478,24 @@ OptiXStateWrapper::OptiXStateWrapper(const std::string &path,
     createPipeline(pState->context, path, cuda_path, defines, "mogTracingAHBwd", sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH,
                    &pState->moduleMoGTracingAHBwd, &pState->pipelineMoGTracingAHBwd, pState->sbtMoGTracingAHBwd, hitMode & MOGTracingSampling ? 4 : 3);
 
-    pState->moduleMoGTracingIS = nullptr;
-    pState->pipelineMoGTracingIS = nullptr;
-    pState->sbtMoGTracingIS = {};
-    createPipeline(pState->context, path, cuda_path, defines, "mogTracingIS",
-                   sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH | PipelineFlag_HasIS, &pState->moduleMoGTracingIS,
-                   &pState->pipelineMoGTracingIS, pState->sbtMoGTracingIS);
+    // pState->moduleMoGTracingIS = nullptr;
+    // pState->pipelineMoGTracingIS = nullptr;
+    // pState->sbtMoGTracingIS = {};
+    // createPipeline(pState->context, path, cuda_path, defines, "mogTracingIS",
+    //                sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH | PipelineFlag_HasIS, &pState->moduleMoGTracingIS,
+    //                &pState->pipelineMoGTracingIS, pState->sbtMoGTracingIS);
 
-    pState->moduleMoGTracingMLAT = nullptr;
-    pState->pipelineMoGTracingMLAT = nullptr;
-    pState->sbtMoGTracingMLAT = {};
-    createPipeline(pState->context, path, cuda_path, defines, "mogTracingMLAT", sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH,
-                   &pState->moduleMoGTracingMLAT, &pState->pipelineMoGTracingMLAT, pState->sbtMoGTracingMLAT);
+    // pState->moduleMoGTracingMLAT = nullptr;
+    // pState->pipelineMoGTracingMLAT = nullptr;
+    // pState->sbtMoGTracingMLAT = {};
+    // createPipeline(pState->context, path, cuda_path, defines, "mogTracingMLAT", sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH,
+    //                &pState->moduleMoGTracingMLAT, &pState->pipelineMoGTracingMLAT, pState->sbtMoGTracingMLAT);
 
-    pState->moduleMoGTracingMBOIT = nullptr;
-    pState->pipelineMoGTracingMBOIT = nullptr;
-    pState->sbtMoGTracingMBOIT = {};
-    createPipeline(pState->context, path, cuda_path, defines, "mogTracingMBOIT", sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH,
-                   &pState->moduleMoGTracingMBOIT, &pState->pipelineMoGTracingMBOIT, pState->sbtMoGTracingMBOIT);
+    // pState->moduleMoGTracingMBOIT = nullptr;
+    // pState->pipelineMoGTracingMBOIT = nullptr;
+    // pState->sbtMoGTracingMBOIT = {};
+    // createPipeline(pState->context, path, cuda_path, defines, "mogTracingMBOIT", sharedFlags | PipelineFlag_HasRG | PipelineFlag_HasAH,
+    //                &pState->moduleMoGTracingMBOIT, &pState->pipelineMoGTracingMBOIT, pState->sbtMoGTracingMBOIT);
 
     pState->moduleMoGTracingInd = nullptr;
     pState->pipelineMoGTracingInd = nullptr;

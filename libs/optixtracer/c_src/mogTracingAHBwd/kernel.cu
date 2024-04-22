@@ -200,6 +200,14 @@ extern "C" __global__ void __raygen__rg()
                 make_float4(params.mogRot[gId][0], params.mogRot[gId][1], params.mogRot[gId][2], params.mogRot[gId][3]);
             const float3 gscl = make_float3(params.mogScl[gId][0], params.mogScl[gId][1], params.mogScl[gId][2]);
 
+            float3 sphCoefficients[MOGTRACING_MAX_NUM_RADIANCE_SPH_COEFFS];
+#pragma unroll
+            for (unsigned int j = 0; j < MOGTRACING_MAX_NUM_RADIANCE_SPH_COEFFS; ++j)
+            {
+                const int off = j * 3;
+                sphCoefficients[j] = make_float3(params.mogSph[gId][off + 0], params.mogSph[gId][off + 1], params.mogSph[gId][off + 2]);
+            }
+            
             float33 grotMat;
             rotationMatrix(make_float4(grot.x, grot.y, grot.z, grot.w), grotMat);
             const float3 giscl = make_float3(1 / gscl.x, 1 / gscl.y, 1 / gscl.z);
@@ -291,7 +299,7 @@ extern "C" __global__ void __raygen__rg()
                             // compute the gradient wrt to the sph coefficients and position (through the sph view
                             // direction)
                             float3 gradPosGrd = make_float3(0);
-                            const float3 grad = computeColorFromSHBwd(sphDegree, rayOri[k][j], gId, gpos, weight, rayRadGrd[k][j], params, gradPosGrd);
+                            const float3 grad = computeColorFromSHBwd(sphDegree, &sphCoefficients[0], rayOri[k][j], gId, gpos, weight, rayRadGrd[k][j], params, gradPosGrd);
 
                             // >>> rayRadiance = accumulatedRayRad + weigth * rayRad + (1-galpha)*transmit * residualRayRad
                             const float3 rayRad = weight * grad;

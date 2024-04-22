@@ -552,7 +552,7 @@ def main(conf: DictConfig) -> None:
     # Export the mixture-of-3d-gaussians in mogt file
     if conf.export_ingp.enabled:
         ingp_path = conf.export_ingp.path if conf.export_ingp.path else os.path.join(out_dir, "export_last.ingp")
-        model.export_ingp(os.path.join(out_dir, "export_last.ingp"), conf.export_ingp.force_half)
+        model.export_ingp(os.path.join(out_dir, "export_last.ingp"), conf.export_ingp.force_half, conf.export_ingp.morton3d_grid_resolution)
         
     if conf.test_last:
         logging.info(f"running on test set...")

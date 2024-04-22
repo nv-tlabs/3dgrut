@@ -6,6 +6,6 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
-from .ops import OptixMogPipeline, OptixMogPrimitive, OptixMogRenderOpts, OptixMogTracingParams, OptiXContext, build_mog_bvh, trace_mog, trace_mog_grad, trace_mog_inds, count_mog_hits, get_mog_primitives
+from .ops import OptixMogPipeline, OptixMogPrimitive, OptixMogRenderOpts, OptixMogTracingParams, OptiXContext, build_mog_bvh, trace_mog, trace_mog_grad, trace_mog_inds, count_mog_hits, get_mog_primitives, create_camera_rays, mog_morton3d_layout
 __all__ = ["OptixMogPipeline", "OptixMogPrimitive", "OptixMogRenderOpts", "OptixMogTracingParams", "OptiXContext",
-           "build_mog_bvh", "trace_mog", "trace_mog_grad", "trace_mog_inds", "count_mog_hits", "get_mog_primitives", "create_camera_rays"]
+           "build_mog_bvh", "trace_mog", "trace_mog_grad", "trace_mog_inds", "count_mog_hits", "get_mog_primitives", "create_camera_rays", "mog_morton3d_layout"]

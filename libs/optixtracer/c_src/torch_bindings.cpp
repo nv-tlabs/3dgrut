@@ -47,6 +47,18 @@
 
 namespace
 {
+    template <typename scalar_t>
+    inline scalar_t *get_ptr(torch::Tensor tensor)
+    {
+        return reinterpret_cast<scalar_t *>(tensor.contiguous().data_ptr<float>());
+    }
+
+    template <typename integer_t>
+    inline integer_t *get_ptri(torch::Tensor tensor)
+    {
+        return reinterpret_cast<integer_t *>(tensor.contiguous().data_ptr<int>());
+    }
+
     inline uint32_t div_round_up(uint32_t val, uint32_t divisor)
     {
         return (val + divisor - 1) / divisor;
@@ -91,10 +103,10 @@ namespace
 } // namespace name
 
 void computeGaussianEnclosingIcosaHedron(uint32_t gNum,
-                                         torch::Tensor gPos,
-                                         torch::Tensor gRot,
-                                         torch::Tensor gScl,
-                                         torch::Tensor gDns,
+                                         const float3 *gPos,
+                                         const float4 *gRot,
+                                         const float3 *gScl,
+                                         const float *gDns,
                                          float kernelMinResponse,
                                          uint32_t opts,
                                          float3 *gPrimVrt,
@@ -103,10 +115,10 @@ void computeGaussianEnclosingIcosaHedron(uint32_t gNum,
                                          cudaStream_t stream);
 
 void computeGaussianEnclosingOctaHedron(uint32_t gNum,
-                                        torch::Tensor gPos,
-                                        torch::Tensor gRot,
-                                        torch::Tensor gScl,
-                                        torch::Tensor gDns,
+                                        const float3 *gPos,
+                                        const float4 *gRot,
+                                        const float3 *gScl,
+                                        const float *gDns,
                                         float kernelMinResponse,
                                         uint32_t opts,
                                         float3 *gPrimVrt,
@@ -115,10 +127,10 @@ void computeGaussianEnclosingOctaHedron(uint32_t gNum,
                                         cudaStream_t stream);
 
 void computeGaussianEnclosingTriHexa(uint32_t gNum,
-                                     torch::Tensor gPos,
-                                     torch::Tensor gRot,
-                                     torch::Tensor gScl,
-                                     torch::Tensor gDns,
+                                     const float3 *gPos,
+                                     const float4 *gRot,
+                                     const float3 *gScl,
+                                     const float *gDns,
                                      float kernelMinResponse,
                                      uint32_t opts,
                                      float3 *gPrimVrt,
@@ -127,10 +139,10 @@ void computeGaussianEnclosingTriHexa(uint32_t gNum,
                                      cudaStream_t stream);
 
 void computeGaussianEnclosingTriSurfel(uint32_t gNum,
-                                       torch::Tensor gPos,
-                                       torch::Tensor gRot,
-                                       torch::Tensor gScl,
-                                       torch::Tensor gDns,
+                                       const float3 *gPos,
+                                       const float4 *gRot,
+                                       const float3 *gScl,
+                                       const float *gDns,
                                        float kernelMinResponse,
                                        uint32_t opts,
                                        float3 *gPrimVrt,
@@ -139,10 +151,10 @@ void computeGaussianEnclosingTriSurfel(uint32_t gNum,
                                        cudaStream_t stream);
 
 void computeGaussianEnclosingTetraHedron(uint32_t gNum,
-                                         torch::Tensor gPos,
-                                         torch::Tensor gRot,
-                                         torch::Tensor gScl,
-                                         torch::Tensor gDns,
+                                         const float3 *gPos,
+                                         const float4 *gRot,
+                                         const float3 *gScl,
+                                         const float *gDns,
                                          float kernelMinResponse,
                                          uint32_t opts,
                                          float3 *gPrimVrt,
@@ -151,10 +163,10 @@ void computeGaussianEnclosingTetraHedron(uint32_t gNum,
                                          cudaStream_t stream);
 
 void computeGaussianEnclosingDiamond(uint32_t gNum,
-                                     torch::Tensor gPos,
-                                     torch::Tensor gRot,
-                                     torch::Tensor gScl,
-                                     torch::Tensor gDns,
+                                     const float3 *gPos,
+                                     const float4 *gRot,
+                                     const float3 *gScl,
+                                     const float *gDns,
                                      float kernelMinResponse,
                                      uint32_t opts,
                                      float3 *gPrimVrt,
@@ -163,10 +175,10 @@ void computeGaussianEnclosingDiamond(uint32_t gNum,
                                      cudaStream_t stream);
 
 void computeGaussianEnclosingSphere(uint32_t gNum,
-                                    torch::Tensor gPos,
-                                    torch::Tensor gRot,
-                                    torch::Tensor gScl,
-                                    torch::Tensor gDns,
+                                    const float3 *gPos,
+                                    const float4 *gRot,
+                                    const float3 *gScl,
+                                    const float *gDns,
                                     float kernelMinResponse,
                                     uint32_t opts,
                                     float3 *gPrimCenter,
@@ -175,10 +187,10 @@ void computeGaussianEnclosingSphere(uint32_t gNum,
                                     cudaStream_t stream);
 
 void computeGaussianEnclosingAABB(uint32_t gNum,
-                                  torch::Tensor gPos,
-                                  torch::Tensor gRot,
-                                  torch::Tensor gScl,
-                                  torch::Tensor gDns,
+                                  const float3 *gPos,
+                                  const float4 *gRot,
+                                  const float3 *gScl,
+                                  const float *gDns,
                                   float kernelMinResponse,
                                   uint32_t opts,
                                   OptixAabb *gPrimAABB,
@@ -201,12 +213,21 @@ void generatePinholeCameraRays(int2 resolution,
                                float3 *rayDir,
                                cudaStream_t stream);
 
+void generateMorton3DMoGLayout(int gridResolution,
+                               OptixAabb mogAABB,
+                               int gNum,
+                               const float3 *mogPos,
+                               int *m3dGridCell,
+                               int2 *m3dMoGCell,
+                               cudaStream_t stream);
+
 void build_mog_bvh(OptiXStateWrapper &stateWrapper,
                    torch::Tensor mogPos,
                    torch::Tensor mogRot,
                    torch::Tensor mogScl,
                    torch::Tensor mogDns,
-                   unsigned int rebuild)
+                   unsigned int rebuild,
+                   bool allow_update)
 {
     const uint32_t gNum = mogPos.size(0);
 
@@ -244,7 +265,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
         stateWrapper.pState->gPrimNumVert = 0;
         stateWrapper.pState->gPrimNumTri = 0;
 
-        computeGaussianEnclosingAABB(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
+        computeGaussianEnclosingAABB(gNum, get_ptr<float3>(mogPos), get_ptr<float4>(mogRot), get_ptr<float3>(mogScl), get_ptr<float>(mogDns), stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                      reinterpret_cast<OptixAabb *>(stateWrapper.pState->gPrimAABB),
                                      reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr), cudaStream);
 
@@ -274,8 +295,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 20;
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingIcosaHedron(gNum, mogPos, mogRot, mogScl,
-                                                mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
+            computeGaussianEnclosingIcosaHedron(gNum, get_ptr<float3>(mogPos), get_ptr<float4>(mogRot), get_ptr<float3>(mogScl), get_ptr<float>(mogDns), stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                                 reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                                 reinterpret_cast<int3 *>(stateWrapper.pState->gPrimTri),
                                                 reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr), cudaStream);
@@ -286,7 +306,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 8;
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingOctaHedron(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
+            computeGaussianEnclosingOctaHedron(gNum, get_ptr<float3>(mogPos), get_ptr<float4>(mogRot), get_ptr<float3>(mogScl), get_ptr<float>(mogDns), stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                                reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                                reinterpret_cast<int3 *>(stateWrapper.pState->gPrimTri),
                                                reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr),
@@ -299,7 +319,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 6;
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingTriHexa(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
+            computeGaussianEnclosingTriHexa(gNum, get_ptr<float3>(mogPos), get_ptr<float4>(mogRot), get_ptr<float3>(mogScl), get_ptr<float>(mogDns), stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                             reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                             reinterpret_cast<int3 *>(stateWrapper.pState->gPrimTri),
                                             reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr),
@@ -312,7 +332,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 2;
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingTriSurfel(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
+            computeGaussianEnclosingTriSurfel(gNum, get_ptr<float3>(mogPos), get_ptr<float4>(mogRot), get_ptr<float3>(mogScl), get_ptr<float>(mogDns), stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                               reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                               reinterpret_cast<int3 *>(stateWrapper.pState->gPrimTri),
                                               reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr),
@@ -325,7 +345,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 4;
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingTetraHedron(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
+            computeGaussianEnclosingTetraHedron(gNum, get_ptr<float3>(mogPos), get_ptr<float4>(mogRot), get_ptr<float3>(mogScl), get_ptr<float>(mogDns), stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                                 reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                                 reinterpret_cast<int3 *>(stateWrapper.pState->gPrimTri),
                                                 reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr), cudaStream);
@@ -336,7 +356,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 1; // number of primtive per gaussians
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingSphere(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
+            computeGaussianEnclosingSphere(gNum, get_ptr<float3>(mogPos), get_ptr<float4>(mogRot), get_ptr<float3>(mogScl), get_ptr<float>(mogDns), stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                            reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                            reinterpret_cast<float *>(stateWrapper.pState->gPrimTri),
                                            reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr), cudaStream);
@@ -347,7 +367,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             stateWrapper.pState->gPrimNumTri = 6;
             stateWrapper.reallocatePrimGeomBuffer(cudaStream);
 
-            computeGaussianEnclosingDiamond(gNum, mogPos, mogRot, mogScl, mogDns, stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
+            computeGaussianEnclosingDiamond(gNum, get_ptr<float3>(mogPos), get_ptr<float4>(mogRot), get_ptr<float3>(mogScl), get_ptr<float>(mogDns), stateWrapper.pState->minKernelResponse, stateWrapper.pState->hitMode,
                                             reinterpret_cast<float3 *>(stateWrapper.pState->gPrimVrt),
                                             reinterpret_cast<int3 *>(stateWrapper.pState->gPrimTri),
                                             reinterpret_cast<OptixAabb *>(stateWrapper.pState->optixAabbPtr), cudaStream);
@@ -364,25 +384,30 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
     // Clear BVH GPU memory
     {
         OptixAccelBuildOptions accel_options = {};
-        accel_options.buildFlags = OPTIX_BUILD_FLAG_PREFER_FAST_TRACE | OPTIX_BUILD_FLAG_ALLOW_UPDATE;
+        accel_options.buildFlags = OPTIX_BUILD_FLAG_PREFER_FAST_TRACE;
+        if (allow_update)
+        {
+            accel_options.buildFlags |= OPTIX_BUILD_FLAG_ALLOW_UPDATE;
+        }
         accel_options.operation = rebuild ? OPTIX_BUILD_OPERATION_BUILD : OPTIX_BUILD_OPERATION_UPDATE;
 
         OptixBuildInput prim_input = {};
+        uint32_t prim_input_flags = 0;
 
         if ((stateWrapper.pState->pipeline == MOGTracingPipelineIS) ||
             (stateWrapper.pState->gPrimType == MOGTracingCustom))
         {
-            const uint32_t prim_input_flags[1] = {OPTIX_GEOMETRY_FLAG_REQUIRE_SINGLE_ANYHIT_CALL};
+            prim_input_flags = {OPTIX_GEOMETRY_FLAG_REQUIRE_SINGLE_ANYHIT_CALL};
             prim_input.type = OPTIX_BUILD_INPUT_TYPE_CUSTOM_PRIMITIVES;
             prim_input.customPrimitiveArray.numPrimitives = gNum;
             prim_input.customPrimitiveArray.aabbBuffers = &stateWrapper.pState->gPrimAABB;
             prim_input.customPrimitiveArray.strideInBytes = 0;
-            prim_input.customPrimitiveArray.flags = prim_input_flags;
+            prim_input.customPrimitiveArray.flags = &prim_input_flags;
             prim_input.customPrimitiveArray.numSbtRecords = 1;
         }
         else if (stateWrapper.pState->gPrimType == MOGTracingSphere)
         {
-            const uint32_t prim_input_flags[1] = {OPTIX_GEOMETRY_FLAG_REQUIRE_SINGLE_ANYHIT_CALL};
+            prim_input_flags = {OPTIX_GEOMETRY_FLAG_REQUIRE_SINGLE_ANYHIT_CALL};
             prim_input.type = OPTIX_BUILD_INPUT_TYPE_SPHERES;
             prim_input.sphereArray.vertexBuffers = &stateWrapper.pState->gPrimVrt;
             prim_input.sphereArray.vertexStrideInBytes = 0;
@@ -390,13 +415,13 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             prim_input.sphereArray.radiusBuffers = &stateWrapper.pState->gPrimTri;
             prim_input.sphereArray.radiusStrideInBytes = 0;
             prim_input.sphereArray.singleRadius = 0;
-            prim_input.sphereArray.flags = prim_input_flags;
+            prim_input.sphereArray.flags = &prim_input_flags;
             prim_input.sphereArray.numSbtRecords = 1;
         }
         else
         {
             // Our build input is a simple list of non-indexed triangle vertices
-            const uint32_t prim_input_flags[1] = {OPTIX_GEOMETRY_FLAG_REQUIRE_SINGLE_ANYHIT_CALL};
+            prim_input_flags = {OPTIX_GEOMETRY_FLAG_REQUIRE_SINGLE_ANYHIT_CALL};
             prim_input.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
             prim_input.triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
             prim_input.triangleArray.numVertices = stateWrapper.pState->gPrimNumVert * gNum;
@@ -404,7 +429,7 @@ void build_mog_bvh(OptiXStateWrapper &stateWrapper,
             prim_input.triangleArray.indexFormat = OPTIX_INDICES_FORMAT_UNSIGNED_INT3;
             prim_input.triangleArray.numIndexTriplets = stateWrapper.pState->gPrimNumTri * gNum;
             prim_input.triangleArray.indexBuffer = stateWrapper.pState->gPrimTri;
-            prim_input.triangleArray.flags = prim_input_flags;
+            prim_input.triangleArray.flags = &prim_input_flags;
             prim_input.triangleArray.numSbtRecords = 1;
         }
 
@@ -482,9 +507,9 @@ std::tuple<torch::Tensor, torch::Tensor> create_camera_rays(
     generatePinholeCameraRays(
         make_int2(width, height),
         make_float2(tanfovx, tanfovy),
-        reinterpret_cast<const float4 *>(invViewMatrix.contiguous().data_ptr()),
-        reinterpret_cast<float3 *>(rayOri.contiguous().data_ptr()),
-        reinterpret_cast<float3 *>(rayDir.contiguous().data_ptr()),
+        get_ptr<float4>(invViewMatrix),
+        get_ptr<float3>(rayOri),
+        get_ptr<float3>(rayDir),
         cudaStream);
 
     CUDA_CHECK_LAST();
@@ -492,16 +517,45 @@ std::tuple<torch::Tensor, torch::Tensor> create_camera_rays(
     return std::tuple<torch::Tensor, torch::Tensor>(rayOri, rayDir);
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, float> trace_mog(OptiXStateWrapper &stateWrapper,
-                                                                                                                      uint32_t frameNumber,
-                                                                                                                      uint32_t renderOpts,
-                                                                                                                      torch::Tensor rayOri,
-                                                                                                                      torch::Tensor rayDir,
-                                                                                                                      torch::Tensor mogPos,
-                                                                                                                      torch::Tensor mogRot,
-                                                                                                                      torch::Tensor mogScl,
-                                                                                                                      torch::Tensor mogDns,
-                                                                                                                      torch::Tensor mogSph)
+std::tuple<torch::Tensor, torch::Tensor> mog_morton3d_layout(
+    OptiXStateWrapper &stateWrapper,
+    torch::Tensor mogPos,
+    int gridResolution)
+{
+    const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kInt32).device(torch::kCUDA);
+    torch::Tensor m3dGridCell = torch::zeros({gridResolution * gridResolution * gridResolution + 1, 1}, opts);
+    torch::Tensor m3dMoGCell = torch::zeros({mogPos.size(0), 2}, opts);
+
+    const int gNum = mogPos.size(0);
+    const OptixAabb mogAABB = stateWrapper.pState->gasAABB;
+
+    cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
+
+    generateMorton3DMoGLayout(
+        gridResolution,
+        mogAABB,
+        gNum,
+        get_ptr<float3>(mogPos),
+        get_ptri<int>(m3dGridCell),
+        get_ptri<int2>(m3dMoGCell),
+        cudaStream);
+
+    CUDA_CHECK_LAST();
+
+    return std::tuple<torch::Tensor, torch::Tensor>(m3dGridCell, m3dMoGCell);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, float>
+trace_mog(OptiXStateWrapper &stateWrapper,
+          uint32_t frameNumber,
+          uint32_t renderOpts,
+          torch::Tensor rayOri,
+          torch::Tensor rayDir,
+          torch::Tensor mogPos,
+          torch::Tensor mogRot,
+          torch::Tensor mogScl,
+          torch::Tensor mogDns,
+          torch::Tensor mogSph)
 {
     const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
     torch::Tensor rayRad = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 3}, opts);
@@ -799,7 +853,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
         .def(pybind11::init<const std::string &, const std::string &, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
                             bool, uint32_t, uint32_t, float, float, uint32_t>())
         .def("set_sph_degree", &OptiXStateWrapper::setSphDegree, R"()", py::arg("degree"))
-        .def("set_pipeline", &OptiXStateWrapper::setPipeline, R"()", py::arg("pipeline"));
+        .def("set_pipeline", &OptiXStateWrapper::setPipeline, R"()", py::arg("pipeline"))
+        .def("get_aabb", &OptiXStateWrapper::getAABB, R"()");
     m.def("build_mog_bvh", &build_mog_bvh, "build_mog_bvh");
     m.def("trace_mog", &trace_mog, "trace_mog");
     m.def("trace_mog_bwd", &trace_mog_bwd, "trace_mog_bwd");
@@ -807,4 +862,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     m.def("count_mog_hits", &count_mog_hits, "count_mog_hits");
     m.def("get_mog_primitives", &get_mog_primitives, "get_mog_primitives");
     m.def("create_camera_rays", &create_camera_rays, "create_camera_rays");
+    m.def("mog_morton3d_layout", &mog_morton3d_layout, "mog_morton3d_layout");
 }

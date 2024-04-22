@@ -26,6 +26,7 @@ writer:
 export_ingp:
   enabled: false 
   force_half: false
+  morton3d_grid_resolution: 512
   path: ""
 import_ingp:
   enabled: false 

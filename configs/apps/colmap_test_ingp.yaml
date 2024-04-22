@@ -24,7 +24,7 @@ render:
   patch_size: 3
   min_kernel_response: 0.0113
   adaptive_kernel_clamping: true
-  min_transmittance: 0.001 
+  min_transmittance: 0.01 
   enable_normals: False
   enable_hitcounts: False
   

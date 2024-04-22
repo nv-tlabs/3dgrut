@@ -138,7 +138,8 @@ class MixtureOfGaussians(torch.nn.Module):
                     self.conf.render.train_hit_sampling, 
                     self.conf.render.adaptive_kernel_clamping,
                     self.conf.render.enable_normals,
-                    self.conf.render.enable_hitcounts
+                    self.conf.render.enable_hitcounts,
+                    (self.conf.render.max_consecutive_bvh_update>1) and not self.conf.render.adaptive_kernel_clamping 
                 ),
                 max_hit_per_slab = self.conf.render.max_hit_per_slab,
                 max_num_slabs = self.conf.render.max_num_slabs,
@@ -1215,12 +1216,12 @@ class MixtureOfGaussians(torch.nn.Module):
             return self.forward_optix_render(rays_o, rays_d, err_target, train, frame_id, force_with_weights, force_sampling, enable_timing)
 
         elif force_method == 'torch':
-            return self.forward_torch_render(rays_o, rays_d, err_target, train)
+           return self.forward_torch_render(rays_o, rays_d, err_target, train)
 
         else:
             raise ValueError(f"unrecognized render method {self.render_method}")
 
-    def export_ingp(self, mogt_path:str,force_half:bool):
+    def export_ingp(self, mogt_path:str,force_half:bool,morton3d_grid_resolution:int):
         export_dtype = torch.float16 if force_half else self.get_positions().dtype
         logging.info(f"exporting mogt file to {mogt_path}...")
         mogt_config: dict[str, Any] = {}
@@ -1228,14 +1229,22 @@ class MixtureOfGaussians(torch.nn.Module):
             "version": "0.0.1", 
             "model": "mogt"
         }
+        if morton3d_grid_resolution > 1:
+            mog_ind = optixtracer.mog_morton3d_layout(
+                self.optix_ctx, 
+                self.get_positions(),
+                morton3d_grid_resolution
+            )
+        else:
+            mog_ind = torch.range(0, self.get_positions().shape[0]-1).to(dtype=torch.int32)
         mogt_config["precision"] = "half" if export_dtype==torch.float16 else "single"
         mogt_config["mog_num"] = self.get_positions().shape[0]
         mogt_config["mog_sph_degree"] = self.max_n_features
-        mogt_config["mog_positions"] = self.get_positions().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        mogt_config["mog_scales"] = self.get_scale().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        mogt_config["mog_rotations"] = self.get_rotation().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        mogt_config["mog_densities"] = self.get_density().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        mogt_config["mog_features"] = self.get_features().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_positions"] = self.get_positions()[mog_ind,:].flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_scales"] = self.get_scale()[mog_ind,:].flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_rotations"] = self.get_rotation()[mog_ind,:].flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_densities"] = self.get_density()[mog_ind,:].flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_features"] = self.get_features()[mog_ind,:].flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
         with gzip.open(ingp_filepath := mogt_path, "wb") as f:
             packed = msgpack.packb(mogt_config)
             f.write(packed)
