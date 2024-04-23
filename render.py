@@ -178,7 +178,7 @@ class Renderer:
                     # Compute the loss
                     psnr.append(criterions["psnr"](rgb_pred, rgb_gt).item())
                     ssim.append(criterions["ssim"](rgb_pred.permute(0, 3, 1, 2), rgb_gt.permute(0, 3, 1, 2)).item())
-                    lpips.append(criterions["lpips"](rgb_pred.permute(0, 3, 1, 2), rgb_gt.permute(0, 3, 1, 2)).item())
+                    lpips.append(criterions["lpips"](rgb_pred.clip(0, 1).permute(0, 3, 1, 2), rgb_gt.permute(0, 3, 1, 2)).item())
 
                     # Record the time
                     inference_time.append(outputs["inference_time"])

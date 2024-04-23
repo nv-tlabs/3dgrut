@@ -24,7 +24,7 @@ writer:
   max_num_hits: 128
 
 export_ingp:
-  enabled: false 
+  enabled: True 
   force_half: false
   morton3d_grid_resolution: 512
   path: ""

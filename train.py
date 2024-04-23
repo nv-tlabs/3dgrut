@@ -186,7 +186,7 @@ def main(conf: DictConfig) -> None:
                                 val_loss.append(torch.abs(outputs['pred_rgb'] - rgb_gt).mean().item())
                                 val_psnr.append(criterions["psnr"](outputs['pred_rgb'], rgb_gt).item())
                                 val_ssim.append(criterions["ssim"](outputs['pred_rgb'].permute(0, 3, 1, 2), rgb_gt.permute(0, 3, 1, 2)).item())
-                                val_lpips.append(criterions["lpips"](outputs['pred_rgb'].permute(0, 3, 1, 2), rgb_gt.permute(0, 3, 1, 2)).item())
+                                val_lpips.append(criterions["lpips"](outputs['pred_rgb'].clip(0, 1).permute(0, 3, 1, 2), rgb_gt.permute(0, 3, 1, 2)).item())
                                 val_hits_min.append(outputs['hits_count'].min().cpu())
                                 val_hits_max.append(outputs['hits_count'].max().cpu())
                                 val_hits_mean.append(outputs['hits_count'].mean().cpu())
@@ -552,7 +552,7 @@ def main(conf: DictConfig) -> None:
     # Export the mixture-of-3d-gaussians in mogt file
     if conf.export_ingp.enabled:
         ingp_path = conf.export_ingp.path if conf.export_ingp.path else os.path.join(out_dir, "export_last.ingp")
-        model.export_ingp(os.path.join(out_dir, "export_last.ingp"), conf.export_ingp.force_half, conf.export_ingp.morton3d_grid_resolution)
+        model.export_ingp(ingp_path, conf.export_ingp.force_half, conf.export_ingp.morton3d_grid_resolution)
         
     if conf.test_last:
         logging.info(f"running on test set...")
