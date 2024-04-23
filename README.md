@@ -155,7 +155,7 @@ python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_ar
 
 ```
 rm utils/ngc/grid_search_configs/grid_search/*
-EXP_NAME="Ashkan-Apr23-adaptive_clamping-training"
+EXP_NAME="Ashkan-Apr23-adaptive_clamping-octahedron-training"
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array grid_search/random_init.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
 ```
@@ -173,7 +173,7 @@ running full evals with faster test renderer
 
 ```
 rm utils/ngc/grid_search_configs/grid_search/*
-EXP_NAME="Ashkan-Apr23-train-with-adaptive-clamping"
+EXP_NAME="Ashkan-Apr23-best-results-with-fast-eval"
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array grid_search/full_eval.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
 ```
