@@ -20,7 +20,7 @@ namespace
     __device__ inline float kernelScale(float density, float minResponse, uint32_t opts)
     {
         const float scale = opts & MOGTracingAdaptiveKernelClamping ? density : 1.0f;
-        return scale <= minResponse ? 0.00001f : (opts & MOGTracingTesseracticKernel ? powf(logf(scale / minResponse) / 0.0555f, 0.25f) : sqrtf(logf(scale / minResponse) / 0.5f));
+        return scale <= minResponse ? 0.0f : (opts & MOGTracingTesseracticKernel ? powf(logf(scale / minResponse) / 0.0555f, 0.25f) : sqrtf(logf(scale / minResponse) / 0.5f));
     }
 
     constexpr uint32_t octaHedronNumVrt = 6;

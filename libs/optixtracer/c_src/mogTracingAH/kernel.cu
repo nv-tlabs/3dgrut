@@ -97,9 +97,6 @@ extern "C" __global__ void __raygen__rg()
 
     float2 minMaxT = make_float2(1e9, -1e9);
 
-    float3 sampleRayOri = make_float3(0.0f);
-    float3 sampleRayDir = make_float3(0.0f);
-
 #pragma unroll
     for (int j = 0; j < MOGTracingPatchSize; ++j)
     {
@@ -108,9 +105,9 @@ extern "C" __global__ void __raygen__rg()
         for (int i = 0; i < MOGTracingPatchSize; ++i)
         {
             const int x = fminf(startIdxX + i, params.frameBounds.x);
-            sampleRayOri += rayOri[j][i] =
+            rayOri[j][i] =
                 make_float3(params.rayOri[idx.z][y][x][0], params.rayOri[idx.z][y][x][1], params.rayOri[idx.z][y][x][2]);
-            sampleRayDir += rayDir[j][i] =
+            rayDir[j][i] =
                 make_float3(params.rayDir[idx.z][y][x][0], params.rayDir[idx.z][y][x][1], params.rayDir[idx.z][y][x][2]);
             rayRad[j][i] = make_float3(0);
             rayTrm[j][i] = 1;
@@ -127,9 +124,6 @@ extern "C" __global__ void __raygen__rg()
             minMaxT.y = fmaxf(minMaxT.y, sampleMinMaxT.y);
         }
     }
-
-    sampleRayOri = sampleRayOri / (MOGTracingPatchSize * MOGTracingPatchSize);
-    sampleRayDir = safe_normalize(sampleRayDir);
 
     // ray- aabb intersection to determine number of segments
     constexpr float epsT = 1e-9;
@@ -158,6 +152,8 @@ extern "C" __global__ void __raygen__rg()
 
         // TODO : add a GOOD ray jittering scheme over the patch (not bounded by the convex hull of the rayDirs if
         // possible)
+        const float3 sampleRayOri = rayOri[MOGTracingPatchSize / 2][MOGTracingPatchSize / 2];
+        const float3 sampleRayDir = rayDir[MOGTracingPatchSize / 2][MOGTracingPatchSize / 2];
 
         trace(&p, sampleRayOri, sampleRayDir, startT + epsT, startT + slabSpacing);
         if (p.ahNumHits == 0)
