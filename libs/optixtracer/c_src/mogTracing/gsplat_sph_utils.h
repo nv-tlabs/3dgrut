@@ -25,7 +25,7 @@ inline __device__ float3 getSphCoeff(const float3 *sphCoefficients, int idx)
 }
 
 static __device__ float3
-computeColorFromSH(int deg, const float3 *sphCoefficients, const float3 &gpos, const float3 &rori, bool clamped = true)
+computeColorFromSH(int deg, const float3 *sphCoefficients, const float3 &rdir, const float3 &rori, bool clamped = true)
 {
     // The implementation is loosely based on code for
     // "Differentiable Point-Based Radiance Fields for
@@ -33,7 +33,7 @@ computeColorFromSH(int deg, const float3 *sphCoefficients, const float3 &gpos, c
     float3 rad = SH_C0 * getSphCoeff(sphCoefficients, 0);
     if (deg > 0)
     {
-        const float3 dir = safe_normalize(gpos - rori);
+        const float3& dir = rdir; //safe_normalize(gpos - rori);
 
         const float x = dir.x;
         const float y = dir.y;
@@ -82,10 +82,10 @@ inline __device__ void addSphCoeffGrd(TParams &params, int gId, int idx, const f
 
 template <typename TParams>
 __device__ float3 computeColorFromSHBwd(
-    int deg, const float3 *sphCoefficients, const float3 &rori, uint32_t gId, const float3 &gpos, float weight, const float3 &rayRadGrd, TParams &params, float3 &dL_dmean)
+    int deg, const float3 *sphCoefficients, const float3 &rori, uint32_t gId, const float3 &rdir, float weight, const float3 &rayRadGrd, TParams &params)
 {
     // radiance unclamped
-    const float3 gradu = computeColorFromSH(deg, sphCoefficients, gpos, rori, false);
+    const float3 gradu = computeColorFromSH(deg, sphCoefficients, rdir, rori, false);
 
     // clamped radiance
     float3 grad = make_float3(gradu.x > SHRadMinBound ? gradu.x : expf(gradu.x - SHRadMinBound) * SHRadMinBound,
@@ -106,8 +106,9 @@ __device__ float3 computeColorFromSHBwd(
 
     if (deg > 0)
     {
-        const float3 sphdiru = gpos - rori;
-        const float3 sphdir = safe_normalize(sphdiru);
+        //const float3 sphdiru = gpos - rori;
+        //const float3 sphdir = safe_normalize(sphdiru);
+        const float3& sphdir = rdir;
 
         float3 dRGBdx = make_float3(0);
         float3 dRGBdy = make_float3(0);
@@ -198,10 +199,10 @@ __device__ float3 computeColorFromSHBwd(
         // The view direction is an input to the computation. View direction
         // is influenced by the Gaussian's mean, so SHs gradients
         // must propagate back into 3D position.
-        const float3 dL_ddir = make_float3(dot(dRGBdx, dL_dRGB), dot(dRGBdy, dL_dRGB), dot(dRGBdz, dL_dRGB));
+        // const float3 dL_ddir = make_float3(dot(dRGBdx, dL_dRGB), dot(dRGBdy, dL_dRGB), dot(dRGBdz, dL_dRGB));
 
         // Account for normalization of direction
-        dL_dmean += safe_normalize_bw(sphdiru, dL_ddir);
+        //dL_dmean += safe_normalize_bw(sphdiru, dL_ddir);
 
         // // Gradients of loss w.r.t. Gaussian means, but only the portion
         // // that is caused because the mean affects the view-dependent color.

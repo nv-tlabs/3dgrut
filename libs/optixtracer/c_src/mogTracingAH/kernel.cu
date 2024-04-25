@@ -269,7 +269,7 @@ extern "C" __global__ void __raygen__rg()
                                 atomicAdd(&params.mogWeightSum[gId][0], weight);
                             }
 
-                            const float3 grad = computeColorFromSH(sphDegree, &sphCoefficients[0], gpos, rayOri[k][j]);
+                            const float3 grad = computeColorFromSH(sphDegree, &sphCoefficients[0], rayDir[k][j], rayOri[k][j]);
 
                             rayRad[k][j] += grad * weight;
                             rayTrm[k][j] *= (1 - galpha);

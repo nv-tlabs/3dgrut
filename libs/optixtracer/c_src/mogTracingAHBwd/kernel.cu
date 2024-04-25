@@ -298,8 +298,7 @@ extern "C" __global__ void __raygen__rg()
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                             // compute the gradient wrt to the sph coefficients and position (through the sph view
                             // direction)
-                            float3 gradPosGrd = make_float3(0);
-                            const float3 grad = computeColorFromSHBwd(sphDegree, &sphCoefficients[0], rayOri[k][j], gId, gpos, weight, rayRadGrd[k][j], params, gradPosGrd);
+                            const float3 grad = computeColorFromSHBwd(sphDegree, &sphCoefficients[0], rayOri[k][j], gId, rayDir[k][j], weight, rayRadGrd[k][j], params);
 
                             // >>> rayRadiance = accumulatedRayRad + weigth * rayRad + (1-galpha)*transmit * residualRayRad
                             const float3 rayRad = weight * grad;
@@ -430,7 +429,7 @@ extern "C" __global__ void __raygen__rg()
                             // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                             // ---> gposc = rayOri - gpos
                             // ===> d_gposc / d_gpos = -1
-                            const float3 rayMoGPosGrd = gradPosGrd - gposcGrd;
+                            const float3 rayMoGPosGrd = -gposcGrd;
                             atomicAdd(&params.mogPosGrd[gId][0], rayMoGPosGrd.x);
                             atomicAdd(&params.mogPosGrd[gId][1], rayMoGPosGrd.y);
                             atomicAdd(&params.mogPosGrd[gId][2], rayMoGPosGrd.z);
