@@ -92,7 +92,10 @@ __device__ float3 computeColorFromSHBwd(
     // float3 grad = make_float3(gradu.x > SHRadMinBound ? gradu.x : expf(gradu.x - SHRadMinBound) * SHRadMinBound,
     //                           gradu.y > SHRadMinBound ? gradu.y : expf(gradu.y - SHRadMinBound) * SHRadMinBound,
     //                           gradu.z > SHRadMinBound ? gradu.z : expf(gradu.z - SHRadMinBound) * SHRadMinBound);
-    
+    float3 grad = make_float3(gradu.x > 0.0f ? gradu.x : 0.0f,
+                              gradu.y > 0.0f ? gradu.y : 0.0f,
+                              gradu.z > 0.0f ? gradu.z : 0.0f);
+
     //
     float3 dL_dRGB = rayRadGrd * weight;
     // dL_dRGB.x *= (gradu.x > SHRadMinBound ? 1 : grad.x);
