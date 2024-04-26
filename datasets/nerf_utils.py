@@ -37,9 +37,8 @@ def get_ray_directions(H, W, K, device='cpu', ray_jitter=None, return_uv=False, 
 
     if return_uv:
         return directions, grid
-    return directions
-
-
+    
+    return torch.nn.functional.normalize(directions, dim=-1)
 
 @torch.cuda.amp.autocast(dtype=torch.float32)
 def get_rays(directions, c2w):
