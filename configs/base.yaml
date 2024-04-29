@@ -187,7 +187,7 @@ render:
   patch_size: 1
   min_kernel_response: 0.0113
   adaptive_kernel_clamping: false
-  min_transmittance: 0.0001 # gsplat default to 0.001
+  min_transmittance: 0.001 # gsplat default to 0.001
   max_hits_returned: 128
   max_consecutive_bvh_update: 15 
   enable_normals: True
