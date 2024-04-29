@@ -31,6 +31,7 @@ export_ingp:
 import_ingp:
   enabled: false 
   path: ""
+  init_global_step: 0
 
 model:
   density_activation: sigmoid
@@ -152,7 +153,7 @@ optimizer:
     positions:  
       lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.00016
     density:
-      lr: 0.09 # 3DGS value: 0.05
+      lr: 0.05 # 3DGS value: 0.05
     features_albedo:
       lr: 0.0025 # 3DGS value: 0.0025
     features_specular:
@@ -171,7 +172,7 @@ scheduler:
     lr_init: ${optimizer.params.positions.lr}
     lr_final: 0.0000016
 
-    max_steps: ${n_iterations}
+    max_steps: 30000
 
   density:
     type: skip

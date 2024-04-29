@@ -76,7 +76,7 @@ def main(conf: DictConfig) -> None:
         logging.info(f"Loading a pretrained ingp model from {ingp_path}!")
         model.init_from_ingp(ingp_path)
         model.build_bvh()
-        global_step = 0
+        global_step = conf.import_ingp.init_global_step
     else: # Initialize
         match conf.initialization.method:
             case 'colmap':

@@ -155,9 +155,16 @@ python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_ar
 
 ```
 rm utils/ngc/grid_search_configs/grid_search/*
-EXP_NAME="Ashkan-Apr23-adaptive_clamping-octahedron-training"
+EXP_NAME="Ashkan-Apr29-density-lr-05-15k-v100"
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
 python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array grid_search/random_init.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
+```
+
+```
+rm utils/ngc/grid_search_configs/grid_search/*
+EXP_NAME="Ashkan-Apr29-density-lr-05-15k-old-kernel"
+python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
+python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array grid_search/finetune_15k.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
 ```
 
 running the ablations
