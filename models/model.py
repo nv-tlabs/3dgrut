@@ -1250,7 +1250,7 @@ class MixtureOfGaussians(torch.nn.Module):
             f.write(packed)
 
     @torch.no_grad()
-    def init_from_ingp(self, ingp_path):
+    def init_from_ingp(self, ingp_path, init_model=True):
         with gzip.open(ingp_path, 'rb') as f:
             mogt_config = msgpack.unpackb(f.read())
         mog_num = mogt_config["mog_num"]
@@ -1273,7 +1273,8 @@ class MixtureOfGaussians(torch.nn.Module):
 
         self.n_active_features = self.max_n_features
         
-        self.init_densification_buffer()
-        self.set_optimizable_parameters()
-        self.setup_optimizer()
-        self.validate_fields()
+        if init_model:
+            self.init_densification_buffer()
+            self.set_optimizable_parameters()
+            self.setup_optimizer()
+            self.validate_fields()

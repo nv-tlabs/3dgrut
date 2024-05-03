@@ -19,6 +19,7 @@ import polyscope.imgui as psim
 
 from datasets.utils import PointCloud
 from datasets.utils import move_to_gpu, pinhole_camera_rays
+from models.model import MixtureOfGaussians
 from utils.misc import to_np
 from libs import optixtracer
 sys.path.append(os.path.dirname(os.path.dirname(os.getcwd()))) 
@@ -56,20 +57,6 @@ def main(conf: DictConfig) -> None:
         )
     )
 
-    ## Manage a collection of Gaussians
-    n_gaussians = 0
-    max_sh_degree = 1
-    sh_dim = (max_sh_degree+1) ** 2
-    gauss_pos = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
-    gauss_rot = torch.zeros((0,4), dtype=torch.float32, device=DEFAULT_DEVICE)
-    gauss_den = torch.zeros((0,1), dtype=torch.float32, device=DEFAULT_DEVICE)
-    gauss_scale = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
-    gauss_features = torch.zeros((0,sh_dim,3), dtype=torch.float32, device=DEFAULT_DEVICE)
-
-    gauss_vertices = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
-    gauss_face_idx = torch.zeros((0,3), dtype=torch.int32, device=DEFAULT_DEVICE)
-
-
     def add_gaussian():
         nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features, gauss_vertices, gauss_face_idx
         n_gaussians += 1
@@ -90,8 +77,36 @@ def main(conf: DictConfig) -> None:
         optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, gauss_den, True)
         gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
         torch.cuda.current_stream().synchronize()
-        
-    add_gaussian() # single initial Gaussian
+    
+    if conf.import_ingp.enabled and conf.import_ingp.path:
+        model = MixtureOfGaussians(conf)
+        model.set_optix_context()
+        ingp_path = conf.import_ingp.path if conf.import_ingp.path else f'{conf.out_dir}/{conf.experiment_name}/export_last.inpg'
+        logging.info(f"Loading a pretrained ingp model from {ingp_path}!")
+        model.init_from_ingp(ingp_path,init_model=False)
+        n_gaussians = model.get_positions().shape[0]
+        max_sh_degree = model.max_n_features
+        sh_dim = (max_sh_degree+1) ** 2
+        gauss_pos = model.get_positions()
+        gauss_rot = model.get_rotation()
+        gauss_den = model.get_density()
+        gauss_scale = model.get_scale()
+        gauss_features = model.get_features()
+        optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, gauss_den, True)
+        gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
+        torch.cuda.current_stream().synchronize()
+    else:
+        n_gaussians = 0
+        max_sh_degree = 1
+        sh_dim = (max_sh_degree+1) ** 2
+        gauss_pos = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
+        gauss_rot = torch.zeros((0,4), dtype=torch.float32, device=DEFAULT_DEVICE)
+        gauss_den = torch.zeros((0,1), dtype=torch.float32, device=DEFAULT_DEVICE)
+        gauss_scale = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
+        gauss_features = torch.zeros((0,sh_dim,3), dtype=torch.float32, device=DEFAULT_DEVICE)
+        gauss_vertices = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
+        gauss_face_idx = torch.zeros((0,3), dtype=torch.int32, device=DEFAULT_DEVICE)        
+        add_gaussian() # single initial Gaussian
 
     def remove_gaussian():
         nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features, gauss_vertices, gauss_face_idx
