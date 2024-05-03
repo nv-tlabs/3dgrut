@@ -95,6 +95,7 @@ def main(conf: DictConfig) -> None:
         optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, gauss_den, True)
         gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
         torch.cuda.current_stream().synchronize()
+        edit_gaussian = False
     else:
         n_gaussians = 0
         max_sh_degree = 1
@@ -107,6 +108,7 @@ def main(conf: DictConfig) -> None:
         gauss_vertices = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
         gauss_face_idx = torch.zeros((0,3), dtype=torch.int32, device=DEFAULT_DEVICE)        
         add_gaussian() # single initial Gaussian
+        edit_gaussian = True
 
     def remove_gaussian():
         nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features, gauss_vertices, gauss_face_idx
@@ -127,82 +129,85 @@ def main(conf: DictConfig) -> None:
         torch.cuda.current_stream().synchronize()
         
     def build_gaussian_ui():
-        nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features, gauss_vertices, gauss_face_idx
+        nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features, gauss_vertices, gauss_face_idx, edit_gaussian
         any_changed = False
 
-        psim.Separator()
+        if edit_gaussian:
+            psim.Separator()
 
-        psim.TextUnformatted(f"Gaussians: {n_gaussians}")
-        psim.SameLine()
-        if psim.Button("Add"):
-            add_gaussian()
-        psim.SameLine()
-        if psim.Button("Remove"):
-            remove_gaussian()
-        
-        gauss_pos = gauss_pos.cpu()
-        gauss_rot = gauss_rot.cpu()
-        gauss_den = gauss_den.cpu()
-        gauss_scale = gauss_scale.cpu()
-        gauss_features = gauss_features.cpu()
+            psim.TextUnformatted(f"Gaussians: {n_gaussians}")
+            psim.SameLine()
+            if psim.Button("Add"):
+                add_gaussian()
+            psim.SameLine()
+            if psim.Button("Remove"):
+                remove_gaussian()
 
-        for iG in range(n_gaussians):
+        if edit_gaussian:
 
-            gstr = f"##{iG:04d}"
-            psim.PushId(gstr)
-
-            psim.SetNextItemOpen(iG == 0, psim.ImGuiCond_FirstUseEver)
-            if(psim.TreeNode(f"Gaussian {iG}")):
-
-                changed, new_vals = psim.SliderFloat3("position", to_np(gauss_pos[iG,:]), -1., 1.)
-                if changed:
-                    any_changed = True
-                    for i in range(3): 
-                        gauss_pos[iG,i] = new_vals[i]
-                
-                changed, new_vals = psim.SliderFloat3("rotation", to_np(gauss_rot[iG,1:]), -1., 1.)
-                if changed:
-                    any_changed = True
-                    for i in range(3): 
-                        gauss_rot[iG,i+1] = new_vals[i]
-                
-                changed, new_vals = psim.SliderFloat("density", to_np(gauss_den[iG,:]), 0., 1.)
-                if changed:
-                    any_changed = True
-                    gauss_den[iG,0] = new_vals
-
-                changed, new_vals = psim.SliderFloat3("scale", to_np(gauss_scale[iG,:]), 0., 1.)
-                if changed:
-                    any_changed = True
-                    for i in range(3): 
-                        gauss_scale[iG,i] = new_vals[i]
+            gauss_pos = gauss_pos.cpu()
+            gauss_rot = gauss_rot.cpu()
+            gauss_den = gauss_den.cpu()
+            gauss_scale = gauss_scale.cpu()
+            gauss_features = gauss_features.cpu()
             
-                if(psim.TreeNode("Spherical Harmonics Coefs")):
+            for iG in range(n_gaussians):
 
-                    for j in range(sh_dim):
-                        changed, new_vals = psim.SliderFloat3(f"coeff {j:02}", to_np(gauss_features[iG,j,:]), -1., 1.)
-                        if changed:
-                            any_changed = True
-                            for i in range(3): 
-                                gauss_features[iG,j,i] = new_vals[i]
+                gstr = f"##{iG:04d}"
+                psim.PushId(gstr)
+
+                psim.SetNextItemOpen(iG == 0, psim.ImGuiCond_FirstUseEver)
+                if(psim.TreeNode(f"Gaussian {iG}")):
+
+                    changed, new_vals = psim.SliderFloat3("position", to_np(gauss_pos[iG,:]), -1., 1.)
+                    if changed:
+                        any_changed = True
+                        for i in range(3): 
+                            gauss_pos[iG,i] = new_vals[i]
+                    
+                    changed, new_vals = psim.SliderFloat3("rotation", to_np(gauss_rot[iG,1:]), -1., 1.)
+                    if changed:
+                        any_changed = True
+                        for i in range(3): 
+                            gauss_rot[iG,i+1] = new_vals[i]
+                    
+                    changed, new_vals = psim.SliderFloat("density", to_np(gauss_den[iG,:]), 0., 1.)
+                    if changed:
+                        any_changed = True
+                        gauss_den[iG,0] = new_vals
+
+                    changed, new_vals = psim.SliderFloat3("scale", to_np(gauss_scale[iG,:]), 0., 1.)
+                    if changed:
+                        any_changed = True
+                        for i in range(3): 
+                            gauss_scale[iG,i] = new_vals[i]
                 
+                    if(psim.TreeNode("Spherical Harmonics Coefs")):
+
+                        for j in range(sh_dim):
+                            changed, new_vals = psim.SliderFloat3(f"coeff {j:02}", to_np(gauss_features[iG,j,:]), -1., 1.)
+                            if changed:
+                                any_changed = True
+                                for i in range(3): 
+                                    gauss_features[iG,j,i] = new_vals[i]
+                    
+                        psim.TreePop()
+                    
                     psim.TreePop()
-                
-                psim.TreePop()
 
-            psim.PopID()
+                psim.PopID()
 
-        gauss_pos = gauss_pos.cuda()
-        gauss_rot = gauss_rot.cuda()
-        gauss_den = gauss_den.cuda()
-        gauss_scale = gauss_scale.cuda()
-        gauss_features = gauss_features.cuda()
+            gauss_pos = gauss_pos.cuda()
+            gauss_rot = gauss_rot.cuda()
+            gauss_den = gauss_den.cuda()
+            gauss_scale = gauss_scale.cuda()
+            gauss_features = gauss_features.cuda()
 
-        if any_changed:
-            gauss_rot = torch.nn.functional.normalize(gauss_rot, dim=-1)
-            optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, gauss_den, True)
-            gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
-            torch.cuda.current_stream().synchronize()
+            if any_changed:
+                gauss_rot = torch.nn.functional.normalize(gauss_rot, dim=-1)
+                optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, gauss_den, True)
+                gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
+                torch.cuda.current_stream().synchronize()
 
     ## Set up Polyscope
 
