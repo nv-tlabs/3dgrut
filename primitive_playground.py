@@ -238,10 +238,10 @@ def main(conf: DictConfig) -> None:
     
     ps.init()
 
-    ps_point_cloud = ps.register_point_cloud("centers", to_np(gauss_pos), radius=1e-2)
+    ps_point_cloud = ps.register_point_cloud("centers", to_np(gauss_pos), radius=1e-2, enabled=False)
     ps_point_cloud_buffer = ps_point_cloud.get_buffer("points")
 
-    ps.register_surface_mesh("octahedrons", to_np(gauss_vertices), to_np(gauss_face_idx), smooth_shade=True)
+    ps.register_surface_mesh("octahedrons", to_np(gauss_vertices), to_np(gauss_face_idx), smooth_shade=True, transparency=0.5, edge_width=1.0)
 
         
     def update_cloud_viz():
