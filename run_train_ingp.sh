@@ -3,7 +3,7 @@ INGP_DIR=$1
 DATA_DIR=$2
 OUT_DIR=$3
 
-mkdir -p INGP_DIR
+mkdir -p ${INGP_DIR}
 
 COLMAP_CMD="python train.py --config-name apps/colmap_train_ingp.yaml out_dir=${OUT_DIR}"
 
@@ -34,10 +34,10 @@ SYNTH_SEQ=(
     #drums
     #ficus
     #hotdog
-    #lego
+    lego
     #materials
     #mic
-    #ship
+    ship
 )
 for i in "${SYNTH_SEQ[@]}"; do
     echo "$SYNTH_CMD path=${DATA_DIR}/nerf_synthetic/$i group_name=nerf_synthetic export_ingp.path=${INGP_DIR}/$i.ingp ${@:4}";

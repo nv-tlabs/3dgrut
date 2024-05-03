@@ -5,10 +5,15 @@ defaults:
   - /base.yaml
   - _self_
 
+use_wandb: True 
+wandb_project: "3dgrt-test-ingp" 
+
 n_iterations: 0
 test_last: true
 import_ingp:
   enabled: true
+export_ingp:
+  enabled: false
 
 # render settings for maximum performances
 render:

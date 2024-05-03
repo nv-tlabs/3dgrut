@@ -38,17 +38,20 @@ def main(conf: DictConfig) -> None:
         params = optixtracer.OptixMogTracingParams(
             hit_mode = optixtracer.OptixMogTracingParams.pack_hit_mode(
                 conf.render.kernel_function, 
-                conf.render.train_hit_sampling,
-                conf.render.adaptive_kernel_clamping
+                conf.render.train_hit_sampling, 
+                conf.render.adaptive_kernel_clamping,
+                conf.render.enable_normals,
+                conf.render.enable_hitcounts,
+                (conf.render.max_consecutive_bvh_update>1) and not conf.render.adaptive_kernel_clamping 
             ),
             max_hit_per_slab = conf.render.max_hit_per_slab,
             max_num_slabs = conf.render.max_num_slabs,
             topk_hits = conf.render.topk_hits,
             patch_size = conf.render.patch_size,
-            sph_degree = 0, # Dummy, dynamically controlled
+            sph_degree = 3,
             min_kernel_response = conf.render.min_kernel_response,
             min_transmittance = conf.render.min_transmittance,
-            max_hits_returned=conf.render.max_hits_returned,
+            max_hits_returned= conf.render.max_hits_returned,
             primitive_type = optixtracer.OptixMogTracingParams.primitive_type_from_str(conf.render.primitive_type)
         )
     )

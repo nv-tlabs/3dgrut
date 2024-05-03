@@ -8,7 +8,7 @@ defaults:
 enable_writer: True 
 test_last: True 
 use_wandb: True 
-wandb_project: "3dgrt-ingp" 
+wandb_project: "3dgrt-train-ingp" 
 
 export_ingp:
   enabled: True
