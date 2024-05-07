@@ -9,8 +9,9 @@ COLMAP_CMD="python train.py --config-name apps/colmap_train_ingp.yaml out_dir=${
 
 NERF360_INDOOR_SEQ=(
     room
-    #bonsai
-    #counter
+    bonsai
+    counter
+    kitchen
 )
 for i in "${NERF360_INDOOR_SEQ[@]}"; do
     echo "$COLMAP_CMD path=${DATA_DIR}/nerf_360/$i dataset.downsample_factor=2 group_name=mipnerf360 export_ingp.path=${INGP_DIR}/$i.ingp ${@:4}";
@@ -19,8 +20,8 @@ done
 
 NERF360_OUTDOOR_SEQ=(
     bicycle
-    #garden
-    #stump
+    garden
+    stump
 )
 for i in "${NERF360_OUTDOOR_SEQ[@]}"; do
     echo "$COLMAP_CMD dataset.downsample_factor=4 path=${DATA_DIR}/nerf_360/$i group_name=mipnerf360 export_ingp.path=${INGP_DIR}/$i.ingp ${@:4}";
@@ -30,13 +31,13 @@ done
 SYNTH_CMD="python train.py --config-name apps/nerf_synthetic_train_ingp.yaml out_dir=${OUT_DIR}"
 
 SYNTH_SEQ=(
-    #chair
-    #drums
-    #ficus
-    #hotdog
+    chair
+    drums
+    ficus
+    hotdog
     lego
-    #materials
-    #mic
+    materials
+    mic
     ship
 )
 for i in "${SYNTH_SEQ[@]}"; do
@@ -45,7 +46,7 @@ for i in "${SYNTH_SEQ[@]}"; do
 done
 
 TANDT_SEQ=(
-    #train
+    train
     truck
 )
 for i in "${TANDT_SEQ[@]}"; do
@@ -55,7 +56,7 @@ done
 
 DB_SEQ=(
     drjohnson
-    #playroom
+    playroom
 )
 for i in "${DB_SEQ[@]}"; do
     echo "$COLMAP_CMD path=${DATA_DIR}/nerf_tandt/$i dataset.downsample_factor=1 group_name=db export_ingp.path=${INGP_DIR}/$i.ingp ${@:4}";

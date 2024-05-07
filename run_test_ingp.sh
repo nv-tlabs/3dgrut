@@ -9,6 +9,7 @@ NERF360_INDOOR_SEQ=(
     room
     bonsai
     counter
+    kitchen
 )
 for i in "${NERF360_INDOOR_SEQ[@]}"; do
     echo "$COLMAP_CMD path=${DATA_DIR}/nerf_360/$i dataset.downsample_factor=2 group_name=mipnerf360 import_ingp.path=${INGP_DIR}/$i.ingp ${@:4}";
