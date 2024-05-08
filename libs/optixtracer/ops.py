@@ -97,7 +97,7 @@ class _trace_mog_func(torch.autograd.Function):
     @staticmethod
     def backward(ctx, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd, ray_normals_grd, ray_hits_count_grd_UNUSED, g_weights_grd_UNUSED, ray_fake_err, inference_time_UNUSED):
         optix_ctx = ctx.optix_ctx
-        ray_ori, ray_dir, ray_radiance, ray_density, ray_normals, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph = ctx.saved_variables
+        ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, ray_normals, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph = ctx.saved_variables
         frame_id = ctx.frame_id
         if optix_ctx.is_sampling():
             frame_id = torch.randint(300000,900000,(1,),device="cpu")[0]
