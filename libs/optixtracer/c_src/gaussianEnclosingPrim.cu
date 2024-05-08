@@ -90,6 +90,7 @@ namespace
         }
     }
 
+    constexpr float triHexaDiag = 1.4142135623730951; // sqrt(2)
     constexpr uint32_t triHexaNumVrt = 6;
     constexpr uint32_t triHexaNumTri = 6;
 
@@ -114,8 +115,8 @@ namespace
             const float3 trans = gPos[idx];
 
             const float3 triHexaVrt[triHexaNumVrt] = {
-                make_float3(0, 0, -octaHedraDiag), make_float3(0, octaHedraDiag, 0), make_float3(-octaHedraDiag, 0, 0),
-                make_float3(0, -octaHedraDiag, 0), make_float3(octaHedraDiag, 0, 0), make_float3(0, 0, octaHedraDiag)};
+                make_float3(0, 0, -triHexaDiag), make_float3(0, triHexaDiag, 0), make_float3(-triHexaDiag, 0, 0),
+                make_float3(0, -triHexaDiag, 0), make_float3(triHexaDiag, 0, 0), make_float3(0, 0, triHexaDiag)};
 
             const uint32_t sVertIdx = triHexaNumVrt * idx;
             const uint32_t sTriIdx = triHexaNumTri * idx;
@@ -150,6 +151,7 @@ namespace
         }
     }
 
+    constexpr float triSurfelDiag = 1.4142135623730951; // sqrt(2)
     constexpr uint32_t triSurfelNumVrt = 4;
     constexpr uint32_t triSurfelNumTri = 2;
 
@@ -177,9 +179,9 @@ namespace
             const uint8_t axis = minScaleAxis ? (scl.y < scl.x ? (scl.z < scl.y ? 2 : 1) : (scl.z < scl.x ? 2 : 0)) : 2;
 
             const float3 triSurfelVrt[3][triSurfelNumVrt] = {
-                {make_float3(0, octaHedraDiag, 0), make_float3(0, -octaHedraDiag, 0), make_float3(0, 0, octaHedraDiag), make_float3(0, 0, -octaHedraDiag)},
-                {make_float3(0, 0, octaHedraDiag), make_float3(0, 0, -octaHedraDiag), make_float3(octaHedraDiag, 0, 0), make_float3(-octaHedraDiag, 0, 0)},
-                {make_float3(octaHedraDiag, 0, 0), make_float3(-octaHedraDiag, 0, 0), make_float3(0, octaHedraDiag, 0), make_float3(0, -octaHedraDiag, 0)}};
+                {make_float3(0, triSurfelDiag, 0), make_float3(0, -triSurfelDiag, 0), make_float3(0, 0, triSurfelDiag), make_float3(0, 0, -triSurfelDiag)},
+                {make_float3(0, 0, triSurfelDiag), make_float3(0, 0, -triSurfelDiag), make_float3(triSurfelDiag, 0, 0), make_float3(-triSurfelDiag, 0, 0)},
+                {make_float3(triSurfelDiag, 0, 0), make_float3(-triSurfelDiag, 0, 0), make_float3(0, triSurfelDiag, 0), make_float3(0, -triSurfelDiag, 0)}};
 
             const uint32_t sVertIdx = triSurfelNumVrt * idx;
             const uint32_t sTriIdx = triSurfelNumTri * idx;
@@ -207,6 +209,66 @@ namespace
             for (int i = 0; i < triSurfelNumTri; ++i)
             {
                 gPrimTri[sTriIdx + i] = triSurfelTri[i] + triIdxOffset;
+            }
+        }
+    }
+
+    constexpr uint32_t triBaryNumVrt = 3;
+    constexpr uint32_t triBaryNumTri = 1;
+    constexpr float triBaryCosPi6 = 0.8660254037844387; // cos(pi/6)
+    constexpr float triBarySinPi6 = 0.5; // sin(pi/6)
+
+    template <typename scalar_t, bool minScaleAxis = false>
+    __global__ void computeGaussianEnclosingTriBaryKernel(
+        const uint32_t gNum,
+        const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gPos,
+        const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gRot,
+        const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gScl,
+        const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> gDns,
+        const float kernelMinResponse,
+        const uint32_t opts,
+        float3 *__restrict__ gPrimVrt,
+        int3 *__restrict__ gPrimTri,
+        OptixAabb *gPrimAABB)
+    {
+        const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+        if (idx < gNum)
+        {
+            float33 rot;
+            invRotationMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
+            const float3 scl = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]);
+            const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
+
+            const float3 triBaryVrt[triBaryNumVrt] = {
+                scl.x * make_float3(-triBaryCosPi6, -triBarySinPi6, 0),
+                scl.y * make_float3(0, 1.0f, 0),
+                scl.z * make_float3(triBaryCosPi6, -triBarySinPi6, 0)};
+
+            const uint32_t sVertIdx = triBaryNumVrt * idx;
+            const uint32_t sTriIdx = triBaryNumTri * idx;
+#pragma unroll
+            for (int i = 0; i < triBaryNumVrt; ++i)
+            {
+                float3 &vrt = gPrimVrt[sVertIdx + i];
+                vrt = triBaryVrt[i] * rot + trans;
+                if (gPrimAABB)
+                {
+                    atomicMinFloat(&gPrimAABB[0].minX, vrt.x);
+                    atomicMinFloat(&gPrimAABB[0].minY, vrt.y);
+                    atomicMinFloat(&gPrimAABB[0].minZ, vrt.z);
+                    atomicMaxFloat(&gPrimAABB[0].maxX, vrt.x);
+                    atomicMaxFloat(&gPrimAABB[0].maxY, vrt.y);
+                    atomicMaxFloat(&gPrimAABB[0].maxZ, vrt.z);
+                }
+            }
+
+            const int3 triBaryTri[triBaryNumTri] = {make_int3(0, 1, 2)};
+            const int3 triIdxOffset = make_int3(sVertIdx, sVertIdx, sVertIdx);
+
+#pragma unroll
+            for (int i = 0; i < triBaryNumTri; ++i)
+            {
+                gPrimTri[sTriIdx + i] = triBaryTri[i] + triIdxOffset;
             }
         }
     }
@@ -831,6 +893,31 @@ void computeGaussianEnclosingTriSurfel(uint32_t gNum,
                                                                             gScl,
                                                                             gDns,
                                                                             kernelMinResponse, opts, gPrimVrt, gPrimTri, gPrimAABB);
+}
+
+void computeGaussianEnclosingTriBary(uint32_t gNum,
+                                     torch::Tensor gPos,
+                                     torch::Tensor gRot,
+                                     torch::Tensor gScl,
+                                     torch::Tensor gDns,
+                                     float kernelMinResponse,
+                                     uint32_t opts,
+                                     float3 *gPrimVrt,
+                                     int3 *gPrimTri,
+                                     OptixAabb *gPrimAABB,
+                                     cudaStream_t stream)
+{
+    const uint32_t threads = 1024;
+    const uint32_t blocks = div_round_up(static_cast<uint32_t>(gNum), threads);
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        gPos.type(), "computeGaussianEnclosingTriBary", ([&]
+                                                         { computeGaussianEnclosingTriBaryKernel<scalar_t>
+                                                               <<<blocks, threads, 0, stream>>>(gNum, gPos.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                gRot.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                gScl.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                gDns.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                                                                                                kernelMinResponse, opts, gPrimVrt, gPrimTri, gPrimAABB); }));
 }
 
 void generatePinholeCameraRays(int2 resolution, float2 tanFoV, const float4 *invViewMatrix, float3 *rayOri, float3 *rayDir, cudaStream_t stream)
