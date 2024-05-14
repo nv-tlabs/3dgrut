@@ -140,7 +140,7 @@ class Renderer:
         # Criterions that we log during training
         criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda"), 
                       "ssim": StructuralSimilarityIndexMeasure(data_range=1.0).to("cuda"), 
-                      "lpips": LearnedPerceptualImagePatchSimilarity(net_type="vgg").to("cuda")}
+                      "lpips": LearnedPerceptualImagePatchSimilarity(net_type="vgg", normalize=True).to("cuda")}
 
         output_path_renders = os.path.join(self.out_dir, f"ours_{int(self.global_step)}", "renders")
         os.makedirs(output_path_renders, exist_ok=True)

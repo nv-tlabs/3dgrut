@@ -124,7 +124,7 @@ def main(conf: DictConfig) -> None:
     # Criterions that we log during training
     criterions = {"psnr":  PeakSignalNoiseRatio(data_range=1).to("cuda"), 
                   "ssim": StructuralSimilarityIndexMeasure(data_range=1.0).to("cuda"), 
-                  "lpips": LearnedPerceptualImagePatchSimilarity(net_type="vgg").to("cuda")}
+                  "lpips": LearnedPerceptualImagePatchSimilarity(net_type="vgg", normalize=True).to("cuda")}
 
     # Initialize the tensorboard writer
     if conf.experiment_name and os.path.exists(f'{conf.out_dir}/{conf.experiment_name}'):
