@@ -33,6 +33,15 @@ import_ingp:
   path: ""
   init_global_step: 0
 
+export_ply:
+  enabled: False 
+  path: ""
+import_ply:
+  enabled: False 
+  path: ""
+  init_global_step: 0
+
+
 model:
   density_activation: sigmoid
   scale_activation: exp

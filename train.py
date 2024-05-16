@@ -77,6 +77,12 @@ def main(conf: DictConfig) -> None:
         model.init_from_ingp(ingp_path)
         model.build_bvh()
         global_step = conf.import_ingp.init_global_step
+    elif conf.import_ply.enabled:
+        ply_path = conf.import_ply.path if conf.import_ply.path else f'{conf.out_dir}/{conf.experiment_name}/export_last.ply'
+        logging.info(f"Loading a ply model from {ply_path}!")
+        model.init_from_ply(ply_path)
+        model.build_bvh()
+        global_step = conf.import_ply.init_global_step
     else: # Initialize
         match conf.initialization.method:
             case 'colmap':
@@ -553,6 +559,9 @@ def main(conf: DictConfig) -> None:
     if conf.export_ingp.enabled:
         ingp_path = conf.export_ingp.path if conf.export_ingp.path else os.path.join(out_dir, "export_last.ingp")
         model.export_ingp(ingp_path, conf.export_ingp.force_half, conf.export_ingp.morton3d_grid_resolution)
+    if conf.export_ply.enabled:
+        ply_path = conf.export_ply.path if conf.export_ply.path else os.path.join(out_dir, "export_last.ingp")
+        model.export_ply(ply_path)
         
     if conf.test_last:
         logging.info(f"running on test set...")

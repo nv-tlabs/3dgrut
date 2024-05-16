@@ -4,7 +4,7 @@ from typing import Optional, Any
 import numpy as np
 import torch
 import tqdm
-from plyfile import PlyData
+from plyfile import PlyData, PlyElement
 
 from libs import optixtracer
 from utils.misc import to_torch, get_activation_function, inverse_sigmoid, get_scheduler, quaternion_to_so3, \
@@ -1221,6 +1221,7 @@ class MixtureOfGaussians(torch.nn.Module):
         else:
             raise ValueError(f"unrecognized render method {self.render_method}")
 
+    @torch.no_grad()
     def export_ingp(self, mogt_path:str,force_half:bool,morton3d_grid_resolution:int):
         export_dtype = torch.float16 if force_half else self.get_positions().dtype
         logging.info(f"exporting mogt file to {mogt_path}...")
@@ -1278,3 +1279,89 @@ class MixtureOfGaussians(torch.nn.Module):
             self.set_optimizable_parameters()
             self.setup_optimizer()
             self.validate_fields()
+
+    # ==================================================================================================
+    # WARN : BORROWED FROM GSPLAT
+    def construct_list_of_attributes(self):
+        l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
+        # All channels except the 3 DC
+        for i in range(self.features_albedo.shape[1]):
+            l.append('f_dc_{}'.format(i))
+        for i in range(self.features_specular.shape[1]):
+            l.append('f_rest_{}'.format(i))
+        l.append('opacity')
+        for i in range(self.scale.shape[1]):
+            l.append('scale_{}'.format(i))
+        for i in range(self.rotation.shape[1]):
+            l.append('rot_{}'.format(i))
+        return l
+
+    @torch.no_grad()
+    def export_ply(self, mogt_path:str):
+        mogt_pos =  self.get_positions().detach().cpu().numpy()
+        mogt_nrm = np.zeros_like(mogt_pos)
+        mogt_albedo = self.features_albedo.detach().contiguous().cpu().numpy()
+        mogt_specular = self.features_specular.detach().contiguous().cpu().numpy()
+        mogt_densities = self.density.detach().cpu().numpy()
+        mogt_scales = self.scale.detach().cpu().numpy()
+        mogt_rotation = self.rotation.detach().cpu().numpy()
+
+        dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
+
+        elements = np.empty(mogt_pos.shape[0], dtype=dtype_full)
+        attributes = np.concatenate((mogt_pos, mogt_nrm, mogt_albedo, mogt_specular, mogt_densities, mogt_scales, mogt_rotation), axis=1)
+        elements[:] = list(map(tuple, attributes))
+        el = PlyElement.describe(elements, 'vertex')
+        PlyData([el]).write(mogt_path)
+
+    @torch.no_grad()
+    def init_from_ply(self, mogt_path:str, init_model=True):
+        plydata = PlyData.read(mogt_path)
+
+        mogt_pos = np.stack((np.asarray(plydata.elements[0]["x"]),
+                        np.asarray(plydata.elements[0]["y"]),
+                        np.asarray(plydata.elements[0]["z"])),  axis=1)
+        mogt_densities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
+
+        mogt_albedo = np.zeros((mogt_pos.shape[0], 3))
+        mogt_albedo[:, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
+        mogt_albedo[:, 1] = np.asarray(plydata.elements[0]["f_dc_1"])
+        mogt_albedo[:, 2] = np.asarray(plydata.elements[0]["f_dc_2"])
+
+        extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
+        extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+        assert len(extra_f_names)==3*(self.max_n_features + 1) ** 2 - 3
+        mogt_specular = np.zeros((mogt_pos.shape[0], len(extra_f_names)))
+        for idx, attr_name in enumerate(extra_f_names):
+            mogt_specular[:, idx] = np.asarray(plydata.elements[0][attr_name])
+        # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
+        # mogt_specular = mogt_specular.reshape((mogt_specular.shape[0], 3, (self.max_sh_degree + 1) ** 2 - 1))
+
+        scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
+        scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
+        mogt_scales = np.zeros((mogt_pos.shape[0], len(scale_names)))
+        for idx, attr_name in enumerate(scale_names):
+            mogt_scales[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+        rot_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("rot")]
+        rot_names = sorted(rot_names, key = lambda x: int(x.split('_')[-1]))
+        mogt_rotation = np.zeros((mogt_pos.shape[0], len(rot_names)))
+        for idx, attr_name in enumerate(rot_names):
+            mogt_rotation[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+        self.positions = torch.nn.Parameter(torch.tensor(mogt_pos, dtype=self.positions.dtype,device=self.device))
+        self.features_albedo = torch.nn.Parameter(torch.tensor(mogt_albedo, dtype=self.features_albedo.dtype,device=self.device))
+        self.features_specular = torch.nn.Parameter(torch.tensor(mogt_specular,dtype=self.features_specular.dtype,device=self.device))
+        self.density = torch.nn.Parameter(torch.tensor(mogt_densities,dtype=self.density.dtype,device=self.device))
+        self.scale = torch.nn.Parameter(torch.tensor(mogt_scales,dtype=self.scale.dtype,device=self.device))
+        self.rotation = torch.nn.Parameter(torch.tensor(mogt_rotation,dtype=self.rotation.dtype,device=self.device))
+
+        self.n_active_features = self.max_n_features
+        
+        if init_model:
+            self.init_densification_buffer()
+            self.set_optimizable_parameters()
+            self.setup_optimizer()
+            self.validate_fields()
+
+    
