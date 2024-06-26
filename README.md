@@ -30,7 +30,7 @@ pip install ./thirdparty/simple-knn
 
 ## Using the GUI
 
-To use the interactive UI, install the following optional dependencies, and run with `--with-gui`
+To use the interactive UI, install the following optional dependencies:
 
 ```
 pip install git+ssh://git@github.com/nmwsharp/polyscope-py.git@v2
