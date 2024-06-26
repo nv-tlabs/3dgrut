@@ -109,3 +109,12 @@ python train.py --config-name=apps/colmap.yaml path=data/mipNeRF360/bonsai test_
 Alternatively, you can use the reference setting, `ours (reference)`, by using adding `optimizer.params.density.lr=0.05 render.kernel_function=gaussian` to the commands. Note that you can export the optimized set of particles (Gaussians) by adding `export_ingp.enabled=True export_ingp.path="<out_path>.ingp"` (replace `<out_path>` with your desired file name). Then, for getting the final inference times, you can load the ingp file using `import_ingp.enabled=True import_ingp.path="<out_path>.ingp`, and set `render.adaptive_kernel_clamping=True render.min_transmittance=0.01`. 
 
 To run each command with the Polyscope visualizer, use `with_gui=True`. 
+
+# Checkpoints in the form of ingp files
+
+You can find our pretrained `.ingp` checkpoints here:
+- [Ours (reference)](https://https://drive.google.com/drive/folders/1aIOW9vTiqIo3vVMhkAxlnj5DWG4t7JoY?usp=drive_link)
+- [Ours (fast)](https://drive.google.com/drive/folders/1H_ShVx_uGr3Imlj0I5uOEBzic5Dz2UBB?usp=drive_link)
+
+As mentioned above, you can load and visualize them using the following arguments: 
+`import_ingp.enabled=True import_ingp.path="<ingp_path>.ingp render.adaptive_kernel_clamping=True render.min_transmittance=0.01 with_gui=True`.
