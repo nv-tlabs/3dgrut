@@ -33,7 +33,7 @@ pip install ./thirdparty/simple-knn
 To use the interactive UI, install the following optional dependencies:
 
 ```
-pip install git+ssh://git@github.com/nmwsharp/polyscope-py.git@v2
+pip install polyscope
 pip install cuda-python cupy
 ```
 
