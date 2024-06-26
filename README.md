@@ -113,8 +113,8 @@ To run each command with the Polyscope visualizer, use `with_gui=True`.
 # Checkpoints in the form of ingp files
 
 You can find our pretrained `.ingp` checkpoints here:
-- [Ours (reference)](https://https://drive.google.com/drive/folders/1aIOW9vTiqIo3vVMhkAxlnj5DWG4t7JoY?usp=drive_link)
+- [Ours (reference)](https://drive.google.com/drive/folders/1aIOW9vTiqIo3vVMhkAxlnj5DWG4t7JoY?usp=drive_link)
 - [Ours (fast)](https://drive.google.com/drive/folders/1H_ShVx_uGr3Imlj0I5uOEBzic5Dz2UBB?usp=drive_link)
 
 As mentioned above, you can load and visualize them using the following arguments: 
-`import_ingp.enabled=True import_ingp.path="<ingp_path>.ingp render.adaptive_kernel_clamping=True render.min_transmittance=0.01 with_gui=True`.
+`import_ingp.enabled=True import_ingp.path="<ingp_path>.ingp render.adaptive_kernel_clamping=True render.min_transmittance=0.01 with_gui=True`. Note that for `ours (reference)` you'll need `render.kernel_function=gaussian` too. 
