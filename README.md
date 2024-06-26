@@ -1,6 +1,10 @@
 
 # Ray Tracing Gaussian Splats
 
+## DISCLAIMER
+
+This branch is intended solely for an internal release and is not maintained in its current form. The code herein may not adhere to our usual standards of cleanliness or best practices.
+
 ## Dependencies
 - __CUDA 11.8 or newer__.
 - __Python 3.11 or newer__.
@@ -35,152 +39,75 @@ pip install cuda-python cupy
 
 The latter two packages `cuda-python` and `cupy` may very slow to install and/or create CUDA versioning problems, which is why we don't install them by default. (In the future we could remove these by writing a few of our own cuda bindings.)
 
-## NGC utils
+## Downloading the datasets
 
-Based on [ngc-toolbox](https://gitlab-master.nvidia.com/jalucas/ngc-toolbox/-/tree/main?ref_type=heads) see more detailed README in `./utils/ngc/README.md`
+We use the same format for the data as [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting). You can refer to their codebase for downloading the dataset. Alternatively, the datasets are also available [here](https://drive.google.com/drive/folders/1MRh6P5B9yBnWozDlHIBQeM-XPNRQ3I3E?usp=drive_link) on our corporate Google drive. We particularly used the following datasets for view-synthesis evaluations:
 
-### Prerequisites
+- nerf_synthetic
+- tandt (Tanks and Temples)
+- mipNeRF360
+- db (Deep Blending)
 
-- [Request access to your NGC team](https://goo.gl/forms/IjKBiZRt4RYZcF3h1) (`omniverse` for the ovx A40 instances on OVC)
-    - Once approved, you will receive a sign-in link to set your password
-- [Download and install the NGC CLI](https://ngc.nvidia.com/setup/installers/cli)
-- [Install docker](https://docs.docker.com/get-docker/)
-
-### Setting up
-
-- [Generate an NGC API key](https://ngc.nvidia.com/configuration/api-key) (and keep it somewhere safe)
-- Set key in docker: `docker login -u \$oauthtoken -p <YOUR_API_KEY> nvcr.io `
-- Configure NGC CLI: `ngc config set`
-    - Input your API key when requested, choose the team `omniverse` and ace `nv-us-west-2`
-
-**You're ready to go!**
-
-### Updating Docker container (only if needed)
-```bash
-python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml build_docker
-python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml push_docker
-```
-### Workspace
-
-Mounting a workspace locally:
-```bash
-python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml mount_workspace
-```
-Unmounting:
-```bash
-python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml unmount_workspace
-```
-
-Syncing current version of code to workspace:
-```bash
-python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml sync_workspace experiment_name
-```
-This will create a copy of the code in the workspace, in the directory `experiments/experiment_name`.
-
-### Jobs
-Before any job, the command will execute `./utils/ngc/ngc_pre_job.sh`.
-After any job, the command will execute `./utils/ngc/ngc_post_job.sh`.
-
-Start an interactive job:
-```bash
-python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml run_interactive_job --runtime 4h 
-```
-The job will spin up and you'll be assigned a job ID (presented in the command output). You can connect to the job via `ngc batch exec <job_id>`.
-
-
-Runnig a normal job:
-```bash
-python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml run_job "python train.py --arg1 value1 --arg2 value2" experiment_name
-```
-
-The job will spin up on ngc, and should be visible on the [NGC dashboard](https://ngc.nvidia.com/dashboard).
-
-Note that syncing a workspace and running a normal job can be combined using the `submit_job` method:
-
-`python ./utils/ngc/app.py --config ngc_config/3dgrt.toml submit_job "python train.py --arg1 value1 --arg2 value2" experiment_name`
-
-**A large batch of jobs**
-
-First, generate a file where each line corresponds to a different command to be run. For example,
-
-> grid_search.txt
-```
-python train.py --arg1 a1 --arg2 a2
-python train.py --arg1 b1 --arg2 a2
-python train.py --arg1 a1 --arg2 b2
-python train.py --arg1 b1 --arg2 b2
-```
-
-Then execute `python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml  generate_job_array grid_search.txt grid_search grid_search_jobs/`.
-The final three arguments are the file containing the commands, a name for the experiment, and the output folder to place the job data.
-Running this command creates a new directory called `grid_search_jobs` containing the files `[cmd_0.json, cmd_1.json, cmd_2.json, cmd_3.json]`. You can then dispatch all jobs to NGC via,
-
-`python ./utils/ngc/app.py --config ngc/ngc_config/3dgrt.toml  run_job_array grid_search_jobs`
-
-_This could also be achieve in one step, by adding the `--run` flag to the `generate_job_array` command._
-
-
-
-
-### Sample commands to run on NeRF Synthetic scenes
+Download the datasets and place them under `data` with the following structure:
 
 ```
-python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/lego  with_gui=True test_last=True
-python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/lego use_wandb=True experiment_name=test-wandb record_training=true test_last=True
+data
+├── db
+│   ├── drjohnson
+│   └── playroom
+├── mipNeRF360
+│   ├── bicycle
+│   ├── bonsai
+│   ├── counter
+│   ├── garden
+│   ├── kitchen
+│   ├── room
+│   ├── stump
+├── nerf_synthetic
+│   ├── chair
+│   ├── drums
+│   ├── ficus
+│   ├── hotdog
+│   ├── lego
+│   ├── materials
+│   ├── mic
+│   ├── README.txt
+│   ├── ship
+│   └── tree
+└── tandt
+    ├── train
+    └── truck
 ```
 
-Fine-tuning from 3DGS
+# Optimizing the scenes
+
+For training scenes using our fast setting ,`ours (fast)`, you can use one of the following commands:
 
 ```
-python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/lego  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
-python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/hotdog  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
-python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/chair  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
-python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/drums  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
-python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/ficus  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
-python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/materials  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
-python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/mic  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
-python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/ship  with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/ficus test_last=True
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/chair test_last=True
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/drums test_last=True
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/hotdog test_last=True
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/lego test_last=True
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/materials test_last=True
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/mic test_last=True
+python train.py --config-name apps/nerf_synthetic.yaml path=data/nerf_synthetic/ship test_last=True
 
-python train.py --config-name apps/colmap.yaml path=data/tandt/truck with_gui=True initialization.method="point_cloud" optimizer.params.positions.lr=0.0000016 model.densify.end_iteration=-1 model.prune.end_iteration=-1 model.reset_density.end_iteration=-1 model.progressive_training.init_n_features=3
-```
+python train.py --config-name=apps/colmap.yaml path=data/tandt/truck test_last=True
+python train.py --config-name=apps/colmap.yaml path=data/tandt/train test_last=True
 
-### Running the experiments on ngc
+python train.py --config-name=apps/colmap.yaml path=data/db/drjohnson test_last=True
+python train.py --config-name=apps/colmap.yaml path=data/db/playroom test_last=True
 
-```
-rm utils/ngc/grid_search_configs/grid_search/*
-EXP_NAME="Ashkan-Feb21-L2-finetune"
-python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
-python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array grid_search/finetune.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
-```
-
-```
-rm utils/ngc/grid_search_configs/grid_search/*
-EXP_NAME="Ashkan-Apr29-density-lr-05-15k-v100"
-python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
-python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array grid_search/random_init.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
+python train.py --config-name=apps/colmap.yaml path=data/mipNeRF360/counter test_last=True dataset.downsample_factor=2
+python train.py --config-name=apps/colmap.yaml path=data/mipNeRF360/bicycle test_last=True dataset.downsample_factor=4
+python train.py --config-name=apps/colmap.yaml path=data/mipNeRF360/kitchen test_last=True dataset.downsample_factor=2
+python train.py --config-name=apps/colmap.yaml path=data/mipNeRF360/room test_last=True dataset.downsample_factor=2
+python train.py --config-name=apps/colmap.yaml path=data/mipNeRF360/garden test_last=True dataset.downsample_factor=4
+python train.py --config-name=apps/colmap.yaml path=data/mipNeRF360/stump test_last=True dataset.downsample_factor=4
+python train.py --config-name=apps/colmap.yaml path=data/mipNeRF360/bonsai test_last=True dataset.downsample_factor=2
 ```
 
-```
-rm utils/ngc/grid_search_configs/grid_search/*
-EXP_NAME="Ashkan-Apr29-density-lr-05-15k-old-kernel"
-python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
-python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array grid_search/finetune_15k.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
-```
+Alternatively, you can use the reference setting, `ours (reference)`, by using adding `optimizer.params.density.lr=0.05 render.kernel_function=gaussian` to the commands. Note that you can export the optimized set of particles (Gaussians) by adding `export_ingp.enabled=True export_ingp.path="<out_path>.ingp"` (replace `<out_path>` with your desired file name). Then, for getting the final inference times, you can load the ingp file using `import_ingp.enabled=True import_ingp.path="<out_path>.ingp`, and set `render.adaptive_kernel_clamping=True render.min_transmittance=0.01`. 
 
-running the ablations
-
-```
-rm utils/ngc/grid_search_configs/grid_search/*
-EXP_NAME="Ashkan-Apr16-new-kernel-reg-ablation"
-python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
-python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array grid_search/ablations.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
-```
-
-running full evals with faster test renderer
-
-```
-rm utils/ngc/grid_search_configs/grid_search/*
-EXP_NAME="Ashkan-Apr23-best-results-with-fast-eval"
-python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml sync_workspace $EXP_NAME
-python utils/ngc/app.py --config utils/ngc/ngc_config/3dgrt.toml generate_job_array grid_search/full_eval.txt grid_search grid_search_jobs/ --run --exp_name $EXP_NAME
-```
+To run each command with the Polyscope visualizer, use `with_gui=True`. 
