@@ -71,9 +71,7 @@ data
 │   ├── lego
 │   ├── materials
 │   ├── mic
-│   ├── README.txt
 │   ├── ship
-│   └── tree
 └── tandt
     ├── train
     └── truck
