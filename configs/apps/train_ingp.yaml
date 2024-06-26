@@ -1,0 +1,40 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base.yaml
+  - _self_
+
+enable_writer: True 
+test_last: True 
+use_wandb: True 
+wandb_project: "3dgrt-train-ingp" 
+
+export_ingp:
+  enabled: True
+  force_half: False
+  morton3d_grid_resolution: 512
+
+render:
+  kernel_function: exp-p4-dist
+  primitive_type : icosahedron
+  kernel_cosx_term: False
+  max_num_slabs: 1
+  max_hit_per_slab: 32
+  train_hit_sampling: False
+  topk_hits: False
+  patch_size: 1
+  min_kernel_response: 0.0113
+  adaptive_kernel_clamping: False
+  min_transmittance: 0.001 
+  enable_normals: False
+  enable_hitcounts: True
+
+dataset:
+  downsample_factor: 2
+  train:
+    ray_jittering:
+      type: none
+
+# overwrite of default parameters
+val_frequency: 1095 

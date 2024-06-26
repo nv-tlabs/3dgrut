@@ -1,10 +1,10 @@
-import logging, os
-from typing import Optional
+import logging, os, gzip, msgpack
+from typing import Optional, Any
 
 import numpy as np
 import torch
 import tqdm
-from plyfile import PlyData
+from plyfile import PlyData, PlyElement
 
 from libs import optixtracer
 from utils.misc import to_torch, get_activation_function, inverse_sigmoid, get_scheduler, quaternion_to_so3, \
@@ -15,6 +15,7 @@ from models.geometry import nearest_neighbor_dist_cpuKD, nearest_neighbors
 from utils.misc import to_np
 import models.background as background
 from models.render_utils import evaluate_rays, RGB2SH
+from datasets.utils import move_to_gpu
 
 class MixtureOfGaussians(torch.nn.Module):
     def __init__(self, conf, scene_extent=None):
@@ -29,6 +30,18 @@ class MixtureOfGaussians(torch.nn.Module):
         self.features_albedo = torch.nn.Parameter(torch.empty([0, 3]))  # Feature vector of the 0th order SH coefficients [n_gaussians, 3] (We split it into two due to different learning rates)
         self.features_specular = torch.nn.Parameter(torch.empty([0, 1]))  # Features of the higher order SH coefficients [n_gaussians, 3]
         
+        self.positions_gradient_norm = None
+
+        self.num_update_bvh = 0
+        self.render_opts =  optixtracer.OptixMogRenderOpts.NONE
+        self.train_render_opts = optixtracer.OptixMogRenderOpts.NONE
+        if self.conf.model.prune_weight.end_iteration > self.conf.model.prune_weight.frequency:
+            self.train_render_opts |= optixtracer.OptixMogRenderOpts.USE_GWEIGHTS
+        if self.conf.loss.lambda_reg_density > 0 and self.conf.loss.reg_density_weight_masked:
+            self.train_render_opts |= optixtracer.OptixMogRenderOpts.USE_GWEIGHTS
+        if self.conf.render.train_hit_sampling:
+            self.train_render_opts |= optixtracer.OptixMogRenderOpts.SAMPLING
+        
         if self.conf.model.log_rolling_buffers:
             self.rolling_error = torch.empty([0,1]) 
             self.rolling_weight_contrib = torch.empty([0,1]) 
@@ -36,8 +49,8 @@ class MixtureOfGaussians(torch.nn.Module):
         match self.conf.model.densify.method:
             case 'gradient-buffer':
                 # Accumulation of the norms of the positions gradients
-                self.positional_grad_norm_accum = torch.empty([0,1]) 
-                self.positional_grad_norm_denom = torch.empty([0,1])
+                self.densify_grad_norm_accum = torch.empty([0,1]) 
+                self.densify_grad_norm_denom = torch.empty([0,1])
             case 'error':
                 assert self.conf.model.log_rolling_buffers, "must log weights and errors to densify based on them"
             case 'adam':
@@ -100,8 +113,8 @@ class MixtureOfGaussians(torch.nn.Module):
 
         match self.conf.model.densify.method:
             case 'gradient-buffer':
-                assert self.positional_grad_norm_accum.shape == (num_gsplat, 1)
-                assert self.positional_grad_norm_denom.shape == (num_gsplat, 1)
+                assert self.densify_grad_norm_accum.shape == (num_gsplat, 1)
+                assert self.densify_grad_norm_denom.shape == (num_gsplat, 1)
             case 'error':
                 assert self.conf.model.log_rolling_buffers
             case 'adam': 
@@ -120,15 +133,23 @@ class MixtureOfGaussians(torch.nn.Module):
         torch.zeros(1, device=self.device) # Create a dummy tensor to force cuda context init
         self.optix_ctx = optixtracer.OptiXContext(
             params = optixtracer.OptixMogTracingParams(
-                hit_mode = self.conf.render.hit_mode,
+                hit_mode = optixtracer.OptixMogTracingParams.pack_hit_mode(
+                    self.conf.render.kernel_function, 
+                    self.conf.render.train_hit_sampling, 
+                    self.conf.render.adaptive_kernel_clamping,
+                    self.conf.render.enable_normals,
+                    self.conf.render.enable_hitcounts,
+                    (self.conf.render.max_consecutive_bvh_update>1) and not self.conf.render.adaptive_kernel_clamping 
+                ),
                 max_hit_per_slab = self.conf.render.max_hit_per_slab,
                 max_num_slabs = self.conf.render.max_num_slabs,
                 topk_hits = self.conf.render.topk_hits,
                 patch_size = self.conf.render.patch_size,
                 sph_degree = 0, # Dummy, dynamically controlled
-                gaussian_sigma_threshold = self.conf.render.gaussian_sigma_threshold,
+                min_kernel_response = self.conf.render.min_kernel_response,
                 min_transmittance = self.conf.render.min_transmittance,
                 max_hits_returned=self.conf.render.max_hits_returned,
+                primitive_type = optixtracer.OptixMogTracingParams.primitive_type_from_str(self.conf.render.primitive_type)
             )
         )
 
@@ -275,10 +296,10 @@ class MixtureOfGaussians(torch.nn.Module):
 
         dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(fused_point_cloud), 1e-3)
         scales = torch.log(dist)[..., None].repeat(1, 3)
-        rots = torch.zeros((num_gsplat, 4), device=self.device)
+        rots = torch.rand((num_gsplat, 4), device=self.device)
         rots[:, 0] = 1
 
-        opacities = self.density_activation_inv(0.1 * torch.ones((num_gsplat, 1), dtype=dtype, device=self.device))
+        opacities = self.density_activation_inv(self.conf.model.default_density * torch.ones((num_gsplat, 1), dtype=dtype, device=self.device))
 
         self.positions = torch.nn.Parameter(fused_point_cloud)  # type: ignore
         self.rotation = torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
@@ -337,7 +358,7 @@ class MixtureOfGaussians(torch.nn.Module):
         scales = self.scale_activation_inv(observation_scale)[:,None].repeat(1,3)
 
         # set density as a constant
-        opacities = self.density_activation_inv(torch.full((N,1), fill_value=0.1, dtype=dtype, device=self.device))
+        opacities = self.density_activation_inv(torch.full((N,1), fill_value=self.conf.model.default_density, dtype=dtype, device=self.device))
 
         # set colors, constant if they weren't given
         if colors is None:
@@ -453,7 +474,7 @@ class MixtureOfGaussians(torch.nn.Module):
         scales = self.scale_activation_inv(observation_scale)[:,None].repeat(1,3)
 
         # set density as a constant
-        opacities = self.density_activation_inv(torch.full((N,1), fill_value=0.1, dtype=dtype, device=self.device))
+        opacities = self.density_activation_inv(torch.full((N,1), fill_value=self.conf.model.default_density, dtype=dtype, device=self.device))
 
         # set color as a constant
         features_albedo = torch.rand((N, 3), dtype=dtype, device=self.device) / 255.0
@@ -535,8 +556,18 @@ class MixtureOfGaussians(torch.nn.Module):
         for name, value in optimizable_tensors.items():
             setattr(self, name, value)
 
-    def build_bvh(self, full_build=True):
-        optixtracer.build_mog_bvh(self.optix_ctx, self.positions, self.rotation_activation(self.rotation), self.scale_activation(self.scale), full_build)
+    def build_bvh(self, rebuild_bvh=True):
+        with torch.cuda.nvtx.range(f"build-bvh-full-build-{rebuild_bvh}"):
+            rebuild_bvh = rebuild_bvh or self.conf.render.adaptive_kernel_clamping or self.num_update_bvh >= self.conf.render.max_consecutive_bvh_update
+            optixtracer.build_mog_bvh(
+                self.optix_ctx, 
+                self.positions, 
+                self.rotation_activation(self.rotation), 
+                self.scale_activation(self.scale), 
+                self.density_activation(self.density), 
+                rebuild_bvh
+            )
+            self.num_update_bvh = 0 if rebuild_bvh else self.num_update_bvh + 1
 
     def increase_num_active_features(self) -> None:
         self.n_active_features = min(self.max_n_features, self.n_active_features + self.feature_dim_increase_step)
@@ -561,6 +592,12 @@ class MixtureOfGaussians(torch.nn.Module):
 
     def reset_density(self):
         updated_densities = self.density_activation_inv(torch.min(self.get_density(), torch.ones_like(self.density) * self.new_max_density))
+        optimizable_tensors = self.replace_tensor_to_optimizer(updated_densities, "density")
+        self.density = optimizable_tensors["density"]
+
+    def set_density(self, mask, density):
+        updated_densities = self.density.clone()
+        updated_densities[mask] = density
         optimizable_tensors = self.replace_tensor_to_optimizer(updated_densities, "density")
         self.density = optimizable_tensors["density"]
 
@@ -643,8 +680,8 @@ class MixtureOfGaussians(torch.nn.Module):
                 self.rolling_weight_contrib = checkpoint["rolling_weight_contrib"]
 
             if self.conf.model.densify.method == 'gradient-buffer':
-                self.positional_grad_norm_accum = checkpoint["positional_grad_norm_accum"]
-                self.positional_grad_norm_denom = checkpoint["positional_grad_norm_denom"]
+                self.densify_grad_norm_accum = checkpoint["densify_grad_norm_accum"][0]
+                self.densify_grad_norm_denom = checkpoint["densify_grad_norm_denom"][0]
         else: 
             if self.conf.model.log_rolling_buffers:
                 num_gaussians = self.positions.shape[0]
@@ -653,8 +690,8 @@ class MixtureOfGaussians(torch.nn.Module):
 
             if self.conf.model.densify.method == 'gradient-buffer':
                 num_gaussians = self.positions.shape[0]
-                self.positional_grad_norm_accum = torch.zeros((num_gaussians,1), dtype=torch.float, device=self.device)
-                self.positional_grad_norm_denom = torch.zeros((num_gaussians,1), dtype=torch.int, device=self.device)
+                self.densify_grad_norm_accum = torch.zeros((num_gaussians,1), dtype=torch.float, device=self.device)
+                self.densify_grad_norm_denom = torch.zeros((num_gaussians,1), dtype=torch.int, device=self.device)
 
     # @torch.cuda.nvtx.range("update-gradient-buffer")
     # def update_gradient_buffer(self, rays_ori, rays_dir):
@@ -663,24 +700,42 @@ class MixtureOfGaussians(torch.nn.Module):
     #     mask = (hit_cts > 0).squeeze()
 
     #     assert self.positions.grad is not None
-    #     self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask], dim=-1, keepdim=True)
-    #     self.positional_grad_norm_denom[mask] += 1
+    #     self.densify_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask], dim=-1, keepdim=True)
+    #     self.densify_grad_norm_denom[mask] += 1
                 
     @torch.cuda.nvtx.range("update-gradient-buffer")
     def update_gradient_buffer(self, rays_ori, rays_dir):
-        assert self.conf.model.densify.method == 'gradient-buffer'
-        mask = (self.positions.grad != 0).max(dim=1)[0]
+        match self.conf.model.densify.params:
+            case 'positions':
+                params_grad = self.positions.grad
+            case 'positions_gradient_norm':
+                params_grad = self.positions_gradient_norm.grad
+            case "features_albedo":
+                params_grad = self.features_albedo.grad
+                
+            case _:
+                raise ValueError(f"densify.params {self.conf.model.densify.params} not supported")
+            
+        with torch.cuda.nvtx.range(f"getting-the-hit-mask"):
+            assert self.conf.model.densify.method == 'gradient-buffer'
+            mask = (params_grad != 0).max(dim=1)[0]
 
-        assert self.positions.grad is not None
-        distance_to_camera = (self.positions[mask] - rays_ori[0, 0, 0]).pow(2).sum(dim=1).pow(0.5)[..., None]
-
-        self.positional_grad_norm_accum[mask] += torch.norm(self.positions.grad[mask] * distance_to_camera, dim=-1, keepdim=True) / 2
-        self.positional_grad_norm_denom[mask] += 1
+        if self.conf.model.densify.distance_based_scaling:
+            with torch.cuda.nvtx.range(f"getting-gaussian-to-camera-distances"):
+                assert params_grad is not None
+                distance_to_camera = (self.positions[mask] - rays_ori[0, 0, 0]).norm(dim=1, keepdim=True)
+            with torch.cuda.nvtx.range(f"accumulating-gradients"):
+                self.densify_grad_norm_accum[mask] += torch.norm(params_grad[mask] * distance_to_camera, dim=-1, keepdim=True) / 2
+                self.densify_grad_norm_denom[mask] += 1
+        else:
+            with torch.cuda.nvtx.range(f"accumulating-gradients"):
+                self.densify_grad_norm_accum[mask] += torch.norm(params_grad[mask], dim=-1, keepdim=True)
+                self.densify_grad_norm_denom[mask] += 1
 
         # if global_step % 100 == 0:
         #     import matplotlib.pyplot as plt
-        #     plt.scatter(distance_to_camera.detach().cpu(), torch.norm(self.positions.grad[mask] * (distance_to_camera + 1), dim=-1, keepdim=True)[:, 0].detach().cpu(), label="Ours - scaled")
-        #     plt.scatter(distance_to_camera.detach().cpu(), torch.norm(self.positions.grad[mask], dim=-1, keepdim=True)[:, 0].detach().cpu(), label="Ours")
+        #     plt.scatter(distance_to_camera.detach().cpu(), torch.norm(params_grad[mask] * (distance_to_camera + 1), dim=-1, keepdim=True)[:, 0].detach().cpu(), label="Ours - scaled")
+        #     plt.scatter(distance_to_camera.detach().cpu(), torch.norm(sparams_grad[mask], dim=-1, keepdim=True)[:, 0].detach().cpu(), label="Ours")
         #     plt.legend()
         #     plt.savefig("test.png")
         #     plt.clf()
@@ -694,34 +749,41 @@ class MixtureOfGaussians(torch.nn.Module):
     @torch.cuda.nvtx.range("densify_gaussians")
     def densify_gaussians(self, scene_extent):
         if self.conf.model.densify.method in ["adam", "gradient-buffer"]:
-            self.densify_positional_grad(scene_extent)
+            self.densify_params_grad(scene_extent, self.conf.model.densify.params)
         elif self.conf.model.densify.method == "error":
             self.clone_gaussians_error()
     
-    def densify_positional_grad(self, scene_extent):
+    def densify_params_grad(self, scene_extent, params_name):
         assert self.optimizer is not None, "Optimizer need to be initialized before splitting and cloning the Gaussians"
-        assert self.get_positions().requires_grad, "Trying to perform split and clone but the positions are not being optimized"
+        match params_name:
+            case 'positions':
+                assert self.get_positions().requires_grad, "Trying to perform split and clone but the positions are not being optimized"
+            case 'positions_gradient_norm':
+                assert self.positions_gradient_norm is not None and self.positions_gradient_norm.requires_grad, "Trying to perform split and clone but the positions gradient norm are not available"
+            case "features_albedo":
+                assert self.get_features().requires_grad, "Trying to perform split and clone but the positions are not being optimized"
+            case _:
+                raise ValueError(f"densify.params {self.conf.model.densify.params} not supported")
 
-        positional_grad_norm = None
+        densify_grad_norm = None
         match self.conf.model.densify.method:
             case 'adam':
-                # TODO: we directly use the gradient of the 3D positions, whereas 3D Gaussian Splatting uses the 2D position gradient after projection (in theory this should be the same as not projecting the gradient)
-                # TODO: we always consider all the Gaussians by tapping into the Adam's exponential moving average. 3DGS only considers Gaussians that survived the frustum culling in the last iteration.
                 for group in self.optimizer.param_groups:
-                    if group["name"] == "positions":
-                        positional_grad_norm = torch.norm(self.optimizer.state.get(group['params'][0], None)["exp_avg"], dim=-1)
-
+                    if group["name"] == params_name:
+                        # TODO: we directly use the gradient of the 3D positions, whereas 3D Gaussian Splatting uses the 2D position gradient after projection (in theory this should be the same as not projecting the gradient)
+                        # TODO: we always consider all the Gaussians by tapping into the Adam's exponential moving average. 3DGS only considers Gaussians that survived the frustum culling in the last iteration.
+                        densify_grad_norm = torch.norm(self.optimizer.state.get(group['params'][0], None)["exp_avg"], dim=-1)
             case 'gradient-buffer':
                 # gsplat implementation
-                positional_grad_norm = self.positional_grad_norm_accum / self.positional_grad_norm_denom
-                positional_grad_norm[positional_grad_norm.isnan()] = 0.0 
+                densify_grad_norm = self.densify_grad_norm_accum / self.densify_grad_norm_denom
+                densify_grad_norm[densify_grad_norm.isnan()] = 0.0 
             case _:
                 raise ValueError(f"densify.method {self.conf.model.densify.method} not supported")
 
-        assert positional_grad_norm is not None, "Was not able to retrieve the exp average of the positional gradient from Adam"       
+        assert densify_grad_norm is not None, "Was not able to retrieve the exp average of the positional gradient from Adam"       
 
-        self.clone_gaussians(positional_grad_norm.squeeze(), scene_extent)
-        self.split_gaussians(positional_grad_norm.squeeze(), scene_extent)      
+        self.clone_gaussians(densify_grad_norm.squeeze(), scene_extent)
+        self.split_gaussians(densify_grad_norm.squeeze(), scene_extent)      
 
         torch.cuda.empty_cache()
 
@@ -735,30 +797,32 @@ class MixtureOfGaussians(torch.nn.Module):
             self.reset_rolling_buffers()
 
         if self.conf.model.densify.method == 'gradient-buffer':
-            self.positional_grad_norm_accum = torch.zeros((self.get_positions().shape[0], 1), 
+            self.densify_grad_norm_accum = torch.zeros((self.get_positions().shape[0], 1), 
                                                         device=self.device, 
-                                                        dtype=self.positional_grad_norm_accum.dtype)
-            self.positional_grad_norm_denom = torch.zeros((self.get_positions().shape[0], 1), 
+                                                        dtype=self.densify_grad_norm_accum.dtype)
+            self.densify_grad_norm_denom = torch.zeros((self.get_positions().shape[0], 1), 
                                                         device=self.device, 
-                                                        dtype=self.positional_grad_norm_denom.dtype)
+                                                        dtype=self.densify_grad_norm_denom.dtype)
         
     @torch.cuda.nvtx.range("split_gaussians")
-    def split_gaussians(self, positional_grad_norm: torch.Tensor, scene_extent: float):
+    def split_gaussians(self, densify_grad_norm: torch.Tensor, scene_extent: float):
         n_init_points = self.get_positions().shape[0]
 
         # Extract points that satisfy the gradient condition
         padded_grad = torch.zeros((n_init_points), device="cuda")
 
         # Here we already have the cloned points in the self.positions so only take the points up to size of the initial grad
-        padded_grad[:positional_grad_norm.shape[0]] = positional_grad_norm.squeeze()
+        padded_grad[:densify_grad_norm.shape[0]] = densify_grad_norm.squeeze()
         mask = torch.where(padded_grad >= self.split_grad_threshold, True, False)
         mask = torch.logical_and(mask, torch.max(self.get_scale(), dim=1).values > self.relative_size_threshold * scene_extent)
-
 
         stds = self.get_scale()[mask].repeat(self.split_n_gaussians, 1)
         means = torch.zeros((stds.size(0), 3),device="cuda")
         samples = torch.normal(mean=means, std=stds)
         rots = quaternion_to_so3(self.rotation[mask]).repeat(self.split_n_gaussians,1,1)
+
+        if self.conf.model.densify.share_density:
+            self.set_density(mask,self.density[mask] / self.split_n_gaussians)
 
         add_gaussians = {
                 "positions": torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_positions()[mask].repeat(self.split_n_gaussians, 1),
@@ -785,13 +849,16 @@ class MixtureOfGaussians(torch.nn.Module):
 
 
     @torch.cuda.nvtx.range("clone_gaussians")
-    def clone_gaussians(self, positional_grad_norm: torch.Tensor, scene_extent: float):
-        assert positional_grad_norm is not None, "Positional gradients must be available in order to clone the Gaussians"
+    def clone_gaussians(self, densify_grad_norm: torch.Tensor, scene_extent: float):
+        assert densify_grad_norm is not None, "Positional gradients must be available in order to clone the Gaussians"
         # Extract points that satisfy the gradient condition
-        mask = torch.where(positional_grad_norm >= self.clone_grad_threshold, True, False)
+        mask = torch.where(densify_grad_norm >= self.clone_grad_threshold, True, False)
 
         # If the gaussians are larger they shouldn't be cloned, but rather split
         mask = torch.logical_and(mask, torch.max(self.get_scale(), dim=1).values <= self.relative_size_threshold * scene_extent)
+
+        if self.conf.model.densify.share_density:
+            self.set_density(mask,self.density[mask] / 2)
 
         # stats
         if self.conf.model.print_stats:
@@ -860,6 +927,32 @@ class MixtureOfGaussians(torch.nn.Module):
 
         self.prune_gaussians(mask)
 
+    @torch.no_grad()
+    def prune_gaussians_count(self, train_dataset):
+        g_weights_accum = torch.zeros_like(self.get_density(True))
+        visibility_train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1, shuffle=False)
+
+        # make sure the bvh is up-to-date
+        self.build_bvh(rebuild_bvh=True)
+
+        with tqdm.tqdm(visibility_train_dataloader) as pbar:
+            pbar.set_description("Count pruning:" )
+            for batch in pbar:
+                with torch.no_grad():
+                    gpu_batch = move_to_gpu(batch)
+                    g_weights_accum += self(gpu_batch["rays_ori"], gpu_batch["rays_dir"], train=False, force_with_weights=True)["g_weights"]        
+        
+        threshold, _ = torch.kthvalue(g_weights_accum[:, 0], 
+                                      int(self.positions.shape[0] - self.conf.model.prune_count.max_allowed_gaussians * (1 - self.conf.model.prune_count.prune_ratio)))
+        valid_mask = g_weights_accum[:,0] >= threshold
+
+        if self.conf.model.print_stats:
+            n_before = valid_mask.shape[0]
+            n_prune = n_before - valid_mask.sum()
+            print(f"Count-pruned {n_prune} / {n_before} ({n_prune/n_before*100:.2f}%) gaussians")
+
+        self.prune_gaussians(valid_mask)
+
     def prune_gaussians_scale(self, dataset):
         cam_normals = torch.from_numpy(dataset.poses[:, :3, 2]).to(self.device)
         similarities = torch.matmul(self.positions, cam_normals.T)
@@ -899,8 +992,8 @@ class MixtureOfGaussians(torch.nn.Module):
         self.update_optimizable_parameters(optimizable_tensors)
 
         if self.conf.model.densify.method == 'gradient-buffer':
-            self.positional_grad_norm_accum = self.positional_grad_norm_accum[valid_mask]
-            self.positional_grad_norm_denom = self.positional_grad_norm_denom[valid_mask]
+            self.densify_grad_norm_accum = self.densify_grad_norm_accum[valid_mask]
+            self.densify_grad_norm_denom = self.densify_grad_norm_denom[valid_mask]
 
         if self.conf.model.log_rolling_buffers:
             # TODO only touch these based on a densify method?
@@ -981,8 +1074,8 @@ class MixtureOfGaussians(torch.nn.Module):
             model_params["features_specular"] = self.features_specular
 
         if self.conf.model.densify.method == 'gradient-buffer':
-            model_params["positional_grad_norm_accum"] = self.positional_grad_norm_accum,
-            model_params["positional_grad_norm_denom"] = self.positional_grad_norm_denom,
+            model_params["densify_grad_norm_accum"] = self.densify_grad_norm_accum,
+            model_params["densify_grad_norm_denom"] = self.densify_grad_norm_denom,
         
         return model_params
 
@@ -999,11 +1092,14 @@ class MixtureOfGaussians(torch.nn.Module):
         )
         return mog_counts
 
-    def forward_optix_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target, train: bool) -> dict[str, torch.Tensor]:
+    def forward_optix_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target, train: bool, frame_id: int, force_with_weights: bool, force_sampling: bool, enable_timing: bool) -> dict[str, torch.Tensor]:
 
         if err_target is None:
             err_target = torch.ones_like(rays_o[:,0])
 
+        self.positions_gradient_norm = torch.ones_like(self.density)
+        self.positions_gradient_norm.requires_grad = self.conf.model.densify.params == 'positions_gradient_norm'
+        
         num_gsplats = self.positions.shape[0]
         with torch.cuda.nvtx.range(f"model.forward({num_gsplats} gaussians)"):
             # The feature mask zeros out feature dims the model shouldn't use yet.
@@ -1017,10 +1113,18 @@ class MixtureOfGaussians(torch.nn.Module):
             if self.feature_type == 'sh':
                 self.optix_ctx.set_sph_degree(self.n_active_features)
 
-            pred_rgb, pred_opacity, pred_dist, g_weights, err_backprop_proxy = optixtracer.trace_mog(
-                    self.optix_ctx, rays_o, rays_d,
+            render_opts =  self.train_render_opts if train else self.render_opts
+            if force_with_weights:
+                render_opts |= optixtracer.OptixMogRenderOpts.USE_GWEIGHTS
+            if force_sampling:
+                render_opts |= optixtracer.OptixMogRenderOpts.SAMPLING
+            if enable_timing:
+                render_opts |= optixtracer.OptixMogRenderOpts.ENABLE_TIMING
+
+            pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count, g_weights, err_backprop_proxy, inference_time = optixtracer.trace_mog(
+                    self.optix_ctx, frame_id, render_opts, rays_o, rays_d,
                     self.positions, self.get_rotation(), self.get_scale(),
-                    self.get_density(), features, err_target)
+                    self.get_density(), features, err_target, self.positions_gradient_norm)
 
             pred_rgb, pred_opacity = self.background(rays_d, pred_rgb, pred_opacity, train)
 
@@ -1028,8 +1132,11 @@ class MixtureOfGaussians(torch.nn.Module):
             'pred_rgb': pred_rgb,
             'pred_opacity': pred_opacity,
             'pred_dist': pred_dist,
+            'pred_normals': pred_normals,
+            'hits_count': hits_count,
             'g_weights': g_weights,
             'err_backprop_proxy': err_backprop_proxy,
+            'inference_time': inference_time
         }
     
     def forward_torch_render(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target: torch.Tensor, train: bool) -> dict[str, torch.Tensor]:
@@ -1078,12 +1185,23 @@ class MixtureOfGaussians(torch.nn.Module):
             'pred_opacity': ray_opacity,
             'pred_ohit': ray_ohit,
             'pred_dist': ray_dist,
+            'hits_count': torch.zeros_like(ray_opacity),
             'g_weights': g_weights,
             'err_backprop_proxy': err_backprop_proxy,
         }
 
     
-    def forward(self, rays_o: torch.Tensor, rays_d: torch.Tensor, err_target=None, force_method=None, train=False) -> dict[str, torch.Tensor]:
+    def forward(
+        self, 
+        rays_o: torch.Tensor, 
+        rays_d: torch.Tensor, 
+        err_target=None, 
+        force_method=None, 
+        train=False, 
+        frame_id=0, 
+        force_with_weights=False,
+        force_sampling=False,
+        enable_timing=False) -> dict[str, torch.Tensor]:
         """
         err_target is a "dummy" input used to implement rolling error accumulation
         """
@@ -1095,12 +1213,155 @@ class MixtureOfGaussians(torch.nn.Module):
             force_method = self.render_method
 
         if force_method == 'optix':
-            return self.forward_optix_render(rays_o, rays_d, err_target, train)
+            return self.forward_optix_render(rays_o, rays_d, err_target, train, frame_id, force_with_weights, force_sampling, enable_timing)
 
         elif force_method == 'torch':
-            return self.forward_torch_render(rays_o, rays_d, err_target, train)
+           return self.forward_torch_render(rays_o, rays_d, err_target, train)
 
         else:
             raise ValueError(f"unrecognized render method {self.render_method}")
 
+    @torch.no_grad()
+    def export_ingp(self, mogt_path:str,force_half:bool,morton3d_grid_resolution:int):
+        export_dtype = torch.float16 if force_half else self.get_positions().dtype
+        logging.info(f"exporting mogt file to {mogt_path}...")
+        mogt_config: dict[str, Any] = {}
+        mogt_config["nre_data"] = { 
+            "version": "0.0.1", 
+            "model": "mogt"
+        }
+        if morton3d_grid_resolution > 1:
+            mog_ind = optixtracer.mog_morton3d_layout(
+                self.optix_ctx, 
+                self.get_positions(),
+                morton3d_grid_resolution
+            )
+        else:
+            mog_ind = torch.range(0, self.get_positions().shape[0]-1).to(dtype=torch.int32)
+        mogt_config["precision"] = "half" if export_dtype==torch.float16 else "single"
+        mogt_config["mog_num"] = self.get_positions().shape[0]
+        mogt_config["mog_sph_degree"] = self.max_n_features
+        mogt_config["mog_positions"] = self.get_positions()[mog_ind,:].flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_scales"] = self.get_scale()[mog_ind,:].flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_rotations"] = self.get_rotation()[mog_ind,:].flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_densities"] = self.get_density()[mog_ind,:].flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        mogt_config["mog_features"] = self.get_features()[mog_ind,:].flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+        with gzip.open(ingp_filepath := mogt_path, "wb") as f:
+            packed = msgpack.packb(mogt_config)
+            f.write(packed)
 
+    @torch.no_grad()
+    def init_from_ingp(self, ingp_path, init_model=True):
+        with gzip.open(ingp_path, 'rb') as f:
+            mogt_config = msgpack.unpackb(f.read())
+        mog_num = mogt_config["mog_num"]
+        self.n_active_features = self.max_n_features = mogt_config["mog_sph_degree"]
+        import_dtype = np.float16 if mogt_config["precision"] == "half" else np.float32
+        positions =  torch.from_numpy(np.frombuffer(mogt_config["mog_positions"], dtype=import_dtype)).to(device=self.device).reshape(mog_num,3)
+        scales =  torch.from_numpy(np.frombuffer(mogt_config["mog_scales"], dtype=import_dtype)).to(device=self.device).reshape(mog_num,3)
+        densities =  torch.from_numpy(np.frombuffer(mogt_config["mog_densities"], dtype=import_dtype)).to(device=self.device).reshape(mog_num,1)
+        rotations =  torch.from_numpy(np.frombuffer(mogt_config["mog_rotations"], dtype=import_dtype)).to(device=self.device).reshape(mog_num,4)
+        n_features = sh_degree_to_specular_dim(self.max_n_features)
+        features =  torch.from_numpy(np.frombuffer(mogt_config["mog_features"], dtype=import_dtype)).to(device=self.device).reshape(mog_num,n_features+3)
+        features_albedo, features_specular = torch.split(features,[3,n_features], dim=1)
+
+        self.positions = torch.nn.Parameter(positions)
+        self.rotation = torch.nn.Parameter(rotations)
+        self.scale = torch.nn.Parameter(self.scale_activation_inv(scales))
+        self.density = torch.nn.Parameter(self.density_activation_inv(densities))
+        self.features_albedo = torch.nn.Parameter(features_albedo)
+        self.features_specular = torch.nn.Parameter(features_specular)
+
+        self.n_active_features = self.max_n_features
+        
+        if init_model:
+            self.init_densification_buffer()
+            self.set_optimizable_parameters()
+            self.setup_optimizer()
+            self.validate_fields()
+
+    # ==================================================================================================
+    # WARN : BORROWED FROM GSPLAT
+    def construct_list_of_attributes(self):
+        l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
+        # All channels except the 3 DC
+        for i in range(self.features_albedo.shape[1]):
+            l.append('f_dc_{}'.format(i))
+        for i in range(self.features_specular.shape[1]):
+            l.append('f_rest_{}'.format(i))
+        l.append('opacity')
+        for i in range(self.scale.shape[1]):
+            l.append('scale_{}'.format(i))
+        for i in range(self.rotation.shape[1]):
+            l.append('rot_{}'.format(i))
+        return l
+
+    @torch.no_grad()
+    def export_ply(self, mogt_path:str):
+        mogt_pos =  self.get_positions().detach().cpu().numpy()
+        mogt_nrm = np.zeros_like(mogt_pos)
+        mogt_albedo = self.features_albedo.detach().contiguous().cpu().numpy()
+        mogt_specular = self.features_specular.detach().contiguous().cpu().numpy()
+        mogt_densities = self.density.detach().cpu().numpy()
+        mogt_scales = self.scale.detach().cpu().numpy()
+        mogt_rotation = self.rotation.detach().cpu().numpy()
+
+        dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
+
+        elements = np.empty(mogt_pos.shape[0], dtype=dtype_full)
+        attributes = np.concatenate((mogt_pos, mogt_nrm, mogt_albedo, mogt_specular, mogt_densities, mogt_scales, mogt_rotation), axis=1)
+        elements[:] = list(map(tuple, attributes))
+        el = PlyElement.describe(elements, 'vertex')
+        PlyData([el]).write(mogt_path)
+
+    @torch.no_grad()
+    def init_from_ply(self, mogt_path:str, init_model=True):
+        plydata = PlyData.read(mogt_path)
+
+        mogt_pos = np.stack((np.asarray(plydata.elements[0]["x"]),
+                        np.asarray(plydata.elements[0]["y"]),
+                        np.asarray(plydata.elements[0]["z"])),  axis=1)
+        mogt_densities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
+
+        mogt_albedo = np.zeros((mogt_pos.shape[0], 3))
+        mogt_albedo[:, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
+        mogt_albedo[:, 1] = np.asarray(plydata.elements[0]["f_dc_1"])
+        mogt_albedo[:, 2] = np.asarray(plydata.elements[0]["f_dc_2"])
+
+        extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
+        extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+        assert len(extra_f_names)==3*(self.max_n_features + 1) ** 2 - 3
+        mogt_specular = np.zeros((mogt_pos.shape[0], len(extra_f_names)))
+        for idx, attr_name in enumerate(extra_f_names):
+            mogt_specular[:, idx] = np.asarray(plydata.elements[0][attr_name])
+        # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
+        # mogt_specular = mogt_specular.reshape((mogt_specular.shape[0], 3, (self.max_sh_degree + 1) ** 2 - 1))
+
+        scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
+        scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
+        mogt_scales = np.zeros((mogt_pos.shape[0], len(scale_names)))
+        for idx, attr_name in enumerate(scale_names):
+            mogt_scales[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+        rot_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("rot")]
+        rot_names = sorted(rot_names, key = lambda x: int(x.split('_')[-1]))
+        mogt_rotation = np.zeros((mogt_pos.shape[0], len(rot_names)))
+        for idx, attr_name in enumerate(rot_names):
+            mogt_rotation[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+        self.positions = torch.nn.Parameter(torch.tensor(mogt_pos, dtype=self.positions.dtype,device=self.device))
+        self.features_albedo = torch.nn.Parameter(torch.tensor(mogt_albedo, dtype=self.features_albedo.dtype,device=self.device))
+        self.features_specular = torch.nn.Parameter(torch.tensor(mogt_specular,dtype=self.features_specular.dtype,device=self.device))
+        self.density = torch.nn.Parameter(torch.tensor(mogt_densities,dtype=self.density.dtype,device=self.device))
+        self.scale = torch.nn.Parameter(torch.tensor(mogt_scales,dtype=self.scale.dtype,device=self.device))
+        self.rotation = torch.nn.Parameter(torch.tensor(mogt_rotation,dtype=self.rotation.dtype,device=self.device))
+
+        self.n_active_features = self.max_n_features
+        
+        if init_model:
+            self.init_densification_buffer()
+            self.set_optimizable_parameters()
+            self.setup_optimizer()
+            self.validate_fields()
+
+    

@@ -12,7 +12,22 @@ enum MOGTracingMode
 {
     MOGTracingModeNone = 0,
     MOGTracingGaussianHit = 1<<0, ///< use the position on the ray with highest gaussian response
+    MOGTracingSampling = 1<<1, ///< sampling mode
+    MOGTracingTesseracticKernel = 1<<2, 
+    MOGTracingAdaptiveKernelClamping = 1<<3, 
+    MOGTracingWithNormals = 1<<4,
+    MOGTracingWithHitCounts = 1<<5,
     MOGTracingDefaultMode = MOGTracingModeNone
+};
+
+enum MOGRenderOpts
+{
+    MOGRenderNone = 0,
+    MOGRenderUseGWeights = 1<<0, 
+    MOGRenderDnsHitSampling = 1<<1, 
+    MOGRenderTesseracticKernel = 1<<2, 
+    MOGRenderEnableTiming = 1<<3, 
+    MOGRenderDefault = MOGRenderNone
 };
 
 enum MOGPrimitiveTypes
@@ -23,6 +38,8 @@ enum MOGPrimitiveTypes
     MOGTracingDiamond,
     MOGTracingSphere,
     MOGTracingCustom,
+    MOGTracingTriHexa,
+    MOGTracingTriSurfel
 };
 
 enum MOGTracingPipeline

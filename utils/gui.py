@@ -52,8 +52,9 @@ class GUI:
         self.training_done = False
         self.viz_bbox = False
         self.live_update = True # if disabled , will skip rendering updates to accelerate background training loop
-        self.viz_render_styles = ['color', 'density', 'distance']
+        self.viz_render_styles = ['color', 'density', 'distance', 'hits', 'normals']
         self.viz_render_style_ind = 0
+        self.viz_render_style_scale = 1.0
         self.viz_render_method_overrides = ['none', 'optix', 'torch']
         self.viz_render_method_override_ind = 0
         self.viz_curr_render_size = None
@@ -64,6 +65,12 @@ class GUI:
         self.viz_render_enabled = True
         self.viz_render_subsample = 1
         self.viz_render_train_view = False
+        self.viz_render_show_sampling = False
+        self.viz_render_show_details = False
+        self.render_timing = 0
+        self.render_width = 1920
+        self.render_width = 1080
+
         if self.conf.render.method == 'torch':
             self.viz_render_subsample = 4
 
@@ -136,9 +143,19 @@ class GUI:
             if force_method == 'none':
                 force_method = None
 
-            outputs = self.model(rays_ori, rays_dir, train=self.viz_render_train_view, force_method=force_method)
+            outputs = self.model(
+                rays_ori, 
+                rays_dir, 
+                train=self.viz_render_train_view, 
+                force_method=force_method, 
+                force_sampling=self.viz_render_show_sampling,
+                enable_timing=self.viz_render_show_details
+            )
+            self.render_timing = outputs['inference_time']
+            self.render_width = rays_ori.shape[2]
+            self.render_height = rays_ori.shape[1]
 
-        return outputs['pred_rgb'], outputs['pred_opacity'], outputs['pred_dist']
+        return outputs['pred_rgb'], outputs['pred_opacity'], outputs['pred_dist'], outputs['pred_normals'], outputs['hits_count'] / self.conf.writer.max_num_hits
 
     def update_render_view_viz(self, force=False):
 
@@ -152,7 +169,7 @@ class GUI:
             self.viz_curr_render_style_ind = self.viz_render_style_ind
             self.viz_curr_render_size = (window_w, window_h)
 
-            if style == "color":
+            if style == "color" or style == "normals":
 
                 dummy_image = np.ones((window_h, window_w, 4), dtype=np.float32)
 
@@ -205,9 +222,28 @@ class GUI:
 
                 self.viz_render_color_buffer = None
                 self.viz_render_scalar_buffer = ps.get_quantity_buffer(self.viz_render_name, "values")
+            
+            elif style == "hits":
+
+                dummy_vals = np.zeros((window_h, window_w), dtype=np.float32)
+                dummy_vals[0] = 1.0  # hack so the default polyscope scale gets set more nicely
+
+                self.viz_main_image = ps.add_scalar_image_quantity(
+                    self.viz_render_name,
+                    dummy_vals,
+                    enabled=self.viz_render_enabled,
+                    image_origin="upper_left",
+                    show_fullscreen=True,
+                    show_in_imgui_window=False,
+                    cmap="jet",
+                    vminmax=(0, 1),
+                )
+
+                self.viz_render_color_buffer = None
+                self.viz_render_scalar_buffer = ps.get_quantity_buffer(self.viz_render_name, "values")
 
         # do the actual rendering
-        sple_orad, sple_odns, sple_odist = self.render_from_current_ps_view()
+        sple_orad, sple_odns, sple_odist, sple_onrm, sple_ohit = self.render_from_current_ps_view()
 
         # update the data
         if style == "color":
@@ -226,9 +262,26 @@ class GUI:
 
         elif style == "distance":
             if self.update_from_device:
-                self.viz_render_scalar_buffer.update_data_from_device(sple_odist.detach())
+                self.viz_render_scalar_buffer.update_data_from_device((sple_odist.detach()*self.viz_render_style_scale) / torch.clamp(sple_odns,min=1e-06))
             else:
-                self.viz_render_scalar_buffer.update_data(to_np(sple_odist))
+                self.viz_render_scalar_buffer.update_data(to_np((sple_odist*self.viz_render_style_scale) / torch.clamp(sple_odns,min=1e-06)))
+
+        elif style == "hits":
+            if self.update_from_device:
+                self.viz_render_scalar_buffer.update_data_from_device(sple_ohit.detach())
+            else:
+                self.viz_render_scalar_buffer.update_data(to_np(sple_ohit))
+
+        elif style == "normals":
+            # scale in rendering space 
+            sple_onrm = 0.5 * (sple_onrm + 1)
+            # append 1s for alpha
+            sple_onrm = torch.cat((sple_onrm, torch.ones_like(sple_onrm[:,:,:,0:1])), dim=-1)
+            if self.update_from_device:
+                self.viz_render_color_buffer.update_data_from_device(sple_onrm.detach())
+            else:
+                self.viz_render_color_buffer.update_data(to_np(sple_onrm))
+
 
     def populate_rolling_buffers(self):
         self.ps_point_cloud.add_scalar_quantity("rolling_error", to_np(self.model.rolling_error[:,0]))
@@ -265,8 +318,17 @@ class GUI:
                 self.viz_render_enabled = False
                 self.update_render_view_viz(force=True)
 
+            _, self.viz_render_show_details = psim.Checkbox("Infos", self.viz_render_show_details)
+            if self.viz_render_show_details:
+                psim.SameLine()
+                psim.Text(f"({self.render_width}x{self.render_height}) @ {self.render_timing} ms."); 
 
+            _, self.viz_render_show_sampling = psim.Checkbox("Show sampling", self.viz_render_show_sampling)
+            
             _, self.viz_render_style_ind = psim.Combo("Style", self.viz_render_style_ind, self.viz_render_styles)
+            if self.viz_render_styles[self.viz_render_style_ind] == "distance":
+                psim.SameLine()
+                _, self.viz_render_style_scale = psim.InputFloat("scale", self.viz_render_style_scale, 0.01); 
 
             changed, self.viz_render_subsample = psim.InputInt("Subsample Factor", self.viz_render_subsample, 1)
             if changed:

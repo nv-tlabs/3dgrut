@@ -139,6 +139,17 @@ class TrainingRecorder:
             self.train_info_dict['grad_opacity_norm'].append(model.density.grad.norm(dim=1).mean().item())
         except:
             pass
+
+        try:
+            self.train_info_dict['grad_feature_albedo_R_mean'].append(model.features_albedo.grad.mean(dim=0)[0].item())
+            self.train_info_dict['grad_feature_albedo_G_mean'].append(model.features_albedo.grad.mean(dim=0)[1].item())
+            self.train_info_dict['grad_feature_albedo_B_mean'].append(model.features_albedo.grad.mean(dim=0)[2].item())
+            self.train_info_dict['grad_feature_albedo_R_std'].append(model.features_albedo.grad.std(dim=0)[0].item())
+            self.train_info_dict['grad_feature_albedo_G_std'].append(model.features_albedo.grad.std(dim=0)[1].item())
+            self.train_info_dict['grad_feature_albedo_B_std'].append(model.features_albedo.grad.std(dim=0)[2].item())
+            self.train_info_dict['grad_feature_albedo_norm'].append(model.features_albedo.grad.norm(dim=1).mean().item())
+        except:
+            pass
     
         self._buffered_updates = True
 
@@ -232,6 +243,17 @@ class TrainingRecorder:
             writer.add_scalar("grad_statistics/opacity/grad_opacity_mean", self.train_info_dict['grad_opacity_mean'][-1])
             writer.add_scalar("grad_statistics/opacity/grad_opacity_std", self.train_info_dict['grad_opacity_std'][-1])
             writer.add_scalar("grad_statistics/opacity/grad_opacity_norm", self.train_info_dict['grad_opacity_norm'][-1])
+        except:
+            pass
+
+        try:
+            writer.add_scalar("grad_statistics/feature_albedo/grad_albedo_R_mean", self.train_info_dict['grad_feature_albedo_R_mean'][-1])
+            writer.add_scalar("grad_statistics/feature_albedo/grad_albedo_G_mean", self.train_info_dict['grad_feature_albedo_G_mean'][-1])
+            writer.add_scalar("grad_statistics/feature_albedo/grad_albedo_B_mean", self.train_info_dict['grad_feature_albedo_B_mean'][-1])
+            writer.add_scalar("grad_statistics/feature_albedo/grad_albedo_R_std", self.train_info_dict['grad_feature_albedo_R_std'][-1])
+            writer.add_scalar("grad_statistics/feature_albedo/grad_albedo_G_std", self.train_info_dict['grad_feature_albedo_G_std'][-1])
+            writer.add_scalar("grad_statistics/feature_albedo/grad_albedo_B_std", self.train_info_dict['grad_feature_albedo_B_std'][-1])
+            writer.add_scalar("grad_statistics/feature_albedo/grad_albedo_norm", self.train_info_dict['grad_feature_albedo_norm'][-1])
         except:
             pass
         

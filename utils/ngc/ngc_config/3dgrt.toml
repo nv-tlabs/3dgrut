@@ -14,6 +14,7 @@ result_path = "/result"
 id = 257
 name = "nv-us-west-2"
 instance = "ovxa40.48g.1"
+# instance = "dgx1v.32g.1.norm"
 
 # Can mount more by adding more `[ngc.workspaceXYZ]` categories
 # but this one will be used by the local workspace commands

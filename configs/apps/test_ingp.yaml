@@ -1,0 +1,38 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base.yaml
+  - _self_
+
+use_wandb: True 
+wandb_project: "3dgrt-test-ingp" 
+
+n_iterations: 0
+test_last: true
+import_ingp:
+  enabled: true
+export_ingp:
+  enabled: false
+
+# render settings for maximum performances
+render:
+  method : optix
+  kernel_function : exp-p4-dist # one of [gaussian, exp-p4-dist]
+  train_hit_sampling : false # use hits sampling during training
+  primitive_type : icosahedron
+  max_hit_per_slab: 8
+  max_num_slabs: 1
+  topk_hits: False
+  patch_size: 1
+  min_kernel_response: 0.0113
+  adaptive_kernel_clamping: true
+  min_transmittance: 0.03 
+  enable_normals: False
+  enable_hitcounts: False
+  
+dataset:
+  train:
+    ray_jittering:
+      type: none
+

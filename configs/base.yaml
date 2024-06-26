@@ -9,6 +9,7 @@ gui_update_from_device: true
 val_frequency: 5000
 num_workers: 8
 use_wandb: false
+wandb_project: "3dgrt"
 record_training: true
 test_last: false
 validate_first: False
@@ -17,9 +18,34 @@ use_deterministic_algorithms: False
 use_fixed_random_seed: False
 fixed_random_seed: 0
 
+enable_writer: true
+writer:
+  hit_stat_frequency : 100
+  max_num_hits: 128
+
+export_ingp:
+  enabled: True 
+  force_half: false
+  morton3d_grid_resolution: 512
+  path: ""
+import_ingp:
+  enabled: false 
+  path: ""
+  init_global_step: 0
+
+export_ply:
+  enabled: False 
+  path: ""
+import_ply:
+  enabled: False 
+  path: ""
+  init_global_step: 0
+
+
 model:
   density_activation: sigmoid
   scale_activation: exp
+  default_density: 0.1
   optimize_density: true
   optimize_features_albedo: true
   optimize_features_specular: true
@@ -35,6 +61,7 @@ model:
     increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
     
   lambda_background: 0.
+  lambda_opacity: 0.
 
   density_decay:
     gamma: 0.99
@@ -51,6 +78,8 @@ model:
 
   densify:
     method: gradient-buffer # one of [adam, gradient-buffer, error]
+    params: positions # one of [positions, positions_gradient_norm, features_albedo]
+    distance_based_scaling: true # whether or not to scale the buffered gradients of Gaussians according to their distances to the camera
     frequency: 300 # densification_interval in 3DGS with default value 100
     start_iteration: 500 # densify_from_iter in 3DGS default value 500
     end_iteration: 15000 # densify_until_iter in 3DGS default value 15_000
@@ -60,6 +89,7 @@ model:
     error_ratio_threshold: 0.5
     split:
       n_gaussians: 2 # Hardcoded to 2 in 3DGS
+    share_density: false # share the original gaussian density among the new ones
 
   # They use the same values for pruning and densification so check the above values
   prune:
@@ -73,6 +103,19 @@ model:
     start_iteration: -1
     end_iteration: -1
     weight_threshold : 0.5
+
+  prune_visibility:
+    frequency: 3000
+    start_iteration: 0
+    end_iteration: -1
+    weight_threshold : 0.0
+
+  prune_count:
+    frequency: 100
+    start_iteration: 0
+    end_iteration: 15000
+    max_allowed_gaussians: 3e6
+    prune_ratio: 0.1  # the ratio of the Gaussians to prune after going above the max allowed Gaussian count
 
   prune_scale:
     frequency: 100
@@ -119,7 +162,7 @@ optimizer:
     positions:  
       lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.00016
     density:
-      lr: 0.05 # 3DGS value: 0.05
+      lr: 0.09 # 3DGS value: 0.05
     features_albedo:
       lr: 0.0025 # 3DGS value: 0.0025
     features_specular:
@@ -138,22 +181,27 @@ scheduler:
     lr_init: ${optimizer.params.positions.lr}
     lr_final: 0.0000016
 
-    max_steps: ${n_iterations}
+    max_steps: 30000
 
   density:
     type: skip
 
 render:
   method : optix
-  hit_mode : 0
+  kernel_function : exp-p4-dist # one of [gaussian, exp-p4-dist]
+  train_hit_sampling : false # use hits sampling during training
   primitive_type : icosahedron
   max_hit_per_slab: 32
   max_num_slabs: 64
   topk_hits: False
   patch_size: 1
-  gaussian_sigma_threshold: 3.0
-  min_transmittance: 0.0001
-  max_hits_returned: 128 
+  min_kernel_response: 0.0113
+  adaptive_kernel_clamping: false
+  min_transmittance: 0.001 # gsplat default to 0.001
+  max_hits_returned: 128
+  max_consecutive_bvh_update: 15 
+  enable_normals: True
+  enable_hitcounts: True
   
   optix: {} # optix-specific render settings
   
@@ -168,6 +216,9 @@ loss:
   lambda_l2: 1.0
   use_ssim: true
   lambda_ssim: 0.2
+  lambda_reg_density: 0.0
+  lambda_reg_density_power: 1.0
+  reg_density_weight_masked: false # apply the density regularization only on hit gaussians
 
   # Scale-regularization, preventing needle-like geometries
   use_scalereg: False

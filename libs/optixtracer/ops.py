@@ -74,9 +74,11 @@ if _plugin is None:
 # 
 class _trace_mog_func(torch.autograd.Function):
     @staticmethod 
-    def forward(ctx, optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, mog_err_target):
-        ray_radiance, ray_density, ray_hit_distance, g_weights = _plugin.trace_mog(
+    def forward(ctx, optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, mog_err_target, mog_pos_grd_sq_target):
+        ray_radiance, ray_density, ray_hit_distance, ray_normals, hits_count, g_weights, inference_time = _plugin.trace_mog(
             optix_ctx.cpp_wrapper,
+            frame_id,
+            render_opts,
             ray_ori,
             ray_dir,
             mog_pos,
@@ -85,22 +87,42 @@ class _trace_mog_func(torch.autograd.Function):
             mog_dns,
             mog_sph
         )
-        ctx.save_for_backward(ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph)
+        ctx.save_for_backward(ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, ray_normals, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph)
+        ctx.frame_id = frame_id
+        ctx.render_opts = render_opts
         ctx.optix_ctx = optix_ctx
         err_backprop_proxy = torch.ones_like(ray_density) # used to abuse autograd
-        return ray_radiance, ray_density, ray_hit_distance, g_weights, err_backprop_proxy
+        return ray_radiance, ray_density, ray_hit_distance, ray_normals, hits_count, g_weights, err_backprop_proxy, inference_time
     
     @staticmethod
-    def backward(ctx, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd, g_weights_grd_UNUSED, ray_fake_err):
+    def backward(ctx, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd, ray_normals_grd, ray_hits_count_grd_UNUSED, g_weights_grd_UNUSED, ray_fake_err, inference_time_UNUSED):
         optix_ctx = ctx.optix_ctx
-        ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph = ctx.saved_variables
-        mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error = _plugin.trace_mog_bwd(
+        ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, ray_normals, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph = ctx.saved_variables
+        frame_id = ctx.frame_id
+        if optix_ctx.is_sampling():
+            frame_id = torch.randint(300000,900000,(1,),device="cpu")[0]
+            ray_radiance, ray_density, ray_hit_distance, ray_normals, _, _ = _plugin.trace_mog(
+                optix_ctx.cpp_wrapper,
+                frame_id,
+                ctx.render_opts,
+                ray_ori,
+                ray_dir,
+                mog_pos,
+                mog_rot,
+                mog_scl,
+                mog_dns,
+                mog_sph
+            )
+        mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error, mop_pos_grd_sq = _plugin.trace_mog_bwd(
             optix_ctx.cpp_wrapper,
+            frame_id,
+            ctx.render_opts,
             ray_ori,
             ray_dir,
             ray_radiance,
             ray_density,
             ray_hit_distance,
+            ray_normals,
             mog_pos,
             mog_rot,
             mog_scl,
@@ -109,54 +131,62 @@ class _trace_mog_func(torch.autograd.Function):
             ray_radiance_grd,
             ray_density_grd,
             ray_hit_distance_grd,
+            ray_normals_grd,
             ray_fake_err 
         )
-        return None, None, None, mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error
+        return None, None, None, None, None, mog_pos_grd, mog_rot_grd, mog_scl_grd, mog_dns_grd, mog_sph_grd, mog_error, mop_pos_grd_sq
 
 @torch.cuda.nvtx.range("trace_mog")
-def trace_mog(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, err_target):
-    ray_radiance, ray_density, ray_hit_distance, g_weights, err_backprop_proxy = _trace_mog_func.apply(
+def trace_mog(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, err_target, mog_pos_grd_sq):
+    ray_radiance, ray_density, ray_hit_distance, ray_normals, ray_hits_count, g_weights, err_backprop_proxy, inference_time = _trace_mog_func.apply(
         optix_ctx,
-        ray_ori,
-        ray_dir,
-        mog_pos,
-        mog_rot,
-        mog_scl,
-        mog_dns,
-        mog_sph,
-        err_target
+        frame_id,
+        render_opts,
+        ray_ori.contiguous(),
+        ray_dir.contiguous(),
+        mog_pos.contiguous(),
+        mog_rot.contiguous(),
+        mog_scl.contiguous(),
+        mog_dns.contiguous(),
+        mog_sph.contiguous(),
+        err_target,
+        mog_pos_grd_sq
     )
-    return ray_radiance, ray_density, ray_hit_distance, g_weights, err_backprop_proxy
+    return ray_radiance, ray_density, ray_hit_distance, ray_normals, ray_hits_count, g_weights, err_backprop_proxy, inference_time
 
 @torch.cuda.nvtx.range("trace_mog_grad")
-def trace_mog_grad(optix_ctx, ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd):
+def trace_mog_grad(optix_ctx, frame_id, render_opts, ray_ori, ray_dir, ray_radiance, ray_density, ray_hit_distance, ray_normals, mog_pos, mog_rot, mog_scl, mog_dns, mog_sph, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd, ray_normals_grd):
     return _plugin.trace_mog_bwd(
         optix_ctx.cpp_wrapper,
-        ray_ori,
-        ray_dir,
-        ray_radiance,
-        ray_density,
-        ray_hit_distance,
-        mog_pos,
-        mog_rot,
-        mog_scl,
-        mog_dns,
-        mog_sph,
-        ray_radiance_grd,
-        ray_density_grd,
-        ray_hit_distance_grd
+        frame_id,
+        render_opts,
+        ray_ori.contiguous(),
+        ray_dir.contiguous(),
+        ray_radiance.contiguous(),
+        ray_density.contiguous(),
+        ray_hit_distance.contiguous(),
+        ray_normals.contiguous(),
+        mog_pos.contiguous(),
+        mog_rot.contiguous(),
+        mog_scl.contiguous(),
+        mog_dns.contiguous(),
+        mog_sph.contiguous(),
+        ray_radiance_grd.contiguous(),
+        ray_density_grd.contiguous(),
+        ray_hit_distance_grd.contiguous(),
+        ray_normals_grd.contiguous()
     )
 
 @torch.cuda.nvtx.range("count_mog_hits")
 def count_mog_hits(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_dns):
     mog_hit_counts = _plugin.count_mog_hits(
         optix_ctx.cpp_wrapper,
-        ray_ori,
-        ray_dir,
-        mog_pos,
-        mog_rot,
-        mog_scl,
-        mog_dns
+        ray_ori.contiguous(),
+        ray_dir.contiguous(),
+        mog_pos.contiguous(),
+        mog_rot.contiguous(),
+        mog_scl.contiguous(),
+        mog_dns.contiguous()
     )
     return mog_hit_counts
 
@@ -164,18 +194,22 @@ def trace_mog_inds(optix_ctx, ray_ori, ray_dir, mog_pos, mog_rot, mog_scl, mog_d
 
     ray_hits = _plugin.trace_mog_inds(
         optix_ctx.cpp_wrapper,
-        ray_ori,
-        ray_dir,
-        mog_pos,
-        mog_rot,
-        mog_scl,
-        mog_dns
+        ray_ori.contiguous(),
+        ray_dir.contiguous(),
+        mog_pos.contiguous(),
+        mog_rot.contiguous(),
+        mog_scl.contiguous(),
+        mog_dns.contiguous()
     )
     return ray_hits
 
 @torch.cuda.nvtx.range("get_mog_primitives")
 def get_mog_primitives(optix_ctx):
     return _plugin.get_mog_primitives(optix_ctx.cpp_wrapper)
+
+@torch.cuda.nvtx.range("create_camera_rays")
+def create_camera_rays(image_width: int, image_height: int, tanfovx: float, tanfovy : float, viewmatrix : torch.Tensor):
+    return _plugin.create_camera_rays(image_width, image_height, tanfovx, tanfovy, viewmatrix)
 
 #----------------------------------------------------------------------------
 #
@@ -185,15 +219,37 @@ def build_mog_bvh(
         mog_pos,
         mog_rot,
         mog_scl,
+        mog_dns,
         rebuild
 ):
     _plugin.build_mog_bvh(
         optix_ctx.cpp_wrapper,
-        mog_pos.view(-1, 3),
-        mog_rot.view(-1, 4),
-        mog_scl.view(-1, 3),
-        rebuild
+        mog_pos.view(-1, 3).contiguous(),
+        mog_rot.view(-1, 4).contiguous(),
+        mog_scl.view(-1, 3).contiguous(),
+        mog_dns.view(-1, 1).contiguous(),
+        rebuild or not optix_ctx.allow_bvh_update(),
+        optix_ctx.allow_bvh_update()
     )
+
+#----------------------------------------------------------------------------
+#
+@torch.cuda.nvtx.range("morton3d_layout")
+def mog_morton3d_layout(
+        optix_ctx,
+        mog_pos,
+        resolution
+):
+    # m3d_grid_cell contains the number of gaussian for every morton3d cells (cells are indexed from 1 to n+1)
+    # mog_m3d_cell contains both the cell id and the id within its cell for each gaussians
+    m3d_grid_cell, mog_m3d_cell = _plugin.mog_morton3d_layout(
+        optix_ctx.cpp_wrapper,
+        mog_pos.view(-1, 3),
+        resolution
+    )
+    return torch.cumsum(m3d_grid_cell,dim=0)[mog_m3d_cell[:,0],0] + mog_m3d_cell[:,1]
+
+
 
 #----------------------------------------------------------------------------
 #
@@ -207,9 +263,24 @@ class OptixMogPrimitive(IntEnum):
     TRACING_ICOSAHEDRON = 0
     TRACING_OCTAHEDRON = 1
     TRACING_TETRAHEDRON = 2
-    TRACING_DIAMOND = 3,
-    TRACING_SPHERE = 4,
+    TRACING_DIAMOND = 3
+    TRACING_SPHERE = 4
     TRACING_CUSTOM = 5
+    TRACING_TRIHEXA = 6
+    TRACING_TRISURFEL = 7
+
+
+class OptixMogRenderOpts(IntEnum):
+  NONE = 0
+  USE_GWEIGHTS = 1 # MOGRenderUseGWeights
+  SAMPLING = 2 # MOGTracingSampling / MOGRenderDnsHitSampling
+  TESSERACTIC_KERNEL = 4 # MOGTracingTesseracticKernel / MOGRenderTesseracticKernel
+  ENABLE_TIMING = 8 # MOGRenderEnableTiming
+  ADAPTIVE_KERNEL_SAMPLING = 8 # MOGTracingAdaptiveKernelClamping
+  ENABLE_NORMALS = 16 # MOGTracingWithNormals
+  ENABLE_HITCOUNTS = 32 # MOGTracingWithHitCounts
+  ENABLE_BVH_UPDATE = 64
+  DEFAULT = NONE
 
 @dataclass
 class OptixMogTracingParams:
@@ -221,14 +292,66 @@ class OptixMogTracingParams:
     topk_hits: bool=False       # If true do not respawn rays, just keep the first max_hit_per_slab gaussians
     patch_size: int=1           # tile size (best performances achieve with 3 but need COHERENT rays inputs)
     sph_degree: int=3           # spherical harmonics degree
-    gaussian_sigma_threshold: float=3.0 # sigma factor to decide the size of the octahedron enveloppe
-    min_transmittance: float=0.03       # minimum transmittance at which we stop gathering gaussians
+    min_kernel_response: float=0.0113 # minimum kernel response which decide the size of the primitive enveloppe
+    min_transmittance: float=0.001   # minimum transmittance at which we stop gathering gaussians
     max_hits_returned : int=64       # total number of hits returned
+    
+    @staticmethod
+    def pack_hit_mode(gaussian_function:str, sampling_mode:bool, adaptive_kernel_clamping: bool, enable_normals: bool, enable_hitcounts: bool, enable_bvh_update: bool):
+        hit_mode = int(OptixMogRenderOpts.NONE)
+        if gaussian_function=="exp-p4-dist":
+            hit_mode = hit_mode | OptixMogRenderOpts.TESSERACTIC_KERNEL
+        if sampling_mode:
+            hit_mode = hit_mode | OptixMogRenderOpts.SAMPLING
+        if adaptive_kernel_clamping:
+            hit_mode = hit_mode | OptixMogRenderOpts.ADAPTIVE_KERNEL_SAMPLING
+        if enable_normals:
+            hit_mode = hit_mode | OptixMogRenderOpts.ENABLE_NORMALS
+        if enable_hitcounts:
+            hit_mode = hit_mode | OptixMogRenderOpts.ENABLE_HITCOUNTS
+        if enable_bvh_update:
+            hit_mode = hit_mode | OptixMogRenderOpts.ENABLE_BVH_UPDATE
+        return hit_mode
 
+    @staticmethod
+    def primitive_type_from_str(primitive_type:str):
+        if primitive_type == 'icosahedron':
+            return OptixMogPrimitive.TRACING_ICOSAHEDRON
+        elif primitive_type == 'octahedron':
+            return OptixMogPrimitive.TRACING_OCTAHEDRON
+        elif primitive_type == 'tetrahedron':
+            return OptixMogPrimitive.TRACING_TETRAHEDRON
+        elif primitive_type == 'diamond':
+            return OptixMogPrimitive.TRACING_DIAMOND
+        elif primitive_type == 'sphere':
+            return OptixMogPrimitive.TRACING_SPHERE
+        elif primitive_type == 'custom':
+            return OptixMogPrimitive.TRACING_CUSTOM
+        elif primitive_type == 'trihexa':
+            return OptixMogPrimitive.TRACING_TRIHEXA
+        elif primitive_type == 'trisurfel':
+            return OptixMogPrimitive.TRACING_TRISURFEL
+        else :
+            raise ValueError("Unknown OptixMogTracingParams.primitive_type")
+        
+    @staticmethod
+    def pipeline_from_str(pipeline:str):
+        if pipeline == 'baseline':
+            return OptixMogPipeline.TRACING_BASELINE
+        elif pipeline == 'default':
+            return OptixMogPipeline.TRACING_DEFAULT
+        elif pipeline == 'mlat':
+            return OptixMogPipeline.TRACING_MLAT
+        elif pipeline == 'mboit':
+            return OptixMogPipeline.TRACING_MBOIT
+        else :
+            raise ValueError("Unknown OptixMogTracingParams.pipeline")
 class OptiXContext:
+    
     def __init__(self,params:OptixMogTracingParams=OptixMogTracingParams()):
         print("Cuda path", torch.utils.cpp_extension.CUDA_HOME)
         torch.zeros(1, device='cuda') # Create a dummy tensor to force cuda context init
+        self.params = params
         self.cpp_wrapper = _plugin.OptiXStateWrapper(
             os.path.dirname(__file__), 
             torch.utils.cpp_extension.CUDA_HOME,
@@ -240,7 +363,7 @@ class OptiXContext:
             params.topk_hits,
             params.patch_size,
             params.sph_degree,
-            params.gaussian_sigma_threshold,
+            params.min_kernel_response,
             params.min_transmittance,
             params.max_hits_returned
         )
@@ -251,3 +374,11 @@ class OptiXContext:
     def set_pipeline(self, pipeline:int):
         self.cpp_wrapper.set_pipeline(pipeline)
 
+    def is_sampling(self):
+        return self.params.hit_mode & OptixMogRenderOpts.SAMPLING
+    
+    def allow_bvh_update(self):
+        return self.params.hit_mode & OptixMogRenderOpts.ENABLE_BVH_UPDATE
+    
+    def get_primitive_aabb(self):
+        return self.cpp_wrapper.get_aabb()

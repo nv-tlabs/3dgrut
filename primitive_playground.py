@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 import torch 
-import argparse
+import hydra
 import logging
 import torch.utils.data
 
@@ -12,23 +12,23 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 
 from tqdm import tqdm
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
     
 import polyscope as ps
 import polyscope.imgui as psim
 
 from datasets.utils import PointCloud
 from datasets.utils import move_to_gpu, pinhole_camera_rays
-from loss_utils import ssim
-from utils import to_np
+from models.model import MixtureOfGaussians
+from utils.misc import to_np
 from libs import optixtracer
 sys.path.append(os.path.dirname(os.path.dirname(os.getcwd()))) 
 
 
 DEFAULT_DEVICE = torch.device('cuda')
 
-def main(conf):
-
+@hydra.main(config_path="configs", version_base=None)
+def main(conf: DictConfig) -> None:
     # Determinism, ish
     rand_gen = torch.Generator(device=DEFAULT_DEVICE)
     rand_gen.manual_seed(42)
@@ -37,31 +37,25 @@ def main(conf):
     torch.zeros(1, device=DEFAULT_DEVICE) # Create a dummy tensor to force cuda context init
     optix_ctx = optixtracer.OptiXContext(
         params = optixtracer.OptixMogTracingParams(
-            hit_mode = conf.render.hit_mode,
-            primitive_type=optixtracer.OptixMogPrimitive.TRACING_ICOSAHEDRON,
+            hit_mode = optixtracer.OptixMogTracingParams.pack_hit_mode(
+                conf.render.kernel_function, 
+                conf.render.train_hit_sampling, 
+                conf.render.adaptive_kernel_clamping,
+                conf.render.enable_normals,
+                conf.render.enable_hitcounts,
+                (conf.render.max_consecutive_bvh_update>1) and not conf.render.adaptive_kernel_clamping 
+            ),
             max_hit_per_slab = conf.render.max_hit_per_slab,
             max_num_slabs = conf.render.max_num_slabs,
             topk_hits = conf.render.topk_hits,
             patch_size = conf.render.patch_size,
-            sph_degree = 1, #conf.render.sph_degree,
-            gaussian_sigma_threshold = 3, #conf.render.gaussian_sigma_threshold,
+            sph_degree = 3,
+            min_kernel_response = conf.render.min_kernel_response,
             min_transmittance = conf.render.min_transmittance,
+            max_hits_returned= conf.render.max_hits_returned,
+            primitive_type = optixtracer.OptixMogTracingParams.primitive_type_from_str(conf.render.primitive_type)
         )
     )
-
-    ## Manage a collection of Gaussians
-    n_gaussians = 0
-    max_sh_degree = 1
-    sh_dim = (max_sh_degree+1) ** 2
-    gauss_pos = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
-    gauss_rot = torch.zeros((0,4), dtype=torch.float32, device=DEFAULT_DEVICE)
-    gauss_den = torch.zeros((0,1), dtype=torch.float32, device=DEFAULT_DEVICE)
-    gauss_scale = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
-    gauss_features = torch.zeros((0,sh_dim,3), dtype=torch.float32, device=DEFAULT_DEVICE)
-
-    gauss_vertices = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
-    gauss_face_idx = torch.zeros((0,3), dtype=torch.int32, device=DEFAULT_DEVICE)
-
 
     def add_gaussian():
         nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features, gauss_vertices, gauss_face_idx
@@ -80,11 +74,41 @@ def main(conf):
         gauss_features = torch.cat((gauss_features, new_feat), dim=0)
         gauss_rot = torch.nn.functional.normalize(gauss_rot, dim=-1)
 
-        optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, True)
+        optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, gauss_den, True)
         gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
         torch.cuda.current_stream().synchronize()
-        
-    add_gaussian() # single initial Gaussian
+    
+    if conf.import_ingp.enabled and conf.import_ingp.path:
+        model = MixtureOfGaussians(conf)
+        model.set_optix_context()
+        ingp_path = conf.import_ingp.path if conf.import_ingp.path else f'{conf.out_dir}/{conf.experiment_name}/export_last.inpg'
+        logging.info(f"Loading a pretrained ingp model from {ingp_path}!")
+        model.init_from_ingp(ingp_path,init_model=False)
+        n_gaussians = model.get_positions().shape[0]
+        max_sh_degree = model.max_n_features
+        sh_dim = (max_sh_degree+1) ** 2
+        gauss_pos = model.get_positions()
+        gauss_rot = model.get_rotation()
+        gauss_den = model.get_density()
+        gauss_scale = model.get_scale()
+        gauss_features = model.get_features()
+        optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, gauss_den, True)
+        gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
+        torch.cuda.current_stream().synchronize()
+        edit_gaussian = False
+    else:
+        n_gaussians = 0
+        max_sh_degree = 1
+        sh_dim = (max_sh_degree+1) ** 2
+        gauss_pos = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
+        gauss_rot = torch.zeros((0,4), dtype=torch.float32, device=DEFAULT_DEVICE)
+        gauss_den = torch.zeros((0,1), dtype=torch.float32, device=DEFAULT_DEVICE)
+        gauss_scale = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
+        gauss_features = torch.zeros((0,sh_dim,3), dtype=torch.float32, device=DEFAULT_DEVICE)
+        gauss_vertices = torch.zeros((0,3), dtype=torch.float32, device=DEFAULT_DEVICE)
+        gauss_face_idx = torch.zeros((0,3), dtype=torch.int32, device=DEFAULT_DEVICE)        
+        add_gaussian() # single initial Gaussian
+        edit_gaussian = True
 
     def remove_gaussian():
         nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features, gauss_vertices, gauss_face_idx
@@ -100,87 +124,90 @@ def main(conf):
         gauss_scale = gauss_scale[:-1,:]
         gauss_features = gauss_features[:-1,...]
         
-        optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, True)
+        optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, gauss_den, True)
         gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
         torch.cuda.current_stream().synchronize()
         
     def build_gaussian_ui():
-        nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features, gauss_vertices, gauss_face_idx
+        nonlocal n_gaussians, gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features, gauss_vertices, gauss_face_idx, edit_gaussian
         any_changed = False
 
-        psim.Separator()
+        if edit_gaussian:
+            psim.Separator()
 
-        psim.TextUnformatted(f"Gaussians: {n_gaussians}")
-        psim.SameLine()
-        if psim.Button("Add"):
-            add_gaussian()
-        psim.SameLine()
-        if psim.Button("Remove"):
-            remove_gaussian()
-        
-        gauss_pos = gauss_pos.cpu()
-        gauss_rot = gauss_rot.cpu()
-        gauss_den = gauss_den.cpu()
-        gauss_scale = gauss_scale.cpu()
-        gauss_features = gauss_features.cpu()
+            psim.TextUnformatted(f"Gaussians: {n_gaussians}")
+            psim.SameLine()
+            if psim.Button("Add"):
+                add_gaussian()
+            psim.SameLine()
+            if psim.Button("Remove"):
+                remove_gaussian()
 
-        for iG in range(n_gaussians):
+        if edit_gaussian:
 
-            gstr = f"##{iG:04d}"
-            psim.PushId(gstr)
-
-            psim.SetNextItemOpen(iG == 0, psim.ImGuiCond_FirstUseEver)
-            if(psim.TreeNode(f"Gaussian {iG}")):
-
-                changed, new_vals = psim.SliderFloat3("position", to_np(gauss_pos[iG,:]), -1., 1.)
-                if changed:
-                    any_changed = True
-                    for i in range(3): 
-                        gauss_pos[iG,i] = new_vals[i]
-                
-                changed, new_vals = psim.SliderFloat3("rotation", to_np(gauss_rot[iG,1:]), -1., 1.)
-                if changed:
-                    any_changed = True
-                    for i in range(3): 
-                        gauss_rot[iG,i+1] = new_vals[i]
-                
-                changed, new_vals = psim.SliderFloat("density", to_np(gauss_den[iG,:]), 0., 1.)
-                if changed:
-                    any_changed = True
-                    gauss_den[iG,0] = new_vals
-
-                changed, new_vals = psim.SliderFloat3("scale", to_np(gauss_scale[iG,:]), 0., 1.)
-                if changed:
-                    any_changed = True
-                    for i in range(3): 
-                        gauss_scale[iG,i] = new_vals[i]
+            gauss_pos = gauss_pos.cpu()
+            gauss_rot = gauss_rot.cpu()
+            gauss_den = gauss_den.cpu()
+            gauss_scale = gauss_scale.cpu()
+            gauss_features = gauss_features.cpu()
             
-                if(psim.TreeNode("Spherical Harmonics Coefs")):
+            for iG in range(n_gaussians):
 
-                    for j in range(sh_dim):
-                        changed, new_vals = psim.SliderFloat3(f"coeff {j:02}", to_np(gauss_features[iG,j,:]), -1., 1.)
-                        if changed:
-                            any_changed = True
-                            for i in range(3): 
-                                gauss_features[iG,j,i] = new_vals[i]
+                gstr = f"##{iG:04d}"
+                psim.PushId(gstr)
+
+                psim.SetNextItemOpen(iG == 0, psim.ImGuiCond_FirstUseEver)
+                if(psim.TreeNode(f"Gaussian {iG}")):
+
+                    changed, new_vals = psim.SliderFloat3("position", to_np(gauss_pos[iG,:]), -1., 1.)
+                    if changed:
+                        any_changed = True
+                        for i in range(3): 
+                            gauss_pos[iG,i] = new_vals[i]
+                    
+                    changed, new_vals = psim.SliderFloat3("rotation", to_np(gauss_rot[iG,1:]), -1., 1.)
+                    if changed:
+                        any_changed = True
+                        for i in range(3): 
+                            gauss_rot[iG,i+1] = new_vals[i]
+                    
+                    changed, new_vals = psim.SliderFloat("density", to_np(gauss_den[iG,:]), 0., 1.)
+                    if changed:
+                        any_changed = True
+                        gauss_den[iG,0] = new_vals
+
+                    changed, new_vals = psim.SliderFloat3("scale", to_np(gauss_scale[iG,:]), 0., 1.)
+                    if changed:
+                        any_changed = True
+                        for i in range(3): 
+                            gauss_scale[iG,i] = new_vals[i]
                 
+                    if(psim.TreeNode("Spherical Harmonics Coefs")):
+
+                        for j in range(sh_dim):
+                            changed, new_vals = psim.SliderFloat3(f"coeff {j:02}", to_np(gauss_features[iG,j,:]), -1., 1.)
+                            if changed:
+                                any_changed = True
+                                for i in range(3): 
+                                    gauss_features[iG,j,i] = new_vals[i]
+                    
+                        psim.TreePop()
+                    
                     psim.TreePop()
-                
-                psim.TreePop()
 
-            psim.PopID()
+                psim.PopID()
 
-        gauss_pos = gauss_pos.cuda()
-        gauss_rot = gauss_rot.cuda()
-        gauss_den = gauss_den.cuda()
-        gauss_scale = gauss_scale.cuda()
-        gauss_features = gauss_features.cuda()
+            gauss_pos = gauss_pos.cuda()
+            gauss_rot = gauss_rot.cuda()
+            gauss_den = gauss_den.cuda()
+            gauss_scale = gauss_scale.cuda()
+            gauss_features = gauss_features.cuda()
 
-        if any_changed:
-            gauss_rot = torch.nn.functional.normalize(gauss_rot, dim=-1)
-            optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, True)
-            gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
-            torch.cuda.current_stream().synchronize()
+            if any_changed:
+                gauss_rot = torch.nn.functional.normalize(gauss_rot, dim=-1)
+                optixtracer.build_mog_bvh(optix_ctx, gauss_pos, gauss_rot, gauss_scale, gauss_den, True)
+                gauss_vertices, gauss_face_idx = optixtracer.get_mog_primitives(optix_ctx)
+                torch.cuda.current_stream().synchronize()
 
     ## Set up Polyscope
 
@@ -201,7 +228,7 @@ def main(conf):
     ps.set_length_scale(s)
 
     # viz stateful parameters & options
-    viz_render_styles = ['color', 'density', 'distance']
+    viz_render_styles = ['color', 'density', 'distance', 'normals']
     viz_render_style_ind = 0
     viz_curr_render_size = None
     viz_curr_render_style_ind = None
@@ -211,10 +238,10 @@ def main(conf):
     
     ps.init()
 
-    ps_point_cloud = ps.register_point_cloud("centers", to_np(gauss_pos), radius=1e-2)
+    ps_point_cloud = ps.register_point_cloud("centers", to_np(gauss_pos), radius=1e-2, enabled=False)
     ps_point_cloud_buffer = ps_point_cloud.get_buffer("points")
 
-    ps.register_surface_mesh("octahedrons", to_np(gauss_vertices), to_np(gauss_face_idx), smooth_shade=True)
+    ps.register_surface_mesh("octahedrons", to_np(gauss_vertices), to_np(gauss_face_idx), smooth_shade=True, transparency=0.5, edge_width=1.0)
 
         
     def update_cloud_viz():
@@ -255,11 +282,11 @@ def main(conf):
 
         with torch.no_grad():
 
-            pred_orad, pred_opacity, pred_dist, _, _ = optixtracer.trace_mog(optix_ctx, 
+            pred_orad, pred_opacity, pred_dist, pred_nrm, _, _, _, _ = optixtracer.trace_mog(optix_ctx, 0, optixtracer.OptixMogRenderOpts.DEFAULT,
                     rays_ori, rays_dir,
-                    gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features_flat, None)
+                    gauss_pos, gauss_rot, gauss_scale, gauss_den, gauss_features_flat, None, None)
 
-        return pred_orad, pred_opacity, pred_dist
+        return pred_orad, pred_opacity, pred_dist, pred_nrm
 
     def update_render_view_viz():
         nonlocal viz_curr_render_size, viz_curr_render_style_ind, viz_render_color_buffer, viz_render_scalar_buffer
@@ -273,7 +300,7 @@ def main(conf):
             viz_curr_render_style_ind = viz_render_style_ind
             viz_curr_render_size = (window_w, window_h)
 
-            if style == "color":
+            if style == "color" or style == "normals":
 
                 dummy_image = np.zeros((window_h, window_w, 4), dtype=np.float32)
 
@@ -329,7 +356,7 @@ def main(conf):
 
 
         # do the actual rendering
-        sple_orad, sple_odns, sple_odist = render_from_current_ps_view()
+        sple_orad, sple_odns, sple_odist, sple_onrm = render_from_current_ps_view()
 
         # print(f"rad max: {sple_orad.max()} dens max: {sple_odns.max()}")
 
@@ -345,6 +372,13 @@ def main(conf):
         
         elif style == "distance":
             viz_render_scalar_buffer.update_data_from_device(sple_odist.detach())
+
+        elif style == "normals":
+            sple_onrm = 0.5 * (sple_onrm + 1.0)
+            # append 1s for alpha
+            sple_onrm = torch.cat((sple_onrm + 0.001, sple_odns), dim=-1)
+            # sple_orad = torch.cat((sple_orad, sple_orad[...,0:1]), dim=-1)
+            viz_render_color_buffer.update_data_from_device(sple_onrm.detach())
 
 
     def ps_ui_callback():
@@ -363,15 +397,5 @@ def main(conf):
 
     ps.show()
 
-
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, required=True, help="Path to the config file")
-    args, remainder = parser.parse_known_args()
-
-    base_conf = OmegaConf.load(args.config)
-    cli_conf = OmegaConf.from_cli(remainder)
-    conf = OmegaConf.merge(base_conf, cli_conf)
-
-    main(conf)
+    main()
