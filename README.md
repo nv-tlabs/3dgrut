@@ -11,6 +11,13 @@ This branch is intended solely for an internal release and is not maintained in 
 
 ## Set up the environment
 
+We use git lfs to track certain files so as a first step after cloning the repo make sure to run:
+
+```
+git lfs install
+git lfs pull
+```
+
 To set up the environment using conda, you can run the following
 
 ```
