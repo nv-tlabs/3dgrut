@@ -23,13 +23,17 @@ To set up the environment using conda, you can run the following
 ```
 conda create -n 3dgrt python=3.11
 conda activate 3dgrt 
+
+conda install -y cuda-toolkit -c nvidia/label/cuda-11.8.0
+conda install -y pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 "numpy<2.0" -c pytorch -c nvidia/label/cuda-11.8.0
+
 pip install -r requirements.txt
 
 # Install ray utils cpp module for AV data / packed_ops
 pip install ./libs/ray_utils
-pip install ./libs/packed_ops
 
 # Install packed_ops
+pip install ./libs/packed_ops
 
 # Install simple-knn submodule
 pip install ./thirdparty/simple-knn
