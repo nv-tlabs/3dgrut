@@ -6,7 +6,6 @@
 This branch is intended solely for an internal release and is not maintained in its current form. The code herein may not adhere to our usual standards of cleanliness or best practices.
 
 ## Dependencies
-- __CUDA 11.8 or newer__.
 - __Python 3.11 or newer__.
 
 ## Set up the environment
@@ -21,15 +20,19 @@ git lfs pull
 To set up the environment using conda, you can run the following
 
 ```
-conda create -n 3dgrt python=3.11
-conda activate 3dgrt 
+conda create -n 3dgrt python=3.11 -y
+conda activate 3dgrt
+
+conda install -y cuda-toolkit -c nvidia/label/cuda-11.8.0
+conda install -y pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 "numpy<2.0" ninja -c pytorch -c nvidia/label/cuda-11.8.0
+
 pip install -r requirements.txt
 
-# Install ray utils cpp module for AV data / packed_ops
+# Install ray utils cpp module for AV data
 pip install ./libs/ray_utils
-pip install ./libs/packed_ops
 
 # Install packed_ops
+pip install ./libs/packed_ops
 
 # Install simple-knn submodule
 pip install ./thirdparty/simple-knn
@@ -40,7 +43,6 @@ pip install ./thirdparty/simple-knn
 To use the interactive UI, install the following optional dependencies:
 
 ```
-pip install polyscope
 pip install cuda-python cupy
 ```
 
