@@ -8,6 +8,7 @@ omegaconf
 hydra-core
 scikit-learn
 wandb
+polyscope
 # NeRF Dataset requirements
 kornia
 opencv-python
