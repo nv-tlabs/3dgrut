@@ -83,6 +83,22 @@ chmod +x install_env.sh
 conda activate 3dgrut
 ```
 
+### Running with Docker
+
+Build the docker image:
+```bash
+git clone --recursive https://github.com/nv-tlabs/3dgrut.git
+cd 3dgrut
+docker build . -t 3dgrut
+````
+
+Run it:
+```bash
+sudo xhost +local:root
+sudo docker run -v --rm -it --gpus=all --net=host --ipc=host -v $PWD:/workspace --runtime=nvidia -e DISPLAY=$DISPLAY --privileged 3dgrut
+conda activate 3dgrut
+```
+
 ## 💻 2. Train 3DGRT or 3DGUT scenes
 
 We provide different configurations for training using 3DGRT and 3DGUT models on common benchmark datasets. 
