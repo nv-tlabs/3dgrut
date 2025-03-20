@@ -1,5 +1,6 @@
 **__pycache__
 .vscode
+.polyscope.ini
 
 external/
 runs/
@@ -21,10 +22,13 @@ thirdparty/simple-knn/build
 thirdparty/simple-knn/dist
 thirdparty/simple-knn/simple_knn.egg-info
 
-libs/ray_utils/external/.cache/
-libs/ray_utils/external/
-libs/ray_utils/build/
-libs/ray_utils/ray_utils.egg-info/
-libs/ray_utils/dist/
+threedgrt_tracer/.ninja_log
+threedgrt_tracer/include/3dgrt/kernels/slang/*.cuh*
+*.egg-info
+.idea
 
 grid_search
+
+libs/
+results/
+thirdparty/ncore/

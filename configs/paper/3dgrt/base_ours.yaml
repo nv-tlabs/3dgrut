@@ -1,0 +1,9 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - base_ours_reference
+
+optimizer.params.density.lr: 0.09
+render:
+  particle_kernel_degree: 4

@@ -1,0 +1,14 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - base_ours_reference
+  - /dataset: colmap
+  - /initialization: colmap
+  - _self_
+
+# overwrite of default parameters
+val_frequency: 1095 
+
+render.particle_kernel_density_clamping: true
+render.min_transmittance: 0.03

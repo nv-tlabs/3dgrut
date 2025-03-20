@@ -1,21 +1,29 @@
 plyfile
 torchmetrics
 tensorboard
-tqdm
 fire
-toml
 omegaconf
 hydra-core
 scikit-learn
 wandb
-polyscope
+polyscope>=2.3.0
+addict
+rich
+slangtorch
 # NeRF Dataset requirements
 kornia
 opencv-python
 einops
 imageio
 msgpack
-
-## Wheels (tracked via LFS)
-thirdparty/ncore/ncore-0.6.6-py3-none-any.whl # NCore
-thirdparty/tinycudann/tinycudann-1.7+cu118-cp311-cp311-linux_x86_64.whl # tinycudann
+dataclasses_json
+# JIT compilation
+setuptools <72.1.0
+# Fused-ssim
+git+https://github.com/rahul-goel/fused-ssim@1272e21a282342e89537159e4bad508b19b34157
+# Playground
+tqdm
+libigl
+pygltflib
+--find-links https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.2_cu118.html
+kaolin==0.17.0

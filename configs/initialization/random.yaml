@@ -1,2 +1,4 @@
 method: random
 num_gaussians: 100_000
+xyz_max: 1.5
+xyz_min: -1.5

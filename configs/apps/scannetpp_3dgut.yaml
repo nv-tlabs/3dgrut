@@ -1,0 +1,11 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base_3dgut.yaml
+  - /dataset: scannetpp
+  - /initialization: colmap
+  - _self_
+
+# overwrite of default parameters
+val_frequency: 999999 # never validate

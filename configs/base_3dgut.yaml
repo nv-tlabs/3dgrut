@@ -1,0 +1,12 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base.yaml
+  - _self_
+
+render:
+  method: 3dgut
+  particle_kernel_degree: 2
+  particle_kernel_min_response: 0.0
+  min_transmittance: 0.0001

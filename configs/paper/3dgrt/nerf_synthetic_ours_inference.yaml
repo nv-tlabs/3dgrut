@@ -1,0 +1,18 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - base_ours
+  - /dataset: nerf
+  - /initialization: random
+  - _self_
+
+# overwrite of default parameters
+val_frequency: 5000
+
+model:
+  background:
+    color: black
+
+render.particle_kernel_density_clamping: true
+render.min_transmittance: 0.03
