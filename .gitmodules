@@ -1,0 +1,7 @@
+[submodule "thirdparty/tiny-cuda-nn"]
+	path = thirdparty/tiny-cuda-nn
+	url = https://github.com/NVlabs/tiny-cuda-nn.git
+[submodule "threedgrt_tracer/dependencies/optix-dev"]
+	path = threedgrt_tracer/dependencies/optix-dev
+	url = https://github.com/NVIDIA/optix-dev.git
+	branch = v7.5.0

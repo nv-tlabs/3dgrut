@@ -1,0 +1,15 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base.yaml
+  - /dataset: nerf
+  - /initialization: random
+  - _self_
+
+# overwrite of default parameters
+val_frequency: 999999 # never validate
+
+model:
+  background:
+    color: black

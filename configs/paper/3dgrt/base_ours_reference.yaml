@@ -1,0 +1,19 @@
+defaults:
+  - /base
+
+render:
+  method: 3dgrt 
+  pipeline_type: reference
+  backward_pipeline_type: ${render.pipeline_type}Bwd
+  particle_kernel_degree: 2
+  particle_kernel_density_clamping: false
+  particle_kernel_min_response: 0.0113
+  particle_kernel_min_alpha: ${div:1.0,255.0}
+  particle_kernel_max_alpha: 0.99
+  particle_radiance_sph_degree: 3
+  primitive_type: icosahedron
+  min_transmittance: 0.001
+  max_consecutive_bvh_update: 15
+  enable_normals: false
+  enable_hitcounts: false
+  enable_kernel_timings: false

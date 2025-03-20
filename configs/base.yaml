@@ -1,35 +1,38 @@
+defaults:
+  - _self_
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
 path: ???
 experiment_name: ""
-group_name: ""
 resume: ""
-out_dir: "runs"
+out_dir: "./runs"
 n_iterations: 30000
 with_gui: false
 gui_update_from_device: true
 val_frequency: 5000
-num_workers: 8
+num_workers: 24
 use_wandb: false
 wandb_project: "3dgrt"
-record_training: true
-test_last: false
-validate_first: False
+test_last: true
+validate_first: false
 log_frequency: 1
-use_deterministic_algorithms: False
-use_fixed_random_seed: False
-fixed_random_seed: 0
+compute_extra_metrics: true
+
+enable_frame_timings: false
 
 enable_writer: true
 writer:
-  hit_stat_frequency : 100
+  hit_stat_frequency: 999999
   max_num_hits: 128
+  log_image_views: ${int_list:[ 0, 13, 27, 43, 78 ]}
 
 export_ingp:
-  enabled: True 
+  enabled: true
   force_half: false
-  morton3d_grid_resolution: 512
   path: ""
 import_ingp:
-  enabled: false 
+  enabled: false
   path: ""
   init_global_step: 0
 
@@ -40,9 +43,9 @@ import_ply:
   enabled: False 
   path: ""
   init_global_step: 0
-
-
+  
 model:
+  strategy: GSStrategy # The strategy used for densification and pruning
   density_activation: sigmoid
   scale_activation: exp
   default_density: 0.1
@@ -54,14 +57,11 @@ model:
   optimize_scale: true
   bvh_update_frequency: 1
   progressive_training:
-    feature_type: 'sh'        # one of [sh, mlp], currently only sh supported
-    init_n_features: 0        # sh: initial sh deg | mlp: num of dims initially unmasked
-    max_n_features: 3         # sh: maximum sh deg | mlp: total num of dims finally unmasked
-    increase_frequency: 1000  # unmask more feature dimensions every N global steps
-    increase_step: 1          # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
-    
-  lambda_background: 0.
-  lambda_opacity: 0.
+    feature_type: "sh" # one of [sh, mlp], currently only sh supported
+    init_n_features: 0 # sh: initial sh deg | mlp: num of dims initially unmasked
+    max_n_features: 3 # sh: maximum sh deg | mlp: total num of dims finally unmasked
+    increase_frequency: 1000 # unmask more feature dimensions every N global steps
+    increase_step: 1 # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
 
   density_decay:
     gamma: 0.99
@@ -70,23 +70,19 @@ model:
     frequency: 50
 
   background:
-    name: background-color # one of [skip-background, background-color, sky-mlp]
+    name: background-color # one of [skip-background, background-color]
     color: black # one of [black, white, random] needs to be defined if name == background-color
 
-  log_rolling_buffers: false # needs to be set as true if densify.method == error
   print_stats: true
 
   densify:
-    method: gradient-buffer # one of [adam, gradient-buffer, error]
     params: positions # one of [positions, positions_gradient_norm, features_albedo]
-    distance_based_scaling: true # whether or not to scale the buffered gradients of Gaussians according to their distances to the camera
     frequency: 300 # densification_interval in 3DGS with default value 100
     start_iteration: 500 # densify_from_iter in 3DGS default value 500
     end_iteration: 15000 # densify_until_iter in 3DGS default value 15_000
     clone_grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
     split_grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
     relative_size_threshold: 0.01 # Gaussians larger than relative_size_threshold * scene_extent will be split not cloned. Called percent_dense in 3DGS with default value 0.01
-    error_ratio_threshold: 0.5
     split:
       n_gaussians: 2 # Hardcoded to 2 in 3DGS
     share_density: false # share the original gaussian density among the new ones
@@ -97,25 +93,12 @@ model:
     start_iteration: 500
     end_iteration: 15000
     density_threshold: 0.01 # All Gaussians with the density lower than this will be pruned away
-    
+
   prune_weight:
     frequency: 100
     start_iteration: -1
     end_iteration: -1
-    weight_threshold : 0.5
-
-  prune_visibility:
-    frequency: 3000
-    start_iteration: 0
-    end_iteration: -1
-    weight_threshold : 0.0
-
-  prune_count:
-    frequency: 100
-    start_iteration: 0
-    end_iteration: 15000
-    max_allowed_gaussians: 3e6
-    prune_ratio: 0.1  # the ratio of the Gaussians to prune after going above the max allowed Gaussian count
+    weight_threshold: 0.5
 
   prune_scale:
     frequency: 100
@@ -129,40 +112,20 @@ model:
     start_iteration: 0
     end_iteration: ${model.densify.end_iteration}
     # This parameter is hardcoded in the 3DGS to 0.01
-    new_max_density: 0.01 # The density of the all the Gaussians will be set to min(density, this) 
-
-  prune_needles: 
-    frequency: 100 # Opacity reset interval in 3DGS default value 3000
-    start_iteration: -1
-    end_iteration: -1
-    min_scale_threshold: 1e-6
-
-  prune_sky_mlp: 
-    frequency: 100 # Opacity reset interval in 3DGS default value 3000
-    start_iteration: -1
-    end_iteration: -1
-    step_pixel: 10
-    step_frame: 10
-
-  # Sample rays according to the error buffer - mode null skips the process
-  error_based_sampling:
-    use: false # Use buffer to do the error sampling
-    sampling_frequency: 30
-    buffer_update_frequency: 2499 # to not do it in sync with other changes
-    downsampling_factor: 1
+    new_max_density: 0.01 # The density of the all the Gaussians will be set to min(density, this)
 
 checkpoint:
-  frequency: 10000
+  iterations: ${int_list:[ 7000, 30000 ]}
 
 optimizer:
   type: adam # We only support adam for now
   lr: 0.01
   eps: 1.e-15
   params:
-    positions:  
-      lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.00016
+    positions:
+      lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.0000016
     density:
-      lr: 0.09 # 3DGS value: 0.05
+      lr: 0.05 # 3DGS value: 0.05
     features_albedo:
       lr: 0.0025 # 3DGS value: 0.0025
     features_specular:
@@ -171,8 +134,6 @@ optimizer:
       lr: 0.001 # 3DGS value: 0.001
     scale:
       lr: 0.005 # 3DGS value: 0.005
-    background:
-      lr: 0.01
 
 scheduler:
   positions:
@@ -187,43 +148,49 @@ scheduler:
     type: skip
 
 render:
-  method : optix
-  kernel_function : exp-p4-dist # one of [gaussian, exp-p4-dist]
-  train_hit_sampling : false # use hits sampling during training
-  primitive_type : icosahedron
-  max_hit_per_slab: 32
-  max_num_slabs: 64
-  topk_hits: False
-  patch_size: 1
-  min_kernel_response: 0.0113
-  adaptive_kernel_clamping: false
-  min_transmittance: 0.001 # gsplat default to 0.001
-  max_hits_returned: 128
-  max_consecutive_bvh_update: 15 
-  enable_normals: True
-  enable_hitcounts: True
-  
-  optix: {} # optix-specific render settings
-  
-  torch:    # torch-specific render settings
-    chunk_size: 250000  # decrease to trade speed for peak memory usage
-    clamp_rad: True     # Note: clamping options are currently not exposed by the optix renderer yet (current settings reflect the same parameters)
-    clamp_rad_min_bound: 0.001
-    gaussian_evaluation: geometric # either 'geometric' or 'analytic'
+  method: 3dgrt # 3dgrt or 3dgut
+  pipeline_type: reference
+  backward_pipeline_type: ${render.pipeline_type}Bwd
+  particle_kernel_degree: 4
+  particle_kernel_density_clamping: true
+  particle_kernel_min_response: 0.0113
+  particle_kernel_min_alpha: ${div:1.0,255.0}
+  particle_kernel_max_alpha: 0.99
+  particle_radiance_sph_degree: 3
+  primitive_type: instances
+  min_transmittance: 0.001
+  max_consecutive_bvh_update: 15
+  enable_normals: false
+  enable_hitcounts: true
+  enable_kernel_timings: false
+
+  splat: # 3DGUT-specific settings
+    # culling
+    rect_bounding: true
+    tight_opacity_bounding: true
+    tile_based_culling: true
+    # projection
+    n_rolling_shutter_iterations: 5
+    ut_alpha: 1.0
+    ut_beta: 2.0
+    ut_kappa: 0.0
+    ut_in_image_margin_factor: 0.1
+    ut_require_all_sigma_points_valid: false
+    # rendering
+    k_buffer_size: 0  # 0 means unsorted
+    global_z_order: true
 
 loss:
+  use_l1: true
+  lambda_l1: 0.8
   use_l2: false
   lambda_l2: 1.0
   use_ssim: true
   lambda_ssim: 0.2
-  lambda_reg_density: 0.0
-  lambda_reg_density_power: 1.0
-  reg_density_weight_masked: false # apply the density regularization only on hit gaussians
 
-  # Scale-regularization, preventing needle-like geometries
-  use_scalereg: False
-  lambda_scalereg: 1e-3
-
-  # Lidar-based distance supervision
-  use_lidardistance: False
-  lambda_lidardistance: 0.01
+hydra:
+  output_subdir: null
+  job:
+    chdir: false
+  run:
+    dir: .

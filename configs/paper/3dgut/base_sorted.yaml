@@ -1,0 +1,10 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base_3dgut.yaml
+  - _self_
+
+render:
+  splat: # 3DGUT-specific settings
+    k_buffer_size: 16  # 0 means unsorted

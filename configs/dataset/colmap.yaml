@@ -1,11 +1,2 @@
-  type: colmap
-  downsample_factor: 1
-  
-  train:
-    batch_size: 8192
-    sample_full_image: True
-
-    ray_jittering:
-        start_iteration: 0
-        apply_every_n_iterations: true
-        type: none
+type: colmap
+downsample_factor: 1
