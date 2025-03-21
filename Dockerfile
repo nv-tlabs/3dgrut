@@ -23,9 +23,10 @@ RUN conda init
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
 ENV FORCE_CUDA=1
-ENV TORCH_CUDA_ARCH_LIST="6.0;6.1;6.2;7.0;7.5;8.0;8.6"
+ENV TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6"
 
 WORKDIR /workspace
 COPY . .
 
 RUN ./install_env.sh 3dgrut WITH_GCC11
+RUN echo "conda activate 3dgrut" >> ~/.bashrc
