@@ -1,0 +1,55 @@
+name: Continuous Integration
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}:${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.04
+    steps:
+      - name: Install prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            curl \
+            gcc-11 g++-11 \
+            git \
+            libglib2.0-0
+
+      - name: Install conda
+        run: |
+          curl -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+          bash ~/miniconda.sh -b -p /opt/conda
+          rm ~/miniconda.sh
+          /opt/conda/bin/conda install -y python=${PYTHON_VERSION}
+          /opt/conda/bin/conda clean -ya
+          echo "/opt/conda/bin" >> $GITHUB_PATH
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install 3dgrut including all dependencies
+        run: |
+          git config --global --add safe.directory "$(pwd)"
+          ./install_env.sh 3dgrut WITH_GCC11
+        env:
+          TORCH_CUDA_ARCH_LIST: "7.5" # random arch for testing install
+
+      - name: Smoketest - python train.py --help # better (smoke) testing requires a GPU
+        run: |
+          conda run -n 3dgrut python train.py --help
