@@ -333,6 +333,10 @@ struct GUTKBufferRenderer : Params {
             // Process fetched particles
             for (int j = 0; j < min(GUTParameters::Tiling::BlockSize, tileNumParticlesToProcess); j++) {
 
+                if (__all_sync(GUTParameters::Tiling::WarpMask, !ray.isAlive())) {
+                    break;
+                }
+
                 const PrefetchedRawParticleData particleData = prefetchedRawParticlesData[j];
                 if (particleData.idx == GUTParameters::InvalidParticleIdx) {
                     i = tileNumBlocksToProcess;
