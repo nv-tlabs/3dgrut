@@ -781,8 +781,8 @@ class Playground:
         if self.use_dof_in_trajectory:
             old_use_dof = self.use_depth_of_field
             self.use_depth_of_field = True
-            eye, target = self.trajectory[0]
-            ps.look_at(eye, target)
+            eye, target, up = self.trajectory[0]
+            ps.look_at_dir(eye, target, up, fly_to=True)
             dofs = np.linspace(self.min_dof, self.max_dof, self.frames_between_cameras)
             for dof in tqdm(dofs):
                 self.depth_of_field.focus_z = dof
@@ -802,8 +802,9 @@ class Playground:
             self.use_depth_of_field = old_use_dof
 
         elif self.continuous_trajectory:
-            eyes = np.stack([eye for eye, target in self.trajectory])
-            targets = np.stack([target for eye, target in self.trajectory])
+            eyes = np.stack([eye for eye, target, up in self.trajectory])
+            targets = np.stack([target for eye, target, up in self.trajectory])
+            ups = np.stack([up for eye, target, up in self.trajectory])
 
             from scipy.interpolate import splprep, splev
             tck, u = splprep(eyes.T, u=None, s=0.0, per=1)
@@ -814,8 +815,12 @@ class Playground:
             u_new = np.linspace(u.min(), u.max(), self.frames_between_cameras * len(self.trajectory))
             targets_new = np.stack(splev(u_new, tck, der=0)).T
 
-            for eye, target in tqdm(zip(eyes_new, targets_new)):
-                ps.look_at(eye, target)
+            tck, u = splprep(ups.T, u=None, s=0.0, per=1)
+            u_new = np.linspace(u.min(), u.max(), self.frames_between_cameras * len(self.trajectory))
+            ups_new = np.stack(splev(u_new, tck, der=0)).T
+
+            for eye, target, up in tqdm(zip(eyes_new, targets_new, ups_new)):
+                ps.look_at_dir(eye, target, up)
 
                 rgb, _ = self.render_from_current_ps_view(window_w=self.window_w, window_h=self.window_h)
                 while self.has_progressive_effects_to_render():
@@ -830,15 +835,16 @@ class Playground:
                 out_video.write(data)
         else:
             for traj_idx in tqdm(range(1, len(self.trajectory))):
-                eye_1, target_1 = self.trajectory[traj_idx - 1]
-                eye_2, target_2 = self.trajectory[traj_idx]
+                eye_1, target_1, up_1 = self.trajectory[traj_idx - 1]
+                eye_2, target_2, up_2 = self.trajectory[traj_idx]
 
                 Xs = smoothstep(np.linspace(0.0, 1.0, self.frames_between_cameras), N=3)
 
                 for x in Xs:
                     eye = eye_1 * (1 - x) + eye_2 * x
                     target = target_1 * (1 - x) + target_2 * x
-                    ps.look_at(eye, target)
+                    up = up_1 * (1 - x) + up_2 * x
+                    ps.look_at_dir(eye, target, up)
 
                     rgb, _ = self.render_from_current_ps_view(window_w=self.window_w, window_h=self.window_h)
                     while self.has_progressive_effects_to_render():
@@ -1167,13 +1173,10 @@ class Playground:
             if (psim.Button("Add Camera")):
                 view_params = ps.get_view_camera_parameters()
                 cam_center = view_params.get_position()
-                corner_rays = view_params.generate_camera_ray_corners()
-                c_ul, c_ur, c_ll, c_lr = [torch.tensor(a, device=self.DEFAULT_DEVICE, dtype=torch.float32) for a in
-                                          corner_rays]
-                c_mid = (c_ul + c_ur + c_ll + c_lr) / 4
                 self.trajectory.append((
                     cam_center,
-                    cam_center + c_mid.cpu().numpy()
+                    cam_center + view_params.get_look_dir(),
+                    view_params.get_up_dir()
                 ))
             psim.SameLine()
             if (psim.Button("Reset")):
@@ -1203,8 +1206,8 @@ class Playground:
 
             if len(self.trajectory) > 0 and psim.TreeNode("Cameras"):
                 remained_cameras = []
-                for i, (eye, target) in enumerate(self.trajectory):
-                    is_not_removed = self._draw_single_trajectory_camera(i, eye, target)
+                for i, (eye, target, up) in enumerate(self.trajectory):
+                    is_not_removed = self._draw_single_trajectory_camera(i, eye, target, up)
                     remained_cameras.append(is_not_removed)
                 self.trajectory = [self.trajectory[i] for i in range(len(self.trajectory)) if remained_cameras[i]]
 
@@ -1734,10 +1737,10 @@ class Playground:
         #     "Scatter (Imperfectness)", self.mirrors.mirror_scatter, v_min=0.0, v_max=1e-2, power=1)
         # self.is_force_canvas_dirty = self.is_force_canvas_dirty or settings_changed
 
-    def _draw_single_trajectory_camera(self, i, eye, target):
+    def _draw_single_trajectory_camera(self, i, eye, target, up):
         psim.PushItemWidth(200)
         if (psim.Button(f"view {i + 1}")):
-            ps.look_at(eye, target)
+            ps.look_at_dir(eye, target, up, fly_to=True)
 
         psim.SameLine()
         if (psim.Button(f"remove {i + 1}")):
@@ -1749,13 +1752,10 @@ class Playground:
         if psim.Button(f"replace {i + 1}"):
             view_params = ps.get_view_camera_parameters()
             cam_center = view_params.get_position()
-            corner_rays = view_params.generate_camera_ray_corners()
-            c_ul, c_ur, c_ll, c_lr = [torch.tensor(a, device=self.DEFAULT_DEVICE, dtype=torch.float32) for a in
-                                      corner_rays]
-            c_mid = (c_ul + c_ur + c_ll + c_lr) / 4
             self.trajectory[i] = (
                 cam_center,
-                cam_center + c_mid.cpu().numpy()
+                cam_center + view_params.get_look_dir(),
+                view_params.get_up_dir()
             )
 
         psim.PopItemWidth()
