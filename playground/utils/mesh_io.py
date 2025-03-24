@@ -134,10 +134,8 @@ def load_mesh(path: str, device):
     Supported formats: .obj, .gltf, .glb
     """
     format = Path(path).suffix
-    if format in ('.gltf', '.glb'):
-        mesh = kaolin.io.gltf.import_mesh(path)
-    elif format in ('.obj',):
-        mesh = kaolin.io.obj.import_mesh(path, with_normals=True)
+    if format in ('.obj', '.gltf', '.glb'):
+        mesh = kaolin.io.import_mesh(path, triangulate=True)
     else:
         raise ValueError(f'Cannot load mesh asset with unsupported format: {format}. '
                          f'Supported types: .obj, .glb, .gltf')
