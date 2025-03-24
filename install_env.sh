@@ -35,7 +35,7 @@ if [ ! "$WITH_GCC11" = true ]; then
     # Make sure gcc is at most 11 for nvcc compatibility
     gcc_version=$(gcc -dumpversion)
     if [ "$gcc_version" -gt 11 ]; then
-        echo "Default gcc version $gcc_version is higher than 11. See note about installing gcc-11 and rerun with ./install.sh 3dgrut WITH_GCC11"
+        echo "Default gcc version $gcc_version is higher than 11. See note about installing gcc-11 (you may need 'sudo apt-get install gcc-11 g++-11') and rerun with ./install.sh 3dgrut WITH_GCC11"
         exit 1
     fi
 
@@ -69,14 +69,7 @@ conda activate $CONDA_ENV
 if [ "$WITH_GCC11" = true ]; then
     echo "Setting CC=$GCC_11_PATH and CXX=$GXX_11_PATH in conda environment"
 
-    mkdir -p $CONDA_PREFIX/etc/conda/activate.d
-    mkdir -p $CONDA_PREFIX/etc/conda/deactivate.d
-    echo "export CC=$GCC_11_PATH" > $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
-    echo "export CXX=$GXX_11_PATH" >> $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
-    echo 'unset CC' > $CONDA_PREFIX/etc/conda/deactivate.d/env_vars.sh
-    echo 'unset CXX' >> $CONDA_PREFIX/etc/conda/deactivate.d/env_vars.sh
-    chmod +x $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
-    chmod +x $CONDA_PREFIX/etc/conda/deactivate.d/env_vars.sh
+    conda env config vars set CC=$GCC_11_PATH CXX=$GXX_11_PATH
 
     conda deactivate
     conda activate $CONDA_ENV
