@@ -4,7 +4,7 @@
 
 ---
 <p align="center">
-  <img width="100%" src="assets/nvidia-hq.gif">
+  <img width="100%" src="assets/nvidia-hq-playground.gif">
 </p>
 
 This repository provides the official implementations of **3D Gaussian Ray Tracing (3DGRT)** and **3D Gaussian Unscented Transform (3DGUT)**. Unlike traditional methods that rely on splatting, 3DGRT performs ray tracing of volumetric Gaussian particles instead. This enables support for distorted cameras with complex, time-dependent effects such as rolling shutters, while also efficiently simulating secondary rays required for rendering phenomena like reflection, refraction, and shadows. However, 3DGRT requires dedicated ray-tracing hardware and remains slower than 3DGS.
