@@ -419,7 +419,7 @@ class Primitives:
 class Playground:
     DEFAULT_DEVICE = torch.device('cuda')
     AVAILABLE_CAMERAS = ['Pinhole', 'Fisheye']
-    AVAILABLE_CONTROLLERS = ['Turntable', 'First Person']
+    AVAILABLE_CONTROLLERS = ['Turntable', 'First Person', 'Free']
     ANTIALIASING_MODES = ['4x MSAA', '8x MSAA', '16x MSAA', 'Quasi-Random (Sobol)']
     trajectory = []
     continuous_trajectory = False
