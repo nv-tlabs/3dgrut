@@ -69,7 +69,7 @@ struct PlaygroundPipelineParameters: PipelineParameters
     PackedTensorAccessor32<float, 2> vTangents;    // vertex tangents
 
     // Materials
-    PackedTensorAccessor32<float, 2> matUV;              // uv coordinates per vertex
+    PackedTensorAccessor32<float, 3> matUV;              // [F,3,2]: triangular face X vertex X 2d uv
     PackedTensorAccessor32<int32_t, 2> matID;            // id of material to use, per vertex
     PBRMaterial* materials;                              // dynamic array of materials
     unsigned int numMaterials;

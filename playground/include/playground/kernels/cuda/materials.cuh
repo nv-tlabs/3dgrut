@@ -38,16 +38,12 @@ static __device__ __inline__ const PBRMaterial& get_material(const unsigned int 
 static __device__ __inline__ float3 get_diffuse_color(const float3 ray_d, float3 normal)
 {
     const unsigned int triId = optixGetPrimitiveIndex();
-    const unsigned int v0_idx = params.triangles[triId][0];
-    const unsigned int v1_idx = params.triangles[triId][1];
-    const unsigned int v2_idx = params.triangles[triId][2];
-
     const unsigned int materialId = params.matID[triId][0];
     const auto material = get_material(materialId);
 
-    const float2 uv0 = make_float2(params.matUV[v0_idx][0], params.matUV[v0_idx][1]);
-    const float2 uv1 = make_float2(params.matUV[v1_idx][0], params.matUV[v1_idx][1]);
-    const float2 uv2 = make_float2(params.matUV[v2_idx][0], params.matUV[v2_idx][1]);
+    const float2 uv0 = make_float2(params.matUV[triId][0][0], params.matUV[triId][0][1]);
+    const float2 uv1 = make_float2(params.matUV[triId][1][0], params.matUV[triId][1][1]);
+    const float2 uv2 = make_float2(params.matUV[triId][2][0], params.matUV[triId][2][1]);
     const float2 barycentric = optixGetTriangleBarycentrics();
     float2 texCoords = (1 - barycentric.x - barycentric.y) * uv0 + barycentric.x * uv1 + barycentric.y * uv2;
 
