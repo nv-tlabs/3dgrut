@@ -9,7 +9,7 @@ wandb
 polyscope>=2.3.0
 addict
 rich
-slangtorch
+slangtorch==1.3.4
 # NeRF Dataset requirements
 kornia
 opencv-python
