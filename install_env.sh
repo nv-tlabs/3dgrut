@@ -35,7 +35,7 @@ if [ ! "$WITH_GCC11" = true ]; then
     # Make sure gcc is at most 11 for nvcc compatibility
     gcc_version=$(gcc -dumpversion)
     if [ "$gcc_version" -gt 11 ]; then
-        echo "Default gcc version $gcc_version is higher than 11. See note about installing gcc-11 (you may need 'sudo apt-get install gcc-11 g++-11') and rerun with ./install.sh 3dgrut WITH_GCC11"
+        echo "Default gcc version $gcc_version is higher than 11. See note about installing gcc-11 (you may need 'sudo apt-get install gcc-11 g++-11') and rerun with ./install_env.sh 3dgrut WITH_GCC11"
         exit 1
     fi
 
