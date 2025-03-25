@@ -173,7 +173,6 @@ class OptixPrimitive:
 
 class Primitives:
     SUPPORTED_MESH_EXTENSIONS = ['.obj', '.glb']
-    MAX_MATERIALS = 32
     DEFAULT_REFRACTIVE_INDEX = 1.33
     SCALE_OF_NEW_MESH_TO_SMALL_SCENE = 0.5    # Mesh will be this percent of the scene on longest axis
 
@@ -324,25 +323,21 @@ class Primitives:
         for mat_idx, mat in enumerate(materials):
             material_name = f'{model_name}${mat["material_name"]}'
             if material_name not in self.registered_materials:
-                if len(self.registered_materials) >= self.MAX_MATERIALS:
-                    print('WARNING: Maximum number of supported materials reached. Mesh will not render correctly.')
-                    break
-                else:
-                    self.registered_materials[material_name] = PBRMaterial(
-                        material_id=len(self.registered_materials),
-                        diffuse_map=mat['diffuse_map'],
-                        emissive_map=mat['emissive_map'],
-                        metallic_roughness_map=mat['metallic_roughness_map'],
-                        normal_map=mat['normal_map'],
-                        diffuse_factor=mat['diffuse_factor'],
-                        emissive_factor=mat['emissive_factor'],
-                        metallic_factor=mat['metallic_factor'],
-                        roughness_factor=mat['roughness_factor'],
-                        alpha_mode=mat['alpha_mode'],
-                        alpha_cutoff=mat['alpha_cutoff'],
-                        transmission_factor=mat['transmission_factor'],
-                        ior=mat['ior']
-                    )
+                self.registered_materials[material_name] = PBRMaterial(
+                    material_id=len(self.registered_materials),
+                    diffuse_map=mat['diffuse_map'],
+                    emissive_map=mat['emissive_map'],
+                    metallic_roughness_map=mat['metallic_roughness_map'],
+                    normal_map=mat['normal_map'],
+                    diffuse_factor=mat['diffuse_factor'],
+                    emissive_factor=mat['emissive_factor'],
+                    metallic_factor=mat['metallic_factor'],
+                    roughness_factor=mat['roughness_factor'],
+                    alpha_mode=mat['alpha_mode'],
+                    alpha_cutoff=mat['alpha_cutoff'],
+                    transmission_factor=mat['transmission_factor'],
+                    ior=mat['ior']
+                )
             mat_idx_to_mat_id[mat_idx] = self.registered_materials[material_name].material_id
         return mat_idx_to_mat_id
 
@@ -372,6 +367,8 @@ class Primitives:
                     material_index_mapping = material_index_mapping.to(device=device)
                     material_id = mesh.material_assignments.to(device=device, dtype=torch.long)
                     mesh.material_assignments = material_index_mapping[material_id].int()
+        # Always use default material, if no materials were specified
+        mesh.material_assignments = torch.max(mesh.material_assignments, torch.zeros_like(mesh.material_assignments))
         return mesh
 
     def recompute_stacked_buffers(self):

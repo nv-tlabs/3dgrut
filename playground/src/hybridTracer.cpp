@@ -209,65 +209,65 @@ void HybridOptixTracer::setMaterialTextures(
     CudaTexture2DFloat4Object& normalTexObject,
     const CPBRMaterial& cmat)
 {
-    PBRMaterial* paramsMat = nullptr;
-    switch (textureId)
-    {
-        case 0: paramsMat = &params.mat0; break;
-        case 1: paramsMat = &params.mat1; break;
-        case 2: paramsMat = &params.mat2; break;
-        case 3: paramsMat = &params.mat3; break;
-        case 4: paramsMat = &params.mat4; break;
-        case 5: paramsMat = &params.mat5; break;
-        case 6: paramsMat = &params.mat6; break;
-        case 7: paramsMat = &params.mat7; break;
-        case 8: paramsMat = &params.mat8; break;
-        case 9: paramsMat = &params.mat9; break;
-        case 10: paramsMat = &params.mat10; break;
-        case 11: paramsMat = &params.mat11; break;
-        case 12: paramsMat = &params.mat12; break;
-        case 13: paramsMat = &params.mat13; break;
-        case 14: paramsMat = &params.mat14; break;
-        case 15: paramsMat = &params.mat15; break;
-        case 16: paramsMat = &params.mat16; break;
-        case 17: paramsMat = &params.mat17; break;
-        case 18: paramsMat = &params.mat18; break;
-        case 19: paramsMat = &params.mat19; break;
-        case 20: paramsMat = &params.mat20; break;
-        case 21: paramsMat = &params.mat21; break;
-        case 22: paramsMat = &params.mat22; break;
-        case 23: paramsMat = &params.mat23; break;
-        case 24: paramsMat = &params.mat24; break;
-        case 25: paramsMat = &params.mat25; break;
-        case 26: paramsMat = &params.mat26; break;
-        case 27: paramsMat = &params.mat27; break;
-        case 28: paramsMat = &params.mat28; break;
-        case 29: paramsMat = &params.mat29; break;
-        case 30: paramsMat = &params.mat30; break;
-        case 31: paramsMat = &params.mat31; break;
-        default: break;
-    }
-
-    if (paramsMat)
-    {
-        paramsMat->useDiffuseTexture = diffuseTexObject.isTexInitialized();
-        paramsMat->diffuseTexture = diffuseTexObject.tex();
-        paramsMat->useEmissiveTexture = emissiveTexObject.isTexInitialized();
-        paramsMat->emissiveTexture = emissiveTexObject.tex();
-        paramsMat->useMetallicRoughnessTexture = metallicRoughnessTexObject.isTexInitialized();
-        paramsMat->metallicRoughnessTexture = metallicRoughnessTexObject.tex();
-        paramsMat->useNormalTexture = normalTexObject.isTexInitialized();
-        paramsMat->normalTexture = normalTexObject.tex();
-        float* diffuseFactor = cmat.diffuseFactor.data_ptr<float>();
-        paramsMat->diffuseFactor = make_float4(diffuseFactor[0], diffuseFactor[1], diffuseFactor[2], diffuseFactor[3]);
-        float* emissiveFactor = cmat.emissiveFactor.data_ptr<float>();
-        paramsMat->emissiveFactor = make_float3(emissiveFactor[0], emissiveFactor[1], emissiveFactor[2]);
-        paramsMat->metallicFactor = cmat.metallicFactor;
-        paramsMat->roughnessFactor = cmat.roughnessFactor;
-        paramsMat->alphaMode = cmat.alphaMode;
-        paramsMat->alphaCutoff = cmat.alphaCutoff;
-        paramsMat->transmissionFactor = cmat.transmissionFactor;
-        paramsMat->ior = cmat.ior;
-    }
+//    PBRMaterial* paramsMat = nullptr;
+//    switch (textureId)
+//    {
+//        case 0: paramsMat = &params.mat0; break;
+//        case 1: paramsMat = &params.mat1; break;
+//        case 2: paramsMat = &params.mat2; break;
+//        case 3: paramsMat = &params.mat3; break;
+//        case 4: paramsMat = &params.mat4; break;
+//        case 5: paramsMat = &params.mat5; break;
+//        case 6: paramsMat = &params.mat6; break;
+//        case 7: paramsMat = &params.mat7; break;
+//        case 8: paramsMat = &params.mat8; break;
+//        case 9: paramsMat = &params.mat9; break;
+//        case 10: paramsMat = &params.mat10; break;
+//        case 11: paramsMat = &params.mat11; break;
+//        case 12: paramsMat = &params.mat12; break;
+//        case 13: paramsMat = &params.mat13; break;
+//        case 14: paramsMat = &params.mat14; break;
+//        case 15: paramsMat = &params.mat15; break;
+//        case 16: paramsMat = &params.mat16; break;
+//        case 17: paramsMat = &params.mat17; break;
+//        case 18: paramsMat = &params.mat18; break;
+//        case 19: paramsMat = &params.mat19; break;
+//        case 20: paramsMat = &params.mat20; break;
+//        case 21: paramsMat = &params.mat21; break;
+//        case 22: paramsMat = &params.mat22; break;
+//        case 23: paramsMat = &params.mat23; break;
+//        case 24: paramsMat = &params.mat24; break;
+//        case 25: paramsMat = &params.mat25; break;
+//        case 26: paramsMat = &params.mat26; break;
+//        case 27: paramsMat = &params.mat27; break;
+//        case 28: paramsMat = &params.mat28; break;
+//        case 29: paramsMat = &params.mat29; break;
+//        case 30: paramsMat = &params.mat30; break;
+//        case 31: paramsMat = &params.mat31; break;
+//        default: break;
+//    }
+//
+//    if (paramsMat)
+//    {
+//        paramsMat->useDiffuseTexture = diffuseTexObject.isTexInitialized();
+//        paramsMat->diffuseTexture = diffuseTexObject.tex();
+//        paramsMat->useEmissiveTexture = emissiveTexObject.isTexInitialized();
+//        paramsMat->emissiveTexture = emissiveTexObject.tex();
+//        paramsMat->useMetallicRoughnessTexture = metallicRoughnessTexObject.isTexInitialized();
+//        paramsMat->metallicRoughnessTexture = metallicRoughnessTexObject.tex();
+//        paramsMat->useNormalTexture = normalTexObject.isTexInitialized();
+//        paramsMat->normalTexture = normalTexObject.tex();
+//        float* diffuseFactor = cmat.diffuseFactor.data_ptr<float>();
+//        paramsMat->diffuseFactor = make_float4(diffuseFactor[0], diffuseFactor[1], diffuseFactor[2], diffuseFactor[3]);
+//        float* emissiveFactor = cmat.emissiveFactor.data_ptr<float>();
+//        paramsMat->emissiveFactor = make_float3(emissiveFactor[0], emissiveFactor[1], emissiveFactor[2]);
+//        paramsMat->metallicFactor = cmat.metallicFactor;
+//        paramsMat->roughnessFactor = cmat.roughnessFactor;
+//        paramsMat->alphaMode = cmat.alphaMode;
+//        paramsMat->alphaCutoff = cmat.alphaCutoff;
+//        paramsMat->transmissionFactor = cmat.transmissionFactor;
+//        paramsMat->ior = cmat.ior;
+//    }
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> HybridOptixTracer::traceHybrid(
@@ -369,6 +369,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     std::vector<CudaTexture2DFloat4Object> cuEmissiveTexture(numMaterials);
     std::vector<CudaTexture2DFloat2Object> cuMetallicRoughnessTexture(numMaterials);
     std::vector<CudaTexture2DFloat4Object> cuNormalTexture(numMaterials);
+    std::vector<PBRMaterial> launchMaterials(numMaterials);
 
     for (int i = 0; i < numMaterials; ++i) {
         torch::Tensor texDiffuse = materials[i].diffuseMap;
@@ -408,13 +409,46 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
             cuNormalTexture[i].reset(texNormal.data_ptr<float>(), normalTexHeight, normalTexWidth);
         }
 
-        setMaterialTextures(paramsHost, i,
-                            cuDiffuseTexture[i], cuEmissiveTexture[i],
-                            cuMetallicRoughnessTexture[i], cuNormalTexture[i],
-                            materials[i]);
+//        setMaterialTextures(paramsHost, i,
+//                            cuDiffuseTexture[i], cuEmissiveTexture[i],
+//                            cuMetallicRoughnessTexture[i], cuNormalTexture[i],
+//                            materials[i]);
+        auto& diffuseTexObject = cuDiffuseTexture[i];
+        auto& emissiveTexObject = cuEmissiveTexture[i];
+        auto& metallicRoughnessTexObject = cuMetallicRoughnessTexture[i];
+        auto& normalTexObject = cuNormalTexture[i];
+        auto& cmat = materials[i];
+
+        launchMaterials[i].useDiffuseTexture = diffuseTexObject.isTexInitialized();
+        launchMaterials[i].diffuseTexture = diffuseTexObject.tex();
+        launchMaterials[i].useEmissiveTexture = emissiveTexObject.isTexInitialized();
+        launchMaterials[i].emissiveTexture = emissiveTexObject.tex();
+        launchMaterials[i].useMetallicRoughnessTexture = metallicRoughnessTexObject.isTexInitialized();
+        launchMaterials[i].metallicRoughnessTexture = metallicRoughnessTexObject.tex();
+        launchMaterials[i].useNormalTexture = normalTexObject.isTexInitialized();
+        launchMaterials[i].normalTexture = normalTexObject.tex();
+        float* diffuseFactor = cmat.diffuseFactor.data_ptr<float>();
+        launchMaterials[i].diffuseFactor = make_float4(diffuseFactor[0], diffuseFactor[1], diffuseFactor[2], diffuseFactor[3]);
+        float* emissiveFactor = cmat.emissiveFactor.data_ptr<float>();
+        launchMaterials[i].emissiveFactor = make_float3(emissiveFactor[0], emissiveFactor[1], emissiveFactor[2]);
+        launchMaterials[i].metallicFactor = cmat.metallicFactor;
+        launchMaterials[i].roughnessFactor = cmat.roughnessFactor;
+        launchMaterials[i].alphaMode = cmat.alphaMode;
+        launchMaterials[i].alphaCutoff = cmat.alphaCutoff;
+        launchMaterials[i].transmissionFactor = cmat.transmissionFactor;
+        launchMaterials[i].ior = cmat.ior;
     }
 
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
+
+    CUDA_CHECK(cudaMallocAsync(
+       reinterpret_cast<void**>(&paramsHost.materials), sizeof(PBRMaterial) * numMaterials, cudaStream)
+    );
+    CUDA_CHECK(cudaMemcpyAsync(
+        reinterpret_cast<void*>(paramsHost.materials), launchMaterials.data(), sizeof(PBRMaterial) * numMaterials, cudaMemcpyHostToDevice, cudaStream)
+    );
+
+    paramsHost.numMaterials = numMaterials;
 
     reallocatePlaygroundParamsDevice(sizeof(paramsHost), cudaStream);
     CUDA_CHECK(cudaMemcpyAsync(
@@ -428,6 +462,10 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
                         rayRad.size(1),
                         rayRad.size(0)
     ));
+
+//    if (paramsHost.materials != nullptr) {
+//        CUDA_CHECK(cudaFreeAsync(reinterpret_cast<void**>(&paramsHost.materials), cudaStream));
+//    }
 
     CUDA_CHECK_LAST();
 

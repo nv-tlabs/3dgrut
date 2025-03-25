@@ -30,74 +30,9 @@ extern "C"
     #endif
 }
 
-static __device__ __inline__ PBRMaterial get_material(const unsigned int matId)
+static __device__ __inline__ const PBRMaterial& get_material(const unsigned int matId)
 {
-    if (matId == 0)
-        return params.mat0;
-    else if (matId == 1)
-        return params.mat1;
-    else if (matId == 2)
-        return params.mat2;
-    else if (matId == 3)
-        return params.mat3;
-    else if (matId == 4)
-        return params.mat4;
-    else if (matId == 5)
-        return params.mat5;
-    else if (matId == 6)
-        return params.mat6;
-    else if (matId == 7)
-        return params.mat7;
-    else if (matId == 8)
-        return params.mat8;
-    else if (matId == 9)
-        return params.mat9;
-    else if (matId == 10)
-        return params.mat10;
-    else if (matId == 11)
-        return params.mat11;
-    else if (matId == 12)
-        return params.mat12;
-    else if (matId == 13)
-        return params.mat13;
-    else if (matId == 14)
-        return params.mat14;
-    else if (matId == 15)
-        return params.mat15;
-    else if (matId == 16)
-        return params.mat16;
-    else if (matId == 17)
-        return params.mat17;
-    else if (matId == 18)
-        return params.mat18;
-    else if (matId == 19)
-        return params.mat19;
-    else if (matId == 20)
-        return params.mat20;
-    else if (matId == 21)
-        return params.mat21;
-    else if (matId == 22)
-        return params.mat22;
-    else if (matId == 23)
-        return params.mat23;
-    else if (matId == 24)
-        return params.mat24;
-    else if (matId == 25)
-        return params.mat25;
-    else if (matId == 26)
-        return params.mat26;
-    else if (matId == 27)
-        return params.mat27;
-    else if (matId == 28)
-        return params.mat28;
-    else if (matId == 29)
-        return params.mat29;
-    else if (matId == 30)
-        return params.mat30;
-    else if (matId == 31)
-        return params.mat31;
-    else
-        return params.mat0; // default material, this should never happen unless some error occured
+    return params.materials[matId];
 }
 
 static __device__ __inline__ float3 get_diffuse_color(const float3 ray_d, float3 normal)
