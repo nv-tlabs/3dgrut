@@ -36,69 +36,70 @@ template <typename TBuffer, bool TDifferentiable>
 struct ShRadiativeGaussianParticlesOptionalBuffer<TBuffer, TDifferentiable, true> : ShRadiativeGaussianParticlesBuffer<TBuffer, TDifferentiable> {
 };
 
-template <typename TDensityParameters,
-          typename TFeaturesParameters,
-          typename Params,
+template <typename Params,
           typename ExtParams,
           bool TDifferentiable = true>
 struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams {
 
-    using DensityParameters    = TDensityParameters;
-    using DensityRawParameters = gaussianParticle_RawParameters_0;
+    using DensityParameters    = threedgut::ParticeFetchedDensity;
+    using DensityRawParameters = threedgut::ParticleDensity;
 
     __forceinline__ __device__ void initializeDensity(threedgut::MemoryHandles parameters) {
+        static_assert(sizeof(DensityRawParameters) == sizeof(gaussianParticle_RawParameters_0), "Sizes must match for binary compatibility");
+        static_assert(sizeof(DensityParameters) == sizeof(gaussianParticle_Parameters_0), "Sizes must match for binary compatibility");
         m_densityRawParameters.ptr =
-            parameters.bufferPtr<gaussianParticle_RawParameters_0>(Params::DensityRawParametersBufferIndex);
+            parameters.bufferPtr<DensityRawParameters>(Params::DensityRawParametersBufferIndex);
     }
 
     __forceinline__ __device__ void initializeDensityGradient(threedgut::MemoryHandles parametersGradient) {
         if constexpr (TDifferentiable) {
             m_densityRawParameters.gradPtr =
-                parametersGradient.bufferPtr<gaussianParticle_RawParameters_0>(Params::DensityRawParametersGradientBufferIndex);
+                parametersGradient.bufferPtr<DensityRawParameters>(Params::DensityRawParametersGradientBufferIndex);
         }
     };
 
     __forceinline__ __device__ DensityRawParameters fetchDensityRawParameters(uint32_t particleIdx) const {
-
-        return *reinterpret_cast<const DensityRawParameters*>(&m_densityRawParameters.ptr[particleIdx]);
+        return m_densityRawParameters.ptr[particleIdx];
     }
 
-    __forceinline__ __device__ TDensityParameters fetchDensityParameters(uint32_t particleIdx) const {
-
-        return particleDensityParameters(particleIdx, {m_densityRawParameters.ptr, nullptr});
+    __forceinline__ __device__ DensityParameters fetchDensityParameters(uint32_t particleIdx) const {
+        const auto parameters = particleDensityParameters(
+            particleIdx,
+            {reinterpret_cast<gaussianParticle_RawParameters_0*>(m_densityRawParameters.ptr), nullptr});
+        return *reinterpret_cast<const DensityParameters*>(&parameters);
     }
 
     __forceinline__ __device__ tcnn::vec3 fetchPosition(uint32_t particleIdx) const {
-        return *(reinterpret_cast<const tcnn::vec3*>(&m_densityRawParameters.ptr[particleIdx].position_0));
+        return *(reinterpret_cast<const tcnn::vec3*>(&m_densityRawParameters.ptr[particleIdx].position));
     }
 
-    __forceinline__ __device__ const tcnn::vec3& position(const TDensityParameters& parameters) const {
-        return *(reinterpret_cast<const tcnn::vec3*>(&parameters.position_1));
+    __forceinline__ __device__ const tcnn::vec3& position(const DensityParameters& parameters) const {
+        return *(reinterpret_cast<const tcnn::vec3*>(&parameters.position));
     }
 
-    __forceinline__ __device__ const tcnn::vec3& scale(const TDensityParameters& parameters) const {
-        return *(reinterpret_cast<const tcnn::vec3*>(&parameters.scale_1));
+    __forceinline__ __device__ const tcnn::vec3& scale(const DensityParameters& parameters) const {
+        return *(reinterpret_cast<const tcnn::vec3*>(&parameters.scale));
     }
 
-    __forceinline__ __device__ const tcnn::mat3& rotation(const TDensityParameters& parameters) const {
+    __forceinline__ __device__ const tcnn::mat3& rotation(const DensityParameters& parameters) const {
         // slang uses row-major order (tcnn uses column-major order), so we return the rotation (not transposed)
-        return *(reinterpret_cast<const tcnn::mat3*>(&parameters.rotationT_0));
+        return *(reinterpret_cast<const tcnn::mat3*>(&parameters.rotationT));
     }
 
-    __forceinline__ __device__ const float& opacity(const TDensityParameters& parameters) const {
-        return parameters.density_1;
+    __forceinline__ __device__ const float& opacity(const DensityParameters& parameters) const {
+        return parameters.density;
     }
 
     __forceinline__ __device__ bool densityHit(const tcnn::vec3& rayOrigin,
                                                const tcnn::vec3& rayDirection,
-                                               const TDensityParameters& parameters,
+                                               const DensityParameters& parameters,
                                                float& alpha,
                                                float& depth,
                                                tcnn::vec3* normal = nullptr) const {
 
         return particleDensityHit(*reinterpret_cast<const float3*>(&rayOrigin),
                                   *reinterpret_cast<const float3*>(&rayDirection),
-                                  parameters,
+                                  reinterpret_cast<const gaussianParticle_Parameters_0&>(parameters),
                                   &alpha,
                                   &depth,
                                   normal != nullptr,
@@ -129,7 +130,7 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
         return particleDensityProcessHitFwdFromBuffer(*reinterpret_cast<const float3*>(&rayOrigin),
                                                       *reinterpret_cast<const float3*>(&rayDirection),
                                                       particleIdx,
-                                                      {{m_densityRawParameters.ptr, nullptr, true}},
+                                                      {{reinterpret_cast<gaussianParticle_RawParameters_0*>(m_densityRawParameters.ptr), nullptr, true}},
                                                       &transmittance,
                                                       &integratedDepth,
                                                       integratedNormal != nullptr,
@@ -156,7 +157,9 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
             particleDensityProcessHitBwdToBuffer(*reinterpret_cast<const float3*>(&rayOrigin),
                                                  *reinterpret_cast<const float3*>(&rayDirection),
                                                  particleIdx,
-                                                 {{m_densityRawParameters.ptr, m_densityRawParameters.gradPtr, exclusiveGradient}},
+                                                 {{reinterpret_cast<gaussianParticle_RawParameters_0*>(m_densityRawParameters.ptr),
+                                                   reinterpret_cast<gaussianParticle_RawParameters_0*>(m_densityRawParameters.gradPtr),
+                                                   exclusiveGradient}},
                                                  alpha,
                                                  alphaGrad,
                                                  &transmittance,
@@ -181,7 +184,7 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
         return particleDensityHitCustom(*reinterpret_cast<const float3*>(&rayOrigin),
                                         *reinterpret_cast<const float3*>(&rayDirection),
                                         particleIdx,
-                                        {{m_densityRawParameters.ptr, nullptr, true}},
+                                        {{reinterpret_cast<gaussianParticle_RawParameters_0*>(m_densityRawParameters.ptr), nullptr, true}},
                                         minHitDistance,
                                         maxHitDistance,
                                         maxParticleSquaredDistance,
@@ -208,7 +211,8 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
                                                                    const tcnn::vec3& sourcePosition)
 
     {
-        const auto incidentDirection = particleDensityIncidentDirection(parameters, *reinterpret_cast<const float3*>(&sourcePosition));
+        const auto incidentDirection = particleDensityIncidentDirection(reinterpret_cast<const gaussianParticle_Parameters_0&>(parameters),
+                                                                        *reinterpret_cast<const float3*>(&sourcePosition));
         return *reinterpret_cast<const tcnn::vec3*>(&incidentDirection);
     }
 
@@ -218,11 +222,13 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
 
     {
         particleDensityIncidentDirectionBwdToBuffer(particlesIdx,
-                                                    {{m_densityRawParameters.ptr, m_densityRawParameters.gradPtr, exclusiveGradient}},
+                                                    {{reinterpret_cast<gaussianParticle_RawParameters_0*>(m_densityRawParameters.ptr),
+                                                      reinterpret_cast<gaussianParticle_RawParameters_0*>(m_densityRawParameters.gradPtr),
+                                                      exclusiveGradient}},
                                                     *reinterpret_cast<const float3*>(&sourcePosition));
     }
 
-    using FeaturesParameters = TFeaturesParameters;
+    using FeaturesParameters = shRadiativeParticle_Parameters_0;
     using TFeaturesVec       = typename tcnn::vec<ExtParams::FeaturesDim>;
 
     inline __device__ void initializeFeatures(threedgut::MemoryHandles parameters) {
@@ -348,7 +354,7 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
             reinterpret_cast<const float3&>(rayOrigin),
             reinterpret_cast<const float3&>(rayDirection),
             particleIdx,
-            reinterpret_cast<const threedgut::ParticleDensity*>(m_densityRawParameters.ptr),
+            m_densityRawParameters.ptr,
             PerRayRadiance ? reinterpret_cast<const float*>(m_featureRawParameters.ptr) : reinterpret_cast<const float*>(particleFeaturesPtr),
             ExtParams::MinParticleKernelDensity,
             ExtParams::AlphaThreshold,
@@ -433,50 +439,50 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
             // Perform warp reduction
 #pragma unroll
             for (int mask = 1; mask < warpSize; mask *= 2) {
-                densityRawParameters.position_0.x += __shfl_xor_sync(0xffffffff, densityRawParameters.position_0.x, mask);
-                densityRawParameters.position_0.y += __shfl_xor_sync(0xffffffff, densityRawParameters.position_0.y, mask);
-                densityRawParameters.position_0.z += __shfl_xor_sync(0xffffffff, densityRawParameters.position_0.z, mask);
-                densityRawParameters.density_0 += __shfl_xor_sync(0xffffffff, densityRawParameters.density_0, mask);
-                densityRawParameters.quaternion_0.x += __shfl_xor_sync(0xffffffff, densityRawParameters.quaternion_0.x, mask);
-                densityRawParameters.quaternion_0.y += __shfl_xor_sync(0xffffffff, densityRawParameters.quaternion_0.y, mask);
-                densityRawParameters.quaternion_0.z += __shfl_xor_sync(0xffffffff, densityRawParameters.quaternion_0.z, mask);
-                densityRawParameters.quaternion_0.w += __shfl_xor_sync(0xffffffff, densityRawParameters.quaternion_0.w, mask);
-                densityRawParameters.scale_0.x += __shfl_xor_sync(0xffffffff, densityRawParameters.scale_0.x, mask);
-                densityRawParameters.scale_0.y += __shfl_xor_sync(0xffffffff, densityRawParameters.scale_0.y, mask);
-                densityRawParameters.scale_0.z += __shfl_xor_sync(0xffffffff, densityRawParameters.scale_0.z, mask);
+                densityRawParameters.position.x += __shfl_xor_sync(0xffffffff, densityRawParameters.position.x, mask);
+                densityRawParameters.position.y += __shfl_xor_sync(0xffffffff, densityRawParameters.position.y, mask);
+                densityRawParameters.position.z += __shfl_xor_sync(0xffffffff, densityRawParameters.position.z, mask);
+                densityRawParameters.density += __shfl_xor_sync(0xffffffff, densityRawParameters.density, mask);
+                densityRawParameters.quaternion.x += __shfl_xor_sync(0xffffffff, densityRawParameters.quaternion.x, mask);
+                densityRawParameters.quaternion.y += __shfl_xor_sync(0xffffffff, densityRawParameters.quaternion.y, mask);
+                densityRawParameters.quaternion.z += __shfl_xor_sync(0xffffffff, densityRawParameters.quaternion.z, mask);
+                densityRawParameters.quaternion.w += __shfl_xor_sync(0xffffffff, densityRawParameters.quaternion.w, mask);
+                densityRawParameters.scale.x += __shfl_xor_sync(0xffffffff, densityRawParameters.scale.x, mask);
+                densityRawParameters.scale.y += __shfl_xor_sync(0xffffffff, densityRawParameters.scale.y, mask);
+                densityRawParameters.scale.z += __shfl_xor_sync(0xffffffff, densityRawParameters.scale.z, mask);
             }
 
             // First thread in the warp performs the atomic add
             if ((tileThreadIdx & (warpSize - 1)) == 0) {
-                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].position_0.x, densityRawParameters.position_0.x);
-                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].position_0.y, densityRawParameters.position_0.y);
-                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].position_0.z, densityRawParameters.position_0.z);
-                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].density_0, densityRawParameters.density_0);
-                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion_0.x, densityRawParameters.quaternion_0.x);
-                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion_0.y, densityRawParameters.quaternion_0.y);
-                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion_0.z, densityRawParameters.quaternion_0.z);
-                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion_0.w, densityRawParameters.quaternion_0.w);
-                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].scale_0.x, densityRawParameters.scale_0.x);
-                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].scale_0.y, densityRawParameters.scale_0.y);
-                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].scale_0.z, densityRawParameters.scale_0.z);
+                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].position.x, densityRawParameters.position.x);
+                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].position.y, densityRawParameters.position.y);
+                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].position.z, densityRawParameters.position.z);
+                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].density, densityRawParameters.density);
+                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion.x, densityRawParameters.quaternion.x);
+                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion.y, densityRawParameters.quaternion.y);
+                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion.z, densityRawParameters.quaternion.z);
+                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion.w, densityRawParameters.quaternion.w);
+                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].scale.x, densityRawParameters.scale.x);
+                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].scale.y, densityRawParameters.scale.y);
+                atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].scale.z, densityRawParameters.scale.z);
             }
         } else {
-            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].position_0.x, densityRawParameters.position_0.x);
-            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].position_0.y, densityRawParameters.position_0.y);
-            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].position_0.z, densityRawParameters.position_0.z);
-            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].density_0, densityRawParameters.density_0);
-            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion_0.x, densityRawParameters.quaternion_0.x);
-            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion_0.y, densityRawParameters.quaternion_0.y);
-            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion_0.z, densityRawParameters.quaternion_0.z);
-            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion_0.w, densityRawParameters.quaternion_0.w);
-            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].scale_0.x, densityRawParameters.scale_0.x);
-            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].scale_0.y, densityRawParameters.scale_0.y);
-            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].scale_0.z, densityRawParameters.scale_0.z);
+            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].position.x, densityRawParameters.position.x);
+            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].position.y, densityRawParameters.position.y);
+            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].position.z, densityRawParameters.position.z);
+            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].density, densityRawParameters.density);
+            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion.x, densityRawParameters.quaternion.x);
+            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion.y, densityRawParameters.quaternion.y);
+            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion.z, densityRawParameters.quaternion.z);
+            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].quaternion.w, densityRawParameters.quaternion.w);
+            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].scale.x, densityRawParameters.scale.x);
+            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].scale.y, densityRawParameters.scale.y);
+            atomicAdd(&m_densityRawParameters.gradPtr[particleIdx].scale.z, densityRawParameters.scale.z);
         }
     }
 
 private:
-    ShRadiativeGaussianParticlesBuffer<gaussianParticle_RawParameters_0, TDifferentiable>
+    ShRadiativeGaussianParticlesBuffer<DensityRawParameters, TDifferentiable>
         m_densityRawParameters;
 
     int m_featureActiveShDegree = 0;
