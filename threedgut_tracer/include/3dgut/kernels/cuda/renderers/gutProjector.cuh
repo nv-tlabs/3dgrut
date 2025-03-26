@@ -424,7 +424,6 @@ struct GUTProjector : Params, UTParams {
         //                                     reinterpret_cast<const TFeaturesVec*>(particlesPrecomputedFeaturesPtr)[particleIdx],
         //                                     reinterpret_cast<const TFeaturesVec*>(particlesPrecomputedFeaturesGradPtr)[particleIdx],
         //                                     incidentDirection);
-
         particles.initializeDensityGradient(parametersGradient);
         particles.template densityIncidentDirectionBwdToBuffer<true>(particleIdx, sensorWorldPosition);
     }
