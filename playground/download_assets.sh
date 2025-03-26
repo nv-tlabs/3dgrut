@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -13,17 +15,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-#!/bin/bash
 
 assets=(
-    "armadillo.obj"
-    "xyzrgb_dragon.obj"
-    "beast.obj"
-    "happy.obj"
-    "horse.obj"
-    "lucy.obj"
-    "nefertiti.obj"
-    "teapot.obj"
+    armadillo.obj
+    xyzrgb_dragon.obj
+    beast.obj
+    happy.obj
+    horse.obj
+    lucy.obj
+    nefertiti.obj
+    teapot.obj
 )
 
 # Source: https://github.com/alecjacobson/common-3d-test-models/blob/master/data
