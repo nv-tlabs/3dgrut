@@ -30,7 +30,7 @@ if [ -d "$RESULT_DIR" ]; then
     exit 1
 fi
 
-mkdir $RESULT_DIR
+mkdir -p $RESULT_DIR
 
 SCENE_LIST="0a5c013435 8d563fc2cc bb87c292ad d415cc449b e8ea9b4da8 fe1733741f"
 

@@ -30,7 +30,7 @@ if [ -d "$RESULT_DIR" ]; then
     exit 1
 fi
 
-mkdir $RESULT_DIR
+mkdir -p $RESULT_DIR
 
 SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
 
