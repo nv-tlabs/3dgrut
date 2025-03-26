@@ -416,14 +416,11 @@ struct GUTProjector : Params, UTParams {
 
         particles.initializeFeatures(parameters);
         particles.initializeFeaturesGradient(parametersGradient);
-        particles.featuresBwdToBuffer<true>(particleIdx,
-                                            reinterpret_cast<const TFeaturesVec*>(particlesPrecomputedFeaturesGradPtr)[particleIdx],
-                                            incidentDirection);
-        // FIXME : the custom backward induce a loss in accuracy
-        // particles.featuresBwdCustomToBuffer(particleIdx,
-        //                                     reinterpret_cast<const TFeaturesVec*>(particlesPrecomputedFeaturesPtr)[particleIdx],
-        //                                     reinterpret_cast<const TFeaturesVec*>(particlesPrecomputedFeaturesGradPtr)[particleIdx],
-        //                                     incidentDirection);
+        particles.featuresBwdCustomToBuffer<false>(
+            particleIdx,
+            reinterpret_cast<const TFeaturesVec*>(particlesPrecomputedFeaturesPtr)[particleIdx],
+            reinterpret_cast<const TFeaturesVec*>(particlesPrecomputedFeaturesGradPtr)[particleIdx],
+            incidentDirection);
         particles.initializeDensityGradient(parametersGradient);
         particles.template densityIncidentDirectionBwdToBuffer<true>(particleIdx, sensorWorldPosition);
     }

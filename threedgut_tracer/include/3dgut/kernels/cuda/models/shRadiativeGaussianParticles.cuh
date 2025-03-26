@@ -273,12 +273,12 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
                                     *reinterpret_cast<const float3*>(&incidentDirection));
     }
 
+    template <bool Atomic = false>
     __forceinline__ __device__ void featuresBwdCustomToBuffer(uint32_t particleIdx,
                                                               const TFeaturesVec& features,
                                                               const TFeaturesVec& featuresGrad,
                                                               const tcnn::vec3& incidentDirection) const {
-
-        threedgut::radianceFromSpHBwd(m_featureActiveShDegree,
+        threedgut::radianceFromSpHBwd<Atomic>(m_featureActiveShDegree,
                                       *reinterpret_cast<const float3*>(&incidentDirection),
                                       *reinterpret_cast<const float3*>(&featuresGrad),
                                       reinterpret_cast<float3*>(&m_featureRawParameters.gradPtr[particleIdx * ExtParams::RadianceMaxNumSphCoefficients]),
