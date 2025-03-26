@@ -56,3 +56,13 @@ done
 # To grep results from log files, run the following command:
 # grep "Training Statistics" -A 5 train_*.log | awk 'NR % 7 == 5'
 # grep "Test Metrics"        -A 5 train_*.log | awk 'NR % 7 == 5'
+# 
+# Directly print 
+#  - Training Time: 
+#  - Testing PSNR: 
+#  - Testing SSIM: 
+#  - Rendering Frame Time: 
+#      echo "- Train Time(s) "    && grep "Training Statistics" -A 5 train_*.log | awk 'NR % 7 == 5' | awk -F' ' '{print $6}'
+#      echo "- Test PSNR     "    && grep "Test Metrics" -A 5        train_*.log | awk 'NR % 7 == 5' | awk -F' ' '{print $2}'
+#      echo "- Test SSIM     "    && grep "Test Metrics" -A 5        train_*.log | awk 'NR % 7 == 5' | awk -F' ' '{print $4}'
+#      echo "- Frame Time(ms)"    && grep "Test Metrics" -A 5       render_*.log | awk 'NR % 7 == 5' | awk -F' ' '{print $10}'

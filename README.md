@@ -159,45 +159,107 @@ We provide scripts to reproduce results reported in publications.
 # Training
 bash ./benchmark/mipnerf360_3dgut.sh <config-yaml>
 # Rendering
-bash ./benchmark/mipnerf360_3dgut_render.sh <config-yaml>
+bash ./benchmark/mipnerf360_3dgut_render.sh <results-folder>
 ```
 
 ### 3DGRT
 
-#### MipNeRF360 Dataset
+**NeRF Synthestic Dataset**
+
+```bash
+bash ./benchmark/nerf_synthestic.sh paper/3dgrt/colmap_ours.yaml
+bash ./benchmark/nerf_synthestic_render.sh results/nerf_synthetic
+```
+
+Results for 3DGRT (Produced on RTX 5090):
+
+|          | Chair   | Drums   | Ficus   | Hotdog  | Lego    | Materials | Mic      | Ship    | *Average* |
+|----------|---------|---------|---------|---------|---------|-----------|----------|---------|-----------|
+| train(s) | 1036.90 | 935.94  | 623.79  | 937.66  | 832.65  | 742.79    | 1265.34  | 872.63  | 905.96    | 
+| FPS      | 311.5   | 354.6   | 403.2   | 256.4   | 378.8   | 377.4     | 207.5    | 349.7   | 329.9     |
+| PSNR     | 35.849  | 25.873  | 36.581  | 37.689  | 36.692  | 30.469    | 35.826   | 31.71   | 33.836    |
+
+
+**MipNeRF360 Dataset**
+
+```bash
+bash ./benchmark/mipnerf360.sh paper/3dgrt/colmap_ours.yaml
+bash ./benchmark/mipnerf360_render.sh results/mipnerf360
+```
+
+Results for 3DGRT (Produced on RTX 5090):
+
+|          | Bicycle | Bonsai  | Counter | Flower  | Garden  | Kitchen | Room    | Stump   | Treehill | *Average* |
+|----------|---------|---------|---------|---------|---------|---------|---------|---------|----------|-----------|
+| train(s) | 5417.39 | 4107.31 | 4157.14 | 4150.21 | 4660.56 | 5230.30 | 3884.14 | 5197.60 | 5169.49  | 4663.79   |
+| FPS      | 63.8    | 96.1    | 74.3    | 92.9    | 73.2    | 48.4    | 91.5    | 71.2    | 66.7     | 75.3      |
+| PSNR     | 24.633  | 31.724  | 27.978  | 21.327  | 26.594  | 30.057  | 30.194  | 26.323  | 22.412   | 26.805    |
+
 
 ### 3DGUT
 
-#### MipNeRF360 Dataset
+**NeRF Synthestic Dataset**
+
+```bash
+bash ./benchmark/nerf_synthestic.sh paper/3dgut/unsorted_nerf_synthestic.yaml
+bash ./benchmark/nerf_synthestic_render.sh results/nerf_synthetic
+```
+
+Results for 3DGUT (Produced on RTX 5090):
+
+|            | PSNR	  | SSIM	| Train (s) |	FPS |
+|------------|--------|-------|-------|------|
+| Chair      | 35.61	| 0.988	| 265.6	| 599  |
+| Drums      | 25.99	| 0.953	| 254.1	| 694  |
+| Ficus      | 36.43	| 0.988	| 183.5	| 1053 |
+| Hotdog     | 38.11	| 0.986	| 184.8	| 952  |
+| Lego       | 36.47	| 0.984	| 221.7	| 826  |
+| Materials  | 30.39	| 0.960	| 194.3	| 1000 |
+| Mic        | 36.32	| 0.992	| 204.7	| 775  |
+| Ship       | 31.72	| 0.908	| 208.5	| 870  |
+| *Average*  | 33.88	| 0.970	| 214.6	| 846  |
+
+**MipNeRF360 Dataset**
 
 ```bash
 bash ./benchmark/mipnerf360.sh paper/3dgut/unsorted_colmap.yaml
+bash ./benchmark/mipnerf360_render.sh results/mipnerf360
 ```
 
 Results for unsorted 3DGUT (Produced on RTX 5090):
 
-|          | Bicycle | Bonsai  | Counter | Flower  | Garden  | Kitchen | Room    | Stump   | Treehill | *Average* |
-|----------|---------|---------|---------|---------|---------|---------|---------|---------|----------|-----------|
-| train(s) | 835.93  | 476.00  | 468.86  | 681.15  | 665.59  | 502.89  | 447.66  | 682.58  | 669.83   | 608.28    |
-| FPS      | 269.5   | 362.3   | 336.7   | 276.2   | 333.3   | 310.6   | 383.1   | 333.3   | 326.8    | 325.8     |
-| PSNR     | 24.737  | 32.235  | 28.448  | 21.326  | 26.699  | 30.393  | 31.130  | 26.289  | 22.518   | 27.086    |
+|           | PSNR  | SSIM	| Train (s) |	FPS |
+|-----------|-------|-------|-------|------|
+| Bicycle   | 25.01	| 0.759	| 949.8	| 275 |
+| Bonsai    | 32.46	| 0.945	| 485.3	| 362 |
+| Counter   | 29.14	| 0.911	| 484.5	| 380 |
+| Flowers   | 21.45	| 0.612	| 782.0	| 253 |
+| Garden    | 27.18	| 0.856	| 810.2	| 316 |
+| Kitchen   | 31.16	| 0.928	| 664.8	| 275 |
+| Room      | 31.63	| 0.920	| 448.8	| 370 |
+| Stump     | 26.50	| 0.773	| 742.6	| 319 |
+| Treehill  | 22.35	| 0.627	| 809.6	| 299 |
+| *Average* | 27.43	| 0.815	| 686.4	| 317 |
 
-
-#### Scannet++ Dataset
+**Scannet++ Dataset**
 
 ```bash
 bash ./benchmark/scannetpp.sh paper/3dgut/unsorted_scannetpp.yaml
+bash ./benchmark/scannetpp_render.sh results/scannetpp
 ```
 > [!Note]
 > We followed [FisheyeGS](https://github.com/zmliao/Fisheye-GS?tab=readme-ov-file#prepare-training-data-on-scannet-dataset)'s convention to prepare the dataset for fair comparisons
 
 Results for unsorted 3DGUT (Produced on RTX 5090):
 
-|          | 0a5c013435 | 8d563fc2cc | bb87c292ad | d415cc449b | e8ea9b4da8 | fe1733741f | *Average* |
-|----------|------------|------------|------------|------------|------------|------------|-----------|
-| train(s) | 298.09     | 295.64     | 330.89     | 405.95     | 288.53     | 371.71     |  331.80   |
-| FPS      | 408.2      | 465.1      | 490.2      | 446.4      | 401.6      | 444.4      |  442.7    |
-| PSNR     | 29.790     | 26.848     | 31.610     | 28.084     | 33.259     | 25.608     |  29.200   |
+|           | PSNR  | SSIM	| Train (s) |	FPS |
+| 0a5c013435 | 29.67	| 0.930	| 292.3	| 389 | 
+| 8d563fc2cc | 26.88	| 0.912	| 286.1	| 439 | 
+| bb87c292ad | 31.58	| 0.941	| 316.9	| 448 | 
+| d415cc449b | 28.12	| 0.871	| 394.6	| 483 | 
+| e8ea9b4da8 | 33.47	| 0.954	| 280.8	| 394 | 
+| fe1733741f | 25.60	| 0.858	| 355.8	| 450 | 
+| *Average*  | 29.22	| 0.911	| 321.1	| 434 |
 
 ## 🛝 5. Interactive Playground GUI
 
