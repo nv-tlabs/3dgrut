@@ -35,6 +35,7 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 - [🔥 News](#-news)
 - [Contents](#contents)
 - [🔧 1 Dependencies and Installation](#-1-dependencies-and-installation)
+  - [Running with Docker](#running-with-docker)
 - [💻 2. Train 3DGRT or 3DGUT scenes](#-2-train-3dgrt-or-3dgut-scenes)
 - [🎥 3. Rendering from Checkpoints](#-3-rendering-from-checkpoints)
   - [To visualize training progress interactively](#to-visualize-training-progress-interactively)
@@ -181,7 +182,6 @@ Results for unsorted 3DGUT (Produced on RTX 5090):
 | FPS      | 269.5   | 362.3   | 336.7   | 276.2   | 333.3   | 310.6   | 383.1   | 333.3   | 326.8    | 325.8     |
 | PSNR     | 24.737  | 32.235  | 28.448  | 21.326  | 26.699  | 30.393  | 31.130  | 26.289  | 22.518   | 27.086    |
 
-_NOTE: A minor issue in computing SH gradients has been identified in the current implementation of 3DGUT. A temporary workaround has been applied in PR [#23](https://github.com/nv-tlabs/3dgrut/pull/23). We are actively investigating the underlying cause and will implement a permanent solution shortly._
 
 #### Scannet++ Dataset
 
