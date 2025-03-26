@@ -2,17 +2,10 @@
 
 # order in which configs override each other (/* - denotes a relative search path)
 defaults:
-  - base_ours_reference
+  - /base_3dgut.yaml
   - /dataset: nerf
   - /initialization: random
   - _self_
 
 # overwrite of default parameters
-val_frequency: 999999
-
-model:
-  background:
-    color: 
-    
-render.particle_kernel_density_clamping: true
-render.min_transmittance: 0.03
+val_frequency: 999999 # never validate

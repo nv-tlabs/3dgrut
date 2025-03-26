@@ -8,7 +8,7 @@ defaults:
   - _self_
 
 # overwrite of default parameters
-val_frequency: 1095 
+val_frequency: 999999
 
 render.particle_kernel_density_clamping: true
 render.min_transmittance: 0.03
