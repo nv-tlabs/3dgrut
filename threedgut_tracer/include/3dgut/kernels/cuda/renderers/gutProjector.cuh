@@ -414,6 +414,7 @@ struct GUTProjector : Params, UTParams {
         particles.initializeDensity(parameters);
         const tcnn::vec3 incidentDirection = tcnn::normalize(particles.fetchPosition(particleIdx) - sensorWorldPosition);
 
+        particles.initializeFeatures(parameters);
         particles.initializeFeaturesGradient(parametersGradient);
         particles.featuresBwdToBuffer<true>(particleIdx,
                                             reinterpret_cast<const TFeaturesVec*>(particlesPrecomputedFeaturesGradPtr)[particleIdx],
