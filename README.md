@@ -181,6 +181,7 @@ Results for unsorted 3DGUT (Produced on RTX 5090):
 | FPS      | 269.5   | 362.3   | 336.7   | 276.2   | 333.3   | 310.6   | 383.1   | 333.3   | 326.8    | 325.8     |
 | PSNR     | 24.737  | 32.235  | 28.448  | 21.326  | 26.699  | 30.393  | 31.130  | 26.289  | 22.518   | 27.086    |
 
+**NOTE: A minor issue in computing SH gradients has been identified in the current implementation of 3DGUT. A temporary workaround has been applied in version #23. We are actively investigating the underlying cause and will implement a permanent solution shortly.**
 
 #### Scannet++ Dataset
 
