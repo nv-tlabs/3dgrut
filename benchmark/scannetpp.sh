@@ -39,8 +39,9 @@ do
     echo "Running: $SCENE, Configuration: $CONFIG"
 
     # train without eval
+    nvidia-smi > $RESULT_DIR/train_$SCENE.log
     CUDA_VISIBLE_DEVICES=0 python train.py --config-name $CONFIG \
         use_wandb=False with_gui=False out_dir=$RESULT_DIR \
-        path=data/scannetpp/$SCENE/dslr experiment_name=$SCENE > $RESULT_DIR/train_$SCENE.log
+        path=data/scannetpp/$SCENE/dslr experiment_name=$SCENE >> $RESULT_DIR/train_$SCENE.log
 
 done

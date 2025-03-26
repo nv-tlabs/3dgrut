@@ -45,10 +45,11 @@ do
     echo "Running: $SCENE, Configuration: $CONFIG"
 
     # train without eval
+    nvidia-smi > $RESULT_DIR/train_$SCENE.log
     CUDA_VISIBLE_DEVICES=0 python train.py --config-name $CONFIG \
         use_wandb=False with_gui=False out_dir=$RESULT_DIR \
         path=data/mipnerf360/$SCENE experiment_name=$SCENE \
-        dataset.downsample_factor=$DATA_FACTOR > $RESULT_DIR/train_$SCENE.log
+        dataset.downsample_factor=$DATA_FACTOR >> $RESULT_DIR/train_$SCENE.log
 
 done
 
