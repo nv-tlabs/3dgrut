@@ -162,16 +162,15 @@ bash ./benchmark/mipnerf360_3dgut.sh <config-yaml>
 bash ./benchmark/mipnerf360_3dgut_render.sh <results-folder>
 ```
 
-### 3DGRT
+<details>
+<summary><strong>3DGRT Results Produced on RTX 5090</strong></summary>
 
 **NeRF Synthestic Dataset**
 
 ```bash
-bash ./benchmark/nerf_synthestic.sh paper/3dgrt/colmap_ours.yaml
+bash ./benchmark/nerf_synthestic.sh apps/nerf_synthestic_3dgrt.yaml
 bash ./benchmark/nerf_synthestic_render.sh results/nerf_synthetic
 ```
-
-Results for 3DGRT (Produced on RTX 5090):
 
 |            | PSNR	  | SSIM	| Train (s) |	FPS |
 |------------|--------|-------|-------|------|
@@ -188,20 +187,15 @@ Results for 3DGRT (Produced on RTX 5090):
 **MipNeRF360 Dataset**
 
 ```bash
-bash ./benchmark/mipnerf360.sh paper/3dgrt/colmap_ours.yaml
+bash ./benchmark/mipnerf360.sh apps/colmap_3dgrt.yaml
 bash ./benchmark/mipnerf360_render.sh results/mipnerf360
 ```
 
-Results for 3DGRT (Produced on RTX 5090):
-
-|          | Bicycle | Bonsai  | Counter | Flower  | Garden  | Kitchen | Room    | Stump   | Treehill | *Average* |
-|----------|---------|---------|---------|---------|---------|---------|---------|---------|----------|-----------|
-| train(s) | 5417.39 | 4107.31 | 4157.14 | 4150.21 | 4660.56 | 5230.30 | 3884.14 | 5197.60 | 5169.49  | 4663.79   |
-| FPS      | 63.8    | 96.1    | 74.3    | 92.9    | 73.2    | 48.4    | 91.5    | 71.2    | 66.7     | 75.3      |
-| PSNR     | 24.633  | 31.724  | 27.978  | 21.327  | 26.594  | 30.057  | 30.194  | 26.323  | 22.412   | 26.805    |
+</details>
 
 
-### 3DGUT
+<details>
+<summary><strong>3DGUT Results Produced on RTX 5090</strong></summary>
 
 **NeRF Synthestic Dataset**
 
@@ -209,8 +203,6 @@ Results for 3DGRT (Produced on RTX 5090):
 bash ./benchmark/nerf_synthestic.sh paper/3dgut/unsorted_nerf_synthestic.yaml
 bash ./benchmark/nerf_synthestic_render.sh results/nerf_synthetic
 ```
-
-Results for 3DGUT (Produced on RTX 5090):
 
 |            | PSNR	  | SSIM	| Train (s) |	FPS |
 |------------|--------|-------|-------|------|
@@ -230,8 +222,6 @@ Results for 3DGUT (Produced on RTX 5090):
 bash ./benchmark/mipnerf360.sh paper/3dgut/unsorted_colmap.yaml
 bash ./benchmark/mipnerf360_render.sh results/mipnerf360
 ```
-
-Results for unsorted 3DGUT (Produced on RTX 5090):
 
 |           | PSNR  | SSIM	| Train (s) |	FPS |
 |-----------|-------|-------|-------|------|
@@ -266,6 +256,8 @@ Results for unsorted 3DGUT (Produced on RTX 5090):
 | e8ea9b4da8 | 33.47	| 0.954	| 280.8	| 394 | 
 | fe1733741f | 25.60	| 0.858	| 355.8	| 450 | 
 | *Average*  | 29.22	| 0.911	| 321.1	| 434 |
+
+</details>
 
 ## 🛝 5. Interactive Playground GUI
 
