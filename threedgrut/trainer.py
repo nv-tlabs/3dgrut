@@ -480,7 +480,6 @@ class Trainer3DGRUT:
 
         loss = np.mean(metrics["losses"]["total_loss"])
         writer.add_scalar("loss/total/val", loss, global_step)
-        writer.add_scalar("train_loss_patches/total_loss", loss, global_step)  # hack to compare with 3DGS
         if self.conf.loss.use_l1:
             l1_loss = np.mean(metrics["losses"]["l1_loss"])
             writer.add_scalar("loss/l1/val", l1_loss, global_step)
@@ -549,6 +548,10 @@ class Trainer3DGRUT:
                     )
 
             writer.add_scalar("num_particles/train", self.model.num_gaussians, self.global_step)
+
+            # # NOTE: hack to easily compare with 3DGS
+            # writer.add_scalar("train_loss_patches/total_loss", loss, global_step)
+            # writer.add_scalar("gaussians/count", self.model.num_gaussians, self.global_step)
 
         logger.log_progress(
             task_name="Training",
