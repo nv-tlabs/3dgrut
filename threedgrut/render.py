@@ -249,7 +249,10 @@ class Renderer:
             mean_lpips=mean_lpips,
             std_psnr=std_psnr,
         )
-        table["mean_inference_time"] = f"{'{:.2f}'.format(mean_inference_time)}" + " ms/frame"
+
+        if self.conf.render.enable_kernel_timings:
+            table["mean_inference_time"] = f"{'{:.2f}'.format(mean_inference_time)}" + " ms/frame"
+
         logger.log_table(f"⭐ Test Metrics - Step {self.global_step}", record=table)
 
         if self.writer is not None:

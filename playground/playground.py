@@ -173,7 +173,6 @@ class OptixPrimitive:
 
 class Primitives:
     SUPPORTED_MESH_EXTENSIONS = ['.obj', '.glb']
-    MAX_MATERIALS = 32
     DEFAULT_REFRACTIVE_INDEX = 1.33
     SCALE_OF_NEW_MESH_TO_SMALL_SCENE = 0.5    # Mesh will be this percent of the scene on longest axis
 
@@ -295,7 +294,7 @@ class Primitives:
             vertex_normals=mesh.vertex_normals.float(),
             has_tangents=has_tangents.bool(),
             vertex_tangents=mesh.vertex_tangents.float(),
-            material_uv=mesh.uvs.float(),
+            material_uv=mesh.face_uvs.float(),
             material_id=mesh.material_assignments.unsqueeze(1).int(),
             primitive_type=primitive_type,
             primitive_type_tensor=prim_type_tensor.int(),
@@ -324,25 +323,21 @@ class Primitives:
         for mat_idx, mat in enumerate(materials):
             material_name = f'{model_name}${mat["material_name"]}'
             if material_name not in self.registered_materials:
-                if len(self.registered_materials) >= self.MAX_MATERIALS:
-                    print('WARNING: Maximum number of supported materials reached. Mesh will not render correctly.')
-                    break
-                else:
-                    self.registered_materials[material_name] = PBRMaterial(
-                        material_id=len(self.registered_materials),
-                        diffuse_map=mat['diffuse_map'],
-                        emissive_map=mat['emissive_map'],
-                        metallic_roughness_map=mat['metallic_roughness_map'],
-                        normal_map=mat['normal_map'],
-                        diffuse_factor=mat['diffuse_factor'],
-                        emissive_factor=mat['emissive_factor'],
-                        metallic_factor=mat['metallic_factor'],
-                        roughness_factor=mat['roughness_factor'],
-                        alpha_mode=mat['alpha_mode'],
-                        alpha_cutoff=mat['alpha_cutoff'],
-                        transmission_factor=mat['transmission_factor'],
-                        ior=mat['ior']
-                    )
+                self.registered_materials[material_name] = PBRMaterial(
+                    material_id=len(self.registered_materials),
+                    diffuse_map=mat['diffuse_map'],
+                    emissive_map=mat['emissive_map'],
+                    metallic_roughness_map=mat['metallic_roughness_map'],
+                    normal_map=mat['normal_map'],
+                    diffuse_factor=mat['diffuse_factor'],
+                    emissive_factor=mat['emissive_factor'],
+                    metallic_factor=mat['metallic_factor'],
+                    roughness_factor=mat['roughness_factor'],
+                    alpha_mode=mat['alpha_mode'],
+                    alpha_cutoff=mat['alpha_cutoff'],
+                    transmission_factor=mat['transmission_factor'],
+                    ior=mat['ior']
+                )
             mat_idx_to_mat_id[mat_idx] = self.registered_materials[material_name].material_id
         return mat_idx_to_mat_id
 
@@ -355,10 +350,12 @@ class Primitives:
                 v1 = [-MS, +MS, MZ]
                 v2 = [+MS, -MS, MZ]
                 v3 = [+MS, +MS, MZ]
+                faces = torch.tensor([[0, 1, 2], [2, 1, 3]])
+                vertex_uvs = torch.tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
                 mesh = create_procedural_mesh(
                     vertices=torch.tensor([v0, v1, v2, v3]),
-                    faces=torch.tensor([[0, 1, 2], [2, 1, 3]]),
-                    uvs=torch.tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]]),
+                    faces=faces,
+                    face_uvs=vertex_uvs[faces].contiguous(), # (F, 3, 2)
                     device=device
                 )
             case _:
@@ -372,6 +369,8 @@ class Primitives:
                     material_index_mapping = material_index_mapping.to(device=device)
                     material_id = mesh.material_assignments.to(device=device, dtype=torch.long)
                     mesh.material_assignments = material_index_mapping[material_id].int()
+        # Always use default material, if no materials were specified
+        mesh.material_assignments = torch.max(mesh.material_assignments, torch.zeros_like(mesh.material_assignments))
         return mesh
 
     def recompute_stacked_buffers(self):
@@ -478,7 +477,12 @@ class Playground:
             rgb=None,
             opacity=None
         )
+        """ When this flag is toggled on, the state of the canvas have changed and it needs to be re-rendered
+        """
         self.is_force_canvas_dirty = False
+        """ When this flag is toggled on, the state of the materials have changed they need to be re-uploaded to device
+        """
+        self.is_materials_dirty = False
         self.gui_aux_fields = dict()
 
         self.is_running = True
@@ -559,6 +563,7 @@ class Playground:
             material_uv=self.primitives.stacked_fields.material_uv,
             material_id=self.primitives.stacked_fields.material_id,
             materials=sorted(self.primitives.registered_materials.values(), key=lambda mat: mat.material_id),
+            is_sync_materials=self.is_materials_dirty,
             refractive_index=self.primitives.stacked_fields.refractive_index_tensor[:, None],
             background_color=background_color,
             envmap=envmap,
@@ -665,7 +670,7 @@ class Playground:
         elif object_path.endswith('.ply'):
             conf = load_default_config()
             model = MixtureOfGaussians(conf)
-            model.init_from_ingp(object_path, init_model=False)
+            model.init_from_ply(object_path, init_model=False)
             object_name = Path(object_path).stem
         else:
             raise ValueError(f"Unknown object type: {object_path}")
@@ -781,8 +786,8 @@ class Playground:
         if self.use_dof_in_trajectory:
             old_use_dof = self.use_depth_of_field
             self.use_depth_of_field = True
-            eye, target = self.trajectory[0]
-            ps.look_at(eye, target)
+            eye, target, up = self.trajectory[0]
+            ps.look_at_dir(eye, target, up, fly_to=True)
             dofs = np.linspace(self.min_dof, self.max_dof, self.frames_between_cameras)
             for dof in tqdm(dofs):
                 self.depth_of_field.focus_z = dof
@@ -802,8 +807,9 @@ class Playground:
             self.use_depth_of_field = old_use_dof
 
         elif self.continuous_trajectory:
-            eyes = np.stack([eye for eye, target in self.trajectory])
-            targets = np.stack([target for eye, target in self.trajectory])
+            eyes = np.stack([eye for eye, target, up in self.trajectory])
+            targets = np.stack([target for eye, target, up in self.trajectory])
+            ups = np.stack([up for eye, target, up in self.trajectory])
 
             from scipy.interpolate import splprep, splev
             tck, u = splprep(eyes.T, u=None, s=0.0, per=1)
@@ -814,8 +820,12 @@ class Playground:
             u_new = np.linspace(u.min(), u.max(), self.frames_between_cameras * len(self.trajectory))
             targets_new = np.stack(splev(u_new, tck, der=0)).T
 
-            for eye, target in tqdm(zip(eyes_new, targets_new)):
-                ps.look_at(eye, target)
+            tck, u = splprep(ups.T, u=None, s=0.0, per=1)
+            u_new = np.linspace(u.min(), u.max(), self.frames_between_cameras * len(self.trajectory))
+            ups_new = np.stack(splev(u_new, tck, der=0)).T
+
+            for eye, target, up in tqdm(zip(eyes_new, targets_new, ups_new)):
+                ps.look_at_dir(eye, target, up)
 
                 rgb, _ = self.render_from_current_ps_view(window_w=self.window_w, window_h=self.window_h)
                 while self.has_progressive_effects_to_render():
@@ -830,15 +840,16 @@ class Playground:
                 out_video.write(data)
         else:
             for traj_idx in tqdm(range(1, len(self.trajectory))):
-                eye_1, target_1 = self.trajectory[traj_idx - 1]
-                eye_2, target_2 = self.trajectory[traj_idx]
+                eye_1, target_1, up_1 = self.trajectory[traj_idx - 1]
+                eye_2, target_2, up_2 = self.trajectory[traj_idx]
 
                 Xs = smoothstep(np.linspace(0.0, 1.0, self.frames_between_cameras), N=3)
 
                 for x in Xs:
                     eye = eye_1 * (1 - x) + eye_2 * x
                     target = target_1 * (1 - x) + target_2 * x
-                    ps.look_at(eye, target)
+                    up = up_1 * (1 - x) + up_2 * x
+                    ps.look_at_dir(eye, target, up)
 
                     rgb, _ = self.render_from_current_ps_view(window_w=self.window_w, window_h=self.window_h)
                     while self.has_progressive_effects_to_render():
@@ -872,6 +883,8 @@ class Playground:
     def is_dirty(self):
         # Force dirty flag is on
         if self.is_force_canvas_dirty:
+            return True
+        if self.is_materials_dirty:
             return True
         if self.did_camera_change():
             return True
@@ -1009,6 +1022,7 @@ class Playground:
 
         self.cache_last_state(view_params=view_params, outputs=outputs, window_size=(window_h, window_w))
         self.is_force_canvas_dirty = False
+        self.is_materials_dirty = False
         return outputs['rgb'], outputs['opacity']
 
     def update_data_on_device(self, buffer, tensor_array):
@@ -1167,13 +1181,10 @@ class Playground:
             if (psim.Button("Add Camera")):
                 view_params = ps.get_view_camera_parameters()
                 cam_center = view_params.get_position()
-                corner_rays = view_params.generate_camera_ray_corners()
-                c_ul, c_ur, c_ll, c_lr = [torch.tensor(a, device=self.DEFAULT_DEVICE, dtype=torch.float32) for a in
-                                          corner_rays]
-                c_mid = (c_ul + c_ur + c_ll + c_lr) / 4
                 self.trajectory.append((
                     cam_center,
-                    cam_center + c_mid.cpu().numpy()
+                    cam_center + view_params.get_look_dir(),
+                    view_params.get_up_dir()
                 ))
             psim.SameLine()
             if (psim.Button("Reset")):
@@ -1203,8 +1214,8 @@ class Playground:
 
             if len(self.trajectory) > 0 and psim.TreeNode("Cameras"):
                 remained_cameras = []
-                for i, (eye, target) in enumerate(self.trajectory):
-                    is_not_removed = self._draw_single_trajectory_camera(i, eye, target)
+                for i, (eye, target, up) in enumerate(self.trajectory):
+                    is_not_removed = self._draw_single_trajectory_camera(i, eye, target, up)
                     remained_cameras.append(is_not_removed)
                 self.trajectory = [self.trajectory[i] for i in range(len(self.trajectory)) if remained_cameras[i]]
 
@@ -1519,6 +1530,7 @@ class Playground:
 
         if material_changed:
             self.is_force_canvas_dirty = True
+            self.is_materials_dirty = True
 
     def _draw_general_primitive_settings_widget(self):
         primitives_disabled = not self.primitives.enabled
@@ -1585,6 +1597,7 @@ class Playground:
             )
             self.primitives.rebuild_bvh_if_needed(True, True)
             self.is_force_canvas_dirty = True
+            self.is_materials_dirty = True
 
         psim.SameLine()
 
@@ -1617,6 +1630,7 @@ class Playground:
                 self._recompute_slice_planes()
                 self.primitives.rebuild_bvh_if_needed(force=True, rebuild=True)
                 self.is_force_canvas_dirty = True
+                self.is_materials_dirty = True
                 print(f'Scene loaded from {scene_path}')
         psim.PopItemWidth()
 
@@ -1730,14 +1744,11 @@ class Playground:
 
     def _draw_mirror_settings_widget(self, obj):
         pass
-        # settings_changed, self.mirrors.mirror_scatter = psim.SliderFloat(
-        #     "Scatter (Imperfectness)", self.mirrors.mirror_scatter, v_min=0.0, v_max=1e-2, power=1)
-        # self.is_force_canvas_dirty = self.is_force_canvas_dirty or settings_changed
 
-    def _draw_single_trajectory_camera(self, i, eye, target):
+    def _draw_single_trajectory_camera(self, i, eye, target, up):
         psim.PushItemWidth(200)
         if (psim.Button(f"view {i + 1}")):
-            ps.look_at(eye, target)
+            ps.look_at_dir(eye, target, up, fly_to=True)
 
         psim.SameLine()
         if (psim.Button(f"remove {i + 1}")):
@@ -1749,13 +1760,10 @@ class Playground:
         if psim.Button(f"replace {i + 1}"):
             view_params = ps.get_view_camera_parameters()
             cam_center = view_params.get_position()
-            corner_rays = view_params.generate_camera_ray_corners()
-            c_ul, c_ur, c_ll, c_lr = [torch.tensor(a, device=self.DEFAULT_DEVICE, dtype=torch.float32) for a in
-                                      corner_rays]
-            c_mid = (c_ul + c_ur + c_ll + c_lr) / 4
             self.trajectory[i] = (
                 cam_center,
-                cam_center + c_mid.cpu().numpy()
+                cam_center + view_params.get_look_dir(),
+                view_params.get_up_dir()
             )
 
         psim.PopItemWidth()

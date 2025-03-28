@@ -134,10 +134,8 @@ def load_mesh(path: str, device):
     Supported formats: .obj, .gltf, .glb
     """
     format = Path(path).suffix
-    if format in ('.gltf', '.glb'):
-        mesh = kaolin.io.gltf.import_mesh(path)
-    elif format in ('.obj',):
-        mesh = kaolin.io.obj.import_mesh(path, with_normals=True)
+    if format in ('.obj', '.gltf', '.glb'):
+        mesh = kaolin.io.import_mesh(path, triangulate=True)
     else:
         raise ValueError(f'Cannot load mesh asset with unsupported format: {format}. '
                          f'Supported types: .obj, .glb, .gltf')
@@ -160,15 +158,20 @@ def load_mesh(path: str, device):
     mesh.vertex_tangents = mesh.vertex_tangents if mesh.has_attribute('vertex_tangents') \
         else torch.zeros([num_verts, 3], device=device, dtype=torch.float32)
 
-    # Presampled materials
     mesh.uvs = mesh.uvs if mesh.has_attribute('uvs') else mesh.vertices.new_zeros(num_verts, 2)
+    # If uvs + face_uvs_idx are available, use to compute face_uvs
+    if not mesh.has_attribute('face_uvs'):
+        if mesh.has_attribute('face_uvs_idx') and len(mesh.uvs) > 0:
+            mesh.face_uvs = mesh.uvs[mesh.face_uvs_idx].contiguous()
+        else:
+            mesh.face_uvs = mesh.vertices.new_zeros(num_faces, 3, 2)
     mesh.material_assignments = mesh.material_assignments if mesh.has_attribute('material_assignments') else\
         torch.zeros([num_faces], device=device)
 
     return mesh
 
-def create_procedural_mesh(vertices, faces, uvs, device):
-    mesh = kaolin.rep.SurfaceMesh(vertices=vertices, faces=faces, uvs=uvs)
+def create_procedural_mesh(vertices, faces, face_uvs, device):
+    mesh = kaolin.rep.SurfaceMesh(vertices=vertices, faces=faces, face_uvs=face_uvs)
     mesh.vertex_tangents = torch.zeros([len(mesh.vertices), 3], dtype=torch.bool)
     mesh.material_assignments = torch.zeros([len(mesh.faces)], device=device)
     return mesh.to(device)

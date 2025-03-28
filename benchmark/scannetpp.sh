@@ -30,7 +30,7 @@ if [ -d "$RESULT_DIR" ]; then
     exit 1
 fi
 
-mkdir $RESULT_DIR
+mkdir -p $RESULT_DIR
 
 SCENE_LIST="0a5c013435 8d563fc2cc bb87c292ad d415cc449b e8ea9b4da8 fe1733741f"
 
@@ -39,8 +39,9 @@ do
     echo "Running: $SCENE, Configuration: $CONFIG"
 
     # train without eval
+    nvidia-smi > $RESULT_DIR/train_$SCENE.log
     CUDA_VISIBLE_DEVICES=0 python train.py --config-name $CONFIG \
         use_wandb=False with_gui=False out_dir=$RESULT_DIR \
-        path=data/scannetpp/$SCENE/dslr experiment_name=$SCENE > $RESULT_DIR/train_$SCENE.log
+        path=data/scannetpp/$SCENE/dslr experiment_name=$SCENE >> $RESULT_DIR/train_$SCENE.log
 
 done

@@ -25,6 +25,13 @@ struct ParticleDensity {
     float padding;
 };
 
+struct ParticeFetchedDensity {
+    float3 position;
+    float3 scale;
+    float33 rotationT;
+    float density;
+};
+
 __forceinline__ __device__ void rotationMatrixTranspose(const float4& q, float33& ret) {
     const float r = q.x;
     const float x = q.y;

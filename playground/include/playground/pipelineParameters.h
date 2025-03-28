@@ -22,28 +22,29 @@
 #include <playground/pipelineDefinitions.h>
 #include <playground/cutexture.h>
 
-struct PBRMaterial
+struct alignas(16) PBRMaterial
 {
-    bool useDiffuseTexture;
-    float4 diffuseFactor;
-    cudaTextureObject_t diffuseTexture;
+    cudaTextureObject_t diffuseTexture;                     // 8 bytes -> offset 8
+    cudaTextureObject_t emissiveTexture;                    // 8 bytes -> offset 16
+    cudaTextureObject_t metallicRoughnessTexture;           // 8 bytes -> offset 24
+    cudaTextureObject_t normalTexture;                      // 8 bytes -> offset 32
 
-    bool useEmissiveTexture;
-    float3 emissiveFactor;
-    cudaTextureObject_t emissiveTexture;
+    float4 diffuseFactor;                                   // 16 bytes -> offset 48
+    float3 emissiveFactor;                                  // 12 bytes -> offset 60
+    float metallicFactor;                                   // 4 bytes  -> offset 64
+    float roughnessFactor;                                  // 4 bytes  -> offset 68
+    float transmissionFactor;                               // 4 bytes  -> offset 72
+    float ior;                                              // 4 bytes  -> offset 76
+    float alphaCutoff;                                      // 4 bytes  -> offset 80
+    unsigned int alphaMode;    // see GltfAlphaMode         // 4 bytes  -> offset 84
 
-    bool useMetallicRoughnessTexture;
-    float metallicFactor;
-    float roughnessFactor;
-    cudaTextureObject_t metallicRoughnessTexture;
+    bool useDiffuseTexture;                                 // 1 byte -> offset 85
+    bool useEmissiveTexture;                                // 1 byte -> offset 86
+    bool useMetallicRoughnessTexture;                       // 1 byte -> offset 87
+    bool useNormalTexture;                                  // 1 byte -> offset 88
 
-    bool useNormalTexture;
-    cudaTextureObject_t normalTexture;
-
-    unsigned int alphaMode;    // see GltfAlphaMode
-    float alphaCutoff;
-    float transmissionFactor;
-    float ior;
+    float2 pad0;                                            // 8 bytes -> offset 96
+    // --> mem 16 byte aligned
 };
 
 struct PlaygroundPipelineParameters: PipelineParameters
@@ -68,40 +69,10 @@ struct PlaygroundPipelineParameters: PipelineParameters
     PackedTensorAccessor32<float, 2> vTangents;    // vertex tangents
 
     // Materials
-    PackedTensorAccessor32<float, 2> matUV;              // uv coordinates per vertex
+    PackedTensorAccessor32<float, 3> matUV;              // [F,3,2]: triangular face X vertex X 2d uv
     PackedTensorAccessor32<int32_t, 2> matID;            // id of material to use, per vertex
-    PBRMaterial mat0;                        // material 0
-    PBRMaterial mat1;                        // material 1
-    PBRMaterial mat2;                        // material 2
-    PBRMaterial mat3;                        // material 3
-    PBRMaterial mat4;                        // material 4
-    PBRMaterial mat5;                        // material 5
-    PBRMaterial mat6;                        // material 6
-    PBRMaterial mat7;                        // material 7
-    PBRMaterial mat8;                        // material 8
-    PBRMaterial mat9;                        // material 9
-    PBRMaterial mat10;                       // material 10
-    PBRMaterial mat11;                       // material 11
-    PBRMaterial mat12;                       // material 12
-    PBRMaterial mat13;                       // material 13
-    PBRMaterial mat14;                       // material 14
-    PBRMaterial mat15;                       // material 15
-    PBRMaterial mat16;                       // material 16
-    PBRMaterial mat17;                       // material 17
-    PBRMaterial mat18;                       // material 18
-    PBRMaterial mat19;                       // material 19
-    PBRMaterial mat20;                       // material 20
-    PBRMaterial mat21;                       // material 21
-    PBRMaterial mat22;                       // material 22
-    PBRMaterial mat23;                       // material 23
-    PBRMaterial mat24;                       // material 24
-    PBRMaterial mat25;                       // material 25
-    PBRMaterial mat26;                       // material 26
-    PBRMaterial mat27;                       // material 27
-    PBRMaterial mat28;                       // material 28
-    PBRMaterial mat29;                       // material 29
-    PBRMaterial mat30;                       // material 30
-    PBRMaterial mat31;                       // material 31
+    PBRMaterial* materials;                              // dynamic array of materials
+    unsigned int numMaterials;
 
     // Per triangle attributes
     PackedTensorAccessor32<int32_t, 2> primType;         // see PlaygroundPrimitiveTypes

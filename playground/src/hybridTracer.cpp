@@ -31,6 +31,7 @@
 #include <playground/pipelineParameters.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
+#include <memory>
 #include <cuda_runtime.h>
 #include <nvrtc.h>
 #include <algorithm>
@@ -200,73 +201,78 @@ void HybridOptixTracer::buildMeshBVH(
     CUDA_CHECK_LAST();
 }
 
-void HybridOptixTracer::setMaterialTextures(
+void HybridOptixTracer::syncMaterials(
     PlaygroundPipelineParameters& params,
-    unsigned int textureId,
-    CudaTexture2DFloat4Object& diffuseTexObject,
-    CudaTexture2DFloat4Object& emissiveTexObject,
-    CudaTexture2DFloat2Object& metallicRoughnessTexObject,
-    CudaTexture2DFloat4Object& normalTexObject,
-    const CPBRMaterial& cmat)
-{
-    PBRMaterial* paramsMat = nullptr;
-    switch (textureId)
-    {
-        case 0: paramsMat = &params.mat0; break;
-        case 1: paramsMat = &params.mat1; break;
-        case 2: paramsMat = &params.mat2; break;
-        case 3: paramsMat = &params.mat3; break;
-        case 4: paramsMat = &params.mat4; break;
-        case 5: paramsMat = &params.mat5; break;
-        case 6: paramsMat = &params.mat6; break;
-        case 7: paramsMat = &params.mat7; break;
-        case 8: paramsMat = &params.mat8; break;
-        case 9: paramsMat = &params.mat9; break;
-        case 10: paramsMat = &params.mat10; break;
-        case 11: paramsMat = &params.mat11; break;
-        case 12: paramsMat = &params.mat12; break;
-        case 13: paramsMat = &params.mat13; break;
-        case 14: paramsMat = &params.mat14; break;
-        case 15: paramsMat = &params.mat15; break;
-        case 16: paramsMat = &params.mat16; break;
-        case 17: paramsMat = &params.mat17; break;
-        case 18: paramsMat = &params.mat18; break;
-        case 19: paramsMat = &params.mat19; break;
-        case 20: paramsMat = &params.mat20; break;
-        case 21: paramsMat = &params.mat21; break;
-        case 22: paramsMat = &params.mat22; break;
-        case 23: paramsMat = &params.mat23; break;
-        case 24: paramsMat = &params.mat24; break;
-        case 25: paramsMat = &params.mat25; break;
-        case 26: paramsMat = &params.mat26; break;
-        case 27: paramsMat = &params.mat27; break;
-        case 28: paramsMat = &params.mat28; break;
-        case 29: paramsMat = &params.mat29; break;
-        case 30: paramsMat = &params.mat30; break;
-        case 31: paramsMat = &params.mat31; break;
-        default: break;
-    }
+    const std::vector<CPBRMaterial>& materials,
+    cudaStream_t cudaStream
+) {
+    size_t numMaterials = materials.size();
 
-    if (paramsMat)
-    {
-        paramsMat->useDiffuseTexture = diffuseTexObject.isTexInitialized();
-        paramsMat->diffuseTexture = diffuseTexObject.tex();
-        paramsMat->useEmissiveTexture = emissiveTexObject.isTexInitialized();
-        paramsMat->emissiveTexture = emissiveTexObject.tex();
-        paramsMat->useMetallicRoughnessTexture = metallicRoughnessTexObject.isTexInitialized();
-        paramsMat->metallicRoughnessTexture = metallicRoughnessTexObject.tex();
-        paramsMat->useNormalTexture = normalTexObject.isTexInitialized();
-        paramsMat->normalTexture = normalTexObject.tex();
-        float* diffuseFactor = cmat.diffuseFactor.data_ptr<float>();
-        paramsMat->diffuseFactor = make_float4(diffuseFactor[0], diffuseFactor[1], diffuseFactor[2], diffuseFactor[3]);
-        float* emissiveFactor = cmat.emissiveFactor.data_ptr<float>();
-        paramsMat->emissiveFactor = make_float3(emissiveFactor[0], emissiveFactor[1], emissiveFactor[2]);
-        paramsMat->metallicFactor = cmat.metallicFactor;
-        paramsMat->roughnessFactor = cmat.roughnessFactor;
-        paramsMat->alphaMode = cmat.alphaMode;
-        paramsMat->alphaCutoff = cmat.alphaCutoff;
-        paramsMat->transmissionFactor = cmat.transmissionFactor;
-        paramsMat->ior = cmat.ior;
+    // Material Textures
+    std::vector<CudaTexture2DFloat4Object> cuDiffuseTexture(numMaterials);
+    std::vector<CudaTexture2DFloat4Object> cuEmissiveTexture(numMaterials);
+    std::vector<CudaTexture2DFloat2Object> cuMetallicRoughnessTexture(numMaterials);
+    std::vector<CudaTexture2DFloat4Object> cuNormalTexture(numMaterials);
+
+    _playgroundState->materials.resize(numMaterials);
+    _playgroundState->textures.resize(numMaterials);
+
+    for (int i = 0; i < numMaterials; ++i) {
+
+        auto& texture = _playgroundState->textures[i];
+
+        torch::Tensor texDiffuse = materials[i].diffuseMap;
+        int diffuseTexHeight = texDiffuse.size(0);
+        int diffuseTexWidth = texDiffuse.size(1);
+        texture.diffuse = std::make_shared<CudaTexture2DFloat4Object>();
+        if (diffuseTexHeight > 0 && diffuseTexWidth > 0) {
+            texture.diffuse->reset(texDiffuse.data_ptr<float>(), diffuseTexHeight, diffuseTexWidth);
+        }
+
+        torch::Tensor texEmissive = materials[i].emissiveMap;
+        int emissiveTexHeight = texEmissive.size(0);
+        int emissiveTexWidth = texEmissive.size(1);
+        texture.emissive = std::make_shared<CudaTexture2DFloat4Object>();
+        if (emissiveTexHeight > 0 && emissiveTexWidth > 0) {
+            texture.emissive->reset(texEmissive.data_ptr<float>(), emissiveTexHeight, emissiveTexWidth);
+        }
+
+        torch::Tensor texMetallicRoughness = materials[i].metallicRoughnessMap;
+        int metallicRoughnessTexHeight = texMetallicRoughness.size(0);
+        int metallicRoughnessTexWidth = texMetallicRoughness.size(1);
+        texture.metallicRoughness = std::make_shared<CudaTexture2DFloat2Object>();
+        if (metallicRoughnessTexHeight > 0 && metallicRoughnessTexWidth > 0) {
+            texture.metallicRoughness->reset(texMetallicRoughness.data_ptr<float>(),
+                                                  metallicRoughnessTexHeight, metallicRoughnessTexWidth);
+        }
+
+        torch::Tensor texNormal = materials[i].normalMap;
+        int normalTexHeight = texNormal.size(0);
+        int normalTexWidth = texNormal.size(1);
+        texture.normal = std::make_shared<CudaTexture2DFloat4Object>();
+        if (normalTexHeight > 0 && normalTexWidth > 0) {
+            texture.normal->reset(texNormal.data_ptr<float>(), normalTexHeight, normalTexWidth);
+        }
+
+        PBRMaterial& hostMat = _playgroundState->materials[i];
+        hostMat.useDiffuseTexture = texture.diffuse->isTexInitialized();
+        hostMat.diffuseTexture = texture.diffuse->tex();
+        hostMat.useEmissiveTexture = texture.emissive->isTexInitialized();
+        hostMat.emissiveTexture = texture.emissive->tex();
+        hostMat.useMetallicRoughnessTexture = texture.metallicRoughness->isTexInitialized();
+        hostMat.metallicRoughnessTexture = texture.metallicRoughness->tex();
+        hostMat.useNormalTexture = texture.normal->isTexInitialized();
+        hostMat.normalTexture = texture.normal->tex();
+        float* diffuseFactor = materials[i].diffuseFactor.data_ptr<float>();
+        hostMat.diffuseFactor = make_float4(diffuseFactor[0], diffuseFactor[1], diffuseFactor[2], diffuseFactor[3]);
+        float* emissiveFactor = materials[i].emissiveFactor.data_ptr<float>();
+        hostMat.emissiveFactor = make_float3(emissiveFactor[0], emissiveFactor[1], emissiveFactor[2]);
+        hostMat.metallicFactor = materials[i].metallicFactor;
+        hostMat.roughnessFactor = materials[i].roughnessFactor;
+        hostMat.alphaMode = materials[i].alphaMode;
+        hostMat.alphaCutoff = materials[i].alphaCutoff;
+        hostMat.transmissionFactor = materials[i].transmissionFactor;
+        hostMat.ior = materials[i].ior;
     }
 }
 
@@ -289,6 +295,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     torch::Tensor matUV,
     torch::Tensor matID,
     const std::vector<CPBRMaterial>& materials,
+    bool shouldSyncMaterials,
     torch::Tensor refractiveIndex,
     torch::Tensor backgroundColor,
     torch::Tensor envmap,
@@ -341,7 +348,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.vTangents = packed_accessor32<float, 2>(vTangents);
     paramsHost.vHasTangents = packed_accessor32<bool, 2>(vHasTangents);
     paramsHost.primType = packed_accessor32<int32_t, 2>(primType);
-    paramsHost.matUV = packed_accessor32<float, 2>(matUV);
+    paramsHost.matUV = packed_accessor32<float, 3>(matUV);
     paramsHost.matID =  packed_accessor32<int32_t, 2>(matID);
     paramsHost.refractiveIndex = packed_accessor32<float, 2>(refractiveIndex);
     paramsHost.maxPBRBounces = maxPBRBounces;
@@ -363,58 +370,17 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
         paramsHost.envmap = cuEnvMap.tex();
     }
 
-    // Material Textures
-    size_t numMaterials = materials.size();
-    std::vector<CudaTexture2DFloat4Object> cuDiffuseTexture(numMaterials);
-    std::vector<CudaTexture2DFloat4Object> cuEmissiveTexture(numMaterials);
-    std::vector<CudaTexture2DFloat2Object> cuMetallicRoughnessTexture(numMaterials);
-    std::vector<CudaTexture2DFloat4Object> cuNormalTexture(numMaterials);
-
-    for (int i = 0; i < numMaterials; ++i) {
-        torch::Tensor texDiffuse = materials[i].diffuseMap;
-        int diffuseTexHeight = texDiffuse.size(0);
-        int diffuseTexWidth = texDiffuse.size(1);
-        cuDiffuseTexture[i] = CudaTexture2DFloat4Object();
-        if (diffuseTexHeight > 0 && diffuseTexWidth > 0)
-        {
-            cuDiffuseTexture[i].reset(texDiffuse.data_ptr<float>(), diffuseTexHeight, diffuseTexWidth);
-        }
-
-        torch::Tensor texEmissive = materials[i].emissiveMap;
-        int emissiveTexHeight = texEmissive.size(0);
-        int emissiveTexWidth = texEmissive.size(1);
-        cuEmissiveTexture[i] = CudaTexture2DFloat4Object();
-        if (emissiveTexHeight > 0 && emissiveTexWidth > 0)
-        {
-            cuEmissiveTexture[i].reset(texEmissive.data_ptr<float>(), emissiveTexHeight, emissiveTexWidth);
-        }
-
-        torch::Tensor texMetallicRoughness = materials[i].metallicRoughnessMap;
-        int metallicRoughnessTexHeight = texMetallicRoughness.size(0);
-        int metallicRoughnessTexWidth = texMetallicRoughness.size(1);
-        cuMetallicRoughnessTexture[i] = CudaTexture2DFloat2Object();
-        if (metallicRoughnessTexHeight > 0 && metallicRoughnessTexWidth > 0)
-        {
-            cuMetallicRoughnessTexture[i].reset(texMetallicRoughness.data_ptr<float>(),
-                                                metallicRoughnessTexHeight, metallicRoughnessTexWidth);
-        }
-
-        torch::Tensor texNormal = materials[i].normalMap;
-        int normalTexHeight = texNormal.size(0);
-        int normalTexWidth = texNormal.size(1);
-        cuNormalTexture[i] = CudaTexture2DFloat4Object();
-        if (normalTexHeight > 0 && normalTexWidth > 0)
-        {
-            cuNormalTexture[i].reset(texNormal.data_ptr<float>(), normalTexHeight, normalTexWidth);
-        }
-
-        setMaterialTextures(paramsHost, i,
-                            cuDiffuseTexture[i], cuEmissiveTexture[i],
-                            cuMetallicRoughnessTexture[i], cuNormalTexture[i],
-                            materials[i]);
-    }
-
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
+
+    syncMaterials(paramsHost, materials, cudaStream);
+    unsigned int numMaterials = materials.size();
+    CUDA_CHECK(cudaMallocAsync(
+        reinterpret_cast<void**>(&paramsHost.materials), sizeof(PBRMaterial) * numMaterials, cudaStream)
+    );
+    CUDA_CHECK(cudaMemcpyAsync(
+        reinterpret_cast<void*>(paramsHost.materials), _playgroundState->materials.data(), sizeof(PBRMaterial) * numMaterials, cudaMemcpyHostToDevice, cudaStream)
+    );
+    paramsHost.numMaterials = numMaterials;
 
     reallocatePlaygroundParamsDevice(sizeof(paramsHost), cudaStream);
     CUDA_CHECK(cudaMemcpyAsync(

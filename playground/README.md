@@ -48,6 +48,12 @@ conda install -c conda-forge mesa-libgl-devel-cos7-x86_64 # may be necessary for
 pip install -r playground/requirements.txt
 ```
 
+3. Download a pack of interesting mesh assets:
+```bash
+chmod +x ./playground/download_assets.sh
+./playground/download_assets.sh
+```
+
 ## 🏃🏻 How to Run 🏃🏼‍♀️
 
 1. Train a 3DGRT scene, for example:
@@ -66,8 +72,9 @@ The playground supports loading `.pt` checkpoints, and exported `.ingp` and `.pl
 3. If desired, gather your own additional mesh assets (`.obj`, `.glb`, `.gltf` formats), and place them under `playground/assets/`.
 The playground will load them automatically as available *primitives* as soon as the app starts.
 Some interesting shapes are [available here](https://github.com/alecjacobson/common-3d-test-models/tree/master).
+A subset of those are downloaded with the `download_assets.sh` script.
 
-4. Have fun experimenting! 
+5. Have fun experimenting! 
 
 #### Additional args
 

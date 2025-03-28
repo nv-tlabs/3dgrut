@@ -4,12 +4,12 @@
 
 ---
 <p align="center">
-  <img width="100%" src="assets/nvidia-hq.gif">
+  <img width="100%" src="assets/nvidia-hq-playground.gif">
 </p>
 
 This repository provides the official implementations of **3D Gaussian Ray Tracing (3DGRT)** and **3D Gaussian Unscented Transform (3DGUT)**. Unlike traditional methods that rely on splatting, 3DGRT performs ray tracing of volumetric Gaussian particles instead. This enables support for distorted cameras with complex, time-dependent effects such as rolling shutters, while also efficiently simulating secondary rays required for rendering phenomena like reflection, refraction, and shadows. However, 3DGRT requires dedicated ray-tracing hardware and remains slower than 3DGS.
 
-To mitigate this limitation, we also propose 3DGUT, which enables support for distorted cameras with complex, time-dependent effects within a rasterization framework, maintaing the efficiency of rasterization methods. By aligning the rendering formulations of 3DGRT and 3DGUT, we introduce a hybrid approach called **3DGRUT**. This technique allows for rendering primary rays via rasterization and secondary rays via ray tracing, combining the strengths of both methods for improved performance and flexibility.
+To mitigate this limitation, we also propose 3DGUT, which enables support for distorted cameras with complex, time-dependent effects within a rasterization framework, maintaining the efficiency of rasterization methods. By aligning the rendering formulations of 3DGRT and 3DGUT, we introduce a hybrid approach called **3DGRUT**. This technique allows for rendering primary rays via rasterization and secondary rays via ray tracing, combining the strengths of both methods for improved performance and flexibility.
 
 
 > __3D Gaussian Ray Tracing: Fast Tracing of Particle Scenes__  
@@ -35,6 +35,7 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 - [🔥 News](#-news)
 - [Contents](#contents)
 - [🔧 1 Dependencies and Installation](#-1-dependencies-and-installation)
+  - [Running with Docker](#running-with-docker)
 - [💻 2. Train 3DGRT or 3DGUT scenes](#-2-train-3dgrt-or-3dgut-scenes)
 - [🎥 3. Rendering from Checkpoints](#-3-rendering-from-checkpoints)
   - [To visualize training progress interactively](#to-visualize-training-progress-interactively)
@@ -77,16 +78,33 @@ To set up the environment using conda, first clone the repository and run `./ins
 git clone --recursive https://github.com/nv-tlabs/3dgrut.git
 cd 3dgrut
 
-# You can install each components step by step following install_env.sh
+# You can install each component step by step following install_env.sh
 chmod +x install_env.sh
 ./install_env.sh 3dgrut
 conda activate 3dgrut
 ```
 
+### Running with Docker
+
+Build the docker image:
+```bash
+git clone --recursive https://github.com/nv-tlabs/3dgrut.git
+cd 3dgrut
+docker build . -t 3dgrut
+````
+
+Run it:
+```bash
+xhost +local:root
+docker run -v --rm -it --gpus=all --net=host --ipc=host -v $PWD:/workspace --runtime=nvidia -e DISPLAY 3dgrut
+```
+> [!NOTE]
+> Remember to set DISPLAY environment variable if you are running on a remote server from command line.
+
 ## 💻 2. Train 3DGRT or 3DGUT scenes
 
 We provide different configurations for training using 3DGRT and 3DGUT models on common benchmark datasets. 
-For example you can download [NeRF Synetic dataset](https://www.kaggle.com/datasets/nguyenhung1903/nerf-synthetic-dataset), 
+For example you can download [NeRF Synthetic dataset](https://www.kaggle.com/datasets/nguyenhung1903/nerf-synthetic-dataset), 
 [MipNeRF360 dataset](https://jonbarron.info/mipnerf360/) or [ScanNet++](https://kaldir.vc.in.tum.de/scannetpp/), 
 and then run one of the following commands:
 
@@ -127,7 +145,7 @@ python train.py --config-name apps/nerf_synthetic_3dgut.yaml path=data/nerf_synt
 python train.py --config-name apps/nerf_synthetic_3dgut.yaml path=data/nerf_synthetic/lego with_gui=True test_last=False export_ingp.enabled=False resume=runs/lego/ckpt_last.pt 
 ```
 > [!NOTE]
-> Remember to set DISPLAY environment variable if you are running on a remote server
+> Remember to set DISPLAY environment variable if you are running on a remote server from command line.
 
 On start up, you might see a black screen, but you can use the GUI to navigate to correct camera views:
 <img src="assets/train_gui_initial.jpg" height="400"/> 
@@ -135,7 +153,7 @@ On start up, you might see a black screen, but you can use the GUI to navigate t
 
 ## 📋 4. Evaluations
 
-We provide scripts to reproduces results reported in publications.
+We provide scripts to reproduce results reported in publications.
 
 ```bash
 # Training
@@ -183,7 +201,7 @@ Results for unsorted 3DGUT (Produced on RTX 5090):
 
 ## 🛝 5. Interactive Playground GUI
 
-The playground allows interactive exploration of pretrained scenes, with raytracing effects such as inserted object, 
+The playground allows interactive exploration of pretrained scenes, with raytracing effects such as inserted objects, 
 reflections, refractions, depth of field, and more.
 
 Run the playground UI to visualize a pretrained scene with:
