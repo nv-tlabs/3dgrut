@@ -166,11 +166,11 @@ bash ./benchmark/mipnerf360_3dgut_render.sh <results-folder>
 <summary><strong>3DGRT Results Produced on RTX 5090</strong></summary>
 <br/>
 
-**NeRF Synthestic Dataset**
+**NeRF Synthetic Dataset**
 
 ```bash
-bash ./benchmark/nerf_synthestic.sh apps/nerf_synthestic_3dgrt.yaml
-bash ./benchmark/nerf_synthestic_render.sh results/nerf_synthetic
+bash ./benchmark/nerf_synthetic.sh apps/nerf_synthetic_3dgrt.yaml
+bash ./benchmark/nerf_synthetic_render.sh results/nerf_synthetic
 ```
 
 |            | PSNR	  | SSIM	| Train (s) |	FPS |
@@ -211,11 +211,11 @@ bash ./benchmark/mipnerf360_render.sh results/mipnerf360
 <summary><strong>3DGUT Results Produced on RTX 5090</strong></summary>
 <br/>
 
-**NeRF Synthestic Dataset**
+**NeRF Synthetic Dataset**
 
 ```bash
-bash ./benchmark/nerf_synthestic.sh paper/3dgut/unsorted_nerf_synthestic.yaml
-bash ./benchmark/nerf_synthestic_render.sh results/nerf_synthetic
+bash ./benchmark/nerf_synthetic.sh paper/3dgut/unsorted_nerf_synthetic.yaml
+bash ./benchmark/nerf_synthetic_render.sh results/nerf_synthetic
 ```
 
 |            | PSNR	  | SSIM	| Train (s) |	FPS |
