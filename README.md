@@ -164,6 +164,7 @@ bash ./benchmark/mipnerf360_3dgut_render.sh <results-folder>
 
 <details>
 <summary><strong>3DGRT Results Produced on RTX 5090</strong></summary>
+<br/>
 
 **NeRF Synthestic Dataset**
 
@@ -190,12 +191,25 @@ bash ./benchmark/nerf_synthestic_render.sh results/nerf_synthetic
 bash ./benchmark/mipnerf360.sh apps/colmap_3dgrt.yaml
 bash ./benchmark/mipnerf360_render.sh results/mipnerf360
 ```
+|           | PSNR  | SSIM	| Train (s) |	FPS |
+|-----------|-------|-------|-------|------|
+| Bicycle   | 24.85	| 0.748	| 2335	| 66 |
+| Bonsai    | 31.95	| 0.942	| 3383	| 72 |
+| Counter   | 28.47	| 0.905	| 3247	| 62 |
+| Flowers   | 21.42	| 0.615	| 2090	| 86 |
+| Garden    | 26.97	| 0.852	| 2253	| 70 |
+| Kitchen   | 30.13	| 0.921	| 4837	| 39 |
+| Room      | 30.35	| 0.911	| 2734	| 73 |
+| Stump     | 26.37	| 0.770	| 1995	| 73 |
+| Treehill  | 22.08	| 0.622	| 2413	| 68 |
+| *Average* | 27.22	| 0.817	| 2869	| 68 |
 
 </details>
 
 
 <details>
 <summary><strong>3DGUT Results Produced on RTX 5090</strong></summary>
+<br/>
 
 **NeRF Synthestic Dataset**
 
@@ -244,8 +258,6 @@ bash ./benchmark/scannetpp_render.sh results/scannetpp
 ```
 > [!Note]
 > We followed [FisheyeGS](https://github.com/zmliao/Fisheye-GS?tab=readme-ov-file#prepare-training-data-on-scannet-dataset)'s convention to prepare the dataset for fair comparisons
-
-Results for unsorted 3DGUT (Produced on RTX 5090):
 
 |           | PSNR  | SSIM	| Train (s) |	FPS |
 |-----------|-------|-------|-------|------|
