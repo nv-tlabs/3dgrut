@@ -418,6 +418,7 @@ class Primitives:
 class Playground:
     DEFAULT_DEVICE = torch.device('cuda')
     AVAILABLE_CAMERAS = ['Pinhole', 'Fisheye']
+    AVAILABLE_CONTROLLERS = ['Turntable', 'First Person', 'Free']
     ANTIALIASING_MODES = ['4x MSAA', '8x MSAA', '16x MSAA', 'Quasi-Random (Sobol)']
     trajectory = []
     continuous_trajectory = False
@@ -440,7 +441,8 @@ class Playground:
 
         self.frame_id = 0
         self.camera_type = 'Pinhole'
-        self.camera_fov = 120.0
+        self.controller_type = 'Turntable'
+        self.camera_fov = 60.0
 
         self.use_depth_of_field = False
         self.depth_of_field = DepthOfField(aperture_size=0.01, focus_z=1.0)
@@ -1143,17 +1145,88 @@ class Playground:
                 self.rebuild_bvh(self.scene_mog)
                 self.is_force_canvas_dirty = True
 
+            psim.PushItemWidth(110)
             cam_idx = Playground.AVAILABLE_CAMERAS.index(self.camera_type)
             is_cam_changed, new_cam_idx = psim.Combo("Camera", cam_idx, Playground.AVAILABLE_CAMERAS)
             if is_cam_changed:
                 self.camera_type = Playground.AVAILABLE_CAMERAS[new_cam_idx]
                 self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_cam_changed
+                self.camera_fov = 120.0 if self.camera_type == 'Fisheye' else 60.0
+
             if self.camera_type == 'Fisheye':
                 psim.SameLine()
-                is_cam_changed, self.camera_fov = psim.SliderFloat(
+                is_fov_changed, self.camera_fov = psim.SliderFloat(
                     "FoV", self.camera_fov, v_min=60.0, v_max=180.0
                 )
-                self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_cam_changed
+                self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_fov_changed
+            elif self.camera_type == 'Pinhole':
+                psim.SameLine()
+                is_fov_changed, self.camera_fov = psim.SliderFloat(
+                    "FoV", self.camera_fov, v_min=30.0, v_max=90
+                )
+                new_cam = ps.CameraParameters(
+                    ps.CameraIntrinsics(
+                        fov_vertical_deg=self.camera_fov,
+                        fov_horizontal_deg=None,
+                        aspect=self.window_w / self.window_h
+                    ),
+                    ps.get_view_camera_parameters().get_extrinsics()
+                )
+                ps.set_view_camera_parameters(new_cam)
+                self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_fov_changed
+            psim.PopItemWidth()
+
+            psim.SameLine()
+            if psim.Button("Reset View"):
+                ps.reset_camera_to_home_view()
+            if psim.IsItemHovered():
+                psim.SetNextWindowPos([self.window_w - psim.GetWindowWidth() - 120, 20])
+                psim.Begin("Reset View", None, psim.ImGuiWindowFlags_NoTitleBar)
+                psim.TextUnformatted("View Navigation:")
+                psim.TextUnformatted("      Rotate: [left click drag]")
+                psim.TextUnformatted("   Translate: [shift] + [left click drag] OR [right click drag]")
+                psim.TextUnformatted("        Zoom: [scroll] OR [ctrl] + [shift] + [left click drag]")
+                psim.TextUnformatted("   Use [ctrl-c] and [ctrl-v] to save and restore camera poses")
+                psim.TextUnformatted("     via the clipboard.")
+                psim.TextUnformatted("\nMenu Navigation:")
+                psim.TextUnformatted("   Menu headers with a '>' can be clicked to collapse and expand.")
+                psim.TextUnformatted("   Use [ctrl] + [left click] to manually enter any numeric value")
+                psim.TextUnformatted("     via the keyboard.")
+                psim.TextUnformatted("   Press [space] to dismiss popup dialogs.")
+                psim.End()
+
+            psim.PushItemWidth(115)
+
+            controller_idx = Playground.AVAILABLE_CONTROLLERS.index(self.controller_type)
+            is_controller_changed, new_controller_idx = psim.Combo("Nav.", controller_idx, Playground.AVAILABLE_CONTROLLERS)
+            if is_controller_changed:
+                self.controller_type = Playground.AVAILABLE_CONTROLLERS[new_controller_idx]
+                self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_controller_changed
+
+                if Playground.AVAILABLE_CONTROLLERS[new_controller_idx] == 'Turntable':
+                    ps.set_navigation_style("turntable")
+                elif Playground.AVAILABLE_CONTROLLERS[new_controller_idx] == 'First Person':
+                    ps.set_navigation_style("first_person")
+                elif Playground.AVAILABLE_CONTROLLERS[new_controller_idx] == 'Free':
+                    ps.set_navigation_style("free")
+
+            psim.SameLine()
+
+            up_dirs = ["x_up", "neg_x_up", "y_up", "neg_y_up", "z_up", "neg_z_up"]
+            front_dirs = ["x_front", "neg_x_front", "y_front", "neg_y_front", "z_front", "neg_z_front"]
+
+            up_dir_idx = up_dirs.index(ps.get_up_dir())
+            is_cam_up_changed, new_up_idx = psim.Combo("Up", up_dir_idx, up_dirs)
+            if is_cam_up_changed:
+                ps.set_up_dir(up_dirs[new_up_idx])
+                self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_cam_up_changed
+            psim.SameLine()
+            front_dir_idx = front_dirs.index(ps.get_front_dir())
+            is_cam_front_changed, new_front_idx = psim.Combo("Front", front_dir_idx, front_dirs)
+            if is_cam_front_changed:
+                ps.set_front_dir(front_dirs[new_front_idx])
+                self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_cam_front_changed
+            psim.PopItemWidth()
 
             psim.PushItemWidth(100)
             settings_changed, self.gamma_correction = psim.SliderFloat(
