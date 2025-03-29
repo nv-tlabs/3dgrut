@@ -20,6 +20,7 @@ set -e
 
 
 CONDA_ENV=${1:-"3dgrut"}
+CUDA_VERSION=${3:-"12.8"}
 
 # parse an optional second arg WITH_GCC11 to also manually use gcc-11 within the environment
 WITH_GCC11=false
@@ -82,9 +83,23 @@ if [ "$WITH_GCC11" = true ]; then
 fi
 
 # Install CUDA and PyTorch dependencies
-conda install -y cuda-toolkit -c nvidia/label/cuda-11.8.0
-conda install -y pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 "numpy<2.0" -c pytorch -c nvidia/label/cuda-11.8.0
-conda install -y cmake ninja -c nvidia/label/cuda-11.8.0
+# 12.6
+if [ "$CUDA_VERSION" = "12.6" ]; then
+    echo "Installing CUDA 12.6..."
+    conda install -y cuda-toolkit -c nvidia/label/cuda-12.6.3
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+    conda install -y cmake ninja -c nvidia/label/cuda-12.6.3
+elif [ "$CUDA_VERSION" = "12.8" ]; then
+    echo "Installing CUDA 12.8..."
+    conda install -y cuda-toolkit -c nvidia/label/cuda-12.8.1
+    pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+    conda install -y cmake ninja -c nvidia/label/cuda-12.8.1
+else
+    echo "Unsupported CUDA version: $CUDA_VERSION"
+    exit 1
+fi
+
+pip3 install --force-reinstall "numpy<2"
 # Install OpenGL headers for the playground
 conda install -c conda-forge mesa-libgl-devel-cos7-x86_64 -y 
 
