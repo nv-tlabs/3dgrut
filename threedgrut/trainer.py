@@ -141,7 +141,7 @@ class Trainer3DGRUT:
             batch_size=1,
             shuffle=True,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=True if conf.num_workers > 0 else False,
         )
         val_dataloader = torch.utils.data.DataLoader(
             val_dataset,
@@ -149,7 +149,7 @@ class Trainer3DGRUT:
             batch_size=1,
             shuffle=False,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=True if conf.num_workers > 0 else False,
         )
         self.train_dataset = train_dataset
         self.train_dataloader = train_dataloader

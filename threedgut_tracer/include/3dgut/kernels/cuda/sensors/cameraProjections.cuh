@@ -107,7 +107,7 @@ static inline __device__ bool projectPoint(const OpenCVFisheyeProjectionParamete
                                            const tcnn::vec3& position,
                                            float tolerance,
                                            tcnn::vec2& projected) {
-    constexpr float eps   = 1e-11f;
+    constexpr float eps   = __FLT_EPSILON__;
     const float rho       = fmaxf(tcnn::length(position.xy()), eps);
     const float thetaFull = atan2f(rho, position.z);
     // Limit angles to max_angle to prevent projected points to leave valid cone around max_angle.
@@ -119,8 +119,9 @@ static inline __device__ bool projectPoint(const OpenCVFisheyeProjectionParamete
     const float theta = fminf(thetaFull, sensorParams.maxAngle);
     // Evaluate forward polynomial
     // (radial distances to the principal point in the normalized image domain (up to focal length scales))
+    const float theta2 = theta * theta;
     const float delta =
-        (theta * (evalPolyHorner<6>(sensorParams.radialCoeffs, theta * theta) + 1.0f)) / rho;
+        (theta * (evalPolyHorner<4>(sensorParams.radialCoeffs, theta2) * theta2 + 1.0f)) / rho;
     projected = sensorParams.focalLength * position.xy() * delta + sensorParams.principalPoint;
 
     return (theta < sensorParams.maxAngle) && withinResolution(resolution, tolerance, projected);
