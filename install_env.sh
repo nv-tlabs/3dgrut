@@ -20,7 +20,7 @@ set -e
 
 
 CONDA_ENV=${1:-"3dgrut"}
-CUDA_VERSION=${3:-"12.8"}
+CUDA_VERSION=${3:-"11.8"}
 
 # parse an optional second arg WITH_GCC11 to also manually use gcc-11 within the environment
 WITH_GCC11=false
@@ -83,12 +83,12 @@ if [ "$WITH_GCC11" = true ]; then
 fi
 
 # Install CUDA and PyTorch dependencies
-# 12.6
-if [ "$CUDA_VERSION" = "12.6" ]; then
-    echo "Installing CUDA 12.6..."
-    conda install -y cuda-toolkit -c nvidia/label/cuda-12.6.3
-    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-    conda install -y cmake ninja -c nvidia/label/cuda-12.6.3
+# 11.8
+if [ "$CUDA_VERSION" = "11.8" ]; then
+    echo "Installing CUDA 11.8..."
+    conda install -y cuda-toolkit -c nvidia/label/cuda-11.8
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+    conda install -y cmake ninja -c nvidia/label/cuda-11.8
 elif [ "$CUDA_VERSION" = "12.8" ]; then
     echo "Installing CUDA 12.8..."
     conda install -y cuda-toolkit -c nvidia/label/cuda-12.8.1

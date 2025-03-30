@@ -1,6 +1,6 @@
 FROM ubuntu:24.04
 
-ARG CUDA_VERSION=12.8
+ARG CUDA_VERSION=11.8
 ENV CUDA_VERSION=${CUDA_VERSION}
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
@@ -25,8 +25,8 @@ RUN conda init
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
 ENV FORCE_CUDA=1
-RUN if [ "$CUDA_VERSION" = "12.6" ]; then \
-      echo 'export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;8.7;8.9"' >> /etc/profile.d/cuda_arch.sh; \
+RUN if [ "$CUDA_VERSION" = "11.8" ]; then \
+      echo 'export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6"' >> /etc/profile.d/cuda_arch.sh; \
     else \
       echo 'export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0"' >> /etc/profile.d/cuda_arch.sh; \
     fi
