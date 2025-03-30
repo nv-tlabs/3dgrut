@@ -63,8 +63,8 @@ public:
 
     /// march the scene according to the given camera and composite the result into the given cuda arrays
     Status renderForward(const RenderParameters& params,
-                         const tcnn::vec3* wordlRayOriginCudaPtr,
-                         const tcnn::vec3* worldRayDirectionCudaPtr,
+                         const tcnn::vec3* sensorRayOriginCudaPtr,
+                         const tcnn::vec3* sensorRayDirectionCudaPtr,
                          float* worldHitDistanceCudaPtr,
                          tcnn::vec4* radianceDensityCudaPtr,
                          Parameters& parameters,
@@ -72,13 +72,13 @@ public:
                          cudaStream_t cudaStream);
 
     Status renderBackward(const RenderParameters& params,
-                          const tcnn::vec3* wordlRayOriginCudaPtr,
-                          const tcnn::vec3* worldRayDirectionCudaPtr,
+                          const tcnn::vec3* sensorRayOriginCudaPtr,
+                          const tcnn::vec3* sensorRayDirectionCudaPtr,
                           const float* worldHitDistanceCudaPtr,
                           const float* worldHitDistanceGradientCudaPtr,
                           const tcnn::vec4* radianceDensityCudaPtr,
                           const tcnn::vec4* radianceDensityGradientCudaPtr,
-                          tcnn::vec3* wordlRayOriginGradientCudaPtr,
+                          tcnn::vec3* worldRayOriginGradientCudaPtr,
                           tcnn::vec3* worldRayDirectionGradientCudaPtr,
                           Parameters& parameters,
                           int cudaDeviceIndex,

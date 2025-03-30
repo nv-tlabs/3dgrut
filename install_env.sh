@@ -92,7 +92,7 @@ if [ "$CUDA_VERSION" = "11.8" ]; then
 elif [ "$CUDA_VERSION" = "12.8" ]; then
     echo "Installing CUDA 12.8..."
     conda install -y cuda-toolkit -c nvidia/label/cuda-12.8.1
-    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+    pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
     conda install -y cmake ninja -c nvidia/label/cuda-12.8.1
 else
     echo "Unsupported CUDA version: $CUDA_VERSION"

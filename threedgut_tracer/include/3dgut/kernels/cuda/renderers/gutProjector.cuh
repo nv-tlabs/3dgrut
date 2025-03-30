@@ -302,7 +302,7 @@ struct GUTProjector : Params, UTParams {
         if constexpr (!Params::PerRayParticleFeatures) {
             particles.initializeFeatures(parameters);
             reinterpret_cast<TFeaturesVec*>(particlesPrecomputedFeaturesPtr)[particleIdx] =
-                particles.featuresCustomFromBuffer<false>(particleIdx, particleSensorRay / particleSensorDistance);
+                particles.template featuresCustomFromBuffer<false>(particleIdx, particleSensorRay / particleSensorDistance);
         }
 
         particlesProjectedPositionPtr[particleIdx]     = particleProjCenter;

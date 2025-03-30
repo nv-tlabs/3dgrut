@@ -8,4 +8,4 @@ defaults:
   - _self_
 
 # overwrite of default parameters
-val_frequency: 1095 
+val_frequency: 999999
