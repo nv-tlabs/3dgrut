@@ -1,39 +1,16 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import torch
-from typing import Optional, Tuple
+from typing import Optional
 from kaolin.render.camera import Camera, generate_centered_pixel_coords
 
-"""
-This module is to be included in next version of kaolin 0.18.0.
-As of March 26, 2025 the latest public release is kaolin 0.17.0, hence it's included here independently.
-"""
 
-# Private function copied from kaolin, to be deleted
+# -- Ray gen --
 def _to_ndc_coords(pixel_x, pixel_y, camera):
     pixel_x = 2 * (pixel_x / camera.width) - 1.0
     pixel_y = 2 * (pixel_y / camera.height) - 1.0
     return pixel_x, pixel_y
 
 
-def generate_fisheye_rays(
-    camera: Camera,
-    coords_grid: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-    eps: float = 1e-9
-):
+def generate_fisheye_rays(camera: Camera, coords_grid: Optional[torch.Tensor] = None, eps: float = 1e-9):
     r"""Default ray generation function for perfect wide-angle fisheye cameras.
 
     Fisheye cameras map wide angles to screen space by introducing distortion towards the edge of the image,
@@ -49,8 +26,8 @@ def generate_fisheye_rays(
 
     Args:
         camera (kaolin.render.camera.Camera): A single camera object (batch size 1).
-        coords_grid (Tuple[torch.FloatTensor, torch.FloatTensor], optional):
-            x and y pixel grid of ray-intersecting coordinates of shape :math:`(\text{H, W})`.
+        coords_grid (torch.FloatTensor, optional):
+            Pixel grid of ray-intersecting coordinates of shape :math:`(\text{H, W, 2})`.
             Coordinates integer parts represent the pixel :math:`(\text{i, j})` coords, and the fraction part of
             :math:`[\text{0,1}]` represents the location within the pixel itself.
             For example, a coordinate of :math:`(\text{0.5, 0.5})` represents the center of the top-left pixel.
