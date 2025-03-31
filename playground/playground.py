@@ -22,6 +22,7 @@ import polyscope as ps
 import polyscope.imgui as psim
 import traceback
 import cv2
+import kaolin
 from typing import List, Tuple, Optional
 from enum import IntEnum
 from pathlib import Path
@@ -34,8 +35,10 @@ from threedgrut.model.background import BackgroundColor
 from playground.utils.mesh_io import load_mesh, load_materials, load_missing_material_info, create_procedural_mesh
 from playground.utils.depth_of_field import DepthOfField
 from playground.utils.spp import SPP
-from playground.utils.transform import ObjectTransform
 from playground.tracer import Tracer
+from playground.utils.kaolin_future.transform import ObjectTransform
+from playground.utils.kaolin_future.conversions import polyscope_from_kaolin_camera, polyscope_to_kaolin_camera
+from playground.utils.kaolin_future.fisheye import generate_fisheye_rays
 
 
 #################################
@@ -499,12 +502,11 @@ class Playground:
         return buffer
 
     @torch.cuda.nvtx.range("_render_depth_of_field_buffer")
-    def _render_depth_of_field_buffer(self, rb, view_params, rays):
+    def _render_depth_of_field_buffer(self, rb, camera, rays):
         if self.use_depth_of_field and self.depth_of_field.has_more_to_accumulate():
             # Store current spp index
             i = self.depth_of_field.spp_accumulated_for_frame
-            extrinsics_R = torch.from_numpy(view_params.get_R()).to(device=self.DEFAULT_DEVICE)
-
+            extrinsics_R = camera.R.squeeze(0).to(dtype=rays.rays_ori.dtype)
             dof_rays_ori, dof_rays_dir = self.depth_of_field(extrinsics_R, rays)
             if not self.primitives.enabled or not self.primitives.has_visible_objects():
                 dof_rb = self.scene_mog.trace(rays_o=dof_rays_ori, rays_d=dof_rays_dir)
@@ -604,11 +606,11 @@ class Playground:
 
     @torch.cuda.nvtx.range("render")
     @torch.no_grad()
-    def render(self, view_params, window_w, window_h):
+    def render(self, camera: kaolin.render.camera.Camera):
 
         is_canvas_dirty = self.is_dirty()
         is_use_spp = not is_canvas_dirty and not self.use_depth_of_field and self.use_spp
-        rays = self.raygen(view_params, window_w, window_h, use_spp=is_use_spp)
+        rays = self.raygen(camera, use_spp=is_use_spp)
 
         if is_canvas_dirty:
             if not self.primitives.enabled or not self.primitives.has_visible_objects():
@@ -626,7 +628,7 @@ class Playground:
             # Render accumulated effects, i.e. depth of field
             rb = dict(rgb=self.last_state['rgb_buffer'], opacity=self.last_state['opacity'])
             if self.use_depth_of_field:
-                self._render_depth_of_field_buffer(rb, view_params, rays)
+                self._render_depth_of_field_buffer(rb, camera, rays)
             elif self.use_spp:
                 self._render_spp_buffer(rb, rays)
 
@@ -901,96 +903,51 @@ class Playground:
         self.last_state['rgb_buffer'] = outputs['rgb_buffer']
         self.last_state['opacity'] = outputs['opacity']
 
-    def _raygen_pinhole(self, view_params, window_w, window_h, jitter=None) -> RayPack:
-        cam_center = view_params.get_position()
-        corner_rays = view_params.generate_camera_ray_corners()
-        c_ul, c_ur, c_ll, c_lr = [torch.tensor(a, device=self.DEFAULT_DEVICE, dtype=torch.float32) for a in corner_rays]
-
-        # generate view camera ray origins and directions
-        rays_ori = torch.tensor(
-            cam_center, device=self.DEFAULT_DEVICE,
-            dtype=torch.float32).reshape(1, 1, 1, 3).expand(1, window_h, window_w, 3
-                                                            )
-        interp_x, interp_y = torch.meshgrid(
-            torch.linspace(0., 1., window_w, device=self.DEFAULT_DEVICE, dtype=torch.float32),
-            torch.linspace(0., 1., window_h, device=self.DEFAULT_DEVICE, dtype=torch.float32),
-            indexing='xy'
+    def _raygen_pinhole(self, camera, jitter=None) -> RayPack:
+        pixel_y, pixel_x = kaolin.render.camera.raygen.generate_centered_pixel_coords(
+            camera.width, camera.height, device=camera.device
         )
         if jitter is not None:
-            # jitter has values of [-0.5, +0.5], transform to [-1/window_dim, +1/window_dim]
-            interp_x = interp_x * (1.0 + jitter[:, :, 0] / window_w)
-            interp_y = interp_y * (1.0 + jitter[:, :, 1] / window_h)
-        interp_x = interp_x.unsqueeze(-1)
-        interp_y = interp_y.unsqueeze(-1)
-        rays_dir = c_ul + interp_x * (c_ur - c_ul) + interp_y * (c_ll - c_ul)
-        rays_dir = torch.nn.functional.normalize(rays_dir, dim=-1)
-        rays_dir = rays_dir.unsqueeze(0)
+            pixel_x += jitter[:, :, 0]
+            pixel_y += jitter[:, :, 1]
+        ray_grid = [pixel_y, pixel_x]
+        rays_o, rays_d = kaolin.render.camera.raygen.generate_rays(camera, coords_grid=ray_grid)
+
         return RayPack(
-            rays_ori=rays_ori,
-            rays_dir=rays_dir,
-            pixel_x=torch.round(interp_x * window_w).squeeze(-1),
-            pixel_y=torch.round(interp_y * window_h).squeeze(-1)
+            rays_ori=rays_o.reshape(1, camera.height, camera.width, 3).float(),
+            rays_dir=rays_d.reshape(1, camera.height, camera.width, 3).float(),
+            pixel_x=torch.round(pixel_x - 0.5).squeeze(-1),
+            pixel_y=torch.round(pixel_y - 0.5).squeeze(-1)
         )
 
     @torch.cuda.nvtx.range("_raygen_fisheye")
-    def _raygen_fisheye(self, view_params, window_w, window_h, jitter) -> RayPack:
-        eps = 1e-9
-        fisheye_fov_rad = torch.deg2rad(
-            torch.tensor([self.camera_fov], device=self.DEFAULT_DEVICE, dtype=torch.float32)
+    def _raygen_fisheye(self, camera, jitter) -> RayPack:
+        pixel_y, pixel_x = kaolin.render.camera.raygen.generate_centered_pixel_coords(
+            camera.width, camera.height, device=camera.device
         )
-        cx = window_w / 2
-        cy = window_h / 2
-
-        interp_x, interp_y = torch.meshgrid(
-            torch.linspace(0., window_w, window_w, device=self.DEFAULT_DEVICE, dtype=torch.float32),
-            torch.linspace(0., window_h, window_h, device=self.DEFAULT_DEVICE, dtype=torch.float32),
-            indexing='xy'
-        )
-
-        u = (interp_x - cx) * 2. / window_w
-        v = (interp_y - cy) * 2. / window_h
-
-        r = torch.sqrt(u * u + v * v)
-        out_of_fov_mask = (r > 1.0)[:, :, None]
-
-        phi_cos = torch.where(torch.abs(r) > eps, u / r, 0.0)
-        phi_cos = torch.clamp(phi_cos, -1.0, 1.0)
-        phi = torch.arccos(phi_cos)
-        phi = torch.where(v < 0, -phi, phi)
-        theta = r * fisheye_fov_rad * 0.5
-
-        rays_dir = torch.stack(
-            [torch.cos(phi) * torch.sin(theta), torch.sin(phi) * torch.sin(theta), torch.cos(theta)], dim=2
-        )
-        mock_dir = torch.zeros_like(rays_dir)
-        mock_dir[:, :, 0] = -1.0
-        mock_dir[:, :, 1] = -.05
-        rays_dir = torch.where(out_of_fov_mask, mock_dir, rays_dir).unsqueeze(0)
-
-        # generate view camera ray origins
-        cam_center = view_params.get_position()
-        rays_ori = torch.tensor(cam_center,
-                                device=self.DEFAULT_DEVICE, dtype=torch.float32).reshape(1, 1, 1, 3).expand(1, window_h,
-                                                                                                            window_w, 3
-                                                                                                            )
+        if jitter is not None:
+            pixel_x += jitter[:, :, 0]
+            pixel_y += jitter[:, :, 1]
+        ray_grid = [pixel_y, pixel_x]
+        rays_o, rays_d, mask = generate_fisheye_rays(camera, ray_grid)
 
         return RayPack(
-            rays_ori=rays_ori.contiguous(),
-            rays_dir=rays_dir.contiguous(),
-            pixel_x=torch.round(interp_x).contiguous(),
-            pixel_y=torch.round(interp_y).contiguous(),
-            mask=out_of_fov_mask
+            rays_ori=rays_o.reshape(1, camera.height, camera.width, 3).float(),
+            rays_dir=rays_d.reshape(1, camera.height, camera.width, 3).float(),
+            pixel_x=torch.round(pixel_x - 0.5).squeeze(-1),
+            pixel_y=torch.round(pixel_y - 0.5).squeeze(-1),
+            mask=mask.reshape(camera.height, camera.width, 1)
         )
 
-    def raygen(self, view_params, window_w, window_h, use_spp=False) -> RayPack:
+    def raygen(self, camera, use_spp=False) -> RayPack:
         ray_batch_size = 1 if not use_spp else self.spp.batch_size
         rays = []
         for _ in range(ray_batch_size):
-            jitter = self.spp(window_h, window_w) if use_spp and self.spp is not None else None
+            jitter = self.spp(camera.height, camera.width) if use_spp and self.spp is not None else None
             if self.camera_type == 'Pinhole':
-                next_rays = self._raygen_pinhole(view_params, window_w, window_h, jitter)
+                next_rays = self._raygen_pinhole(camera, jitter)
             elif self.camera_type == 'Fisheye':
-                next_rays = self._raygen_fisheye(view_params, window_w, window_h, jitter)
+                next_rays = self._raygen_fisheye(camera, jitter)
             else:
                 raise ValueError(f"Unknown camera type: {self.camera_type}")
             rays.append(next_rays)
@@ -1005,7 +962,6 @@ class Playground:
     @torch.cuda.nvtx.range("render_from_current_ps_view")
     @torch.no_grad()
     def render_from_current_ps_view(self, window_w=None, window_h=None):
-
         if window_w is None or window_h is None:
             window_w, window_h = ps.get_window_size()
         # If window size changed since the last render call, mark the canvas as dirty.
@@ -1018,9 +974,16 @@ class Playground:
         if not self.is_dirty() and not self.has_progressive_effects_to_render():
             return self.last_state['rgb'], self.last_state['opacity']
 
+        # Update polyscope camera with params from gui
+        view_params = ps.CameraParameters(
+            ps.CameraIntrinsics(fov_vertical_deg=self.camera_fov, aspect=window_w / window_h),
+            ps.get_view_camera_parameters().get_extrinsics()
+        )
+        ps.set_view_camera_parameters(view_params)
+
         # Render a frame
-        view_params = ps.get_view_camera_parameters()
-        outputs = self.render(view_params, window_w, window_h)
+        camera = polyscope_to_kaolin_camera(view_params, window_w, window_h, device=self.DEFAULT_DEVICE)
+        outputs = self.render(camera)
 
         self.cache_last_state(view_params=view_params, outputs=outputs, window_size=(window_h, window_w))
         self.is_force_canvas_dirty = False
@@ -1036,7 +999,6 @@ class Playground:
     @torch.cuda.nvtx.range("update_render_view_viz")
     @torch.no_grad()
     def update_render_view_viz(self, force=False):
-
         window_w, window_h = ps.get_window_size()
 
         # re-initialize if needed
