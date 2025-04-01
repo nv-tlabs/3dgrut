@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import subprocess
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from threedgrut.utils.logger import logger
@@ -25,8 +26,16 @@ OmegaConf.register_new_resolver("int_list", lambda l: [int(x) for x in l])
 # timing_options.print_enabled = True
 
 
+def get_git_revision_hash() -> str:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
+    except Exception:
+        return "Unknown"
+
+
 @hydra.main(config_path="configs", version_base=None)
 def main(conf: DictConfig) -> None:
+    logger.info(f"Git hash: {get_git_revision_hash()}")
     logger.info(f"Compiling native code..")
     from threedgrut.trainer import Trainer3DGRUT
 

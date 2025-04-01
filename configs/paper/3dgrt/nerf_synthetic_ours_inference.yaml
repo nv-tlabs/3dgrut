@@ -8,7 +8,7 @@ defaults:
   - _self_
 
 # overwrite of default parameters
-val_frequency: 5000
+val_frequency: 999999
 
 model:
   background:

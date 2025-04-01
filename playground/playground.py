@@ -173,7 +173,6 @@ class OptixPrimitive:
 
 class Primitives:
     SUPPORTED_MESH_EXTENSIONS = ['.obj', '.glb']
-    MAX_MATERIALS = 32
     DEFAULT_REFRACTIVE_INDEX = 1.33
     SCALE_OF_NEW_MESH_TO_SMALL_SCENE = 0.5    # Mesh will be this percent of the scene on longest axis
 
@@ -295,7 +294,7 @@ class Primitives:
             vertex_normals=mesh.vertex_normals.float(),
             has_tangents=has_tangents.bool(),
             vertex_tangents=mesh.vertex_tangents.float(),
-            material_uv=mesh.uvs.float(),
+            material_uv=mesh.face_uvs.float(),
             material_id=mesh.material_assignments.unsqueeze(1).int(),
             primitive_type=primitive_type,
             primitive_type_tensor=prim_type_tensor.int(),
@@ -324,25 +323,21 @@ class Primitives:
         for mat_idx, mat in enumerate(materials):
             material_name = f'{model_name}${mat["material_name"]}'
             if material_name not in self.registered_materials:
-                if len(self.registered_materials) >= self.MAX_MATERIALS:
-                    print('WARNING: Maximum number of supported materials reached. Mesh will not render correctly.')
-                    break
-                else:
-                    self.registered_materials[material_name] = PBRMaterial(
-                        material_id=len(self.registered_materials),
-                        diffuse_map=mat['diffuse_map'],
-                        emissive_map=mat['emissive_map'],
-                        metallic_roughness_map=mat['metallic_roughness_map'],
-                        normal_map=mat['normal_map'],
-                        diffuse_factor=mat['diffuse_factor'],
-                        emissive_factor=mat['emissive_factor'],
-                        metallic_factor=mat['metallic_factor'],
-                        roughness_factor=mat['roughness_factor'],
-                        alpha_mode=mat['alpha_mode'],
-                        alpha_cutoff=mat['alpha_cutoff'],
-                        transmission_factor=mat['transmission_factor'],
-                        ior=mat['ior']
-                    )
+                self.registered_materials[material_name] = PBRMaterial(
+                    material_id=len(self.registered_materials),
+                    diffuse_map=mat['diffuse_map'],
+                    emissive_map=mat['emissive_map'],
+                    metallic_roughness_map=mat['metallic_roughness_map'],
+                    normal_map=mat['normal_map'],
+                    diffuse_factor=mat['diffuse_factor'],
+                    emissive_factor=mat['emissive_factor'],
+                    metallic_factor=mat['metallic_factor'],
+                    roughness_factor=mat['roughness_factor'],
+                    alpha_mode=mat['alpha_mode'],
+                    alpha_cutoff=mat['alpha_cutoff'],
+                    transmission_factor=mat['transmission_factor'],
+                    ior=mat['ior']
+                )
             mat_idx_to_mat_id[mat_idx] = self.registered_materials[material_name].material_id
         return mat_idx_to_mat_id
 
@@ -355,10 +350,12 @@ class Primitives:
                 v1 = [-MS, +MS, MZ]
                 v2 = [+MS, -MS, MZ]
                 v3 = [+MS, +MS, MZ]
+                faces = torch.tensor([[0, 1, 2], [2, 1, 3]])
+                vertex_uvs = torch.tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
                 mesh = create_procedural_mesh(
                     vertices=torch.tensor([v0, v1, v2, v3]),
-                    faces=torch.tensor([[0, 1, 2], [2, 1, 3]]),
-                    uvs=torch.tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]]),
+                    faces=faces,
+                    face_uvs=vertex_uvs[faces].contiguous(), # (F, 3, 2)
                     device=device
                 )
             case _:
@@ -372,6 +369,8 @@ class Primitives:
                     material_index_mapping = material_index_mapping.to(device=device)
                     material_id = mesh.material_assignments.to(device=device, dtype=torch.long)
                     mesh.material_assignments = material_index_mapping[material_id].int()
+        # Always use default material, if no materials were specified
+        mesh.material_assignments = torch.max(mesh.material_assignments, torch.zeros_like(mesh.material_assignments))
         return mesh
 
     def recompute_stacked_buffers(self):
@@ -419,6 +418,7 @@ class Primitives:
 class Playground:
     DEFAULT_DEVICE = torch.device('cuda')
     AVAILABLE_CAMERAS = ['Pinhole', 'Fisheye']
+    AVAILABLE_CONTROLLERS = ['Turntable', 'First Person', 'Free']
     ANTIALIASING_MODES = ['4x MSAA', '8x MSAA', '16x MSAA', 'Quasi-Random (Sobol)']
     trajectory = []
     continuous_trajectory = False
@@ -441,7 +441,8 @@ class Playground:
 
         self.frame_id = 0
         self.camera_type = 'Pinhole'
-        self.camera_fov = 120.0
+        self.controller_type = 'Turntable'
+        self.camera_fov = 60.0
 
         self.use_depth_of_field = False
         self.depth_of_field = DepthOfField(aperture_size=0.01, focus_z=1.0)
@@ -478,7 +479,12 @@ class Playground:
             rgb=None,
             opacity=None
         )
+        """ When this flag is toggled on, the state of the canvas have changed and it needs to be re-rendered
+        """
         self.is_force_canvas_dirty = False
+        """ When this flag is toggled on, the state of the materials have changed they need to be re-uploaded to device
+        """
+        self.is_materials_dirty = False
         self.gui_aux_fields = dict()
 
         self.is_running = True
@@ -559,6 +565,7 @@ class Playground:
             material_uv=self.primitives.stacked_fields.material_uv,
             material_id=self.primitives.stacked_fields.material_id,
             materials=sorted(self.primitives.registered_materials.values(), key=lambda mat: mat.material_id),
+            is_sync_materials=self.is_materials_dirty,
             refractive_index=self.primitives.stacked_fields.refractive_index_tensor[:, None],
             background_color=background_color,
             envmap=envmap,
@@ -665,7 +672,7 @@ class Playground:
         elif object_path.endswith('.ply'):
             conf = load_default_config()
             model = MixtureOfGaussians(conf)
-            model.init_from_ingp(object_path, init_model=False)
+            model.init_from_ply(object_path, init_model=False)
             object_name = Path(object_path).stem
         else:
             raise ValueError(f"Unknown object type: {object_path}")
@@ -879,6 +886,8 @@ class Playground:
         # Force dirty flag is on
         if self.is_force_canvas_dirty:
             return True
+        if self.is_materials_dirty:
+            return True
         if self.did_camera_change():
             return True
         if not self.has_cached_buffers():
@@ -1015,6 +1024,7 @@ class Playground:
 
         self.cache_last_state(view_params=view_params, outputs=outputs, window_size=(window_h, window_w))
         self.is_force_canvas_dirty = False
+        self.is_materials_dirty = False
         return outputs['rgb'], outputs['opacity']
 
     def update_data_on_device(self, buffer, tensor_array):
@@ -1135,17 +1145,88 @@ class Playground:
                 self.rebuild_bvh(self.scene_mog)
                 self.is_force_canvas_dirty = True
 
+            psim.PushItemWidth(110)
             cam_idx = Playground.AVAILABLE_CAMERAS.index(self.camera_type)
             is_cam_changed, new_cam_idx = psim.Combo("Camera", cam_idx, Playground.AVAILABLE_CAMERAS)
             if is_cam_changed:
                 self.camera_type = Playground.AVAILABLE_CAMERAS[new_cam_idx]
                 self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_cam_changed
+                self.camera_fov = 120.0 if self.camera_type == 'Fisheye' else 60.0
+
             if self.camera_type == 'Fisheye':
                 psim.SameLine()
-                is_cam_changed, self.camera_fov = psim.SliderFloat(
+                is_fov_changed, self.camera_fov = psim.SliderFloat(
                     "FoV", self.camera_fov, v_min=60.0, v_max=180.0
                 )
-                self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_cam_changed
+                self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_fov_changed
+            elif self.camera_type == 'Pinhole':
+                psim.SameLine()
+                is_fov_changed, self.camera_fov = psim.SliderFloat(
+                    "FoV", self.camera_fov, v_min=30.0, v_max=90
+                )
+                new_cam = ps.CameraParameters(
+                    ps.CameraIntrinsics(
+                        fov_vertical_deg=self.camera_fov,
+                        fov_horizontal_deg=None,
+                        aspect=self.window_w / self.window_h
+                    ),
+                    ps.get_view_camera_parameters().get_extrinsics()
+                )
+                ps.set_view_camera_parameters(new_cam)
+                self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_fov_changed
+            psim.PopItemWidth()
+
+            psim.SameLine()
+            if psim.Button("Reset View"):
+                ps.reset_camera_to_home_view()
+            if psim.IsItemHovered():
+                psim.SetNextWindowPos([self.window_w - psim.GetWindowWidth() - 120, 20])
+                psim.Begin("Reset View", None, psim.ImGuiWindowFlags_NoTitleBar)
+                psim.TextUnformatted("View Navigation:")
+                psim.TextUnformatted("      Rotate: [left click drag]")
+                psim.TextUnformatted("   Translate: [shift] + [left click drag] OR [right click drag]")
+                psim.TextUnformatted("        Zoom: [scroll] OR [ctrl] + [shift] + [left click drag]")
+                psim.TextUnformatted("   Use [ctrl-c] and [ctrl-v] to save and restore camera poses")
+                psim.TextUnformatted("     via the clipboard.")
+                psim.TextUnformatted("\nMenu Navigation:")
+                psim.TextUnformatted("   Menu headers with a '>' can be clicked to collapse and expand.")
+                psim.TextUnformatted("   Use [ctrl] + [left click] to manually enter any numeric value")
+                psim.TextUnformatted("     via the keyboard.")
+                psim.TextUnformatted("   Press [space] to dismiss popup dialogs.")
+                psim.End()
+
+            psim.PushItemWidth(115)
+
+            controller_idx = Playground.AVAILABLE_CONTROLLERS.index(self.controller_type)
+            is_controller_changed, new_controller_idx = psim.Combo("Nav.", controller_idx, Playground.AVAILABLE_CONTROLLERS)
+            if is_controller_changed:
+                self.controller_type = Playground.AVAILABLE_CONTROLLERS[new_controller_idx]
+                self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_controller_changed
+
+                if Playground.AVAILABLE_CONTROLLERS[new_controller_idx] == 'Turntable':
+                    ps.set_navigation_style("turntable")
+                elif Playground.AVAILABLE_CONTROLLERS[new_controller_idx] == 'First Person':
+                    ps.set_navigation_style("first_person")
+                elif Playground.AVAILABLE_CONTROLLERS[new_controller_idx] == 'Free':
+                    ps.set_navigation_style("free")
+
+            psim.SameLine()
+
+            up_dirs = ["x_up", "neg_x_up", "y_up", "neg_y_up", "z_up", "neg_z_up"]
+            front_dirs = ["x_front", "neg_x_front", "y_front", "neg_y_front", "z_front", "neg_z_front"]
+
+            up_dir_idx = up_dirs.index(ps.get_up_dir())
+            is_cam_up_changed, new_up_idx = psim.Combo("Up", up_dir_idx, up_dirs)
+            if is_cam_up_changed:
+                ps.set_up_dir(up_dirs[new_up_idx])
+                self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_cam_up_changed
+            psim.SameLine()
+            front_dir_idx = front_dirs.index(ps.get_front_dir())
+            is_cam_front_changed, new_front_idx = psim.Combo("Front", front_dir_idx, front_dirs)
+            if is_cam_front_changed:
+                ps.set_front_dir(front_dirs[new_front_idx])
+                self.is_force_canvas_dirty = self.is_force_canvas_dirty or is_cam_front_changed
+            psim.PopItemWidth()
 
             psim.PushItemWidth(100)
             settings_changed, self.gamma_correction = psim.SliderFloat(
@@ -1522,6 +1603,7 @@ class Playground:
 
         if material_changed:
             self.is_force_canvas_dirty = True
+            self.is_materials_dirty = True
 
     def _draw_general_primitive_settings_widget(self):
         primitives_disabled = not self.primitives.enabled
@@ -1588,6 +1670,7 @@ class Playground:
             )
             self.primitives.rebuild_bvh_if_needed(True, True)
             self.is_force_canvas_dirty = True
+            self.is_materials_dirty = True
 
         psim.SameLine()
 
@@ -1620,6 +1703,7 @@ class Playground:
                 self._recompute_slice_planes()
                 self.primitives.rebuild_bvh_if_needed(force=True, rebuild=True)
                 self.is_force_canvas_dirty = True
+                self.is_materials_dirty = True
                 print(f'Scene loaded from {scene_path}')
         psim.PopItemWidth()
 
@@ -1733,9 +1817,6 @@ class Playground:
 
     def _draw_mirror_settings_widget(self, obj):
         pass
-        # settings_changed, self.mirrors.mirror_scatter = psim.SliderFloat(
-        #     "Scatter (Imperfectness)", self.mirrors.mirror_scatter, v_min=0.0, v_max=1e-2, power=1)
-        # self.is_force_canvas_dirty = self.is_force_canvas_dirty or settings_changed
 
     def _draw_single_trajectory_camera(self, i, eye, target, up):
         psim.PushItemWidth(200)

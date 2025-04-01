@@ -30,7 +30,7 @@ if [ -d "$RESULT_DIR" ]; then
     exit 1
 fi
 
-mkdir $RESULT_DIR
+mkdir -p $RESULT_DIR
 
 SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
 
@@ -45,13 +45,24 @@ do
     echo "Running: $SCENE, Configuration: $CONFIG"
 
     # train without eval
+    nvidia-smi > $RESULT_DIR/train_$SCENE.log
     CUDA_VISIBLE_DEVICES=0 python train.py --config-name $CONFIG \
         use_wandb=False with_gui=False out_dir=$RESULT_DIR \
         path=data/mipnerf360/$SCENE experiment_name=$SCENE \
-        dataset.downsample_factor=$DATA_FACTOR > $RESULT_DIR/train_$SCENE.log
+        dataset.downsample_factor=$DATA_FACTOR >> $RESULT_DIR/train_$SCENE.log
 
 done
 
 # To grep results from log files, run the following command:
 # grep "Training Statistics" -A 5 train_*.log | awk 'NR % 7 == 5'
 # grep "Test Metrics"        -A 5 train_*.log | awk 'NR % 7 == 5'
+# 
+# Directly print 
+#  - Training Time: 
+#  - Testing PSNR: 
+#  - Testing SSIM: 
+#  - Rendering Frame Time: 
+#      echo "- Train Time(s) "    && grep "Training Statistics" -A 5 train_*.log | awk 'NR % 7 == 5' | awk -F' ' '{print $6}'
+#      echo "- Test PSNR     "    && grep "Test Metrics" -A 5        train_*.log | awk 'NR % 7 == 5' | awk -F' ' '{print $2}'
+#      echo "- Test SSIM     "    && grep "Test Metrics" -A 5        train_*.log | awk 'NR % 7 == 5' | awk -F' ' '{print $4}'
+#      echo "- Frame Time(ms)"    && grep "Test Metrics" -A 5       render_*.log | awk 'NR % 7 == 5' | awk -F' ' '{print $10}'
