@@ -71,19 +71,19 @@ Then run the install script with the optional `WITH_GCC11` flag, which additiona
 ./install_env.sh 3dgrut WITH_GCC11
 ```
 </details>
-</br>
 
 <details> 
 <summary> NOTE: Blackwell GPU support</summary>
 
-Currently the codebase uses CUDA 11.8, which is not compatible with the new Blackwell GPUs (e.g., RTX 5090) or GPUs with compute capability 10.0+. 
-An experimental build script is kindly implemented by @johnnynunez to support Blackwell GPUs. To enable it:
+The current codebase uses CUDA 11.8, which is not compatible with the new Blackwell GPUs (e.g., RTX 5090) or GPUs with compute capability 10.0+.
+An experimental build script has been kindly implemented by [@johnnynunez] (https://www.github.com/johnnynunez) to support Blackwell GPUs. To enable it:
 
-Run the install script with the both the `WITH_GCC11` flag as well as a CUDA version. Currently only CUDA 12.8.1 is supported:
+Run the install script with both the `WITH_GCC11` flag and a CUDA version. Currently, only CUDA 12.8.1 is supported:
 ```sh
 ./install_env.sh 3dgrut_cuda12 WITH_GCC11 12.8.1
 ```
 </details>
+
 </br>
 
 To set up the environment using conda, first clone the repository and run `./install_env.sh` script as:
