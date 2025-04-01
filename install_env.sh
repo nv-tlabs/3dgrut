@@ -18,9 +18,7 @@
 # Exit on error
 set -e
 
-
 CONDA_ENV=${1:-"3dgrut"}
-CUDA_VERSION=${3:-"11.8"}
 
 # parse an optional second arg WITH_GCC11 to also manually use gcc-11 within the environment
 WITH_GCC11=false
@@ -30,6 +28,25 @@ if [ $# -ge 2 ]; then
     fi
 fi
 
+CUDA_VERSION=${3:-"11.8.0"}
+
+# Verify user arguments
+echo "Arguments:"
+echo "  CONDA_ENV: $CONDA_ENV"
+echo "  WITH_GCC11: $WITH_GCC11"
+echo "  CUDA_VERSION: $CUDA_VERSION"
+echo ""
+
+# Check if CUDA_VERSION is supported
+if [ "$CUDA_VERSION" = "11.8.0" ]; then
+    export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0";
+elif [ "$CUDA_VERSION" = "12.8.1" ]; then
+    export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0";
+else
+    echo "Unsupported CUDA version: $CUDA_VERSION, available options are 11.8.0 and 12.8.1"
+    exit 1
+fi
+echo "TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
 
 # Test if we have GCC<=11, and early-out if not
 if [ ! "$WITH_GCC11" = true ]; then
@@ -39,9 +56,7 @@ if [ ! "$WITH_GCC11" = true ]; then
         echo "Default gcc version $gcc_version is higher than 11. See note about installing gcc-11 (you may need 'sudo apt-get install gcc-11 g++-11') and rerun with ./install_env.sh 3dgrut WITH_GCC11"
         exit 1
     fi
-
 fi
-
 
 # If we're going to set gcc11, make sure it is available
 if [ "$WITH_GCC11" = true ]; then
@@ -63,7 +78,15 @@ fi
 
 # Create and activate conda environment
 eval "$(conda shell.bash hook)"
-conda create -n $CONDA_ENV python=3.11 -y
+
+# Finds the path of the environment if the environment already exists
+CONDA_ENV_PATH=$(conda env list | sed -E -n "s/^${CONDA_ENV}[[:space:]]+\*?[[:space:]]*(.*)$/\1/p")
+if [ -z "${CONDA_ENV_PATH}" ]; then
+  echo "Conda environment '${CONDA_ENV}' not found, creating it"
+  conda create --name ${CONDA_ENV} -y python=3.11
+else
+  echo "NOTE: Conda environment '${CONDA_ENV}' already exists at ${CONDA_ENV_PATH}, skipping environment creation"
+fi
 conda activate $CONDA_ENV
 
 # Set CC and CXX variables to gcc11 in the conda env
@@ -77,30 +100,36 @@ if [ "$WITH_GCC11" = true ]; then
 
     # Make sure it worked
     gcc_version=$($CC -dumpversion)
+    echo "gcc_version=$gcc_version"
     if [ "$gcc_version" -gt 11 ]; then
         echo "gcc version $gcc_version is still higher than 11, setting gcc-11 failed"
+        exit 1
     fi
 fi
 
 # Install CUDA and PyTorch dependencies
-# 11.8
-if [ "$CUDA_VERSION" = "11.8" ]; then
-    echo "Installing CUDA 11.8..."
-    conda install -y cuda-toolkit -c nvidia/label/cuda-11.8.0
+# CUDA 11.8 supports until compute capability 9.0
+if [ "$CUDA_VERSION" = "11.8.0" ]; then
+    echo "Installing CUDA 11.8.0 ..."
+    conda install -y cuda-toolkit cmake ninja -c nvidia/label/cuda-11.8.0
     conda install -y pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 "numpy<2.0" -c pytorch -c nvidia/label/cuda-11.8.0
-    conda install -y cmake ninja -c nvidia/label/cuda-11.8.0
     pip3 install --find-links https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.2_cu118.html kaolin==0.17.0
-elif [ "$CUDA_VERSION" = "12.8" ]; then
-    echo "Installing CUDA 12.8..."
-    conda install -y cuda-toolkit -c nvidia/label/cuda-12.8.1
+
+# CUDA 12.8 supports compute capability 10.0 and 12.0
+elif [ "$CUDA_VERSION" = "12.8.1" ]; then
+    echo "Installing CUDA 12.8.1 ..."
+    conda install -y cuda-toolkit cmake ninja -c nvidia/label/cuda-12.8.1
     pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
-    conda install -y cmake ninja -c nvidia/label/cuda-12.8.1
     pip3 install --force-reinstall "numpy<2"
-    IGNORE_TORCH_VER=1 pip3 install git+https://github.com/NVIDIAGameWorks/kaolin
+    pip3 install cython
+    IGNORE_TORCH_VER=1 pip3 install -v git+https://github.com/NVIDIAGameWorks/kaolin
+
+# Unsupported CUDA version
 else
-    echo "Unsupported CUDA version: $CUDA_VERSION"
+    echo "Unsupported CUDA version: $CUDA_VERSION, available options are 11.8.0 and 12.8.1"
     exit 1
 fi
+
 # Install OpenGL headers for the playground
 conda install -c conda-forge mesa-libgl-devel-cos7-x86_64 -y 
 
