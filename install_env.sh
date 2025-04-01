@@ -96,7 +96,7 @@ elif [ "$CUDA_VERSION" = "12.8" ]; then
     pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
     conda install -y cmake ninja -c nvidia/label/cuda-12.8.1
     pip3 install --force-reinstall "numpy<2"
-    pip3 install git+https://github.com/NVIDIAGameWorks/kaolin
+    IGNORE_TORCH_VER=1 pip3 install git+https://github.com/NVIDIAGameWorks/kaolin
 else
     echo "Unsupported CUDA version: $CUDA_VERSION"
     exit 1
