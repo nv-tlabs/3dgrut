@@ -19,6 +19,19 @@
 
 namespace threedgut {
 
+// Computes 2-norm of a [x,y] vector in a numerically stable way
+inline __device__ float stableNorm2(const tcnn::vec2& vec) {
+    const float absX = fabsf(vec.x);
+    const float absY = fabsf(vec.y);
+    const float min  = fminf(absX, absY);
+    const float max  = fmaxf(absX, absY);
+    if (max <= 0.f) {
+        return 0.f;
+    }
+    const float minMaxRatio = min / max;
+    return max * sqrtf(1.f + minMaxRatio * minMaxRatio);
+}
+
 template <int N>
 static inline __device__ float evalPolyHorner(const tcnn::vec<N>& coeffs, float x) {
     // Evaluates a N-1 degree polynomial y=f(x) using numerically stable Horner scheme.
@@ -107,8 +120,11 @@ static inline __device__ bool projectPoint(const OpenCVFisheyeProjectionParamete
                                            const tcnn::vec3& position,
                                            float tolerance,
                                            tcnn::vec2& projected) {
-    constexpr float eps   = __FLT_EPSILON__;
-    const float rho       = fmaxf(tcnn::length(position.xy()), eps);
+    float rho = stableNorm2(position);
+    if (rho <= 0.f) {
+        rho = __FLT_EPSILON__;
+    }
+
     const float thetaFull = atan2f(rho, position.z);
     // Limit angles to max_angle to prevent projected points to leave valid cone around max_angle.
     // In particular for omnidirectional cameras, this prevents points outside the FOV to be
@@ -127,6 +143,58 @@ static inline __device__ bool projectPoint(const OpenCVFisheyeProjectionParamete
     return (theta < sensorParams.maxAngle) && withinResolution(resolution, tolerance, projected);
 }
 
+template <int NumNewtonIterations = 3>
+static inline __device__ bool projectPoint(const FThetaProjectionParameters& sensorParams,
+                                           const tcnn::ivec2& resolution,
+                                           const tcnn::vec3& position,
+                                           float tolerance,
+                                           tcnn::vec2& projected) {
+    float rho = stableNorm2(position);
+    if (rho <= 0.f) {
+        rho = __FLT_EPSILON__;
+    }
+
+    const float thetaFull = atan2f(rho, position.z);
+    // Limit angles to max_angle to prevent projected points to leave valid cone around max_angle.
+    // In particular for omnidirectional cameras, this prevents points outside the FOV to be
+    // wrongly projected to in-image-domain points because of badly constrained polynomials outside
+    // the effective FOV (which is different to the image boundaries).
+    //
+    // These FOV-clamped projections will be marked as *invalid*
+    const float theta = fminf(thetaFull, sensorParams.maxAngle);
+
+    // Evaluate forward polynomial (depending on reference direction), giving delta = f(theta) factor
+    float delta = 0.f;
+    if (sensorParams.referencePoly == FThetaProjectionParameters::PolynomialType::PIXELDIST_TO_ANGLE) {
+        // pixeldist-to-angle polynomial (bw) is reference, evaluate its accurate inverse via Newton-based inversion
+        delta = evalPolyHorner<FThetaProjectionParameters::PolynomialDegree>(sensorParams.angleToPixeldistPoly, theta);
+        tcnn::vec<FThetaProjectionParameters::PolynomialDegree - 1> dPixeldistToAnglePoly;
+#pragma unroll
+        for (auto i = 1; i < FThetaProjectionParameters::PolynomialDegree; ++i) {
+            dPixeldistToAnglePoly[i - 1] = i * sensorParams.pixeldistToAnglePoly[i];
+        }
+#pragma unroll
+        for (auto i = 0; i < NumNewtonIterations; ++i) {
+            const float dfdx     = evalPolyHorner<FThetaProjectionParameters::PolynomialDegree - 1>(dPixeldistToAnglePoly, delta);
+            const float residual = evalPolyHorner<FThetaProjectionParameters::PolynomialDegree>(sensorParams.pixeldistToAnglePoly, delta) - theta;
+            delta -= residual / dfdx;
+        }
+    } else {
+        // angle-to-pixeldist polynomial (fw) is reference, evaluate it directly
+        delta = evalPolyHorner<FThetaProjectionParameters::PolynomialDegree>(sensorParams.angleToPixeldistPoly, theta);
+    }
+
+    // Apply linear term A=[c,d;e,1] to f(theta)-weighted normalized 2d vectors, relative to principal point
+    projected = (delta / rho) * tcnn::vec2{sensorParams.linear_cde[0] * position.x + sensorParams.linear_cde[1] * position.y,
+                                           sensorParams.linear_cde[2] * position.x + position.y};
+
+    // FThetaCameraModelParameters are defined such that the image coordinate origin corresponds to
+    // the center of the first pixel.
+    projected += sensorParams.principalPoint + .5f;
+
+    return (theta < sensorParams.maxAngle) && withinResolution(resolution, tolerance, projected);
+}
+
 static inline __device__ bool projectPoint(const TSensorModel& sensorModel,
                                            const tcnn::ivec2& resolution,
                                            const tcnn::vec3& position,
@@ -137,6 +205,8 @@ static inline __device__ bool projectPoint(const TSensorModel& sensorModel,
         return projectPoint(sensorModel.ocvPinholeParams, resolution, position, tolerance, projected);
     case TSensorModel::OpenCVFisheyeModel:
         return projectPoint(sensorModel.ocvFisheyeParams, resolution, position, tolerance, projected);
+    case TSensorModel::FThetaModel:
+        return projectPoint(sensorModel.fthetaParams, resolution, position, tolerance, projected);
     default:
         projected = tcnn::vec2::zero();
         return false;
