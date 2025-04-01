@@ -75,6 +75,7 @@ if [ "$WITH_GCC11" = true ]; then
     GCC_11_PATH=$(which gcc-11)
     GXX_11_PATH=$(which g++-11)
 fi
+GCC_VERSION=$($GCC_11_PATH -dumpfullversion -dumpversion)
 
 # Create and activate conda environment
 eval "$(conda shell.bash hook)"
@@ -118,11 +119,11 @@ if [ "$CUDA_VERSION" = "11.8.0" ]; then
 # CUDA 12.8 supports compute capability 10.0 and 12.0
 elif [ "$CUDA_VERSION" = "12.8.1" ]; then
     echo "Installing CUDA 12.8.1 ..."
-    conda install -y cuda-toolkit cmake ninja -c nvidia/label/cuda-12.8.1
+    conda install -y cuda-toolkit cmake ninja gcc_linux-64==$GCC_VERSION -c nvidia/label/cuda-12.8.1
     pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
     pip3 install --force-reinstall "numpy<2"
-    pip3 install cython
-    IGNORE_TORCH_VER=1 pip3 install -v git+https://github.com/NVIDIAGameWorks/kaolin
+    # pip3 install cython
+    # IGNORE_TORCH_VER=1 pip3 install -v git+https://github.com/NVIDIAGameWorks/kaolin
 
 # Unsupported CUDA version
 else
