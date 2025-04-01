@@ -200,6 +200,7 @@ class Tracer:
         material_uv=None,
         material_id=None,
         materials=None,
+        is_sync_materials=True,
         refractive_index=None,
         background_color=None,
         envmap=None,
@@ -212,7 +213,7 @@ class Tracer:
         if refractive_index is None:
             refractive_index = torch.ones_like(primitive_type, dtype=torch.float)
         if material_uv is None:
-            material_uv = torch.empty([0, 0], dtype=torch.float)
+            material_uv = torch.empty([0, 3, 2], dtype=torch.float)
         if material_id is None:
             material_id = torch.empty([0, 0], dtype=torch.int)
         if materials is None:
@@ -271,6 +272,7 @@ class Tracer:
                 material_uv,
                 material_id,
                 materials,
+                is_sync_materials,
                 refractive_index,
                 background_color,
                 envmap,

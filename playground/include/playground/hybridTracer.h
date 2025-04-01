@@ -21,6 +21,7 @@
 
 #include <3dgrt/pipelineDefinitions.h>
 #include <3dgrt/optixTracer.h>
+#include <playground/cutexture.h>
 #include <playground/pipelineDefinitions.h>
 #include <playground/pipelineParameters.h>
 
@@ -40,6 +41,13 @@ struct CPBRMaterial {
     float alphaCutoff;
     float transmissionFactor;
     float ior;
+};
+
+struct Textures {
+    std::shared_ptr<CudaTexture2DFloat4Object> diffuse;
+    std::shared_ptr<CudaTexture2DFloat4Object> emissive;
+    std::shared_ptr<CudaTexture2DFloat2Object> metallicRoughness;
+    std::shared_ptr<CudaTexture2DFloat4Object> normal;
 };
 
 struct OptixDenoiserWrapper
@@ -83,6 +91,9 @@ protected:
         OptixShaderBindingTable sbtTriGSTracing;
         OptixModule moduleTriGSTracing;
 
+        std::vector<PBRMaterial> materials;    /// dynamic array of materials, cached so we don't re-upload every frame
+        std::vector<Textures> textures;        /// caches textures allocated on gpu
+
         // Denoiser
         OptixDenoiserWrapper denoiser;
     }* _playgroundState;
@@ -112,13 +123,9 @@ public:
                             unsigned int rebuild,
                             bool allow_update);
 
-    void setMaterialTextures(PlaygroundPipelineParameters& params,
-                             unsigned int textureId,
-                             CudaTexture2DFloat4Object& diffuseTexObject,
-                             CudaTexture2DFloat4Object& emissiveTexObject,
-                             CudaTexture2DFloat2Object& metallicRoughnessTexObject,
-                             CudaTexture2DFloat4Object& normalTexObject,
-                             const CPBRMaterial& cmat);
+    void syncMaterials(PlaygroundPipelineParameters& params,
+                       const std::vector<CPBRMaterial>& materials,
+                       cudaStream_t cudaStream);
 
     std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
     traceHybrid(uint32_t frameNumber,
@@ -139,6 +146,7 @@ public:
                 torch::Tensor matUV,
                 torch::Tensor matID,
                 const std::vector<CPBRMaterial>& materials,
+                bool shouldSyncMaterials,
                 torch::Tensor refractiveIndex,
                 torch::Tensor backgroundColor,
                 torch::Tensor envmap,

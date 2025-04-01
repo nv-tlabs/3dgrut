@@ -27,7 +27,6 @@ void computeGaussianEnclosingIcosaHedron(uint32_t gNum,
                                          float degree,
                                          float3* gPrimVrt,
                                          int3* gPrimTri,
-                                         OptixAabb* gPrimAABB,
                                          cudaStream_t stream);
 
 void computeGaussianEnclosingOctaHedron(uint32_t gNum,
@@ -40,7 +39,6 @@ void computeGaussianEnclosingOctaHedron(uint32_t gNum,
                                         float degree,
                                         float3* gPrimVrt,
                                         int3* gPrimTri,
-                                        OptixAabb* gPrimAABB,
                                         cudaStream_t stream);
 
 void computeGaussianEnclosingTriHexa(uint32_t gNum,
@@ -53,7 +51,6 @@ void computeGaussianEnclosingTriHexa(uint32_t gNum,
                                      float degree,
                                      float3* gPrimVrt,
                                      int3* gPrimTri,
-                                     OptixAabb* gPrimAABB,
                                      cudaStream_t stream);
 
 void computeGaussianEnclosingTriSurfel(uint32_t gNum,
@@ -66,7 +63,6 @@ void computeGaussianEnclosingTriSurfel(uint32_t gNum,
                                        float degree,
                                        float3* gPrimVrt,
                                        int3* gPrimTri,
-                                       OptixAabb* gPrimAABB,
                                        float4* gNormalDensity,
                                        cudaStream_t stream);
 
@@ -80,7 +76,6 @@ void computeGaussianEnclosingTetraHedron(uint32_t gNum,
                                          float degree,
                                          float3* gPrimVrt,
                                          int3* gPrimTri,
-                                         OptixAabb* gPrimAABB,
                                          cudaStream_t stream);
 
 void computeGaussianEnclosingDiamond(uint32_t gNum,
@@ -93,7 +88,6 @@ void computeGaussianEnclosingDiamond(uint32_t gNum,
                                      float degree,
                                      float3* gPrimVrt,
                                      int3* gPrimTri,
-                                     OptixAabb* gPrimAABB,
                                      cudaStream_t stream);
 
 void computeGaussianEnclosingSphere(uint32_t gNum,
@@ -106,7 +100,6 @@ void computeGaussianEnclosingSphere(uint32_t gNum,
                                     float degree,
                                     float3* gPrimCenter,
                                     float* gPrimRadius,
-                                    OptixAabb* gPrimAABB,
                                     cudaStream_t stream);
 
 void computeGaussianEnclosingAABB(uint32_t gNum,
@@ -118,7 +111,6 @@ void computeGaussianEnclosingAABB(uint32_t gNum,
                                   uint32_t opts,
                                   float degree,
                                   OptixAabb* gPrimAABB,
-                                  OptixAabb* gAABB,
                                   cudaStream_t stream);
 
 void computeGaussianEnclosingInstances(uint32_t gNum,
@@ -131,5 +123,4 @@ void computeGaussianEnclosingInstances(uint32_t gNum,
                                        float degree,
                                        OptixTraversableHandle ias,
                                        OptixInstance* gPrimInstances,
-                                       OptixAabb* gAABB,
                                        cudaStream_t stream);

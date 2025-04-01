@@ -39,11 +39,7 @@ struct model_ExternalParams {
 
 #include <3dgut/kernels/cuda/models/shRadiativeGaussianParticles.cuh>
 
-using model_Particles = ShRadiativeGaussianVolumetricFeaturesParticles<gaussianParticle_Parameters_0,
-                                                                       shRadiativeParticle_Parameters_0,
-                                                                       model_InternalParams,
-                                                                       model_ExternalParams,
-                                                                       1>;
+using model_Particles = ShRadiativeGaussianVolumetricFeaturesParticles<model_InternalParams, model_ExternalParams, 1>;
 
 #include <3dgut/kernels/cuda/models/shGaussianModel.cuh>
 

@@ -22,7 +22,7 @@ if [[ -z $CONFIG ]]; then
     exit 1
 fi
 
-RESULT_DIR=results/scannetpp
+RESULT_DIR=results/nerf_synthetic
 
 # if the result directory already exists, warn user and aport execution
 if [ -d "$RESULT_DIR" ]; then
@@ -32,7 +32,7 @@ fi
 
 mkdir -p $RESULT_DIR
 
-SCENE_LIST="0a5c013435 8d563fc2cc bb87c292ad d415cc449b e8ea9b4da8 fe1733741f"
+SCENE_LIST="chair  drums  ficus  hotdog  lego  materials  mic  ship"
 
 for SCENE in $SCENE_LIST;
 do
@@ -42,6 +42,6 @@ do
     nvidia-smi > $RESULT_DIR/train_$SCENE.log
     CUDA_VISIBLE_DEVICES=0 python train.py --config-name $CONFIG \
         use_wandb=False with_gui=False out_dir=$RESULT_DIR \
-        path=data/scannetpp/$SCENE/dslr experiment_name=$SCENE >> $RESULT_DIR/train_$SCENE.log
+        path=data/nerf_synthetic/$SCENE experiment_name=$SCENE >> $RESULT_DIR/train_$SCENE.log
 
 done

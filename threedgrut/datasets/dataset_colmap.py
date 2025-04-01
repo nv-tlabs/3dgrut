@@ -159,8 +159,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             rays_o_cam = torch.zeros_like(rays_d_cam)
             return (
                 params.to_dict(),
-                torch.tensor(rays_o_cam, dtype=torch.float32, device=self.device).reshape(out_shape),
-                torch.tensor(rays_d_cam, dtype=torch.float32, device=self.device).reshape(out_shape),
+                rays_o_cam.to(torch.float32).reshape(out_shape),
+                rays_d_cam.to(torch.float32).reshape(out_shape),
                 type(params).__name__,
             )
 
