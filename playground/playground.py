@@ -22,23 +22,25 @@ import polyscope as ps
 import polyscope.imgui as psim
 import traceback
 import cv2
-import kaolin
-from typing import List, Tuple, Optional
+from typing import List, Optional, Dict
 from enum import IntEnum
 from pathlib import Path
 from tqdm import tqdm
 from scipy.special import comb
 from dataclasses import dataclass
+from kaolin.render.camera import Camera, generate_centered_pixel_coords, generate_pinhole_rays
 from threedgrut.utils.logger import logger
 from threedgrut.model.model import MixtureOfGaussians
 from threedgrut.model.background import BackgroundColor
+from playground.tracer import Tracer
 from playground.utils.mesh_io import load_mesh, load_materials, load_missing_material_info, create_procedural_mesh
 from playground.utils.depth_of_field import DepthOfField
+from playground.utils.video_out import VideoRecorder
 from playground.utils.spp import SPP
-from playground.tracer import Tracer
 from playground.utils.kaolin_future.transform import ObjectTransform
 from playground.utils.kaolin_future.conversions import polyscope_from_kaolin_camera, polyscope_to_kaolin_camera
 from playground.utils.kaolin_future.fisheye import generate_fisheye_rays
+from playground.utils.kaolin_future.interpolated_cameras import camera_path_generator
 
 
 #################################
@@ -423,16 +425,6 @@ class Playground:
     AVAILABLE_CAMERAS = ['Pinhole', 'Fisheye']
     AVAILABLE_CONTROLLERS = ['Turntable', 'First Person', 'Free']
     ANTIALIASING_MODES = ['4x MSAA', '8x MSAA', '16x MSAA', 'Quasi-Random (Sobol)']
-    trajectory = []
-    continuous_trajectory = False
-    trajectory_fps = 30
-    frames_between_cameras = 60
-    trajectory_output_path = "output.mp4"
-    cameras_save_path = "cameras.npy"
-    window_w, window_h = 1920, 1080
-    use_dof_in_trajectory = False
-    min_dof = 2.5
-    max_dof = 24
 
     def __init__(self, gs_object, mesh_assets_folder, default_config, buffer_mode="device2device"):
 
@@ -445,7 +437,7 @@ class Playground:
         self.frame_id = 0
         self.camera_type = 'Pinhole'
         self.controller_type = 'Turntable'
-        self.camera_fov = 60.0
+        self.camera_fov = 45.0
 
         self.use_depth_of_field = False
         self.depth_of_field = DepthOfField(aperture_size=0.01, focus_z=1.0)
@@ -482,6 +474,11 @@ class Playground:
             rgb=None,
             opacity=None
         )
+
+        self.video_recorder = VideoRecorder(renderer=self)
+        self.video_h = 1080
+        self.video_w = 1920
+
         """ When this flag is toggled on, the state of the canvas have changed and it needs to be re-rendered
         """
         self.is_force_canvas_dirty = False
@@ -531,7 +528,7 @@ class Playground:
             rb['opacity'] = (rb['opacity'] * i + spp_rb['pred_opacity']) / (i + self.spp.batch_size)
 
     @torch.cuda.nvtx.range(f"playground._render_playground_hybrid")
-    def _render_playground_hybrid(self, rays_o: torch.Tensor, rays_d) -> dict[str, torch.Tensor]:
+    def _render_playground_hybrid(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> Dict[str, torch.Tensor]:
         mog = self.scene_mog
         playground_render_opts = 0
         if self.primitives.use_smooth_normals:
@@ -604,15 +601,25 @@ class Playground:
         rendered_results['pred_rgb'] = pred_rgb
         return rendered_results
 
-    @torch.cuda.nvtx.range("render")
+    @torch.cuda.nvtx.range("render_pass")
     @torch.no_grad()
-    def render(self, camera: kaolin.render.camera.Camera):
+    def render_pass(self, camera: Camera, is_first_pass: bool):
+        """
+        Renders a single pass of the current frame from the camera point of view.
+        render_pass() is suitable for online rendering situations, where interactivity is preferred.
+        If is_first_pass is true, the first pass excluding any antialiasing and depth-of-field effects will be rendered.
+        If is_first_pass is false and multi-pass effects are enabled, additional effects will be gradually rendered
+        every time this function is called.
+        This function returns the last cached frame if no more passes remain.
+        """
+        # Rendering 3dgrut requires camera to run on cuda device -- avoid crashing
+        if camera.device.type == 'cpu':
+            camera = camera.cuda()
 
-        is_canvas_dirty = self.is_dirty()
-        is_use_spp = not is_canvas_dirty and not self.use_depth_of_field and self.use_spp
+        is_use_spp = not is_first_pass and not self.use_depth_of_field and self.use_spp
         rays = self.raygen(camera, use_spp=is_use_spp)
 
-        if is_canvas_dirty:
+        if is_first_pass:
             if not self.primitives.enabled or not self.primitives.has_visible_objects():
                 rb = self.scene_mog.trace(rays_o=rays.rays_ori, rays_d=rays.rays_dir)
             else:
@@ -643,7 +650,24 @@ class Playground:
             rb['rgb_buffer'][mask] = 0.0
             rb['opacity'][mask] = 0.0
 
+        self.cache_last_state(camera=camera, renderbuffers=rb, window_size=[camera.height, camera.width])
         return rb
+
+    @torch.cuda.nvtx.range("render")
+    def render(self, camera: Camera) -> Dict[str, torch.Tensor]:
+        """
+        Renders a single frame, possibly consisting of multiple passes if any visual effects are toggled on.
+        render() is suitable for offline rendering situations, where high quality is preferred.
+
+        By default, 3dgrt requires only a single pass to render.
+        Toggling on antialiasing and depth of field may require additional samples which require additional passes.
+
+        The returned dictionary of rendered buffers always includes the 'rgb' and 'opacity' buffers.
+        """
+        renderbuffers = self.render_pass(camera, is_first_pass=True)
+        while self.has_progressive_effects_to_render():
+            renderbuffers = self.render_pass(camera, is_first_pass=False)
+        return renderbuffers
 
     @torch.cuda.nvtx.range("load_object")
     def load_object(self, object_path, config_name='apps/colmap_3dgrt.yaml'):
@@ -768,110 +792,10 @@ class Playground:
         # Update once to popualte lazily-created structures
         self.update_render_view_viz(force=True)
 
-    @torch.no_grad()
-    def render_trajectory(self):
-        def smoothstep(x, x_min=0, x_max=1, N=1):
-            x = np.clip((x - x_min) / (x_max - x_min), 0, 1)
-
-            result = 0
-            for n in range(0, N + 1):
-                result += comb(N + n, n) * comb(2 * N + 1, N - n) * (-x) ** n
-
-            result *= x ** (N + 1)
-
-            return result
-
-
-        if len(self.trajectory) < 2:
-            return
-
-        out_video = None
-
-        if self.use_dof_in_trajectory:
-            old_use_dof = self.use_depth_of_field
-            self.use_depth_of_field = True
-            eye, target, up = self.trajectory[0]
-            ps.look_at_dir(eye, target, up, fly_to=True)
-            dofs = np.linspace(self.min_dof, self.max_dof, self.frames_between_cameras)
-            for dof in tqdm(dofs):
-                self.depth_of_field.focus_z = dof
-                self.is_force_canvas_dirty = True
-
-                rgb, _ = self.render_from_current_ps_view(window_w=self.window_w, window_h=self.window_h)
-                while self.has_progressive_effects_to_render():
-                    rgb, _ = self.render_from_current_ps_view(window_w=self.window_w, window_h=self.window_h)
-
-                if out_video is None:
-                    out_video = cv2.VideoWriter(self.trajectory_output_path, cv2.VideoWriter_fourcc(*'mp4v'),
-                                                self.trajectory_fps, (rgb.shape[2], rgb.shape[1]), True)
-                data = rgb[0].clip(0, 1).detach().cpu().numpy()
-                data = (data * 255).astype(np.uint8)
-                data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
-                out_video.write(data)
-            self.use_depth_of_field = old_use_dof
-
-        elif self.continuous_trajectory:
-            eyes = np.stack([eye for eye, target, up in self.trajectory])
-            targets = np.stack([target for eye, target, up in self.trajectory])
-            ups = np.stack([up for eye, target, up in self.trajectory])
-
-            from scipy.interpolate import splprep, splev
-            tck, u = splprep(eyes.T, u=None, s=0.0, per=1)
-            u_new = np.linspace(u.min(), u.max(), self.frames_between_cameras * len(self.trajectory))
-            eyes_new = np.stack(splev(u_new, tck, der=0)).T
-
-            tck, u = splprep(targets.T, u=None, s=0.0, per=1)
-            u_new = np.linspace(u.min(), u.max(), self.frames_between_cameras * len(self.trajectory))
-            targets_new = np.stack(splev(u_new, tck, der=0)).T
-
-            tck, u = splprep(ups.T, u=None, s=0.0, per=1)
-            u_new = np.linspace(u.min(), u.max(), self.frames_between_cameras * len(self.trajectory))
-            ups_new = np.stack(splev(u_new, tck, der=0)).T
-
-            for eye, target, up in tqdm(zip(eyes_new, targets_new, ups_new)):
-                ps.look_at_dir(eye, target, up)
-
-                rgb, _ = self.render_from_current_ps_view(window_w=self.window_w, window_h=self.window_h)
-                while self.has_progressive_effects_to_render():
-                    rgb, _ = self.render_from_current_ps_view(window_w=self.window_w, window_h=self.window_h)
-
-                if out_video is None:
-                    out_video = cv2.VideoWriter(self.trajectory_output_path, cv2.VideoWriter_fourcc(*'mp4v'),
-                                                self.trajectory_fps, (rgb.shape[2], rgb.shape[1]), True)
-                data = rgb[0].clip(0, 1).detach().cpu().numpy()
-                data = (data * 255).astype(np.uint8)
-                data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
-                out_video.write(data)
-        else:
-            for traj_idx in tqdm(range(1, len(self.trajectory))):
-                eye_1, target_1, up_1 = self.trajectory[traj_idx - 1]
-                eye_2, target_2, up_2 = self.trajectory[traj_idx]
-
-                Xs = smoothstep(np.linspace(0.0, 1.0, self.frames_between_cameras), N=3)
-
-                for x in Xs:
-                    eye = eye_1 * (1 - x) + eye_2 * x
-                    target = target_1 * (1 - x) + target_2 * x
-                    up = up_1 * (1 - x) + up_2 * x
-                    ps.look_at_dir(eye, target, up)
-
-                    rgb, _ = self.render_from_current_ps_view(window_w=self.window_w, window_h=self.window_h)
-                    while self.has_progressive_effects_to_render():
-                        rgb, _ = self.render_from_current_ps_view(window_w=self.window_w, window_h=self.window_h)
-
-                    if out_video is None:
-                        out_video = cv2.VideoWriter(self.trajectory_output_path, cv2.VideoWriter_fourcc(*'mp4v'),
-                                                    self.trajectory_fps, (rgb.shape[2], rgb.shape[1]), True)
-                    data = rgb[0].clip(0, 1).detach().cpu().numpy()
-                    data = (data * 255).astype(np.uint8)
-                    data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
-                    out_video.write(data)
-        out_video.release()
-
-    def did_camera_change(self):
-        current_view_matrix = ps.get_view_camera_parameters().get_E()
-        cached_camera = self.last_state.get('camera')
-        is_camera_changed = cached_camera is not None and (cached_camera != current_view_matrix).any()
+    def did_camera_change(self, camera):
+        current_view_matrix = camera.view_matrix()
+        cached_camera_matrix = self.last_state.get('camera')
+        is_camera_changed = cached_camera_matrix is not None and (cached_camera_matrix != current_view_matrix).any()
         return is_camera_changed
 
     def has_cached_buffers(self):
@@ -884,34 +808,33 @@ class Playground:
                                     self.use_spp and self.spp.spp_accumulated_for_frame <= self.spp.spp
         return has_dof_buffers_to_render or has_spp_buffers_to_render
 
-    def is_dirty(self):
+    def is_dirty(self, camera):
         # Force dirty flag is on
         if self.is_force_canvas_dirty:
             return True
         if self.is_materials_dirty:
             return True
-        if self.did_camera_change():
+        if self.did_camera_change(camera):
             return True
         if not self.has_cached_buffers():
             return True
         return False
 
-    def cache_last_state(self, view_params, outputs, window_size):
+    def cache_last_state(self, camera, renderbuffers, window_size):
         self.last_state['window_size'] = window_size
-        self.last_state['camera'] = copy.deepcopy(view_params.get_E())
-        self.last_state['rgb'] = outputs['rgb']
-        self.last_state['rgb_buffer'] = outputs['rgb_buffer']
-        self.last_state['opacity'] = outputs['opacity']
+        self.last_state['camera'] = copy.deepcopy(camera.view_matrix())
+        self.last_state['rgb'] = renderbuffers['rgb']
+        self.last_state['rgb_buffer'] = renderbuffers['rgb_buffer']
+        self.last_state['opacity'] = renderbuffers['opacity']
 
     def _raygen_pinhole(self, camera, jitter=None) -> RayPack:
-        pixel_y, pixel_x = kaolin.render.camera.raygen.generate_centered_pixel_coords(
-            camera.width, camera.height, device=camera.device
-        )
+        pixel_y, pixel_x = generate_centered_pixel_coords(camera.width, camera.height, device=camera.device)
         if jitter is not None:
+            jitter = jitter.to(device=pixel_x.device)
             pixel_x += jitter[:, :, 0]
             pixel_y += jitter[:, :, 1]
         ray_grid = [pixel_y, pixel_x]
-        rays_o, rays_d = kaolin.render.camera.raygen.generate_rays(camera, coords_grid=ray_grid)
+        rays_o, rays_d = generate_pinhole_rays(camera, coords_grid=ray_grid)
 
         return RayPack(
             rays_ori=rays_o.reshape(1, camera.height, camera.width, 3).float(),
@@ -922,10 +845,11 @@ class Playground:
 
     @torch.cuda.nvtx.range("_raygen_fisheye")
     def _raygen_fisheye(self, camera, jitter) -> RayPack:
-        pixel_y, pixel_x = kaolin.render.camera.raygen.generate_centered_pixel_coords(
+        pixel_y, pixel_x = generate_centered_pixel_coords(
             camera.width, camera.height, device=camera.device
         )
         if jitter is not None:
+            jitter = jitter.to(device=pixel_x.device)
             pixel_x += jitter[:, :, 0]
             pixel_y += jitter[:, :, 1]
         ray_grid = [pixel_y, pixel_x]
@@ -964,15 +888,6 @@ class Playground:
     def render_from_current_ps_view(self, window_w=None, window_h=None):
         if window_w is None or window_h is None:
             window_w, window_h = ps.get_window_size()
-        # If window size changed since the last render call, mark the canvas as dirty.
-        # We check it here since the event comes from the windowing system and could prompt in between frame renders
-        if self.last_state.get('window_size'):
-            last_window_size = self.last_state.get('window_size')
-            if (last_window_size[0] != window_h) or (last_window_size[1] != window_w):
-                self.is_force_canvas_dirty = True
-
-        if not self.is_dirty() and not self.has_progressive_effects_to_render():
-            return self.last_state['rgb'], self.last_state['opacity']
 
         # Update polyscope camera with params from gui
         view_params = ps.CameraParameters(
@@ -981,11 +896,21 @@ class Playground:
         )
         ps.set_view_camera_parameters(view_params)
 
-        # Render a frame
-        camera = polyscope_to_kaolin_camera(view_params, window_w, window_h, device=self.DEFAULT_DEVICE)
-        outputs = self.render(camera)
+        # If window size changed since the last render call, mark the canvas as dirty.
+        # We check it here since the event comes from the windowing system and could prompt in between frame renders
+        if self.last_state.get('window_size'):
+            last_window_size = self.last_state.get('window_size')
+            if (last_window_size[0] != window_h) or (last_window_size[1] != window_w):
+                self.is_force_canvas_dirty = True
 
-        self.cache_last_state(view_params=view_params, outputs=outputs, window_size=(window_h, window_w))
+        camera = polyscope_to_kaolin_camera(view_params, window_w, window_h, device=self.DEFAULT_DEVICE)
+        is_first_pass = self.is_dirty(camera)
+        if not is_first_pass and not self.has_progressive_effects_to_render():
+            return self.last_state['rgb'], self.last_state['opacity']
+
+        # Render a frame
+        outputs = self.render_pass(camera, is_first_pass)
+
         self.is_force_canvas_dirty = False
         self.is_materials_dirty = False
         return outputs['rgb'], outputs['opacity']
@@ -1212,71 +1137,82 @@ class Playground:
     def _draw_video_recording_controls(self):
         psim.SetNextItemOpen(False, psim.ImGuiCond_FirstUseEver)
         if psim.TreeNode("Record Trajectory Video"):
-            _, self.trajectory_output_path = psim.InputText("Video Output Path", self.trajectory_output_path)
+            _, self.video_recorder.trajectory_output_path = psim.InputText("Video Output Path",
+                                                                           self.video_recorder.trajectory_output_path)
             if (psim.Button("Add Camera")):
-                view_params = ps.get_view_camera_parameters()
-                cam_center = view_params.get_position()
-                self.trajectory.append((
-                    cam_center,
-                    cam_center + view_params.get_look_dir(),
-                    view_params.get_up_dir()
-                ))
+                camera = polyscope_to_kaolin_camera(
+                    ps.get_view_camera_parameters(), width=self.video_w, height=self.video_h
+                )
+                self.video_recorder.add_camera(camera)
             psim.SameLine()
             if (psim.Button("Reset")):
-                self.trajectory = []
+                self.video_recorder.reset_trajectory()
             psim.SameLine()
             if (psim.Button("Render Video")):
-                self.render_trajectory()
-            psim.SameLine()
-            changed, self.continuous_trajectory = psim.Checkbox("Continuous Trajectory", self.continuous_trajectory)
+                try:
+                    self.video_recorder.render_video()
+                except ValueError as e: # Catch and display any warnings for incorrect input
+                    ps.warning(f'{e}')
+
             psim.PushItemWidth(150)
-            _, self.frames_between_cameras = psim.SliderInt(
-                "Frames Between", self.frames_between_cameras, v_min=1, v_max=120
+            mode_index = VideoRecorder.MODES.index(self.video_recorder.mode)
+            _, mode_index = psim.Combo(
+                "Interpolation", mode_index, VideoRecorder.MODES
+            )
+            self.video_recorder.mode = VideoRecorder.MODES[mode_index]
+            psim.PopItemWidth()
+
+            if self.video_recorder.mode == 'depth_of_field':
+                psim.PushItemWidth(100)
+                psim.SameLine()
+                _, self.video_recorder.min_dof = psim.SliderFloat(
+                    "Min FoV", self.video_recorder.min_dof, v_min=0.0, v_max=24.0
+                )
+                psim.SameLine()
+                _, self.video_recorder.max_dof = psim.SliderFloat(
+                    "Max FoV", self.video_recorder.max_dof, v_min=0.0, v_max=24.0
+                )
+                psim.PopItemWidth()
+
+            psim.PushItemWidth(150)
+            _, self.video_recorder.frames_between_cameras = psim.SliderInt(
+                "Frames Between", self.video_recorder.frames_between_cameras, v_min=1, v_max=120
             )
             psim.SameLine()
-            _, self.trajectory_fps = psim.SliderInt(
-                "FPS", self.trajectory_fps, v_min=1, v_max=120
+            _, self.video_recorder.video_fps = psim.SliderInt(
+                "FPS", self.video_recorder.video_fps, v_min=1, v_max=120
             )
-            _, self.window_w = psim.SliderInt(
-                "Width", self.window_w, v_min=1, v_max=8192
+            _, self.video_w = psim.SliderInt(
+                "Width", self.video_w, v_min=1, v_max=8192
             )
             psim.SameLine()
-            _, self.window_h = psim.SliderInt(
-                "Height", self.window_h, v_min=1, v_max=8192
+            _, self.video_h = psim.SliderInt(
+                "Height", self.video_h, v_min=1, v_max=8192
             )
             psim.PopItemWidth()
-            psim.Text(f"There are {len(self.trajectory)} cameras in the trajectory.")
 
-            if len(self.trajectory) > 0 and psim.TreeNode("Cameras"):
+            trajectory = self.video_recorder.trajectory
+            psim.Text(f"There are {len(trajectory)} cameras in the trajectory.")
+
+            if len(trajectory) > 0 and psim.TreeNode("Cameras"):
                 remained_cameras = []
-                for i, (eye, target, up) in enumerate(self.trajectory):
-                    is_not_removed = self._draw_single_trajectory_camera(i, eye, target, up)
+                for i, cam in enumerate(trajectory):
+                    is_not_removed = self._draw_single_trajectory_camera(i, cam)
                     remained_cameras.append(is_not_removed)
-                self.trajectory = [self.trajectory[i] for i in range(len(self.trajectory)) if remained_cameras[i]]
+                self.video_recorder.trajectory = [trajectory[i] for i in range(len(trajectory)) if remained_cameras[i]]
 
                 psim.TreePop()
 
             if psim.TreeNode("Load/Save a Trajectory"):
-                _, self.cameras_save_path = psim.InputText("Cameras' Path", self.cameras_save_path)
+                _, self.video_recorder.cameras_save_path = psim.InputText("Cameras' Path",
+                                                                          self.video_recorder.cameras_save_path)
                 if (psim.Button("Save Trajectory")):
-                    np.save(self.cameras_save_path, self.trajectory)
+                    self.video_recorder.save_trajectory()
                 psim.SameLine()
                 if (psim.Button("Load Trajectory")):
-                    self.trajectory = list(np.load(self.cameras_save_path))
+                    self.video_recorder.load_trajectory()
 
                 psim.TreePop()
-
-            _, self.use_dof_in_trajectory = psim.Checkbox("Use DoF", self.use_dof_in_trajectory)
-            psim.PushItemWidth(100)
-            psim.SameLine()
-            _, self.min_dof = psim.SliderFloat(
-                "Min FoV", self.min_dof, v_min=0.0, v_max=24.0
-            )
-            psim.SameLine()
-            _, self.max_dof = psim.SliderFloat(
-                "Max FoV", self.max_dof, v_min=0.0, v_max=24.0
-            )
-            psim.PopItemWidth()
 
             psim.PopItemWidth()
             psim.TreePop()
@@ -1777,32 +1713,29 @@ class Playground:
             self.primitives.recompute_stacked_buffers()
         self.is_force_canvas_dirty = self.is_force_canvas_dirty or settings_changed
 
-    def _draw_mirror_settings_widget(self, obj):
-        pass
-
-    def _draw_single_trajectory_camera(self, i, eye, target, up):
+    def _draw_single_trajectory_camera(self, i, cam):
+        view_params = polyscope_from_kaolin_camera(cam)
+        eye = view_params.get_position()
+        target = view_params.get_position() + view_params.get_look_dir()
+        up = view_params.get_up_dir()
         psim.PushItemWidth(200)
-        if (psim.Button(f"view {i + 1}")):
+        if (psim.Button(f"View {i + 1}")):
             ps.look_at_dir(eye, target, up, fly_to=True)
 
         psim.SameLine()
-        if (psim.Button(f"remove {i + 1}")):
+        if (psim.Button(f"Remove {i + 1}")):
             is_not_removed = False
         else:
             is_not_removed = True
 
         psim.SameLine()
-        if psim.Button(f"replace {i + 1}"):
-            view_params = ps.get_view_camera_parameters()
-            cam_center = view_params.get_position()
-            self.trajectory[i] = (
-                cam_center,
-                cam_center + view_params.get_look_dir(),
-                view_params.get_up_dir()
+        if psim.Button(f"Replace {i + 1}"):
+            camera = polyscope_to_kaolin_camera(
+                ps.get_view_camera_parameters(), width=self.video_w, height=self.video_h
             )
+            self.video_recorder.trajectory[i] = camera
 
         psim.PopItemWidth()
-
         return is_not_removed
 
     @torch.cuda.nvtx.range("ps_ui_callback")
