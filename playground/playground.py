@@ -1023,6 +1023,7 @@ class Playground:
             psim.TreePop()
 
     def _draw_render_widget(self):
+        window_w, window_h = ps.get_window_size()
         psim.SetNextItemOpen(True, psim.ImGuiCond_FirstUseEver)
         if psim.TreeNode("Render"):
             render_channel_changed, self.viz_render_style_ind = psim.Combo(
@@ -1055,7 +1056,7 @@ class Playground:
                     ps.CameraIntrinsics(
                         fov_vertical_deg=self.camera_fov,
                         fov_horizontal_deg=None,
-                        aspect=self.window_w / self.window_h
+                        aspect=window_w / window_h
                     ),
                     ps.get_view_camera_parameters().get_extrinsics()
                 )
@@ -1067,7 +1068,7 @@ class Playground:
             if psim.Button("Reset View"):
                 ps.reset_camera_to_home_view()
             if psim.IsItemHovered():
-                psim.SetNextWindowPos([self.window_w - psim.GetWindowWidth() - 120, 20])
+                psim.SetNextWindowPos([window_w - psim.GetWindowWidth() - 120, 20])
                 psim.Begin("Reset View", None, psim.ImGuiWindowFlags_NoTitleBar)
                 psim.TextUnformatted("View Navigation:")
                 psim.TextUnformatted("      Rotate: [left click drag]")
@@ -1163,7 +1164,7 @@ class Playground:
             psim.PopItemWidth()
 
             if self.video_recorder.mode == 'depth_of_field':
-                psim.PushItemWidth(100)
+                psim.PushItemWidth(75)
                 psim.SameLine()
                 _, self.video_recorder.min_dof = psim.SliderFloat(
                     "Min FoV", self.video_recorder.min_dof, v_min=0.0, v_max=24.0
@@ -1174,7 +1175,7 @@ class Playground:
                 )
                 psim.PopItemWidth()
 
-            psim.PushItemWidth(150)
+            psim.PushItemWidth(75)
             _, self.video_recorder.frames_between_cameras = psim.SliderInt(
                 "Frames Between", self.video_recorder.frames_between_cameras, v_min=1, v_max=120
             )
