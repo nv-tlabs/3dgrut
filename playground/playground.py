@@ -712,11 +712,16 @@ class Playground:
 
     @torch.cuda.nvtx.range("rebuild_bvh (mog)")
     def rebuild_bvh(self, scene_mog):
+        """ Rebuilds all BVHs used by playground:
+        1. 3dgrt BVH of proxy shapes encapsulating gaussian particles
+        2. Mesh BVH holding faces of primitives use in the playground
+        """
         rebuild = True
         self.tracer.build_gs_acc(gaussians=scene_mog, rebuild=rebuild)
         self.primitives.rebuild_bvh_if_needed()
 
     def run(self):
+        """ Run infinite gui loop"""
         while self.is_running:
             ps.frame_tick()
 
@@ -792,16 +797,16 @@ class Playground:
         # Update once to popualte lazily-created structures
         self.update_render_view_viz(force=True)
 
-    def did_camera_change(self, camera):
+    def did_camera_change(self, camera) -> bool:
         current_view_matrix = camera.view_matrix()
         cached_camera_matrix = self.last_state.get('camera')
         is_camera_changed = cached_camera_matrix is not None and (cached_camera_matrix != current_view_matrix).any()
         return is_camera_changed
 
-    def has_cached_buffers(self):
+    def has_cached_buffers(self) -> bool:
         return self.last_state.get('rgb') is not None and self.last_state.get('opacity') is not None
 
-    def has_progressive_effects_to_render(self):
+    def has_progressive_effects_to_render(self) -> bool:
         has_dof_buffers_to_render = self.use_depth_of_field and \
                                     self.depth_of_field.spp_accumulated_for_frame <= self.depth_of_field.spp
         has_spp_buffers_to_render = not self.use_depth_of_field and \
@@ -809,6 +814,7 @@ class Playground:
         return has_dof_buffers_to_render or has_spp_buffers_to_render
 
     def is_dirty(self, camera):
+        """ Returns true if the state of the scene have changed since last time the canvas was rendered. """
         # Force dirty flag is on
         if self.is_force_canvas_dirty:
             return True
@@ -886,6 +892,7 @@ class Playground:
     @torch.cuda.nvtx.range("render_from_current_ps_view")
     @torch.no_grad()
     def render_from_current_ps_view(self, window_w=None, window_h=None):
+        """ Render a frame using the polyscope gui camera and window size """
         if window_w is None or window_h is None:
             window_w, window_h = ps.get_window_size()
 
@@ -924,6 +931,9 @@ class Playground:
     @torch.cuda.nvtx.range("update_render_view_viz")
     @torch.no_grad()
     def update_render_view_viz(self, force=False):
+        """ Renders a single pass using the polyscope camera and updates the polyscope canvas buffers
+        with rendered information.
+        """
         window_w, window_h = ps.get_window_size()
 
         # re-initialize if needed
@@ -1741,6 +1751,7 @@ class Playground:
 
     @torch.cuda.nvtx.range("ps_ui_callback")
     def ps_ui_callback(self):
+        """ Polyscope custom UI callback - used to draw gui menu"""
         self._draw_preset_settings_widget()
         psim.Separator()
         self._draw_render_widget()
@@ -1757,5 +1768,6 @@ class Playground:
         psim.Separator()
         self._draw_primitives_widget()
 
+        # Finally refresh the canvas by rendering the next pass, if needed
         if self.live_update:
             self.update_render_view_viz()

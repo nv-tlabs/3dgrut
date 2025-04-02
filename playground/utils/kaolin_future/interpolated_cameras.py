@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List
+from typing import List, Iterator
 from scipy.special import comb
 from kaolin.render.camera import Camera
 import numpy as np
@@ -80,7 +80,7 @@ def interpolate_camera_on_polynomial_path(
     timestep: int,
     frames_between_cameras: int = 60,
     N: int = 3
-):
+) -> Camera:
     r"""Interpolates a camera from a smoothed path formed by a trajectory of cameras.
     The trajectory is assumed to have a list of at least 2 cameras, where the first and last cameras form a
     looped path.
@@ -91,7 +91,7 @@ def interpolate_camera_on_polynomial_path(
         timestep (int): Timestep used to interpolate a point on the smoothed trajectory.
             `timestep` can take any integer value to support continuous animations.
             e.g. if `timestep > len(trajectory) X frames_between_cameras`, the timestep will fold over using a
-            modulus.
+            modulus op.
         frames_between_cameras (int): Number of interpolated points generated between each pair of cameras on the
             trajectory. In essence, this value controls how detailed, or smooth the path is.
         N (int): determines the order polynomial, where the exact order is 2N + 1.
@@ -142,7 +142,7 @@ def interpolate_camera_on_spline_path(
     trajectory: List[Camera],
     timestep: int,
     frames_between_cameras: int = 60
-):
+) -> Camera:
     r"""Interpolates a camera from a linear path formed by a trajectory of cameras.
     The trajectory is assumed to have a list of at least 4 cameras.
     The interpolation is done using Catmull-Rom Splines.
@@ -217,7 +217,7 @@ def infinite_loop_camera_path_generator(
     trajectory: List[Camera],
     frames_between_cameras: int = 60,
     interpolation: str = 'polynomial',
-):
+) -> Iterator[Camera]:
     r"""A generator function for returning continuous camera objects an o smoothed path interpolated
     from a trajectory of cameras.
     The trajectory is assumed to have a list of at least 2 cameras, where the first and last cameras form a
@@ -254,11 +254,12 @@ def camera_path_generator(
     trajectory: List[Camera],
     frames_between_cameras: int = 60,
     interpolation: str = 'catmull_rom'
-):
-    r"""A generator function for returning continuous camera objects an o path interpolated on a spline
+) -> Iterator[Camera]:
+    r"""A finite generator function for returning continuous camera objects an o path interpolated
     from a trajectory of cameras.
-    The trajectory is assumed to have a list of at least 4 cameras.
     This generator is exhausted after it returns the last point on the path.
+    If interpolation is 'polynomial' - the trajectory is assumed to have a list of at least 2 cameras.
+    If interpolation is 'catmull_rom' - the trajectory is assumed to have a list of at least 4 cameras.
 
     Args:
         trajectory (List[kaolin.render.camera.Camera]): A trajectory of camera nodes, used to form a continuous path.

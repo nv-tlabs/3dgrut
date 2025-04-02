@@ -16,6 +16,7 @@
 import torch
 import numpy as np
 import polyscope as ps
+from typing import Union
 from kaolin.render.camera import Camera
 
 """
@@ -23,15 +24,32 @@ This module is to be included in next version of kaolin 0.18.0.
 As of March 26, 2025 the latest public release is kaolin 0.17.0, hence it's included here independently.
 """
 
-def polyscope_to_kaolin_camera(ps_camera, width, height, near=1e-2, far=1e2, device='cpu'):
-    """ Converts a polyscope camera (polyscope.CameraParameters) to kaolin Camera format (kaolin.render.camera.Camera).
+def polyscope_to_kaolin_camera(
+    ps_camera: ps.core.CameraParameters,
+    width: int,
+    height: int,
+    near: float = 1e-2,
+    far: float = 1e2,
+    device: Union[torch.device, str] = 'cpu'
+) -> Camera:
+    """ Converts a polyscope camera (polyscope.core.CameraParameters) to kaolin Camera format (kaolin.render.camera.Camera).
     The converted information includes the camera extrinsics, the image plane dimensions and field of view.
     Additional parameters that kaolin cameras assume, such as near, far plane and device
     can be passed explicitly if needed.
+
+    Args:
+        ps_camera (ps.core.CameraParameters): A polyscope camera object.
+        width (int): Image plane width in pixels.
+        height (int): Image plane height in pixels.
+        near (optional, float): near clipping plane, defines the min depth of the view frustrum.
+        far (optional, float): far clipping plane, define the max depth of the view frustrum.
+        device (optional, torch.device or str): the device on which camera parameters will be allocated. Default: cpu
+    Returns:
+        (kaolin.render.camera.Camera):
+            A kaolin camera object.
     """
     view_matrix = ps_camera.get_view_mat()
     fov_y = ps_camera.get_fov_vertical_deg() * np.pi / 180.0    # to radians
-
     return Camera.from_args(
         view_matrix=view_matrix,
         fov=fov_y,
@@ -42,10 +60,16 @@ def polyscope_to_kaolin_camera(ps_camera, width, height, near=1e-2, far=1e2, dev
     )
 
 
-def polyscope_from_kaolin_camera(camera: Camera):
-    """ Converts a kaolin camera (kaolin.render.camera.Camera) to a
-    polyscope camera format (polyscope.CameraParameters).
-    polysacope cameras are always assumed to exist on a cpu device.
+def polyscope_from_kaolin_camera(camera: Camera) -> ps.core.CameraParameters:
+    """ Converts a kaolin camera (kaolin.render.camera.Camera) to a polyscope camera format (polyscope.core.CameraParameters).
+    polyscope cameras are always assumed to exist on a cpu device.
+    The converted information includes the camera extrinsics, and intrinsics for the field of view.
+
+    Args:
+        camera (kaolin.render.camera.Camera): A polyscope camera object.
+    Returns:
+        (ps.core.CameraParameters):
+            A polyscope camera object.
     """
     view_matrix = camera.view_matrix()
     ps_cam_param = ps.CameraParameters(
