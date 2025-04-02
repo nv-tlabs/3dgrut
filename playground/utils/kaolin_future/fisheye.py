@@ -22,6 +22,7 @@ This module is to be included in next version of kaolin 0.18.0.
 As of March 26, 2025 the latest public release is kaolin 0.17.0, hence it's included here independently.
 """
 
+# Private function copied from kaolin, to be deleted
 def _to_ndc_coords(pixel_x, pixel_y, camera):
     pixel_x = 2 * (pixel_x / camera.width) - 1.0
     pixel_y = 2 * (pixel_y / camera.height) - 1.0
