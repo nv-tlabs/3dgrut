@@ -25,16 +25,11 @@ import traceback
 from threedgrt_tracer.gui.ps_extension import initialize_cugl_interop
 from threedgrut.utils.logger import logger
 from threedgrut.model.model import MixtureOfGaussians
-from threedgrut.model.background import BackgroundColor
-from playground.tracer import Tracer
-from playground.utils.mesh_io import load_mesh, load_materials, load_missing_material_info, create_procedural_mesh
 from playground.utils.depth_of_field import DepthOfField
 from playground.utils.video_out import VideoRecorder
 from playground.utils.spp import SPP
 from playground.utils.kaolin_future.transform import ObjectTransform
 from playground.utils.kaolin_future.conversions import polyscope_from_kaolin_camera, polyscope_to_kaolin_camera
-from playground.utils.kaolin_future.fisheye import generate_fisheye_rays
-from playground.utils.kaolin_future.interpolated_cameras import camera_path_generator
 from playground.engine import Engine3DGRUT, OptixPrimitiveTypes
 
 
