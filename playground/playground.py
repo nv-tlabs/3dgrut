@@ -1175,7 +1175,6 @@ class Playground:
 
             if self.video_recorder.mode == 'depth_of_field':
                 psim.PushItemWidth(75)
-                psim.SameLine()
                 _, self.video_recorder.min_dof = psim.SliderFloat(
                     "Min FoV", self.video_recorder.min_dof, v_min=0.0, v_max=24.0
                 )
