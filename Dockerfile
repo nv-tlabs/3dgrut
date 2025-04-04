@@ -14,7 +14,7 @@ RUN apt-get update \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+RUN curl -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py311_25.1.1-2-Linux-x86_64.sh && \
     bash ~/miniconda.sh -b -p /opt/conda && \
     rm ~/miniconda.sh && \
     /opt/conda/bin/conda install -y python=${PYTHON_VERSION} && \
@@ -44,5 +44,5 @@ ENV FORCE_CUDA=1
 WORKDIR /workspace
 COPY . .
 
-RUN CUDA_VERSION=$CUDA_VERSION ./install_env.sh 3dgrut WITH_GCC11 
+RUN CUDA_VERSION=$CUDA_VERSION bash ./install_env.sh 3dgrut WITH_GCC11 
 RUN echo "conda activate 3dgrut" >> ~/.bashrc

@@ -80,7 +80,12 @@ An experimental build script has been kindly implemented by [@johnnynunez] (http
 
 Run the install script with both the `WITH_GCC11` flag and a CUDA version. Currently, only CUDA 12.8.1 is supported:
 ```sh
-./install_env.sh 3dgrut_cuda12 WITH_GCC11 12.8.1
+CUDA_VERSION=12.8.1 ./install_env.sh 3dgrut_cuda12 WITH_GCC11
+```
+
+To build the docker image, you can use the following command:
+```sh
+docker build --build-arg CUDA_VERSION=12.8.1 -t 3dgrut:cuda128 .
 ```
 </details>
 
