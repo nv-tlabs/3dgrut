@@ -16,6 +16,7 @@
 import os, math
 import torch
 import torch.utils.cpp_extension
+from torch.utils.cpp_extension import CUDA_HOME
 
 
 # ----------------------------------------------------------------------------
@@ -57,6 +58,9 @@ def setup_3dgut(conf):
     include_paths.append(os.path.join(prefix, "..", "thirdparty", "tiny-cuda-nn", "dependencies"))
     include_paths.append(os.path.join(prefix, "..", "thirdparty", "tiny-cuda-nn", "dependencies", "fmt", "include"))
     include_paths.append(build_dir)
+
+    # NOTE: ad-hoc fix for CUDA 12.8.1
+    include_paths.append(os.path.join(CUDA_HOME, "targets", "x86_64-linux", "include"))
 
     def to_cpp_bool(value):
         return "true" if value else "false"
@@ -117,7 +121,13 @@ def setup_3dgut(conf):
 
     # Linker options.
     if os.name == "posix":
-        ldflags = ["-lcuda", "-lnvrtc"]
+        ldflags = [
+            # NOTE: ad-hoc fix for CUDA 12.8.1
+            f"-L{os.path.join(CUDA_HOME, 'targets', 'x86_64-linux', 'lib')}",
+            f"-L{os.path.join(CUDA_HOME, 'targets', 'x86_64-linux', 'lib', 'stubs')}",
+            "-lcuda", 
+            "-lnvrtc"
+        ]
     elif os.name == "nt":
         ldflags = ["cuda.lib", "advapi32.lib", "nvrtc.lib"]
 

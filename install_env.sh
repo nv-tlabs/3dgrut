@@ -28,7 +28,7 @@ if [ $# -ge 2 ]; then
     fi
 fi
 
-CUDA_VERSION=${3:-"11.8.0"}
+CUDA_VERSION=${CUDA_VERSION:-"11.8.0"}
 
 # Verify user arguments
 echo "Arguments:"
@@ -37,6 +37,15 @@ echo "  WITH_GCC11: $WITH_GCC11"
 echo "  CUDA_VERSION: $CUDA_VERSION"
 echo ""
 
+# Make sure TORCH_CUDA_ARCH_LIST matches the pytorch wheel setting.
+# Reference: https://github.com/pytorch/pytorch/blob/main/.ci/manywheel/build_cuda.sh#L54
+#
+# (cuda11) $ python -c "import torch; print(torch.version.cuda, torch.cuda.get_arch_list())"
+# 11.8 ['sm_50', 'sm_60', 'sm_61', 'sm_70', 'sm_75', 'sm_80', 'sm_86', 'sm_37', 'sm_90', 'compute_37']
+#
+# (cuda12) $ python -c "import torch; print(torch.version.cuda, torch.cuda.get_arch_list())"
+# 12.8 ['sm_75', 'sm_80', 'sm_86', 'sm_90', 'sm_100', 'sm_120', 'compute_120']
+#
 # Check if CUDA_VERSION is supported
 if [ "$CUDA_VERSION" = "11.8.0" ]; then
     export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0";
@@ -75,7 +84,7 @@ if [ "$WITH_GCC11" = true ]; then
     GCC_11_PATH=$(which gcc-11)
     GXX_11_PATH=$(which g++-11)
 fi
-GCC_VERSION=$($GCC_11_PATH -dumpfullversion -dumpversion)
+GCC_VERSION=$($GCC_11_PATH -dumpfullversion)
 
 # Create and activate conda environment
 eval "$(conda shell.bash hook)"
@@ -100,13 +109,17 @@ if [ "$WITH_GCC11" = true ]; then
     conda activate $CONDA_ENV
 
     # Make sure it worked
-    gcc_version=$($CC -dumpversion)
+    gcc_version=$($CC -dumpversion | cut -d '.' -f 1)
     echo "gcc_version=$gcc_version"
     if [ "$gcc_version" -gt 11 ]; then
         echo "gcc version $gcc_version is still higher than 11, setting gcc-11 failed"
         exit 1
     fi
 fi
+
+conda env config vars set TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST
+conda deactivate
+conda activate $CONDA_ENV
 
 # Install CUDA and PyTorch dependencies
 # CUDA 11.8 supports until compute capability 9.0
