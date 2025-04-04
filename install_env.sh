@@ -135,8 +135,20 @@ elif [ "$CUDA_VERSION" = "12.8.1" ]; then
     conda install -y cuda-toolkit cmake ninja gcc_linux-64==$GCC_VERSION -c nvidia/label/cuda-12.8.1
     pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
     pip3 install --force-reinstall "numpy<2"
-    # pip3 install cython
-    # IGNORE_TORCH_VER=1 pip3 install -v git+https://github.com/NVIDIAGameWorks/kaolin
+
+    # TODO move to using wheel once kaolin is available
+    rm -fr thirdparty/kaolin
+    git clone --recursive https://github.com/NVIDIAGameWorks/kaolin.git thirdparty/kaolin
+    pushd thirdparty/kaolin
+    pip install --upgrade pip
+    pip install --no-cache-dir ninja imageio imageio-ffmpeg
+    pip install --no-cache-dir        \
+        -r tools/viz_requirements.txt \
+        -r tools/requirements.txt     \
+        -r tools/build_requirements.txt
+    IGNORE_TORCH_VER=1 python setup.py develop
+    popd
+    rm -fr thirdparty/kaolin
 
 # Unsupported CUDA version
 else
