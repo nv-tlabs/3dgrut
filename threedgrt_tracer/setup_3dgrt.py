@@ -16,7 +16,6 @@
 import os
 import torch
 import torch.utils.cpp_extension
-from torch.utils.cpp_extension import CUDA_HOME
 
 
 # ----------------------------------------------------------------------------
@@ -53,9 +52,6 @@ def setup_3dgrt(conf):
         include_paths.append(os.path.dirname(__file__) + r"/include")
         include_paths.append(os.path.dirname(__file__) + r"/dependencies/optix-dev/include")
 
-    # NOTE: ad-hoc fix for CUDA 12.8.1
-    include_paths.append(os.path.join(CUDA_HOME, "targets", "x86_64-linux", "include"))
-
     # Compiler options.
     cc_flags = ["-DNVDR_TORCH"]
 
@@ -69,13 +65,7 @@ def setup_3dgrt(conf):
 
     # Linker options.
     if os.name == "posix":
-        ldflags = [
-            # NOTE: ad-hoc fix for CUDA 12.8.1
-            f"-L{os.path.join(CUDA_HOME, 'targets', 'x86_64-linux', 'lib')}",
-            f"-L{os.path.join(CUDA_HOME, 'targets', 'x86_64-linux', 'lib', 'stubs')}",
-            "-lcuda", 
-            "-lnvrtc"
-        ]
+        ldflags = ["-lcuda", "-lnvrtc"]
     elif os.name == "nt":
         ldflags = ["cuda.lib", "advapi32.lib", "nvrtc.lib"]
 
