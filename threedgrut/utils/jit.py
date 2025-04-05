@@ -13,30 +13,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
+import os, math
 import torch
 import torch.utils.cpp_extension
-from pathlib import Path
+from torch.utils.cpp_extension import CUDA_HOME
 
-# ----------------------------------------------------------------------------
-#
-def setup_gui():
-    THREEDGRT_ROOT = os.path.join(str(Path(os.path.dirname(__file__)).parent.parent), 'threedgrt_tracer')
 
-    # Make sure we can find the necessary compiler and libary binaries.
-    include_paths = []
-    include_paths.append(os.path.join(THREEDGRT_ROOT, "include"))
-    include_paths.append(os.path.join(THREEDGRT_ROOT, "gui", "include"))
+def load(
+    extra_cflags=None,
+    extra_cuda_cflags=None,
+    extra_ldflags=None,
+    extra_include_paths=None,
+    with_cuda=True,
+    verbose=True,
+    *args,
+    **kwargs,
+):
 
     # Make sure we can find the necessary compiler and libary binaries.
     if os.name == "nt":
+
         def find_cl_path():
             import glob
 
             for edition in ["Enterprise", "Professional", "BuildTools", "Community"]:
                 paths = sorted(
                     glob.glob(
-                        r"C:\Program Files (x86)\Microsoft Visual Studio\*\%s\VC\Tools\MSVC\*\bin\Hostx64\x64" % edition
+                        r"C:\Program Files (x86)\Microsoft Visual Studio\*\%s\VC\Tools\MSVC\*\bin\Hostx64\x64"
+                        % edition
                     ),
                     reverse=True,
                 )
@@ -47,43 +51,66 @@ def setup_gui():
         if os.system("where cl.exe >nul 2>nul") != 0:
             cl_path = find_cl_path()
             if cl_path is None:
-                raise RuntimeError("Could not locate a supported Microsoft Visual C++ installation")
+                raise RuntimeError(
+                    "Could not locate a supported Microsoft Visual C++ installation"
+                )
             os.environ["PATH"] += ";" + cl_path
 
     elif os.name == "posix":
         pass
 
-    # Compiler options.
-    cc_flags = ["-DNVDR_TORCH"]
+    # Compiler flags.
+    cflags = [
+        "-DNVDR_TORCH",
+    ]
+    if extra_cflags is not None:
+        cflags += extra_cflags
 
-    nvcc_flags = [
+    cuda_cflags = [
         "-DNVDR_TORCH",
         "-std=c++17",
         "--extended-lambda",
         "--expt-relaxed-constexpr",
         "-Xcompiler=-fno-strict-aliasing",
     ]
+    if extra_cuda_cflags is not None:
+        cuda_cflags += extra_cuda_cflags
 
     # Linker options.
     if os.name == "posix":
-        ldflags = ["-lcuda", "-lnvrtc"]
+        ldflags = [
+            # NOTE: ad-hoc fix for CUDA 12.8.1
+            f"-L{os.path.join(CUDA_HOME, 'lib', 'stubs')}",
+            f"-L{os.path.join(CUDA_HOME, 'targets', 'x86_64-linux', 'lib')}",
+            f"-L{os.path.join(CUDA_HOME, 'targets', 'x86_64-linux', 'lib', 'stubs')}",
+            "-lcuda",
+            "-lnvrtc",
+        ]
     elif os.name == "nt":
-        ldflags = ["cuda.lib", "advapi32.lib", "nvrtc.lib"]
+        ldflags = [
+            "cuda.lib",
+            "advapi32.lib",
+            "nvrtc.lib",
+        ]
+    if extra_ldflags is not None:
+        ldflags += extra_ldflags
 
-    source_files = [
-        "gui/bindings.cpp",
+    # Include paths.
+    include_paths = [
+        # NOTE: ad-hoc fix for CUDA 12.8.1
+        os.path.join(CUDA_HOME, "targets", "x86_64-linux", "include"),
     ]
-    cc_flags.append("-DUSE_CUGL_INTEROP=1")
+    if extra_include_paths is not None:
+        include_paths += extra_include_paths
 
-    # Compile and load.
-    source_paths = [os.path.abspath(os.path.join(THREEDGRT_ROOT, fn)) for fn in source_files]
-    torch.utils.cpp_extension.load(
-        name="lib3dgrt_gui_cc",
-        sources=source_paths,
-        extra_cflags=cc_flags,
-        extra_cuda_cflags=nvcc_flags,
+    # Load
+    return torch.utils.cpp_extension.load(
+        extra_cflags=cflags,
+        extra_cuda_cflags=cuda_cflags,
         extra_ldflags=ldflags,
         extra_include_paths=include_paths,
-        with_cuda=True,
-        verbose=True,
+        with_cuda=with_cuda,
+        verbose=verbose,
+        *args,
+        **kwargs,
     )

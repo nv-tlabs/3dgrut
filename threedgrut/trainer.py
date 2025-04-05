@@ -330,7 +330,7 @@ class Trainer3DGRUT:
         lpips = self.criterions["lpips"]
 
         # Move losses to cpu once
-        metrics["losses"] = {k: v.item() for k, v in losses.items()}
+        metrics["losses"] = {k: v.detach().item() for k, v in losses.items()}
 
         is_compute_train_hit_metrics = (split == "training") and (step % self.conf.writer.hit_stat_frequency == 0)
         is_compute_validation_metrics = split == "validation"

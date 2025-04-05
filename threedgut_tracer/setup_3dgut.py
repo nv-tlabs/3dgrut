@@ -15,42 +15,17 @@
 
 import os, math
 import torch
-import torch.utils.cpp_extension
+
+from threedgrut.utils import jit
 
 
 # ----------------------------------------------------------------------------
 #
 def setup_3dgut(conf):
-    include_paths = []
 
     build_dir = torch.utils.cpp_extension._get_build_directory("lib3dgut_cc", verbose=True)
 
-    # Make sure we can find the necessary compiler and libary binaries.
-    if os.name == "nt":
-
-        def find_cl_path():
-            import glob
-
-            for edition in ["Enterprise", "Professional", "BuildTools", "Community"]:
-                paths = sorted(
-                    glob.glob(
-                        r"C:\Program Files (x86)\Microsoft Visual Studio\*\%s\VC\Tools\MSVC\*\bin\Hostx64\x64" % edition
-                    ),
-                    reverse=True,
-                )
-                if paths:
-                    return paths[0]
-
-        # If cl.exe is not on path, try to find it.
-        if os.system("where cl.exe >nul 2>nul") != 0:
-            cl_path = find_cl_path()
-            if cl_path is None:
-                raise RuntimeError("Could not locate a supported Microsoft Visual C++ installation")
-            os.environ["PATH"] += ";" + cl_path
-
-    elif os.name == "posix":
-        pass
-
+    include_paths = []
     prefix = os.path.dirname(__file__)
     include_paths.append(os.path.join(prefix, "include"))
     include_paths.append(os.path.join(prefix, "..", "thirdparty", "tiny-cuda-nn", "include"))
@@ -58,10 +33,10 @@ def setup_3dgut(conf):
     include_paths.append(os.path.join(prefix, "..", "thirdparty", "tiny-cuda-nn", "dependencies", "fmt", "include"))
     include_paths.append(build_dir)
 
+    # Compiler options.
+
     def to_cpp_bool(value):
         return "true" if value else "false"
-
-    # Compiler options
 
     ut_d = 3
     ut_alpha = conf.render.splat.ut_alpha
@@ -93,20 +68,13 @@ def setup_3dgut(conf):
         f"-DGAUSSIAN_TILE_BASED_CULLING={to_cpp_bool(conf.render.splat.tile_based_culling)}",
     ]
 
-    cc_flags = [
-        "-DNVDR_TORCH",
+    cflags = [
         "-DTCNN_MIN_GPU_ARCH=70",
         *defines,
     ]
 
-    nvcc_flags = [
-        "-DNVDR_TORCH",
+    cuda_cflags = [
         "-DTCNN_MIN_GPU_ARCH=70",
-        "-std=c++17",
-        "--extended-lambda",
-        "--expt-relaxed-constexpr",
-        "-Xcompiler=-Wno-float-conversion",
-        "-Xcompiler=-fno-strict-aliasing",
         "-U__CUDA_NO_HALF_OPERATORS__",
         "-U__CUDA_NO_HALF_CONVERSIONS__",
         "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
@@ -115,15 +83,9 @@ def setup_3dgut(conf):
         *defines,
     ]
 
-    # Linker options.
-    if os.name == "posix":
-        ldflags = ["-lcuda", "-lnvrtc"]
-    elif os.name == "nt":
-        ldflags = ["cuda.lib", "advapi32.lib", "nvrtc.lib"]
-
     # List of sources.
     source_files = [
-        "src/splatRaster.cu",
+        "src/splatRaster.cpp",
         "src/gutRenderer.cu",
         "src/cudaBuffer.cpp",
         "bindings.cpp",
@@ -159,15 +121,11 @@ def setup_3dgut(conf):
 
     # Compile and load.
     source_paths = [os.path.join(os.path.dirname(__file__), fn) for fn in source_files]
-
-    torch.utils.cpp_extension.load(
+    jit.load(
         name="lib3dgut_cc",
         sources=source_paths,
-        extra_cflags=cc_flags,
-        extra_cuda_cflags=nvcc_flags,
-        extra_ldflags=ldflags,
+        extra_cflags=cflags,
+        extra_cuda_cflags=cuda_cflags,
         extra_include_paths=include_paths,
         build_directory=build_dir,
-        with_cuda=True,
-        verbose=True,
     )

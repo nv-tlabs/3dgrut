@@ -704,7 +704,7 @@ class Playground:
             if buffer_mode == "host2device":
                 logger.info("polyscope set to host2device mode.")
             else:  # device2device
-                from threedgrt_tracer.gui.ps_extension import initialize_cugl_interop
+                from threedgrut.gui.ps_extension import initialize_cugl_interop
                 initialize_cugl_interop()
                 logger.info("polyscope set to device2device mode.")
         set_polyscope_buffering_mode()
