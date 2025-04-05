@@ -1,6 +1,6 @@
 FROM ubuntu:24.04
 
-ARG CUDA_VERSION=11.8
+ARG CUDA_VERSION=11.8.0
 ENV CUDA_VERSION=${CUDA_VERSION}
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
@@ -14,7 +14,7 @@ RUN apt-get update \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+RUN curl -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py311_25.1.1-2-Linux-x86_64.sh && \
     bash ~/miniconda.sh -b -p /opt/conda && \
     rm ~/miniconda.sh && \
     /opt/conda/bin/conda install -y python=${PYTHON_VERSION} && \
@@ -25,15 +25,24 @@ RUN conda init
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
 ENV FORCE_CUDA=1
-RUN if [ "$CUDA_VERSION" = "11.8" ]; then \
-      echo 'export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6"' >> /etc/profile.d/cuda_arch.sh; \
-    else \
-      echo 'export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0"' >> /etc/profile.d/cuda_arch.sh; \
-    fi
 
+# # Make sure TORCH_CUDA_ARCH_LIST matches the pytorch wheel setting.
+# # Reference: https://github.com/pytorch/pytorch/blob/main/.ci/manywheel/build_cuda.sh#L54
+# #
+# # (cuda11) $ python -c "import torch; print(torch.version.cuda, torch.cuda.get_arch_list())"
+# # 11.8 ['sm_50', 'sm_60', 'sm_61', 'sm_70', 'sm_75', 'sm_80', 'sm_86', 'sm_37', 'sm_90', 'compute_37']
+# #
+# # (cuda12) $ python -c "import torch; print(torch.version.cuda, torch.cuda.get_arch_list())"
+# # 12.8 ['sm_75', 'sm_80', 'sm_86', 'sm_90', 'sm_100', 'sm_120', 'compute_120']
+# #
+# RUN if   [ "$CUDA_VERSION" = "11.8.0" ]; then                                                        \
+#       echo 'export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0"' >> /etc/profile.d/cuda_arch.sh;       \
+#     elif [ "$CUDA_VERSION" = "12.8.1" ]; then                                                        \
+#       echo 'export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0"' >> /etc/profile.d/cuda_arch.sh; \
+#     fi
 
 WORKDIR /workspace
 COPY . .
 
-RUN ./install_env.sh 3dgrut WITH_GCC11 $CUDA_VERSION
+RUN CUDA_VERSION=$CUDA_VERSION bash ./install_env.sh 3dgrut WITH_GCC11 
 RUN echo "conda activate 3dgrut" >> ~/.bashrc

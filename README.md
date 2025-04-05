@@ -58,7 +58,7 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 
 <details> 
 <summary> NOTE: gcc versions >11 (expand for details)</summary>
-
+</br>
 Currently the codebase requires gcc <= 11.  If your machine uses the compiler gcc-12 or newer (i.e., in Ubuntu 24.04), you may need to install and use gcc-11. 
 
 First, install gcc 11:
@@ -71,6 +71,24 @@ Then run the install script with the optional `WITH_GCC11` flag, which additiona
 ./install_env.sh 3dgrut WITH_GCC11
 ```
 </details>
+
+<details> 
+<summary> NOTE: Blackwell GPU support</summary>
+</br>
+The current codebase uses CUDA 11.8, which is not compatible with the new Blackwell GPUs (e.g., RTX 5090) or GPUs with compute capability 10.0+.
+An experimental build script has been kindly implemented by [@johnnynunez] (https://www.github.com/johnnynunez) to support Blackwell GPUs. To enable it:
+
+Run the install script with both the `WITH_GCC11` flag and a CUDA version. Currently, only CUDA 12.8.1 is supported:
+```sh
+CUDA_VERSION=12.8.1 ./install_env.sh 3dgrut_cuda12 WITH_GCC11
+```
+
+To build the docker image, you can use the following command:
+```sh
+docker build --build-arg CUDA_VERSION=12.8.1 -t 3dgrut:cuda128 .
+```
+</details>
+
 </br>
 
 To set up the environment using conda, first clone the repository and run `./install_env.sh` script as:
