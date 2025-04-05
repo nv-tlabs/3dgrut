@@ -14,6 +14,5 @@
 # limitations under the License.
 
 from .tracer import (Tracer)
-from . import gui
 
-__all__ = ["Tracer", "gui"]
+__all__ = ["Tracer"]

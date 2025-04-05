@@ -21,7 +21,19 @@
 #include <windows.h>
 #endif
 #include <cuda_gl_interop.h>
-#include <3dgrt/cuoptixMacros.h>
+
+
+#define CUDA_CHECK(call)                                              \
+    do {                                                              \
+        cudaError_t error = call;                                     \
+        if (error != cudaSuccess) {                                   \
+            std::stringstream ss;                                     \
+            ss << "CUDA call (" << #call << " ) failed with error: '" \
+               << cudaGetErrorString(error)                           \
+               << "' (" __FILE__ << ":" << __LINE__ << ")\n";         \
+        }                                                             \
+    } while (0)
+
 
 using CUDAGraphicsResource = struct cudaGraphicsResource *;
 
