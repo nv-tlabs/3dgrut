@@ -146,7 +146,7 @@ elif [ "$CUDA_VERSION" = "12.8.1" ]; then
         -r tools/viz_requirements.txt \
         -r tools/requirements.txt     \
         -r tools/build_requirements.txt
-    IGNORE_TORCH_VER=1 python setup.py develop
+    IGNORE_TORCH_VER=1 python setup.py install
     popd
     rm -fr thirdparty/kaolin
 
