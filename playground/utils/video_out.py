@@ -36,13 +36,13 @@ from playground.utils.kaolin_future.interpolated_cameras import camera_path_gene
 class VideoRecorder:
     """ A module for saving video footage of camera trajectories within the Playground"""
 
-    MODES = ['linear_smooth', 'linear_spline', 'continuous', 'depth_of_field']
+    MODES = ['path_smooth', 'path_spline', 'cyclic', 'depth_of_field']
 
     def __init__(self,
         renderer,
         trajectory_output_path="output.mp4",
         cameras_save_path="cameras.npy",
-        mode='linear_smooth',
+        mode='path_smooth',
         frames_between_cameras=60,
         video_fps=30,
         min_dof=2.5,
@@ -55,9 +55,9 @@ class VideoRecorder:
             trajectory_output_path (str): Output path for saved video
             cameras_save_path (str): Save path for storing and loading camera trajectories.
             mode (str): Determines how keyframes are interpolated:
-                'linear_smooth' - shifts the camera in a linear path along the trajectory, using smoothstep interpolation
-                'linear_spline' - shifts the camera in a linear path along the trajectory, using catmull-rom splines
-                'continuous' - shifts the camera in a cyclic trajectory, determined by fitting a bspline
+                'path_smooth' - shifts the camera in a path along the trajectory, using smoothstep interpolation
+                'path_spline' - shifts the camera in a path along the trajectory, using catmull-rom splines
+                'cyclic' - shifts the camera in a cyclic trajectory, determined by fitting a bspline
                 'depth_of_field' - interpolates the depth of field over a static frame (first frame in trajectory)
             frames_between_cameras (int): How many cameras are inserted between keyframe cameras in the trajectory
             video_fps (int): FPS of exported video
@@ -125,9 +125,9 @@ class VideoRecorder:
 
     def render_linear_trajectory(self, interpolation_mode='polynomial'):
         if len(self.trajectory) < 2:
-            raise ValueError('Rendering a linear trajectory requires at least 2 cameras.')
+            raise ValueError('Rendering a path trajectory requires at least 2 cameras.')
         elif interpolation_mode == 'catmull_rom' and len(self.trajectory) < 4:
-            raise ValueError('Rendering a linear spline trajectory requires at least 4 cameras.')
+            raise ValueError('Rendering a path with a spline interpolated trajectory requires at least 4 cameras.')
 
         out_video = None
         interpolated_path = camera_path_generator(
@@ -206,11 +206,11 @@ class VideoRecorder:
         """
         if self.mode == 'depth_of_field':
             self.render_dof_trajectory()
-        elif self.mode == 'continuous':
+        elif self.mode == 'cyclic':
             self.render_continuous_trajectory()
-        elif self.mode == 'linear_smooth':
+        elif self.mode == 'path_smooth':
             self.render_linear_trajectory('polynomial')
-        elif self.mode == 'linear_spline':
+        elif self.mode == 'path_spline':
             self.render_linear_trajectory('catmull_rom')
         else:
             raise ValueError(f'Unknown mode: {self.mode}')
