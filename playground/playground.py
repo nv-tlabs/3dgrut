@@ -22,9 +22,9 @@ import kaolin
 import polyscope as ps
 import polyscope.imgui as psim
 import traceback
-from threedgrt_tracer.gui.ps_extension import initialize_cugl_interop
 from threedgrut.utils.logger import logger
 from threedgrut.model.model import MixtureOfGaussians
+from threedgrt_tracer.gui.ps_extension import initialize_cugl_interop
 from playground.utils.depth_of_field import DepthOfField
 from playground.utils.video_out import VideoRecorder
 from playground.utils.spp import SPP
@@ -153,7 +153,7 @@ class Playground:
             if (last_window_size[0] != window_h) or (last_window_size[1] != window_w):
                 self.is_force_canvas_dirty = True
 
-        camera = polyscope_to_kaolin_camera(view_params, window_w, window_h, device=self.engine.DEFAULT_DEVICE)
+        camera = polyscope_to_kaolin_camera(view_params, window_w, window_h, device=self.engine.device)
         is_first_pass = self.is_dirty(camera)
         if not is_first_pass and not self.engine.has_progressive_effects_to_render():
             return self.engine.last_state['rgb'], self.engine.last_state['opacity']
@@ -778,15 +778,15 @@ class Playground:
         )
         self.is_force_canvas_dirty = self.is_force_canvas_dirty or settings_changed
 
-        settings_changed, self.primitives.disable_gaussian_tracing = psim.Checkbox(
-            "Disable Gaussians", self.primitives.disable_gaussian_tracing
+        settings_changed, self.engine.disable_gaussian_tracing = psim.Checkbox(
+            "Disable Gaussians", self.engine.disable_gaussian_tracing
         )
         self.is_force_canvas_dirty = self.is_force_canvas_dirty or settings_changed
 
         psim.SameLine()
 
-        settings_changed, self.primitives.force_white_bg = psim.Checkbox(
-            "Force White BG", self.primitives.force_white_bg
+        settings_changed, self.engine.force_white_bg = psim.Checkbox(
+            "Force White BG", self.engine.force_white_bg
         )
         self.is_force_canvas_dirty = self.is_force_canvas_dirty or settings_changed
         if self.engine.envmap is not None:
