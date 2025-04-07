@@ -274,6 +274,8 @@ struct GUTKBufferRenderer : Params {
                                            particleFeaturesGradientBuffer);
                     }
                     hitParticleKBuffer.insert(hitParticle);
+
+                    ray.countHit();
                 }
             }
         }
@@ -379,6 +381,8 @@ struct GUTKBufferRenderer : Params {
                                                                   particleFeaturesGradientBuffer, tileThreadIdx);
                 }
                 particles.processHitBwdUpdateDensityGradient(particleData.idx, densityRawParametersGrad, tileThreadIdx);
+         
+                // ray.countHit(); // NOTE: Hit count is not differentiable
             }
         }
     }

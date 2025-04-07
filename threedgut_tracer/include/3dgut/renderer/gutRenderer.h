@@ -65,6 +65,7 @@ public:
     Status renderForward(const RenderParameters& params,
                          const tcnn::vec3* sensorRayOriginCudaPtr,
                          const tcnn::vec3* sensorRayDirectionCudaPtr,
+                         float* worldHitCountCudaPtr,
                          float* worldHitDistanceCudaPtr,
                          tcnn::vec4* radianceDensityCudaPtr,
                          Parameters& parameters,

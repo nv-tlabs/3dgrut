@@ -84,6 +84,7 @@ __global__ void render(threedgut::RenderParameters params,
                        const tcnn::vec3* __restrict__ sensorRayOriginPtr,
                        const tcnn::vec3* __restrict__ sensorRayDirectionPtr,
                        tcnn::mat4x3 sensorToWorldTransform,
+                       float* __restrict__ worldHitCountPtr,
                        float* __restrict__ worldHitDistancePtr,
                        tcnn::vec4* __restrict__ radianceDensityPtr,
                        const tcnn::vec2* __restrict__ particlesProjectedPositionPtr,
@@ -93,7 +94,7 @@ __global__ void render(threedgut::RenderParameters params,
                        const uint64_t* __restrict__ parameterMemoryHandles) {
 
     auto ray = initializeRay<TGUTRenderer::TRayPayload>(
-        params, sensorRayOriginPtr, sensorRayDirectionPtr, worldHitDistancePtr, sensorToWorldTransform);
+        params, sensorRayOriginPtr, sensorRayDirectionPtr, sensorToWorldTransform);
 
     TGUTRenderer::eval(params,
                        ray,
@@ -105,10 +106,10 @@ __global__ void render(threedgut::RenderParameters params,
                        particlesPrecomputedFeaturesPtr,
                        {parameterMemoryHandles});
 
-    TGUTModel::eval(params, ray, {parameterMemoryHandles});
+    // TGUTModel::eval(params, ray, {parameterMemoryHandles});
 
     // NB : finalize ray is not differentiable (has to be no-op when used in a differentiable renderer)
-    finalizeRay(ray, params, sensorRayOriginPtr, worldHitDistancePtr, radianceDensityPtr, sensorToWorldTransform);
+    finalizeRay(ray, params, sensorRayOriginPtr, worldHitCountPtr, worldHitDistancePtr, radianceDensityPtr, sensorToWorldTransform);
 }
 
 __global__ void renderBackward(threedgut::RenderParameters params,
@@ -143,7 +144,7 @@ __global__ void renderBackward(threedgut::RenderParameters params,
                                                                         radianceDensityGradientPtr,
                                                                         sensorToWorldTransform);
 
-    TGUTModel::evalBackward(params, ray, {parameterMemoryHandles}, {parameterGradientMemoryHandles});
+    // TGUTModel::evalBackward(params, ray, {parameterMemoryHandles}, {parameterGradientMemoryHandles});
 
     TGUTBackwardRenderer::eval(params,
                                ray,

@@ -30,31 +30,45 @@ struct RayPayload {
     float hitT;
     float transmittance;
     enum {
-        Default             = 0,
-        Valid               = 1 << 0,
-        Alive               = 1 << 2,
-        BackHit             = 1 << 3,
-        BackHitProxySurface = 1 << 4,
-        FrontHit            = 1 << 5
+        Default = 0,
+        Valid   = 1 << 0,
+        Alive   = 1 << 2,
+        // BackHit             = 1 << 3,
+        // BackHitProxySurface = 1 << 4,
+        // FrontHit            = 1 << 5,
     };
     uint32_t flags;
     uint32_t idx;
     tcnn::vec<FeatN> features;
 
-    __device__ __inline__ bool isAlive() const {
+#if GAUSSIAN_ENABLE_HIT_COUNT
+    uint32_t hitN;
+#endif
+
+    __device__ __forceinline__ bool isAlive() const {
         return flags & Alive;
     }
-    __device__ __inline__ void kill() {
+
+    __device__ __forceinline__ void kill() {
         flags &= ~Alive;
     }
-    __device__ __inline__ bool isValid() const {
+
+    __device__ __forceinline__ bool isValid() const {
         return flags & Valid;
     }
-    __device__ __inline__ bool isFrontHit() const {
-        return flags & FrontHit;
-    }
-    __device__ __inline__ void hitFront() {
-        flags |= FrontHit;
+
+    // __device__ __forceinline__ bool isFrontHit() const {
+    //     return flags & FrontHit;
+    // }
+
+    // __device__ __forceinline__ void hitFront() {
+    //     flags |= FrontHit;
+    // }
+
+    __device__ __forceinline__ void countHit(uint32_t count = 1) {
+#if GAUSSIAN_ENABLE_HIT_COUNT
+        hitN += count;
+#endif
     }
 };
 
@@ -62,7 +76,6 @@ template <typename RayPayloadT>
 __device__ __inline__ RayPayloadT initializeRay(const threedgut::RenderParameters& params,
                                                 const tcnn::vec3* __restrict__ sensorRayOriginPtr,
                                                 const tcnn::vec3* __restrict__ sensorRayDirectionPtr,
-                                                const float* __restrict__ worldHitDistancePtr,
                                                 const tcnn::mat4x3& sensorToWorldTransform) {
     const uint32_t x = threadIdx.x + blockDim.x * blockIdx.x;
     const uint32_t y = threadIdx.y + blockDim.y * blockIdx.y;
@@ -87,6 +100,10 @@ __device__ __inline__ RayPayloadT initializeRay(const threedgut::RenderParameter
         ray.flags |= RayPayloadT::Valid | RayPayloadT::Alive;
     }
 
+#if GAUSSIAN_ENABLE_HIT_COUNT
+    ray.hitN = 0;
+#endif
+
     return ray;
 }
 
@@ -94,6 +111,7 @@ template <typename TRayPayload>
 __device__ __inline__ void finalizeRay(const TRayPayload& ray,
                                        const threedgut::RenderParameters& params,
                                        const tcnn::vec3* __restrict__ sensorRayOriginPtr,
+                                       float* __restrict__ worldCountPtr,
                                        float* __restrict__ worldHitDistancePtr,
                                        tcnn::vec4* __restrict__ radianceDensityPtr,
                                        const tcnn::mat4x3& sensorToWorldTransform) {
@@ -101,8 +119,11 @@ __device__ __inline__ void finalizeRay(const TRayPayload& ray,
         return;
     }
 
-    radianceDensityPtr[ray.idx] = {ray.features[0], ray.features[1], ray.features[2],  (1.0f - ray.transmittance)};
-    if (ray.isFrontHit()) {
-        worldHitDistancePtr[ray.idx] = ray.hitT;
-    }
+    radianceDensityPtr[ray.idx] = {ray.features[0], ray.features[1], ray.features[2], (1.0f - ray.transmittance)};
+
+    worldHitDistancePtr[ray.idx] = ray.hitT;
+
+#if GAUSSIAN_ENABLE_HIT_COUNT
+    worldCountPtr[ray.idx] = (float)ray.hitN;
+#endif
 }

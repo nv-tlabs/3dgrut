@@ -41,7 +41,6 @@ __device__ __inline__ RayPayloadT initializeBackwardRay(const threedgut::RenderP
     RayPayloadT ray = initializeRay<RayPayloadT>(params,
                                                  sensorRayOriginPtr,
                                                  sensorRayDirectionPtr,
-                                                 worldHitDistancePtr,
                                                  sensorToWorldTransform);
 
     if (ray.isAlive()) {
