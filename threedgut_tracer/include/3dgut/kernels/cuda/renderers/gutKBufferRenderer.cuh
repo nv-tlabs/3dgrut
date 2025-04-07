@@ -160,6 +160,8 @@ struct GUTKBufferRenderer : Params {
             particles.featureIntegrateFwd(hitWeight,
                                           Params::PerRayParticleFeatures ? particles.featuresFromBuffer(hitParticle.idx, ray.direction) : tcnn::max(particleFeatures[hitParticle.idx], 0.f),
                                           ray.features);
+
+            if (hitWeight > 0.0f) ray.countHit();
         }
 
         if (ray.transmittance < Particles::MinTransmittanceThreshold) {
@@ -274,8 +276,6 @@ struct GUTKBufferRenderer : Params {
                                            particleFeaturesGradientBuffer);
                     }
                     hitParticleKBuffer.insert(hitParticle);
-
-                    ray.countHit();
                 }
             }
         }
@@ -381,8 +381,6 @@ struct GUTKBufferRenderer : Params {
                                                                   particleFeaturesGradientBuffer, tileThreadIdx);
                 }
                 particles.processHitBwdUpdateDensityGradient(particleData.idx, densityRawParametersGrad, tileThreadIdx);
-         
-                // ray.countHit(); // NOTE: Hit count is not differentiable
             }
         }
     }
