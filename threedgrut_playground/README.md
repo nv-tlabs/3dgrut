@@ -20,6 +20,7 @@ The **Playground** is an interactive demo app that showcases various effects in 
   - [Contents](#-contents)
   - [🔧 Installation](#-installation)
   - [🏃🏻 How to Run 🏃🏼‍♀️](#-how-to-run)
+    - [Headless Mode](#-headless-mode) 
     - [👻 Add your own assets](#-add-your-own-assets)
     - [Additional args️](#-additional-args)
   - [How it works️](#-how-it-works)
@@ -69,7 +70,7 @@ python playground.py --gs_object runs/bonsai/ckpt_last.pt
 
 The playground supports loading `.pt` checkpoints, and exported `.ingp` and `.ply` files.
 
-#### Headless Mode
+### Headless Mode
 If you're running on a remote machine without a screen, a minimal version of the Playground is
 available through Jupyter notebook: `threedgrut_playground/headless.ipynyb`.
 
