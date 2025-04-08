@@ -24,13 +24,13 @@ import polyscope.imgui as psim
 import traceback
 from threedgrut.utils.logger import logger
 from threedgrut.gui.ps_extension import initialize_cugl_interop
-from playground.utils.video_out import VideoRecorder
-from playground.utils.kaolin_future.conversions import polyscope_from_kaolin_camera, polyscope_to_kaolin_camera
-from playground.engine import Engine3DGRUT, OptixPrimitiveTypes
+from threedgrut_playground.utils.video_out import VideoRecorder
+from threedgrut_playground.utils.kaolin_future.conversions import polyscope_from_kaolin_camera, polyscope_to_kaolin_camera
+from threedgrut_playground.engine import Engine3DGRUT, OptixPrimitiveTypes
 
 
 #################################
-##         --- Gui ---         ##
+##    --- Polyscope Gui ---    ##
 #################################
 
 class Playground:

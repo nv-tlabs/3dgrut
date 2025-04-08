@@ -15,8 +15,8 @@
 
 from __future__ import annotations
 import torch
-from playground.utils.rng import rng_torch_low_discrepancy
-from playground.utils.antialiasing import StratifiedRayJitter
+from threedgrut_playground.utils.rng import rng_torch_low_discrepancy
+from threedgrut_playground.utils.antialiasing import StratifiedRayJitter
 
 
 ####################################

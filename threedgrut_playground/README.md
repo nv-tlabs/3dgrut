@@ -9,7 +9,8 @@ The **Playground** is an interactive demo app that showcases various effects in 
 
 ## 🔥 News
 
-- ✅[2025/03] Playgroud v1.0 released (3dgrt + Glass, Mirrors, Diffuse Meshes, Depth of Field)
+- ✅[2025/04] Headless mode added (Engine3DGRUT is now exposed as api).
+- ✅[2025/03] Playground v1.0 released (3dgrt + Glass, Mirrors, Diffuse Meshes, Depth of Field)
 
 
 ## Contents
@@ -45,13 +46,13 @@ The **Playground** is an interactive demo app that showcases various effects in 
 
 ```bash
 conda install -c conda-forge mesa-libgl-devel-cos7-x86_64 # may be necessary for OpenGL headers
-pip install -r playground/requirements.txt
+pip install -r threedgrut_playground/requirements.txt
 ```
 
 3. Download a pack of interesting mesh assets:
 ```bash
-chmod +x ./playground/download_assets.sh
-./playground/download_assets.sh
+chmod +x ./threedgrut_playground/download_assets.sh
+./threedgrut_playground/download_assets.sh
 ```
 
 ## 🏃🏻 How to Run 🏃🏼‍♀️
@@ -68,8 +69,16 @@ python playground.py --gs_object runs/bonsai/ckpt_last.pt
 
 The playground supports loading `.pt` checkpoints, and exported `.ingp` and `.ply` files.
 
+#### Headless Mode
+If you're running on a remote machine without a screen, a minimal version of the Playground is
+available through Jupyter notebook: `threedgrut_playground/headless.ipynyb`.
+
+The playground functionality is exposed through the main engine file:
+`threedgrut_playground/engine.py`.
+
+
 ### 👻 Add your own assets
-3. If desired, gather your own additional mesh assets (`.obj`, `.glb`, `.gltf` formats), and place them under `playground/assets/`.
+3. If desired, gather your own additional mesh assets (`.obj`, `.glb`, `.gltf` formats), and place them under `threedgrut_playground/assets/`.
 The playground will load them automatically as available *primitives* as soon as the app starts.
 Some interesting shapes are [available here](https://github.com/alecjacobson/common-3d-test-models/tree/master).
 A subset of those are downloaded with the `download_assets.sh` script.
@@ -86,7 +95,7 @@ python playground.py --gs_object <ckpt_path>
 ```
 The full run command includes the following optional args:
 * `--mesh_assets`: Path to folder containing mesh assets of .obj or .glb format. 
-  * Defaults to `playground/assets`.
+  * Defaults to `threedgrut_playground/assets`.
 * `--default_gs_config`: Name of default config to use for .ingp, .ply files, or .pt files not trained with 3dgrt.
   * Defaults to `apps/colmap_3dgrt.yaml`.
 * `--device2device`: Buffering mode for passing rendered data from CUDA to OpenGL screen buffer. Using device2device is recommended.
@@ -121,7 +130,7 @@ Alternatively, in the following we discuss various features in depth.
 The *Primitives* subsection allows adding, removing and duplicating different geometries.
 
 The available geometries always include the default Quad and Sphere, and optionally other meshe files
-placed under `playground/assets`
+placed under `threedgrut_playground/assets`
 
 The Playground is always loaded with a default Sphere primitive placed at the origin.
 

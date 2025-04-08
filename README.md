@@ -300,8 +300,10 @@ Run the playground UI to visualize a pretrained scene with:
 python playground.py --gs_object <ckpt_path>
 ```
 
-See [Playground README](playground/README.md) for details.
+See [Playground README](threedgrut_playground/README.md) for details.
 
+*Update (2025/04): The playground engine is now exposed and remote rendering is supported,
+see README for details.*
 
 
 ## 🎓 6. Citations

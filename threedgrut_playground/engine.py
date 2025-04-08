@@ -26,15 +26,15 @@ from kaolin.render.camera import Camera, generate_centered_pixel_coords, generat
 from threedgrut.utils.logger import logger
 from threedgrut.model.model import MixtureOfGaussians
 from threedgrut.model.background import BackgroundColor
-from playground.tracer import Tracer
-from playground.utils.mesh_io import (
+from threedgrut_playground.tracer import Tracer
+from threedgrut_playground.utils.mesh_io import (
     load_mesh, load_materials, load_missing_material_info, create_procedural_mesh, create_quad_mesh
 )
-from playground.utils.depth_of_field import DepthOfField
-from playground.utils.video_out import VideoRecorder
-from playground.utils.spp import SPP
-from playground.utils.kaolin_future.transform import ObjectTransform
-from playground.utils.kaolin_future.fisheye import generate_fisheye_rays
+from threedgrut_playground.utils.depth_of_field import DepthOfField
+from threedgrut_playground.utils.video_out import VideoRecorder
+from threedgrut_playground.utils.spp import SPP
+from threedgrut_playground.utils.kaolin_future.transform import ObjectTransform
+from threedgrut_playground.utils.kaolin_future.fisheye import generate_fisheye_rays
 
 
 #################################

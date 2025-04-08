@@ -32,13 +32,13 @@ def load_playground_plugin(conf):
     global _playground_plugin
     if _playground_plugin is None:
         try:
-            from . import libplayground_cc as tdplg  # type: ignore
+            from . import libplayground_cc as tdgrt  # type: ignore
         except ImportError:
             from .setup_playground import setup_playground
 
             setup_playground(conf)
-            import libplayground_cc as tdplg  # type: ignore
-        _playground_plugin = tdplg
+            import libplayground_cc as tdgrt  # type: ignore
+        _playground_plugin = tdgrt
 
 
 # ----------------------------------------------------------------------------
@@ -52,12 +52,12 @@ class Tracer:
         self.conf = conf
         self.num_update_bvh = 0
 
-        logger.info(f'🔆 Creating playground tracing pipeline.. Using CUDA path: "{torch.utils.cpp_extension.CUDA_HOME}"')
+        logger.info(f'🔆 Creating Optix tracing pipeline.. Using CUDA path: "{torch.utils.cpp_extension.CUDA_HOME}"')
         torch.zeros(1, device=self.device)  # Create a dummy tensor to force cuda context init
         load_playground_plugin(conf)
 
         playground_module_path = os.path.dirname(__file__)
-        threedgrt_tracer_module_path = os.path.abspath(os.path.join(playground_module_path, '..', "threedgrt_tracer"))
+        threedgrt_tracer_module_path = os.path.abspath(os.path.join(playground_module_path, '..', 'threedgrt_tracer'))
 
         self.tracer_wrapper = _playground_plugin.HybridOptixTracer(
             threedgrt_tracer_module_path,
