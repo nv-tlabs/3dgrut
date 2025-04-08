@@ -23,12 +23,8 @@ import polyscope as ps
 import polyscope.imgui as psim
 import traceback
 from threedgrut.utils.logger import logger
-from threedgrut.model.model import MixtureOfGaussians
-from threedgrt_tracer.gui.ps_extension import initialize_cugl_interop
-from playground.utils.depth_of_field import DepthOfField
+from threedgrut.gui.ps_extension import initialize_cugl_interop
 from playground.utils.video_out import VideoRecorder
-from playground.utils.spp import SPP
-from playground.utils.kaolin_future.transform import ObjectTransform
 from playground.utils.kaolin_future.conversions import polyscope_from_kaolin_camera, polyscope_to_kaolin_camera
 from playground.engine import Engine3DGRUT, OptixPrimitiveTypes
 
@@ -86,7 +82,6 @@ class Playground:
             if buffer_mode == "host2device":
                 logger.info("polyscope set to host2device mode.")
             else:  # device2device
-                from threedgrut.gui.ps_extension import initialize_cugl_interop
                 initialize_cugl_interop()
                 logger.info("polyscope set to device2device mode.")
         set_polyscope_buffering_mode()
