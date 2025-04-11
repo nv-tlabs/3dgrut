@@ -43,12 +43,7 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
   - [To visualize a pre-trained checkpoint](#to-visualize-a-pre-trained-checkpoint)
 - [📋 4. Evaluations](#-4-evaluations)
   - [3DGRT](#grt-benchmark)
-    - [NeRF Synthestic](#grt-benchmark-nerf-synthestic)
-    - [MipNeRF360](#grt-benchmark-mipnerf360)
   - [3DGUT](#gut-benchmark)
-    - [NeRF Synthestic](#gut-benchmark-nerf-synthestic)
-    - [MipNeRF360](#gut-benchmark-mipnerf360)
-    - [Scannet++](#gut-benchmark-scannetpp)
 - [🛝 5. Interactive Playground GUI](#-5-interactive-playground-gui)
 - [🎓 6. Citations](#-6-citations)
 - [🙏 7. Acknowledgements](#-7-acknowledgements)
@@ -187,9 +182,8 @@ bash ./benchmark/mipnerf360_3dgut_render.sh <results-folder>
 <summary><strong><a name="grt-benchmark">3DGRT Results Produced on RTX 5090</a></strong></summary>
 <br/>
 
-<a name="grt-benchmark-nerf-synthestic">
-<strong>NeRF Synthetic Dataset</strong>
-</a>
+
+**NeRF Synthetic Dataset**
 
 ```bash
 bash ./benchmark/nerf_synthetic.sh apps/nerf_synthetic_3dgrt.yaml
@@ -208,9 +202,8 @@ bash ./benchmark/nerf_synthetic_render.sh results/nerf_synthetic
 | Ship       | 31.73	| 0.909	| 510.7	| 360 |
 | *Average*  | 33.87	| 0.971	| 479.3	| 347 |
 
-<a name="grt-benchmark-mipnerf360">
-<strong>MipNeRF360 Dataset</strong>
-</a>
+
+**MipNeRF360 Dataset**
 
 ```bash
 bash ./benchmark/mipnerf360.sh apps/colmap_3dgrt.yaml
@@ -236,9 +229,7 @@ bash ./benchmark/mipnerf360_render.sh results/mipnerf360
 <summary><strong><a name="gut-benchmark">3DGUT Results Produced on RTX 5090</a></strong></summary>
 <br/>
 
-<a name="gut-benchmark-nerf-synthestic">
-<strong>NeRF Synthetic Dataset</strong>
-</a>
+**NeRF Synthetic Dataset**
 
 ```bash
 bash ./benchmark/nerf_synthetic.sh paper/3dgut/unsorted_nerf_synthetic.yaml
@@ -257,9 +248,8 @@ bash ./benchmark/nerf_synthetic_render.sh results/nerf_synthetic
 | Ship       | 31.72	| 0.908	| 208.5	| 870  |
 | *Average*  | 33.88	| 0.970	| 214.6	| 846  |
 
-<a name="gut-benchmark-mipnerf360">
-<strong>MipNeRF360 Dataset</strong>
-</a>
+
+**MipNeRF360 Dataset**
 
 ```bash
 bash ./benchmark/mipnerf360.sh paper/3dgut/unsorted_colmap.yaml
@@ -279,9 +269,8 @@ bash ./benchmark/mipnerf360_render.sh results/mipnerf360
 | Treehill  | 22.35	| 0.627	| 809.6	| 299 |
 | *Average* | 27.43	| 0.815	| 686.4	| 317 |
 
-<a name="gut-benchmark-scannetpp">
-<strong>Scannet++ Dataset</strong>
-</a>
+
+**Scannet++ Dataset**
 
 ```bash
 bash ./benchmark/scannetpp.sh paper/3dgut/unsorted_scannetpp.yaml
