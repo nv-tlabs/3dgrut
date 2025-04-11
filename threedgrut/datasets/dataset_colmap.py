@@ -67,8 +67,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             indices = np.mod(indices, llff_test_split) != 0
         else:
             indices = np.mod(indices, llff_test_split) == 0
-        self.poses = self.poses[indices].astype(np.float32)  # poses are numpy arrays
-        self.image_data = self.image_data[indices]  # image_data is a str path numpy array
+        self.poses = self.poses[indices].astype(np.float32)  # poses is a numpy array
+        self.image_paths = self.image_paths[indices]  # image_paths is a numpy str array of image paths
 
         self.camera_centers = self.camera_centers[indices]
         self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
@@ -189,7 +189,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 ), f"Colmap camera model '{intr.model}' not handled: Only undistorted datasets (PINHOLE, SIMPLE_PINHOLE or OPENCV_FISHEYE cameras) supported!"
 
         self.poses = []
-        self.image_data = []
+        self.image_paths = []
 
         cam_centers = []
         for extr in logger.track(self.cam_extrinsics, description=f"Load Dataset ({self.split})", color="salmon1"):
@@ -203,14 +203,14 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             self.poses.append(C2W)
             cam_centers.append(C2W[:3, 3])
             image_path = os.path.join(self.path, self.get_images_folder(), os.path.basename(extr.name))
-            self.image_data.append(image_path)
+            self.image_paths.append(image_path)
 
         self.camera_centers = np.array(cam_centers)
         _, diagonal = get_center_and_diag(self.camera_centers)
         self.cameras_extent = diagonal * 1.1
 
         self.poses = np.stack(self.poses)
-        self.image_data = np.stack(self.image_data, dtype=str)
+        self.image_paths = np.stack(self.image_paths, dtype=str)
 
     @torch.no_grad()
     def compute_spatial_extents(self):
@@ -245,7 +245,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def __getitem__(self, idx) -> dict:
         out_shape = (1, self.image_h, self.image_w, 3)
-        image_data = np.asarray(Image.open(self.image_data[idx]))
+        image_data = np.asarray(Image.open(self.image_paths[idx]))
         assert image_data.dtype == np.uint8, "Image data must be of type uint8"
 
         return {
@@ -305,7 +305,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             fov_w = 2.0 * np.arctan(0.5 * w / f_w)
             fov_h = 2.0 * np.arctan(0.5 * h / f_h)
 
-            image_data = np.asarray(Image.open(self.image_data[i_cam]))
+            image_data = np.asarray(Image.open(self.image_paths[i_cam]))
             assert image_data.dtype == np.uint8, "Image data must be of type uint8"
 
             rgb = image_data.reshape(h, w, 3) / np.float32(255.0)

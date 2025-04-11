@@ -91,7 +91,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def read_meta(self, split):
         self.poses = []
-        self.image_data = []
+        self.image_paths = []
 
         if split == "trainval":
             with open(os.path.join(self.root_dir, "transforms_train.json"), "r") as f:
@@ -110,7 +110,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             self.poses.append(c2w)
 
             img_path = os.path.join(self.root_dir, f"{frame['file_path']}") + self.suffix
-            self.image_data.append(img_path)
+            self.image_paths.append(img_path)
 
         self.camera_centers = np.array(cam_centers)
 
@@ -118,7 +118,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         _, diagonal = get_center_and_diag(self.camera_centers)
         self.cameras_extent = diagonal * 1.1
 
-        self.image_data = np.stack(self.image_data, dtype=str)
+        self.image_paths = np.stack(self.image_paths, dtype=str)
         self.poses = np.array(self.poses).astype(np.float32)  # (N_images, 3, 4)
 
     @torch.no_grad()
@@ -151,7 +151,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def __getitem__(self, idx) -> dict:
         out_shape = (1, self.image_h, self.image_w, 3)
-        img = NeRFDataset.__read_image(self.image_data[idx], self.img_wh, return_alpha=False, bg_color=self.bg_color)
+        img = NeRFDataset.__read_image(self.image_paths[idx], self.img_wh, return_alpha=False, bg_color=self.bg_color)
 
         return {
             "data": torch.tensor(img).reshape(out_shape),
@@ -214,7 +214,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             fov_w = 2.0 * np.arctan(0.5 * w / f_w)
             fov_h = 2.0 * np.arctan(0.5 * h / f_h)
 
-            img = NeRFDataset.__read_image(self.image_data[i_cam], self.img_wh, return_alpha=False, bg_color=self.bg_color)
+            img = NeRFDataset.__read_image(self.image_paths[i_cam], self.img_wh, return_alpha=False, bg_color=self.bg_color)
             rgb = img.reshape(h, w, 3) / np.float32(255.0)
 
             assert rgb.dtype == np.float32, "RGB image must be of type float32, but got {}".format(rgb.dtype)
