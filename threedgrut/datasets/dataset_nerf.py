@@ -34,11 +34,10 @@ from .utils import create_camera_visualization, get_center_and_diag
 
 
 class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
-    def __init__(self, path, device="cuda", split="train", return_alphas=False, ray_jitter=None, bg_color=None):
+    def __init__(self, path, device="cuda", split="train", ray_jitter=None, bg_color=None):
         self.root_dir = path
         self.device = device
         self.split = split
-        self.return_alphas = return_alphas
         self.ray_jitter = ray_jitter
         self.bg_color = bg_color
 
@@ -57,7 +56,6 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.rays_o_cam = torch.zeros((1, self.image_h, self.image_w, 3), dtype=torch.float32, device=self.device)
         self.rays_d_cam = directions.reshape((1, self.image_h, self.image_w, 3)).contiguous()
 
-        assert self.colors.dtype == np.uint8, "RGB image must be of type uint8"
 
     def read_intrinsics(self):
         with open(os.path.join(self.root_dir, "transforms_train.json"), "r") as f:
@@ -92,9 +90,8 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.intrinsics = [fx, fy, w / 2, h / 2]
 
     def read_meta(self, split):
-        self.colors = []
-        self.alphas = []
         self.poses = []
+        self.image_data = []
 
         if split == "trainval":
             with open(os.path.join(self.root_dir, "transforms_train.json"), "r") as f:
@@ -113,13 +110,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             self.poses.append(c2w)
 
             img_path = os.path.join(self.root_dir, f"{frame['file_path']}") + self.suffix
-            if self.return_alphas:
-                img, alpha = NeRFDataset.__read_image(img_path, self.img_wh, return_alpha=True, bg_color=self.bg_color)
-                self.colors.append(img)
-                self.alphas.append(alpha)
-            else:
-                img = NeRFDataset.__read_image(img_path, self.img_wh, return_alpha=False, bg_color=self.bg_color)
-                self.colors.append(img)
+            self.image_data.append(img_path)
 
         self.camera_centers = np.array(cam_centers)
 
@@ -127,12 +118,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         _, diagonal = get_center_and_diag(self.camera_centers)
         self.cameras_extent = diagonal * 1.1
 
-        if len(self.colors) > 0:
-            self.colors = np.stack(self.colors)  # (N_images, H, W, 3)
-
-        if len(self.alphas) > 0 and self.return_alphas:
-            self.alphas = np.stack(self.alphas)  # (N_images, H, W, 1)
-
+        self.image_data = np.stack(self.image_data, dtype=str)
         self.poses = np.array(self.poses).astype(np.float32)  # (N_images, 3, 4)
 
     @torch.no_grad()
@@ -165,8 +151,10 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def __getitem__(self, idx) -> dict:
         out_shape = (1, self.image_h, self.image_w, 3)
+        img = NeRFDataset.__read_image(self.image_data[idx], self.img_wh, return_alpha=False, bg_color=self.bg_color)
+
         return {
-            "data": torch.tensor(self.colors[idx]).reshape(out_shape),
+            "data": torch.tensor(img).reshape(out_shape),
             "pose": torch.tensor(self.poses[idx]).unsqueeze(0),
         }
 
@@ -226,7 +214,9 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             fov_w = 2.0 * np.arctan(0.5 * w / f_w)
             fov_h = 2.0 * np.arctan(0.5 * h / f_h)
 
-            rgb = self.colors[i_cam].reshape(h, w, 3) / np.float32(255.0)
+            img = NeRFDataset.__read_image(self.image_data[i_cam], self.img_wh, return_alpha=False, bg_color=self.bg_color)
+            rgb = img.reshape(h, w, 3) / np.float32(255.0)
+
             assert rgb.dtype == np.float32, "RGB image must be of type float32, but got {}".format(rgb.dtype)
 
             cam_list.append(

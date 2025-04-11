@@ -24,14 +24,12 @@ def make(name: str, config, ray_jitter):
             train_dataset = NeRFDataset(
                 config.path,
                 split="train",
-                return_alphas=False,
                 bg_color=config.model.background.color,
                 ray_jitter=ray_jitter,
             )
             val_dataset = NeRFDataset(
                 config.path,
                 split="val",
-                return_alphas=False,
                 bg_color=config.model.background.color,
             )
         case "colmap":

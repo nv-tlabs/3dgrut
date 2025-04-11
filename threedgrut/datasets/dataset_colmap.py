@@ -68,8 +68,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         else:
             indices = np.mod(indices, llff_test_split) == 0
         self.poses = self.poses[indices].astype(np.float32)  # poses are numpy arrays
-        self.image_data = self.image_data[indices]  # image_data are UINT8 umpy arrays
-        assert self.image_data.dtype == np.uint8, "Image data must be of type uint8"
+        self.image_data = self.image_data[indices]  # image_data is a str path numpy array
 
         self.camera_centers = self.camera_centers[indices]
         self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
@@ -204,16 +203,14 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             self.poses.append(C2W)
             cam_centers.append(C2W[:3, 3])
             image_path = os.path.join(self.path, self.get_images_folder(), os.path.basename(extr.name))
-            image_data = np.asarray(Image.open(image_path))
-            assert image_data.dtype == np.uint8, "Image data must be of type uint8"
-            self.image_data.append(image_data)
+            self.image_data.append(image_path)
 
         self.camera_centers = np.array(cam_centers)
         _, diagonal = get_center_and_diag(self.camera_centers)
         self.cameras_extent = diagonal * 1.1
 
         self.poses = np.stack(self.poses)
-        self.image_data = np.stack(self.image_data)
+        self.image_data = np.stack(self.image_data, dtype=str)
 
     @torch.no_grad()
     def compute_spatial_extents(self):
@@ -248,8 +245,11 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def __getitem__(self, idx) -> dict:
         out_shape = (1, self.image_h, self.image_w, 3)
+        image_data = np.asarray(Image.open(self.image_data[idx]))
+        assert image_data.dtype == np.uint8, "Image data must be of type uint8"
+
         return {
-            "data": torch.tensor(self.image_data[idx]).reshape(out_shape),
+            "data": torch.tensor(image_data).reshape(out_shape),
             "pose": torch.tensor(self.poses[idx]).unsqueeze(0),
             "intr": self.get_intrinsics_idx(idx),
         }
@@ -305,7 +305,10 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             fov_w = 2.0 * np.arctan(0.5 * w / f_w)
             fov_h = 2.0 * np.arctan(0.5 * h / f_h)
 
-            rgb = self.image_data[i_cam].reshape(h, w, 3) / np.float32(255.0)
+            image_data = np.asarray(Image.open(self.image_data[i_cam]))
+            assert image_data.dtype == np.uint8, "Image data must be of type uint8"
+
+            rgb = image_data.reshape(h, w, 3) / np.float32(255.0)
             assert rgb.dtype == np.float32, "RGB image must be of type float32, but got {}".format(rgb.dtype)
 
             cam_list.append(
