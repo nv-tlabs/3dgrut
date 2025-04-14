@@ -24,16 +24,16 @@ from plyfile import PlyData, PlyElement
 
 import threedgrut.model.background as background
 from threedgrut.datasets.protocols import Batch
-from threedgrut.datasets.utils import PointCloud, read_next_bytes, read_colmap_points3D_text
-from threedgrut.model.geometry import nearest_neighbor_dist_cpuKD
+from threedgrut.datasets.utils import read_next_bytes, read_colmap_points3D_text
+from threedgrut.model.geometry import nearest_neighbor_dist_cpuKD, k_nearest_neighbors
 import threedgrt_tracer, threedgut_tracer
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import (
-    get_activation_function, 
+    get_activation_function,
     get_scheduler,
     sh_degree_to_num_features,
     sh_degree_to_specular_dim,
-    to_np, to_torch,
+    to_np, to_torch, quaternion_to_so3
 )
 from threedgrut.utils.render import RGB2SH
 
@@ -51,6 +51,9 @@ class MixtureOfGaussians(torch.nn.Module):
             "features_albedo",
             "features_specular",
         ]
+
+    def get_positions(self) -> torch.Tensor:
+        return self.positions
 
     def get_features(self):
         return torch.cat((self.features_albedo, self.features_specular), dim=1)
@@ -72,6 +75,21 @@ class MixtureOfGaussians(torch.nn.Module):
             return self.density
         else:
             return self.density_activation(self.density)
+
+    def get_covariance(self) -> torch.Tensor:
+        scales = self.get_scale()
+
+        S = torch.zeros((self.get_num_gaussians(), 3, 3), dtype=scales.dtype, device=self.device)
+        R = quaternion_to_so3(self.get_rotation())
+
+        S[:, 0, 0] = scales[:, 0]
+        S[:, 1, 1] = scales[:, 1]
+        S[:, 2, 2] = scales[:, 2]
+
+        return R @ S @ S.transpose(1, 2) @ R.transpose(1, 2)
+
+    def get_num_gaussians(self) -> int:
+        return len(self.positions)
 
     def get_model_parameters(self) -> dict:
         assert self.optimizer is not None, "Optimizer need to be initialized when storing the checkpoint"
@@ -154,7 +172,7 @@ class MixtureOfGaussians(torch.nn.Module):
             self.renderer = threedgut_tracer.Tracer(conf)
         else:
             raise ValueError(f"Unknown rendering method: {conf.render.method}")
-    
+
     @torch.no_grad()
     def build_acc(self, rebuild=True):
         self.renderer.build_acc(self, rebuild)
@@ -357,7 +375,8 @@ class MixtureOfGaussians(torch.nn.Module):
             ).contiguous()
 
         dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(fused_point_cloud), 1e-3)
-        scales = torch.log(dist)[..., None].repeat(1, 3)
+        scales = torch.log(dist * self.conf.model.default_scale_factor)[..., None].repeat(1, 3)
+
         rots = torch.rand((num_gaussians, 4), device=self.device)
         rots[:, 0] = 1
 
@@ -408,14 +427,13 @@ class MixtureOfGaussians(torch.nn.Module):
         N = pts.shape[0]
         positions = pts
 
-        # identity rotations
-        rots = torch.zeros((N, 4), dtype=dtype, device=self.device)
-        rots[:, 0] = 1.0  # they're quaternions
+        # Random rotations
+        rots = torch.rand((N, 4), dtype=dtype, device=self.device)
 
-        # NOTE: it seems we get different scales compared to the original 3DGS implementation
-        # estimate scales based on distances to observers
-        dist_to_observers = torch.clamp_min(nearest_neighbor_dist_cpuKD(pts, observer_pts), 1e-7)
-        observation_scale = dist_to_observers * self.conf.initialization.observation_scale_factor
+        # Initialize the GS size to be the average dist of the 3 nearest neighbors
+        dist2_avg = (k_nearest_neighbors(pts, 4)[:, 1:] ** 2).mean(dim=-1)  # [N,]
+        observation_scale = torch.sqrt(dist2_avg) * self.conf.model.default_scale_factor
+
         scales = self.scale_activation_inv(observation_scale)[:, None].repeat(1, 3)
 
         # set density as a constant
@@ -527,12 +545,6 @@ class MixtureOfGaussians(torch.nn.Module):
         mask[0, :active_features] = 1.0
         return mask
 
-    def set_density(self, mask, density):
-        updated_densities = self.density.clone()
-        updated_densities[mask] = density
-        optimizable_tensors = self.replace_tensor_to_optimizer(updated_densities, "density")
-        self.density = optimizable_tensors["density"]
-
     def clamp_density(self):
         updated_densities = torch.clamp(self.get_density(), min=1e-4, max=1.0 - 1e-4)
         optimizable_tensors = self.replace_tensor_to_optimizer(updated_densities, "density")
@@ -540,7 +552,7 @@ class MixtureOfGaussians(torch.nn.Module):
 
     def forward(self, batch: Batch, train=False, frame_id=0) -> dict[str, torch.Tensor]:
         """
-        Args: 
+        Args:
             batch: a Batch structure containing the input data
             train: a boolean indicating whether the model is in training mode
             frame_id: an integer indicating the frame id (default is 0)
@@ -689,7 +701,7 @@ class MixtureOfGaussians(torch.nn.Module):
         mogt_albedo[:, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
         mogt_albedo[:, 1] = np.asarray(plydata.elements[0]["f_dc_1"])
         mogt_albedo[:, 2] = np.asarray(plydata.elements[0]["f_dc_2"])
-        
+
         extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
         extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
         num_speculars = (self.max_n_features + 1) ** 2 - 1
@@ -720,7 +732,7 @@ class MixtureOfGaussians(torch.nn.Module):
         self.rotation = torch.nn.Parameter(torch.tensor(mogt_rotation,dtype=self.rotation.dtype,device=self.device))
 
         self.n_active_features = self.max_n_features
-        
+
         if init_model:
             self.set_optimizable_parameters()
             self.setup_optimizer()

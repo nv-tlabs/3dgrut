@@ -159,3 +159,44 @@ def create_summary_writer(conf, object_name, out_dir, experiment_name, use_wandb
     writer = SummaryWriter(log_dir=out_dir)
     os.makedirs(out_dir, exist_ok=True)
     return writer, out_dir, run_name
+
+@torch.no_grad()
+def _multinomial_sample(probabilities: torch.Tensor, n: int, replacement: bool = True) -> torch.Tensor:
+    """Sample from a distribution using torch.multinomial or numpy.random.choice.
+
+
+    Sample points from a distribution either with  `torch.multinomial` or `numpy.random.choice`
+    based on the number of elements in `probabilities`. If the number of elements exceeds
+    the torch.multinomial limit (2^24), it falls back to using `numpy.random.choice`.
+    This is a workaround until https://github.com/pytorch/pytorch/issues/2576 is solved.
+
+    Args:
+        probabilities (Tensor): probabilitiy of sampling each element.
+        n (int): The number of samples to draw.
+        replacement (bool): Whether to sample with replacement
+
+    Returns:
+        Tensor: A 1D tensor of sampled indices.
+    """
+
+    assert len(probabilities.size()) == 1, "_multinomial_sample expects a flat tensor as input"
+    num_elements = probabilities.size(0)
+
+    if num_elements <= 2**24:
+        # Use torch.multinomial for elements within the limit
+        return torch.multinomial(probabilities, n, replacement=replacement)
+    else:
+        # Fallback to numpy.random.choice for larger element spaces
+        weights = probabilities / probabilities.sum()
+        weights_np = weights.detach().cpu().numpy()
+        sampled_idxs_np = np.random.choice(num_elements, size=n, p=weights_np, replace=replacement)
+        sampled_idxs = torch.from_numpy(sampled_idxs_np)
+
+        # Return the sampled indices on the original device
+        return sampled_idxs.to(weights.device)
+
+def check_step_condition(step: int, start: int, end: int, freq: int) -> bool:
+    """Checks if an operation should occur for the given step."""
+    if (start >= 0 and step > start) and (step < end or end == -1) and step % freq == 0:
+        return True
+    return False

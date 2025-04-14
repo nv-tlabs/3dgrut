@@ -1,0 +1,48 @@
+method: GSStrategy
+
+print_stats: true
+
+densify:
+  params: positions # one of [positions, positions_gradient_norm, features_albedo]
+  frequency: 300 # densification_interval in 3DGS with default value 100
+  start_iteration: 500 # densify_from_iter in 3DGS default value 500
+  end_iteration: 15000 # densify_until_iter in 3DGS default value 15_000
+  clone_grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
+  split_grad_threshold: 0.0002 # Called densify_grad_threshold in 3DGS with default value 0.0002
+  relative_size_threshold: 0.01 # Gaussians larger than relative_size_threshold * scene_extent will be split not cloned. Called percent_dense in 3DGS with default value 0.01
+  split:
+    n_gaussians: 2 # Hardcoded to 2 in 3DGS
+
+# They use the same values for pruning and densification so check the above values
+prune:
+  frequency: 100
+  start_iteration: 500
+  end_iteration: 15000
+  density_threshold: 0.005 # All Gaussians with the density lower than this will be pruned away
+
+
+# Start and end iteration are not used in 3DGS
+reset_density:
+  frequency: 3000 # Opacity reset interval in 3DGS default value 3000
+  start_iteration: 0
+  end_iteration: ${strategy.densify.end_iteration}
+  # This parameter is hardcoded in the 3DGS to 0.01
+  new_max_density: 0.01 # The density of the all the Gaussians will be set to min(density, this)
+
+density_decay:
+  gamma: 0.99
+  start_iteration: -1 # 500
+  end_iteration: -1 # 15000
+  frequency: 50
+
+prune_weight:
+  frequency: 100
+  start_iteration: -1
+  end_iteration: -1
+  weight_threshold: 0.5
+
+prune_scale:
+  frequency: 100
+  start_iteration: -1
+  end_iteration: -1
+  threshold: 1.0

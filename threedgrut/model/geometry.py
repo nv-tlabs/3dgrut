@@ -21,8 +21,17 @@ import torch
 from threedgrut.utils.misc import to_np
 
 
-def nearest_neighbors(pts_src, k=2):
+def k_nearest_neighbors(x: torch.Tensor, K: int = 4) -> torch.Tensor:
+    x_np = x.cpu().numpy()
+    model = sklearn.neighbors.NearestNeighbors(
+        n_neighbors=K,
+        metric="euclidean",
+    ).fit(x_np)
+    distances, _ = model.kneighbors(x_np)
+    return torch.from_numpy(distances).to(x)
 
+
+def nearest_neighbors(pts_src, k=2):
     pts_src_np = to_np(pts_src)
 
     # distance from a point set to itself
@@ -32,7 +41,7 @@ def nearest_neighbors(pts_src, k=2):
     # Build the tree
     kd_tree = sklearn.neighbors.KDTree(pts_target_np)
 
-    # Query it 
+    # Query it
     _, neighbors = kd_tree.query(pts_src_np, k=k)
 
     # Mask out self element
@@ -45,6 +54,7 @@ def nearest_neighbors(pts_src, k=2):
     # recompute distances in torch, so the function is differentiable
     neigh_inds = torch.tensor(neighbors, device=pts_src.device, dtype=torch.int64)
     return neigh_inds
+
 
 def nearest_neighbor_dist_cpuKD(pts_src, pts_target=None):
     """
@@ -67,11 +77,10 @@ def nearest_neighbor_dist_cpuKD(pts_src, pts_target=None):
         k = 1
         pts_target_np = to_np(pts_target)
 
-
     # Build the tree
     kd_tree = sklearn.neighbors.KDTree(pts_target_np)
 
-    # Query it 
+    # Query it
     _, neighbors = kd_tree.query(pts_src_np, k=k)
 
     # Mask out self element
@@ -82,15 +91,16 @@ def nearest_neighbor_dist_cpuKD(pts_src, pts_target=None):
         mask[np.sum(mask, axis=1) == mask.shape[1], -1] = False
         neighbors = neighbors[mask].reshape((neighbors.shape[0],))
     else:
-        neighbors = neighbors[:,0]
+        neighbors = neighbors[:, 0]
 
     # recompute distances in torch, so the function is differentiable
     neigh_inds = torch.tensor(neighbors, device=pts_src.device, dtype=torch.int64)
-    dists = torch.linalg.norm(pts_src - pts_target[neigh_inds,:], dim=-1)
+    dists = torch.linalg.norm(pts_src - pts_target[neigh_inds, :], dim=-1)
 
     return dists
 
+
 def safe_normalize(vecs):
     norms = torch.linalg.norm(vecs, dim=-1)
-    norms = torch.where(norms > 0., norms, 1.)
-    return vecs / norms[...,None]
+    norms = torch.where(norms > 0.0, norms, 1.0)
+    return vecs / norms[..., None]

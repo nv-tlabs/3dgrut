@@ -5,6 +5,7 @@ defaults:
   - /base_3dgut.yaml
   - /dataset: colmap
   - /initialization: colmap
+  - /strategy: gs
   - _self_
 
 # overwrite of default parameters

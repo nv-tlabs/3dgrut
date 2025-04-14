@@ -1,8 +1,9 @@
 defaults:
   - /base
+  - /strategy: gs
 
 render:
-  method: 3dgrt 
+  method: 3dgrt
   pipeline_type: reference
   backward_pipeline_type: ${render.pipeline_type}Bwd
   particle_kernel_degree: 2
