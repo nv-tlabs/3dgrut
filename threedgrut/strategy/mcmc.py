@@ -23,8 +23,18 @@ from threedgrut.strategy.base import BaseStrategy
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import _multinomial_sample, check_step_condition
 
-import gaussian_mcmc
+_mcmc_plugin = None
 
+def load_mcmc_plugin():
+    global _mcmc_plugin
+    if _mcmc_plugin is None:
+        try:
+            from . import lib_mcmc_cc as gaussian_mcmc
+        except ImportError:
+            from threedgrut.strategy.src.setup_mcmc import setup_mcmc
+            setup_mcmc()
+            import lib_mcmc_cc as gaussian_mcmc
+        _mcmc_plugin = gaussian_mcmc
 
 class MCMCStrategy(BaseStrategy):
     """Densification and prunning strategy that follows the paper:
@@ -44,6 +54,7 @@ class MCMCStrategy(BaseStrategy):
     def __init__(self, config, model: MixtureOfGaussians) -> None:
         super().__init__(config=config, model=model)
 
+        load_mcmc_plugin()
         # Precompute the look up table for binomial coefficients (Eq 9 in the MCMC paper)
         self.binoms = torch.tensor(
             [
@@ -162,7 +173,7 @@ class MCMCStrategy(BaseStrategy):
 
         ratios = (torch.bincount(sampled_idxs)[sampled_idxs] + 1).clamp_(min=1, max=self.conf.strategy.binom_n_max).int()
 
-        new_densities, new_scales = gaussian_mcmc.compute_relocation_tensor(
+        new_densities, new_scales = _mcmc_plugin.compute_relocation_tensor(
             densities[sampled_idxs].contiguous(),
             scales[sampled_idxs].contiguous(),
             ratios.contiguous(),
