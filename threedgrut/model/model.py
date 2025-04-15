@@ -226,7 +226,8 @@ class MixtureOfGaussians(torch.nn.Module):
             file_rgb = torch.tensor(file_rgb, dtype=torch.uint8, device=self.device)
 
         assert file_rgb.dtype == torch.uint8, "Expecting RGB values to be in [0, 255] range"
-        self.default_initialize_from_points(file_pts, observer_pts, file_rgb)
+        self.default_initialize_from_points(file_pts, observer_pts, file_rgb, 
+                                            use_observer_pts=self.conf.initialization.use_observation_points)
 
     def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
         data = PlyData.read(pc_path)
