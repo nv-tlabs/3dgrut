@@ -26,7 +26,7 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 
 
 ## 🔥 News
-- [][2025/04] Support for image masks.
+- ✅[2025/04] Support for image masks.
 - [][2025/04] SparseAdam support.
 - ✅[2025/04] MCMC densification strategy support.
 - ✅[2025/04] Stable release [v1.0.0](https://github.com/nv-tlabs/3dgrut/releases/tag/v1.0.0) tagged.
@@ -41,6 +41,7 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 - [🔧 1 Dependencies and Installation](#-1-dependencies-and-installation)
   - [Running with Docker](#running-with-docker)
 - [💻 2. Train 3DGRT or 3DGUT scenes](#-2-train-3dgrt-or-3dgut-scenes)
+  - [Using image masks](#using-image-masks)
 - [🎥 3. Rendering from Checkpoints](#-3-rendering-from-checkpoints)
   - [To visualize training progress interactively](#to-visualize-training-progress-interactively)
   - [To visualize a pre-trained checkpoint](#to-visualize-a-pre-trained-checkpoint)
@@ -152,6 +153,13 @@ python train.py --config-name apps/colmap_3dgut_mcmc.yaml path=data/mipnerf360/b
 > [!Note]  
 > If you're running from PyCharm IDE, enable rich console through:
 > Run Configuration > Modify Options > Emulate terminal in output console*
+
+### Using image masks
+In order to use image masks, you need to provide a mask for each image in the dataset. The mask is a grayscale image (0s and 1s) that masks out the parts of the image that should not be used during training, i.e. all the pixels with value 0 will be ignored in the loss computation. 
+
+The provided masks should have the same resolution as their corresponding images and be stored in the same folder with the same name but with `_mask.png` extension. For example, to mask out the parts of the image `path-to-image/image.jpeg`, the mask should be stored at `path-to-image/image_mask.png`.
+
+**NOTE**: The masks are only used for loss computation and not for computing the metrics.
 
 ## 🎥 3. Rendering from Checkpoints
 Evaluate Checkpoint with Splatting / OptiX Tracer / Torch

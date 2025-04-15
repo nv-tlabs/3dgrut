@@ -190,6 +190,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         self.poses = []
         self.image_paths = []
+        self.mask_paths = []
 
         cam_centers = []
         for extr in logger.track(self.cam_extrinsics, description=f"Load Dataset ({self.split})", color="salmon1"):
@@ -205,13 +206,17 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             image_path = os.path.join(self.path, self.get_images_folder(), os.path.basename(extr.name))
             self.image_paths.append(image_path)
 
+            # We assume that the mask is stored in the same folder as the image with the same name but with _mask.png extension.
+            # If the mask does not exist, we will return None in the batch
+            self.mask_paths.append(os.path.splitext(image_path)[0] + "_mask.png")
+
         self.camera_centers = np.array(cam_centers)
         _, diagonal = get_center_and_diag(self.camera_centers)
         self.cameras_extent = diagonal * 1.1
 
         self.poses = np.stack(self.poses)
         self.image_paths = np.stack(self.image_paths, dtype=str)
-
+        self.mask_paths = np.stack(self.mask_paths, dtype=str)
     @torch.no_grad()
     def compute_spatial_extents(self):
         camera_origins = torch.FloatTensor(self.poses[:, :, 3])
@@ -248,11 +253,18 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         image_data = np.asarray(Image.open(self.image_paths[idx]))
         assert image_data.dtype == np.uint8, "Image data must be of type uint8"
 
-        return {
+        output_dict = {
             "data": torch.tensor(image_data).reshape(out_shape),
             "pose": torch.tensor(self.poses[idx]).unsqueeze(0),
             "intr": self.get_intrinsics_idx(idx),
         }
+
+        # Only add mask to dictionary if it exists
+        if os.path.exists(mask_path := self.mask_paths[idx]): 
+            mask = torch.from_numpy(np.array(Image.open(mask_path))).reshape(1, self.image_h, self.image_w, 1)
+            output_dict["mask"] = mask
+
+        return output_dict
 
     def get_gpu_batch_with_intrinsics(self, batch):
         """Add the intrinsics to the batch and move data to GPU."""
@@ -272,6 +284,12 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             "T_to_world": pose,
             f"intrinsics_{camera_name}": camera_params_dict,
         }
+
+        if "mask" in batch:
+            mask = batch["mask"][0].to(self.device, non_blocking=True) / 255.0
+            mask = (mask > 0.5).to(torch.float32)
+            sample["mask"] = mask
+
         return Batch(**sample)
 
     def create_dataset_camera_visualization(self):

@@ -92,7 +92,8 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def read_meta(self, split):
         self.poses = []
         self.image_paths = []
-
+        self.mask_paths = []
+        
         if split == "trainval":
             with open(os.path.join(self.root_dir, "transforms_train.json"), "r") as f:
                 frames = json.load(f)["frames"]
@@ -112,6 +113,10 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             img_path = os.path.join(self.root_dir, f"{frame['file_path']}") + self.suffix
             self.image_paths.append(img_path)
 
+            # We assume that the mask is stored in the same folder as the image with the same name but with _mask.png extension.
+            # If the mask does not exist, we will return None in the batch
+            self.mask_paths.append(os.path.splitext(img_path)[0] + "_mask.png")
+
         self.camera_centers = np.array(cam_centers)
 
         # https://github.com/graphdeco-inria/gaussian-splatting/blob/main/scene/__init__.py#L69
@@ -119,6 +124,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.cameras_extent = diagonal * 1.1
 
         self.image_paths = np.stack(self.image_paths, dtype=str)
+        self.mask_paths = np.stack(self.mask_paths, dtype=str)
         self.poses = np.array(self.poses).astype(np.float32)  # (N_images, 3, 4)
 
     @torch.no_grad()
@@ -153,10 +159,16 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         out_shape = (1, self.image_h, self.image_w, 3)
         img = NeRFDataset.__read_image(self.image_paths[idx], self.img_wh, return_alpha=False, bg_color=self.bg_color)
 
-        return {
+        output_dict = {
             "data": torch.tensor(img).reshape(out_shape),
             "pose": torch.tensor(self.poses[idx]).unsqueeze(0),
         }
+
+        if os.path.exists(mask_path := self.mask_paths[idx]): 
+            mask = torch.from_numpy(np.array(Image.open(mask_path))).reshape(1, self.image_h, self.image_w, 1)
+            output_dict["mask"] = mask
+
+        return output_dict
 
     def get_gpu_batch_with_intrinsics(self, batch):
         """Add the intrinsics to the batch and move data to GPU."""
@@ -173,6 +185,11 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             "T_to_world": pose,
             "intrinsics": self.intrinsics,
         }
+
+        if "mask" in batch:
+            mask = batch["mask"][0].to(self.device, non_blocking=True) / 255.0
+            mask = (mask > 0.5).to(torch.float32)
+            sample["mask"] = mask
 
         return Batch(**sample)
 
