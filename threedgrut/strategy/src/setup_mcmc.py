@@ -26,8 +26,8 @@ def setup_mcmc():
     
     # Get build directory
     build_dir = torch.utils.cpp_extension._get_build_directory("lib_mcmc_cc", verbose=True)
-    
-       # Setup include paths
+
+    # Setup include paths
     include_paths = []
     prefix = os.path.dirname(__file__)
     include_paths.append(os.path.join(prefix, "include"))

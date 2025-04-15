@@ -2,6 +2,6 @@
 
 # order in which configs override each other (/* - denotes a relative search path)
 defaults:
-  - /base_3dgut.yaml
-  - /strategy: gs
+  - /base_gs
+  - /render: 3dgut
   - _self_

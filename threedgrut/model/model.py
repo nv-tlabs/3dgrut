@@ -416,7 +416,7 @@ class MixtureOfGaussians(torch.nn.Module):
             self.setup_optimizer(state_dict=checkpoint["optimizer"])
         self.validate_fields()
 
-    def default_initialize_from_points(self, pts, observer_pts, colors=None):
+    def default_initialize_from_points(self, pts, observer_pts, colors=None, use_observer_pts=True):
         """
         Given an Nx3 array of points (and optionally Nx3 rgb colors),
         initialize default values for the other parameters of the model
@@ -430,9 +430,17 @@ class MixtureOfGaussians(torch.nn.Module):
         # Random rotations
         rots = torch.rand((N, 4), dtype=dtype, device=self.device)
 
-        # Initialize the GS size to be the average dist of the 3 nearest neighbors
-        dist2_avg = (k_nearest_neighbors(pts, 4)[:, 1:] ** 2).mean(dim=-1)  # [N,]
-        observation_scale = torch.sqrt(dist2_avg) * self.conf.model.default_scale_factor
+        if use_observer_pts:
+            # NOTE: it seems we get different scales compared to the original 3DGS implementation
+            # estimate scales based on distances to observers
+            dist_to_observers = torch.clamp_min(nearest_neighbor_dist_cpuKD(pts, observer_pts), 1e-7)
+            observation_scale = dist_to_observers * self.conf.initialization.observation_scale_factor
+        else:
+            # Initialize the GS size to be the average dist of the 3 nearest neighbors
+            dist2_avg = (k_nearest_neighbors(pts, 4)[:, 1:] ** 2).mean(dim=-1)  # [N,]
+            observation_scale = torch.sqrt(dist2_avg)
+
+        observation_scale = observation_scale * self.conf.model.default_scale_factor
 
         scales = self.scale_activation_inv(observation_scale)[:, None].repeat(1, 3)
 

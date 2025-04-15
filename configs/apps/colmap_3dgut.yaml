@@ -2,10 +2,10 @@
 
 # order in which configs override each other (/* - denotes a relative search path)
 defaults:
-  - /base_3dgut.yaml
+  - /base_gs
   - /dataset: colmap
   - /initialization: colmap
-  - /strategy: gs
+  - /render: 3dgut
   - _self_
 
 # overwrite of default parameters

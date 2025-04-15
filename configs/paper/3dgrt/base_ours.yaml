@@ -3,6 +3,7 @@
 # order in which configs override each other (/* - denotes a relative search path)
 defaults:
   - base_ours_reference
+  - _self_
 
 optimizer.params.density.lr: 0.09
 render:

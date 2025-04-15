@@ -2,15 +2,11 @@
 
 # order in which configs override each other (/* - denotes a relative search path)
 defaults:
-  - /base_3dgut.yaml
+  - /base_gs
   - /dataset: nerf
   - /initialization: random
-  - /strategy: gs
+  - /render: 3dgut
   - _self_
 
 # overwrite of default parameters
 val_frequency: 999999 # never validate
-
-model:
-  background:
-    color: black

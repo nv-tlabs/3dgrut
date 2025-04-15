@@ -31,6 +31,7 @@ if [ -d "$RESULT_DIR" ]; then
 fi
 
 mkdir -p $RESULT_DIR
+export TORCH_EXTENSIONS_DIR=$RESULT_DIR/.cache
 
 SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
 

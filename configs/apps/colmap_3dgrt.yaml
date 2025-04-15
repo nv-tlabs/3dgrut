@@ -2,10 +2,10 @@
 
 # order in which configs override each other (/* - denotes a relative search path)
 defaults:
-  - /base.yaml
+  - /base_gs
   - /dataset: colmap
   - /initialization: colmap
-  - /strategy: gs
+  - /render: 3dgrt
   - _self_
 
 # overwrite of default parameters

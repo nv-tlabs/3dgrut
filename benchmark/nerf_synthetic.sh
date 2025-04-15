@@ -31,6 +31,7 @@ if [ -d "$RESULT_DIR" ]; then
 fi
 
 mkdir -p $RESULT_DIR
+export TORCH_EXTENSIONS_DIR=$RESULT_DIR/.cache
 
 SCENE_LIST="chair  drums  ficus  hotdog  lego  materials  mic  ship"
 
