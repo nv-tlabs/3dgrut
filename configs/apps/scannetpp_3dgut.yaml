@@ -5,7 +5,7 @@ defaults:
   - /base_gs
   - /dataset: scannetpp
   - /initialization: colmap
-  - /render: 3dgrt
+  - /render: 3dgut
   - _self_
 
 # overwrite of default parameters

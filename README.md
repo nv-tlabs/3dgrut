@@ -28,7 +28,7 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 ## 🔥 News
 - [][2025/04] Support for image masks.
 - [][2025/04] SparseAdam support.
-- [][2025/04] MCMC densification strategy support.
+- ✅[2025/04] MCMC densification strategy support.
 - ✅[2025/04] Stable release [v1.0.0](https://github.com/nv-tlabs/3dgrut/releases/tag/v1.0.0) tagged.
 - ✅[2025/03] Initial code release!
 - ✅[2025/02] [3DGUT](https://research.nvidia.com/labs/toronto-ai/3DGUT/res/3DGUT_ready_main.pdf) was accepted to CVPR 2025!
@@ -45,8 +45,6 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
   - [To visualize training progress interactively](#to-visualize-training-progress-interactively)
   - [To visualize a pre-trained checkpoint](#to-visualize-a-pre-trained-checkpoint)
 - [📋 4. Evaluations](#-4-evaluations)
-  - [3DGRT](#grt-benchmark)
-  - [3DGUT](#gut-benchmark)
 - [🛝 5. Interactive Playground GUI](#-5-interactive-playground-gui)
 - [🎓 6. Citations](#-6-citations)
 - [🙏 7. Acknowledgements](#-7-acknowledgements)
