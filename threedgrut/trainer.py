@@ -184,9 +184,11 @@ class Trainer3DGRUT:
             case "GSStrategy":
                 from threedgrut.strategy.gs import GSStrategy
                 self.strategy = GSStrategy(conf, self.model)
+                logger.info("🔆 Using GS strategy")
             case "MCMCStrategy":
                 from threedgrut.strategy.mcmc import MCMCStrategy
                 self.strategy = MCMCStrategy(conf, self.model)
+                logger.info("🔆 Using MCMC strategy")
             case _:
                 raise ValueError(f"unrecognized model.strategy {conf.strategy.method}")
 

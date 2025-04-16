@@ -135,7 +135,15 @@ python train.py --config-name apps/colmap_3dgrt.yaml path=data/mipnerf360/bonsai
 python train.py --config-name apps/colmap_3dgut.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgut dataset.downsample_factor=2 
 
 # Train Scannet++
+python train.py --config-name apps/scannetpp_3dgrt.yaml path=data/scannetpp/0a5c013435/dslr out_dir=runs experiment_name=0a5c013435_3dgrt
 python train.py --config-name apps/scannetpp_3dgut.yaml path=data/scannetpp/0a5c013435/dslr out_dir=runs experiment_name=0a5c013435_3dgut
+```
+
+We also support MCMC densification strategy for 3DGRT and 3DGUT. To enable it, use the MCMC configuration:
+```bash
+# Train Bonsai
+python train.py --config-name apps/colmap_3dgrt_mcmc.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgrt dataset.downsample_factor=2 
+python train.py --config-name apps/colmap_3dgut_mcmc.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgut dataset.downsample_factor=2 
 ```
 
 > [!Note] 
@@ -252,6 +260,8 @@ bash ./benchmark/nerf_synthetic_render.sh results/nerf_synthetic
 
 **MipNeRF360 Dataset**
 
+GS Strategy, Unsorted
+
 ```bash
 bash ./benchmark/mipnerf360.sh paper/3dgut/unsorted_colmap.yaml
 bash ./benchmark/mipnerf360_render.sh results/mipnerf360
@@ -270,6 +280,25 @@ bash ./benchmark/mipnerf360_render.sh results/mipnerf360
 | Treehill  | 22.35	| 0.627	| 809.6	| 299 |
 | *Average* | 27.43	| 0.815	| 686.4	| 317 |
 
+
+MCMC Strategy, Unsorted
+
+```bash
+bash ./benchmark/mipnerf360.sh paper/3dgut/unsorted_colmap_mcmc.yaml
+bash ./benchmark/mipnerf360_render.sh results/mipnerf360
+```
+|           | PSNR  | SSIM	| Train (s) |	FPS |
+|-----------|-------|-------|-------|------|
+| Bicycle   | 25.31	| 0.765	| 502.3	| 361 |
+| Bonsai    | 32.51	| 0.947	| 670.6	| 274 |
+| Counter   | 29.40	| 0.916	| 752.7	| 254 |
+| Flowers   | 21.86	| 0.616	| 553.3	| 298 |
+| Garden    | 27.06	| 0.852	| 512.7	| 360 |
+| Kitchen   | 31.71	| 0.930	| 739.6	| 258 |
+| Room      | 32.04	| 0.928	| 643.7	| 313 |
+| Stump     | 27.06	| 0.795	| 487.0	| 339 |
+| Treehill  | 23.11	| 0.650	| 508.6	| 365 |
+| *Average* | 27.78	| 0.822	| 596.7	| 308 |
 
 **Scannet++ Dataset**
 
