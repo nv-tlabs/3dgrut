@@ -10,4 +10,3 @@ defaults:
 
 # overwrite of default parameters
 val_frequency: 999999 # never validate
-# # @package _global_
