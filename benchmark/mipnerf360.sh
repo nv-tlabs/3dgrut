@@ -22,7 +22,10 @@ if [[ -z $CONFIG ]]; then
     exit 1
 fi
 
-RESULT_DIR=results/mipnerf360
+RESULT_DIR=$2
+if [[ -z $RESULT_DIR ]]; then
+    RESULT_DIR=results/mipnerf360
+fi
 
 # if the result directory already exists, warn user and aport execution
 if [ -d "$RESULT_DIR" ]; then
