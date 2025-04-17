@@ -27,7 +27,7 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 
 ## 🔥 News
 - ✅[2025/04] Support for image masks.
-- [][2025/04] SparseAdam support.
+- ✅[2025/04] SparseAdam support.
 - ✅[2025/04] MCMC densification strategy support.
 - ✅[2025/04] Stable release [v1.0.0](https://github.com/nv-tlabs/3dgrut/releases/tag/v1.0.0) tagged.
 - ✅[2025/03] Initial code release!

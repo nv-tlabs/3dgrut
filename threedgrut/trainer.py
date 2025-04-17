@@ -41,7 +41,7 @@ from threedgrut.utils.gui import GUI
 from threedgrut.utils.logger import logger
 from threedgrut.utils.timer import CudaTimer
 from threedgrut.utils.misc import jet_map, create_summary_writer, check_step_condition
-
+from threedgrut.optimizers import SelectiveAdam
 
 class Trainer3DGRUT:
     """Trainer for paper: "3D Gaussian Ray Tracing: Fast Tracing of Particle Scenes" """
@@ -705,6 +705,7 @@ class Trainer3DGRUT:
             # Compute the outputs of a single batch
             with torch.cuda.nvtx.range(f"train_{global_step}_fwd"):
                 profilers["inference"].start()
+                import pdb; pdb.set_trace()
                 outputs = model(gpu_batch, train=True, frame_id=global_step)
                 profilers["inference"].end()
 
@@ -730,7 +731,11 @@ class Trainer3DGRUT:
 
             # Optimizer step
             with torch.cuda.nvtx.range(f"train_{global_step}_backprop"):
-                model.optimizer.step()
+                if isinstance(model.optimizer, SelectiveAdam):
+                    assert outputs['mog_visibility'].shape == model.density.shape, f"Visibility shape {outputs['mog_visibility'].shape} does not match density shape {model.density.shape}"
+                    model.optimizer.step(outputs['mog_visibility'])
+                else:
+                    model.optimizer.step()
                 model.optimizer.zero_grad()
 
             # Scheduler step

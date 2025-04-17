@@ -573,6 +573,7 @@ class MixtureOfGaussians(torch.nn.Module):
         Returns:
             A dictionary containing the output of the model
         """
+        import pdb; pdb.set_trace()
 
         return self.renderer.render(self, batch, train, frame_id)
 

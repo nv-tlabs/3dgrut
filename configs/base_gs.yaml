@@ -74,7 +74,7 @@ checkpoint:
   iterations: ${int_list:[ 7000, 30000 ]}
 
 optimizer:
-  type: adam # We only support adam for now
+  type: adam # We only support adam and selective_adam for now
   lr: 0.0
   eps: 1.e-15
   params:

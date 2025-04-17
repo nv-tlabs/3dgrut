@@ -238,6 +238,7 @@ threedgut::Status threedgut::GUTRenderer::renderForward(const RenderParameters& 
                                                         float* worldHitCountCudaPtr,
                                                         float* worldHitDistanceCudaPtr,
                                                         vec4* radianceDensityCudaPtr,
+                                                        int* particlesVisibilityCudaPtr,
                                                         Parameters& parameters,
                                                         int cudaDeviceIndex,
                                                         cudaStream_t cudaStream) {
@@ -282,6 +283,7 @@ threedgut::Status threedgut::GUTRenderer::renderForward(const RenderParameters& 
             (tcnn::vec2*)m_forwardContext->particlesProjectedExtent.data(),
             (float*)m_forwardContext->particlesGlobalDepth.data(),
             (float*)m_forwardContext->particlesPrecomputedFeatures.data(),
+            particlesVisibilityCudaPtr,
             parameters.m_dptrParametersBuffer);
         CUDA_CHECK_STREAM_RETURN(cudaStream, m_logger);
     }

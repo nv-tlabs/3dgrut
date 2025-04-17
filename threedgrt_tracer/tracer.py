@@ -231,6 +231,7 @@ class Tracer:
                 self.conf.render.min_transmittance,
             )
 
+            import pdb; pdb.set_trace()
             if self.frame_timer is not None:
                 self.frame_timer.end()
 

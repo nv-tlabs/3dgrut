@@ -68,6 +68,7 @@ public:
                          float* worldHitCountCudaPtr,
                          float* worldHitDistanceCudaPtr,
                          tcnn::vec4* radianceDensityCudaPtr,
+                         int* particlesVisibilityCudaPtr,
                          Parameters& parameters,
                          int cudaDeviceIndex,
                          cudaStream_t cudaStream);

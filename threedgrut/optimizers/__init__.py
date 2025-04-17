@@ -150,6 +150,7 @@ class SelectiveAdam(torch.optim.Adam):
             exp_avg = stored_state["exp_avg"]
             exp_avg_sq = stored_state["exp_avg_sq"]
 
+            import pdb; pdb.set_trace()
             _CC.selective_adam_update(
                 param.contiguous(),
                 param.grad.contiguous(),

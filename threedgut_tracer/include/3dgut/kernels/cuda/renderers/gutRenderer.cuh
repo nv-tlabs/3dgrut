@@ -31,6 +31,7 @@ __global__ void projectOnTiles(tcnn::uvec2 tileGrid,
                                tcnn::vec2* __restrict__ particlesProjectedExtentPtr,
                                float* __restrict__ particlesGlobalDepthPtr,
                                float* __restrict__ particlesPrecomputedFeaturesPtr,
+                               int* __restrict__ particlesVisibilityCudaPtr,
                                const uint64_t* __restrict__ parameterMemoryHandles) {
 
     TGUTProjector::eval(tileGrid,
@@ -46,6 +47,7 @@ __global__ void projectOnTiles(tcnn::uvec2 tileGrid,
                         particlesProjectedExtentPtr,
                         particlesGlobalDepthPtr,
                         particlesPrecomputedFeaturesPtr,
+                        particlesVisibilityCudaPtr,
                         {parameterMemoryHandles});
 }
 
