@@ -142,6 +142,9 @@ extern "C" __global__ void __raygen__rg() {
                     rayTransmittance *= (1 - rayParticleAlpha);
                     rayHitDistance += rayParticleHitDistance * rayParticleWeight;
 
+                    // NOTE(qi): Race condition here, but as we are writing the same value, it seems it is safe.
+                    params.particleVisibility[rayHit.particleId] = 1;
+
 #ifdef ENABLE_NORMALS
                     // fetch the normals from the precomputed normals buffer
                     const float3 rayParticleNormal = make_float3(particleNormalsDensity.x, particleNormalsDensity.y, particleNormalsDensity.z);

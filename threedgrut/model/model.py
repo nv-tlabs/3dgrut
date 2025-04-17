@@ -36,7 +36,7 @@ from threedgrut.utils.misc import (
     to_np, to_torch, quaternion_to_so3
 )
 from threedgrut.utils.render import RGB2SH
-
+from threedgrut.optimizers import SelectiveAdam
 
 class MixtureOfGaussians(torch.nn.Module):
     """ """
@@ -488,7 +488,12 @@ class MixtureOfGaussians(torch.nn.Module):
                 if module.requires_grad:
                     params.append({"params": [module], "name": name, **args})
 
-        self.optimizer = torch.optim.Adam(params, lr=self.conf.optimizer.lr, eps=self.conf.optimizer.eps)
+        if self.conf.optimizer.type == "adam":
+            self.optimizer = torch.optim.Adam(params, lr=self.conf.optimizer.lr, eps=self.conf.optimizer.eps)
+        elif self.conf.optimizer.type == "selective_adam":
+            self.optimizer = SelectiveAdam(params, lr=self.conf.optimizer.lr, eps=self.conf.optimizer.eps)
+        else:
+            raise ValueError(f"Unknown optimizer type: {self.conf.optimizer.type}")
 
         for param_group in self.optimizer.param_groups:
             if param_group["name"] == "positions":
