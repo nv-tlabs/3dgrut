@@ -12,6 +12,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# 
+#
+# Selective Adam implementation was adpoted from gSplat library (https://github.com/nerfstudio-project/gsplat/blob/main/gsplat/optimizers/selective_adam.py), 
+# which is based on the original implementation https://github.com/humansensinglab/taming-3dgs that uderlines the work
+#
+# Taming 3DGS: High-Quality Radiance Fields with Limited Resources by 
+# Saswat Subhajyoti Mallick*, Rahul Goel*, Bernhard Kerbl, Francisco Vicente Carrasco, Markus Steinberger and Fernando De La Torre
+# 
+# If you use this code in your research, please cite the above works.
 
 
 import os

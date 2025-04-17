@@ -12,6 +12,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// MCMC implementation was adpoted from gSplat library (https://github.com/nerfstudio-project/gsplat/blob/main/gsplat/cuda/csrc/Relocation.cpp), 
+// which is based on the original implementation https://github.com/ubc-vision/3dgs-mcmc that uderlines the work
+//
+// 3D Gaussian Splatting as Markov Chain Monte Carlo by 
+// Shakiba Kheradmand, Daniel Rebain, Gopal Sharma, Weiwei Sun, Yang-Che Tseng, Hossam Isack, Abhishek Kar, Andrea Tagliasacchi and Kwang Moo Yie
+//
+// If you use this code in your research, please cite the above works.
 
 #include "gaussian_mcmc.h"
 #include <vector>

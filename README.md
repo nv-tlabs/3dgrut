@@ -147,6 +147,8 @@ python train.py --config-name apps/colmap_3dgrt_mcmc.yaml path=data/mipnerf360/b
 python train.py --config-name apps/colmap_3dgut_mcmc.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgut dataset.downsample_factor=2 
 ```
 
+If you use MCMC in your research, please cite the original work and gSplat library from which the code was adopted (links to the code are provided in the source files).
+
 > [!Note] 
 > For ScanNet++, we expect the dataset to be preprocessed following [FisheyeGS](https://github.com/zmliao/Fisheye-GS?tab=readme-ov-file#prepare-training-data-on-scannet-dataset)'s method.
 
