@@ -705,7 +705,6 @@ class Trainer3DGRUT:
             # Compute the outputs of a single batch
             with torch.cuda.nvtx.range(f"train_{global_step}_fwd"):
                 profilers["inference"].start()
-                import pdb; pdb.set_trace()
                 outputs = model(gpu_batch, train=True, frame_id=global_step)
                 profilers["inference"].end()
 

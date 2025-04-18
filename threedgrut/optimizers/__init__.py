@@ -12,82 +12,35 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# 
 #
-# Selective Adam implementation was adpoted from gSplat library (https://github.com/nerfstudio-project/gsplat/blob/main/gsplat/optimizers/selective_adam.py), 
+#
+# Selective Adam implementation was adpoted from gSplat library (https://github.com/nerfstudio-project/gsplat/blob/main/gsplat/optimizers/selective_adam.py),
 # which is based on the original implementation https://github.com/humansensinglab/taming-3dgs that uderlines the work
 #
-# Taming 3DGS: High-Quality Radiance Fields with Limited Resources by 
+# Taming 3DGS: High-Quality Radiance Fields with Limited Resources by
 # Saswat Subhajyoti Mallick*, Rahul Goel*, Bernhard Kerbl, Francisco Vicente Carrasco, Markus Steinberger and Fernando De La Torre
-# 
+#
 # If you use this code in your research, please cite the above works.
 
 
-import os
-from setuptools import find_packages, setup
-
 import torch
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 
-def setup_lib_optimizers_cc():
-
-    root_dir = os.path.abspath(os.path.dirname(__file__))
-
-    cpp_standard = 17
-
-    nvcc_flags = [
-        f"-std=c++{cpp_standard}",
-        "--extended-lambda",
-        "--expt-relaxed-constexpr",
-        # The following definitions must be undefined
-        # since TCNN requires half-precision operation.
-        "-U__CUDA_NO_HALF_OPERATORS__",
-        "-U__CUDA_NO_HALF_CONVERSIONS__",
-        "-U__CUDA_NO_HALF2_OPERATORS__",
-    ]
-
-    if os.name == "posix":
-        cflags = [f"-std=c++{cpp_standard}"]
-        nvcc_flags += [
-            "-Xcompiler=-Wno-float-conversion",
-            "-Xcompiler=-fno-strict-aliasing",
-        ]
-    elif os.name == "nt":
-        cflags = [f"/std:c++{cpp_standard}"]
-
-    include_paths = [root_dir]
-
-    # Linker options.
-    if os.name == "posix":
-        ldflags = ["-lcuda", "-lnvrtc"]
-    elif os.name == "nt":
-        ldflags = ["cuda.lib", "advapi32.lib", "nvrtc.lib"]
-
-    build_dir = torch.utils.cpp_extension._get_build_directory(
-        "lib_optimizers_cc", verbose=True
-    )
-
-    return torch.utils.cpp_extension.load(
-        name="lib_optimizers_cc",
-        sources=[
-            os.path.join(root_dir, "optimizers.cu"),
-            os.path.join(root_dir, "optimizers.cpp"),
-        ],
-        extra_cflags=cflags,
-        extra_cuda_cflags=nvcc_flags,
-        extra_ldflags=ldflags,
-        extra_include_paths=include_paths,
-        build_directory=build_dir,
-        with_cuda=True,
-        verbose=True,
-    )
+_optimizer_plugin = None
 
 
-_CC = None
+def load_optimizer_plugin():
+    global _optimizer_plugin
+    if _optimizer_plugin is None:
+        try:
+            from . import lib_optimizers_cc as optimizers_cc
+        except ImportError:
+            from .setup_optimizers import setup_lib_optimizers_cc
 
-if _CC is None:
-    _CC = setup_lib_optimizers_cc()
+            setup_lib_optimizers_cc()  # Setup the C++ extension for the optimizer plugin
+            import lib_optimizers_cc as optimizers_cc
+
+        _optimizer_plugin = optimizers_cc
 
 
 class SelectiveAdam(torch.optim.Adam):
@@ -131,15 +84,21 @@ class SelectiveAdam(torch.optim.Adam):
 
     def __init__(self, params, lr=0.001, betas=(0.9, 0.999), eps=1e-08):
         super().__init__(params=params, lr=lr, eps=eps, betas=betas)
+        load_optimizer_plugin()
 
     @torch.no_grad()
     def step(self, visibility):
+
         for group in self.param_groups:
+
             lr = group["lr"]
             eps = group["eps"]
             beta1, beta2 = group["betas"]
 
-            assert len(group["params"]) == 1, "More than one tensor in group is not supported"
+            assert (
+                len(group["params"]) == 1
+            ), "More than one tensor in group is not supported"
+
             param = group["params"][0]
             if param.grad is None:
                 continue
@@ -159,13 +118,12 @@ class SelectiveAdam(torch.optim.Adam):
             exp_avg = stored_state["exp_avg"]
             exp_avg_sq = stored_state["exp_avg_sq"]
 
-            import pdb; pdb.set_trace()
-            _CC.selective_adam_update(
+            _optimizer_plugin.selective_adam_update(
                 param.contiguous(),
                 param.grad.contiguous(),
                 exp_avg.contiguous(),
                 exp_avg_sq.contiguous(),
-                visibility.squeeze(),
+                visibility.bool().squeeze(),
                 lr,
                 beta1,
                 beta2,

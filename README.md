@@ -140,14 +140,22 @@ python train.py --config-name apps/scannetpp_3dgrt.yaml path=data/scannetpp/0a5c
 python train.py --config-name apps/scannetpp_3dgut.yaml path=data/scannetpp/0a5c013435/dslr out_dir=runs experiment_name=0a5c013435_3dgut
 ```
 
-We also support MCMC densification strategy for 3DGRT and 3DGUT. To enable it, use the MCMC configuration:
+We also support MCMC densification strategy and selective Adam optimizer for 3DGRT and 3DGUT. 
+
+To enable MCMC, use:
 ```bash
-# Train Bonsai
 python train.py --config-name apps/colmap_3dgrt_mcmc.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgrt dataset.downsample_factor=2 
 python train.py --config-name apps/colmap_3dgut_mcmc.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgut dataset.downsample_factor=2 
 ```
 
-If you use MCMC in your research, please cite the original work and gSplat library from which the code was adopted (links to the code are provided in the source files).
+To enable selective Adam, use:
+```bash
+python train.py --config-name apps/colmap_3dgrt.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgrt dataset.downsample_factor=2 optimizer.type=selective_adam
+python train.py --config-name apps/colmap_3dgut.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgut dataset.downsample_factor=2 optimizer.type=selective_adam
+```
+
+If you use MCMC and Selective Adam in your research, please cite [3dgs-mcmck](https://github.com/ubc-vision/3dgs-mcmc), [taming-3dgs](https://github.com/humansensinglab/taming-3dgs),
+and [gSplat](https://github.com/nerfstudio-project/gsplat/tree/main) library from which the code was adopted (links to the code are provided in the source files).
 
 > [!Note] 
 > For ScanNet++, we expect the dataset to be preprocessed following [FisheyeGS](https://github.com/zmliao/Fisheye-GS?tab=readme-ov-file#prepare-training-data-on-scannet-dataset)'s method.
