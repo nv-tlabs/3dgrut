@@ -15,6 +15,9 @@
 
 #!/bin/bash
 
+set -e
+
+
 CONFIG=$1
 if [[ -z $CONFIG ]]; then
     echo "Error: Configuration is not provided. Aborting execution."
@@ -22,10 +25,8 @@ if [[ -z $CONFIG ]]; then
     exit 1
 fi
 
-RESULT_DIR=$2
-if [[ -z $RESULT_DIR ]]; then
-    RESULT_DIR=results/mipnerf360
-fi
+RESULT_DIR=${RESULT_DIR:-"results/mipnerf360"}
+EXTRA_ARGS=${@:2} # any extra arguments to pass to the script
 
 # if the result directory already exists, warn user and aport execution
 if [ -d "$RESULT_DIR" ]; then
@@ -36,7 +37,7 @@ fi
 mkdir -p $RESULT_DIR
 export TORCH_EXTENSIONS_DIR=$RESULT_DIR/.cache
 
-SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
+SCENE_LIST="bicycle bonsai counter flowers garden kitchen room stump treehill"
 
 for SCENE in $SCENE_LIST;
 do
@@ -53,20 +54,7 @@ do
     CUDA_VISIBLE_DEVICES=0 python train.py --config-name $CONFIG \
         use_wandb=False with_gui=False out_dir=$RESULT_DIR \
         path=data/mipnerf360/$SCENE experiment_name=$SCENE \
-        dataset.downsample_factor=$DATA_FACTOR >> $RESULT_DIR/train_$SCENE.log
+        dataset.downsample_factor=$DATA_FACTOR \
+        $EXTRA_ARGS >> $RESULT_DIR/train_$SCENE.log
 
 done
-
-# To grep results from log files, run the following command:
-# grep "Training Statistics" -A 5 train_*.log | awk 'NR % 7 == 5'
-# grep "Test Metrics"        -A 5 train_*.log | awk 'NR % 7 == 5'
-# 
-# Directly print 
-#  - Training Time: 
-#  - Testing PSNR: 
-#  - Testing SSIM: 
-#  - Rendering Frame Time: 
-#      echo "- Train Time(s) "    && grep "Training Statistics" -A 5 train_*.log | awk 'NR % 7 == 5' | awk -F' ' '{print $6}'
-#      echo "- Test PSNR     "    && grep "Test Metrics" -A 5        train_*.log | awk 'NR % 7 == 5' | awk -F' ' '{print $2}'
-#      echo "- Test SSIM     "    && grep "Test Metrics" -A 5        train_*.log | awk 'NR % 7 == 5' | awk -F' ' '{print $4}'
-#      echo "- Frame Time(ms)"    && grep "Test Metrics" -A 5       render_*.log | awk 'NR % 7 == 5' | awk -F' ' '{print $10}'

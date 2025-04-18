@@ -318,8 +318,6 @@ bash ./benchmark/mipnerf360_render.sh results/mipnerf360
 | Treehill  | 23.11	| 0.650	| 508.6	| 365 |
 | *Average* | 27.78	| 0.822	| 596.7	| 308 |
 
-
-
 GS Strategy, Unsorted, Sparse Adam
 
 |           | PSNR   | SSIM  | Train (s) | FPS |

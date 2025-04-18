@@ -15,6 +15,9 @@
 
 #!/bin/bash
 
+set -e
+
+
 CONFIG=$1
 if [[ -z $CONFIG ]]; then
     echo "Error: Configuration is not provided. Aborting execution."
@@ -22,10 +25,8 @@ if [[ -z $CONFIG ]]; then
     exit 1
 fi
 
-RESULT_DIR=$2
-if [[ -z $RESULT_DIR ]]; then
-    RESULT_DIR=results/zipnerf
-fi
+RESULT_DIR=${RESULT_DIR:-"results/zipnerf"}
+EXTRA_ARGS=${@:2} # any extra arguments to pass to the script
 
 # if the result directory already exists, warn user and aport execution
 if [ -d "$RESULT_DIR" ]; then
@@ -49,13 +50,15 @@ do
     CUDA_VISIBLE_DEVICES=0 python train.py --config-name $CONFIG \
         use_wandb=False with_gui=False out_dir=$RESULT_DIR \
         path=data/zipnerf/fisheye/$SCENE experiment_name=fisheye_$SCENE \
-        dataset.downsample_factor=$DATA_FACTOR >> $RESULT_DIR/train_fisheye_$SCENE.log
+        dataset.downsample_factor=$DATA_FACTOR \
+        $EXTRA_ARGS >> $RESULT_DIR/train_fisheye_$SCENE.log
 
     # train on undistorted
     nvidia-smi > $RESULT_DIR/train_undistorted_$SCENE.log
     CUDA_VISIBLE_DEVICES=0 python train.py --config-name $CONFIG \
         use_wandb=False with_gui=False out_dir=$RESULT_DIR \
         path=data/zipnerf/undistorted/$SCENE experiment_name=undistorted_$SCENE \
-        dataset.downsample_factor=$DATA_FACTOR >> $RESULT_DIR/train_undistorted_$SCENE.log
+        dataset.downsample_factor=$DATA_FACTOR \
+        $EXTRA_ARGS >> $RESULT_DIR/train_undistorted_$SCENE.log
 
 done

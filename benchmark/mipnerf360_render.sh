@@ -15,6 +15,9 @@
 
 #!/bin/bash
 
+set -e
+
+
 RESULT_DIR=$1
 if [[ -z $RESULT_DIR ]]; then
     echo "Error: Result directory is not provided. Aborting execution."
@@ -22,7 +25,8 @@ if [[ -z $RESULT_DIR ]]; then
     exit 1
 fi
 
-SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
+SCENE_LIST="bicycle bonsai counter flowers garden kitchen room stump treehill"
+
 for SCENE in $SCENE_LIST;
 do
     if [ "$SCENE" = "bonsai" ] || [ "$SCENE" = "counter" ] || [ "$SCENE" = "kitchen" ] || [ "$SCENE" = "room" ]; then
