@@ -76,7 +76,6 @@ class Tracer:
                 render_opts,
                 sph_degree,
                 min_transmittance,
-                mog_visibility,
             )
             ctx.save_for_backward(
                 ray_to_world,
