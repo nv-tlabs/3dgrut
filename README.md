@@ -318,6 +318,24 @@ bash ./benchmark/mipnerf360_render.sh results/mipnerf360
 | Treehill  | 23.11	| 0.650	| 508.6	| 365 |
 | *Average* | 27.78	| 0.822	| 596.7	| 308 |
 
+
+
+GS Strategy, Unsorted, Sparse Adam
+
+|           | PSNR   | SSIM  | Train (s) | FPS |
+|-----------|--------|-------|-----------|-----|
+| Bicycle   | 25.04  | 0.759 | 835.2     | -   |
+| Bonsai    | 32.63  | 0.945 | 457.1     | -   |
+| Counter   | 29.12  | 0.911 | 468.8     | -   |
+| Flowers   | 21.55  | 0.614 | 741.7     | -   |
+| Garden    | 27.12  | 0.855 | 757.4     | -   |
+| Kitchen   | 31.37  | 0.929 | 639.3     | -   |
+| Room      | 31.72  | 0.921 | 415.2     | -   |
+| Stump     | 26.58  | 0.774 | 695.7     | -   |
+| Treehill  | 22.30  | 0.625 | 749.8     | -   |
+| *Average* | 27.49  | 0.815 | 640.0     | -   |
+
+
 **Scannet++ Dataset**
 
 ```bash
