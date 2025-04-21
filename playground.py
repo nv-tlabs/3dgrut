@@ -14,7 +14,7 @@
 # limitations under the License.
 
 from __future__ import annotations
-from playground.playground import Playground
+from threedgrut_playground.ps_gui import Playground
 import os
 import argparse
 
@@ -42,7 +42,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--mesh_assets',
         type=str,
-        default=os.path.join(os.path.dirname(__file__), 'playground', 'assets'),
+        default=os.path.join(os.path.dirname(__file__), 'threedgrut_playground', 'assets'),
         help="Path to folder containing mesh assets of .obj or .glb format."
     )
     parser.add_argument(

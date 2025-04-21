@@ -164,7 +164,7 @@ SplatRaster::SplatRaster(const nlohmann::json& config)
 SplatRaster::~SplatRaster(void) {
 }
 
-std::tuple<torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
                    torch::Tensor particleDensity,
                    torch::Tensor particleRadiance,
@@ -189,6 +189,8 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
 
     torch::Tensor rayRadianceDensity = torch::zeros({height, width, 4}, opts);
     torch::Tensor rayHitDistance     = torch::ones({height, width, 1}, opts).multiply(1e06f);
+    torch::Tensor rayHitCount        = torch::zeros({height, width, 1}, opts);
+    torch::Tensor particleVisibility = torch::zeros({numParticles, 1}, opts);
 
     m_parameters.values.numParticles               = numParticles;
     m_parameters.values.radianceSphDegree          = numActiveFeatures;
@@ -218,8 +220,10 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
         renderParameters,
         reinterpret_cast<const tcnn::vec3*>(voidDataPtr(rayOrigin)),
         reinterpret_cast<const tcnn::vec3*>(voidDataPtr(rayDirection)),
+        reinterpret_cast<float*>(voidDataPtr(rayHitCount)),
         reinterpret_cast<float*>(voidDataPtr(rayHitDistance)),
         reinterpret_cast<tcnn::vec4*>(voidDataPtr(rayRadianceDensity)),
+        reinterpret_cast<int*>(voidDataPtr(particleVisibility)),
         m_parameters,
         cudaDeviceIndex,
         cudaStream);
@@ -230,7 +234,7 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
         timer->stop();
     }
 
-    return std::tuple<torch::Tensor, torch::Tensor>(rayRadianceDensity, rayHitDistance);
+    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(rayRadianceDensity, rayHitDistance, rayHitCount, particleVisibility);
 }
 
 std::tuple<torch::Tensor, torch::Tensor>

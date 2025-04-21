@@ -47,7 +47,7 @@ def _to_tensor(mat_data, is_normalize=False, is_pad_to_float4=False, device=None
 
 @torch.no_grad()
 def load_missing_material_info(path, materials, device):
-    """ Pupulates materials with additional material fields currently missing from kaolin.
+    """ Populates materials with additional material fields currently missing from kaolin.
     """
     enum2alphamode = {
         OPAQUE: 0,
@@ -170,8 +170,28 @@ def load_mesh(path: str, device):
 
     return mesh
 
+
 def create_procedural_mesh(vertices, faces, face_uvs, device):
     mesh = kaolin.rep.SurfaceMesh(vertices=vertices, faces=faces, face_uvs=face_uvs)
     mesh.vertex_tangents = torch.zeros([len(mesh.vertices), 3], dtype=torch.bool)
     mesh.material_assignments = torch.zeros([len(mesh.faces)], device=device)
     return mesh.to(device)
+
+
+def create_quad_mesh(device):
+    """ Creates a procedurally generated quad mesh. """
+    MS = 1.0
+    MZ = 2.5
+    v0 = [-MS, -MS, MZ]
+    v1 = [-MS, +MS, MZ]
+    v2 = [+MS, -MS, MZ]
+    v3 = [+MS, +MS, MZ]
+    faces = torch.tensor([[0, 1, 2], [2, 1, 3]])
+    vertex_uvs = torch.tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
+    mesh = create_procedural_mesh(
+        vertices=torch.tensor([v0, v1, v2, v3]),
+        faces=faces,
+        face_uvs=vertex_uvs[faces].contiguous(), # (F, 3, 2)
+        device=device
+    )
+    return mesh

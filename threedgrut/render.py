@@ -60,7 +60,7 @@ class Renderer:
         match conf.dataset.type:
             case "nerf":
                 dataset = NeRFDataset(
-                    conf.path, split="test", return_alphas=False, bg_color=conf.model.background.color
+                    conf.path, split="test", bg_color=conf.model.background.color
                 )
             case "colmap":
                 dataset = ColmapDataset(conf.path, split="val", downsample_factor=conf.dataset.downsample_factor)

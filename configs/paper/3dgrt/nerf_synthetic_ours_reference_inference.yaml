@@ -12,7 +12,7 @@ val_frequency: 999999
 
 model:
   background:
-    color: 
-    
+    color: black
+
 render.particle_kernel_density_clamping: true
 render.min_transmittance: 0.03

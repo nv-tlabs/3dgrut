@@ -15,6 +15,9 @@
 
 #!/bin/bash
 
+set -e
+
+
 CONFIG=$1
 if [[ -z $CONFIG ]]; then
     echo "Configuration is not provided. Aborting execution."
@@ -22,7 +25,8 @@ if [[ -z $CONFIG ]]; then
     exit 1
 fi
 
-RESULT_DIR=results/scannetpp
+RESULT_DIR=${RESULT_DIR:-"results/scannetpp"}
+EXTRA_ARGS=${@:2} # any extra arguments to pass to the script
 
 # if the result directory already exists, warn user and aport execution
 if [ -d "$RESULT_DIR" ]; then
@@ -31,6 +35,7 @@ if [ -d "$RESULT_DIR" ]; then
 fi
 
 mkdir -p $RESULT_DIR
+export TORCH_EXTENSIONS_DIR=$RESULT_DIR/.cache
 
 SCENE_LIST="0a5c013435 8d563fc2cc bb87c292ad d415cc449b e8ea9b4da8 fe1733741f"
 
@@ -42,6 +47,7 @@ do
     nvidia-smi > $RESULT_DIR/train_$SCENE.log
     CUDA_VISIBLE_DEVICES=0 python train.py --config-name $CONFIG \
         use_wandb=False with_gui=False out_dir=$RESULT_DIR \
-        path=data/scannetpp/$SCENE/dslr experiment_name=$SCENE >> $RESULT_DIR/train_$SCENE.log
+        path=data/scannetpp/$SCENE/dslr experiment_name=$SCENE \
+        $EXTRA_ARGS >> $RESULT_DIR/train_$SCENE.log
 
 done

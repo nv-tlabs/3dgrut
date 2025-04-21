@@ -2,7 +2,7 @@
 
 # order in which configs override each other (/* - denotes a relative search path)
 defaults:
-  - /base_3dgut.yaml
+  - base_unsorted
   - /dataset: nerf
   - /initialization: random
   - _self_

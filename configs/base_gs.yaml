@@ -1,0 +1,127 @@
+defaults:
+  - _self_
+  - /strategy: gs
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+path: ???
+experiment_name: ""
+resume: ""
+out_dir: "./runs"
+n_iterations: 30000
+with_gui: false
+gui_update_from_device: true
+val_frequency: 5000
+num_workers: 24
+use_wandb: false
+wandb_project: "3dgrt"
+test_last: true
+validate_first: false
+log_frequency: 1
+compute_extra_metrics: true
+
+enable_frame_timings: false
+
+enable_writer: true
+writer:
+  hit_stat_frequency: 999999
+  max_num_hits: 128
+  log_image_views: ${int_list:[ 0, 13, 27, 43, 78 ]}
+
+export_ingp:
+  enabled: true
+  force_half: false
+  path: ""
+import_ingp:
+  enabled: false
+  path: ""
+  init_global_step: 0
+
+export_ply:
+  enabled: False 
+  path: ""
+import_ply:
+  enabled: False 
+  path: ""
+  init_global_step: 0
+  
+model:
+  density_activation: sigmoid
+  scale_activation: exp
+  default_density: 0.1
+  default_scale_factor: 1.0
+  optimize_density: true
+  optimize_features_albedo: true
+  optimize_features_specular: true
+  optimize_position: true
+  optimize_rotation: true
+  optimize_scale: true
+  bvh_update_frequency: 1
+  progressive_training:
+    feature_type: "sh" # one of [sh, mlp], currently only sh supported
+    init_n_features: 0 # sh: initial sh deg | mlp: num of dims initially unmasked
+    max_n_features: 3 # sh: maximum sh deg | mlp: total num of dims finally unmasked
+    increase_frequency: 1000 # unmask more feature dimensions every N global steps
+    increase_step: 1 # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
+
+  background:
+    name: background-color # one of [skip-background, background-color]
+    color: black # one of [black, white, random] needs to be defined if name == background-color
+
+  print_stats: true
+
+checkpoint:
+  iterations: ${int_list:[ 7000, 30000 ]}
+
+optimizer:
+  type: adam # We only support adam and selective_adam for now
+  lr: 0.0
+  eps: 1.e-15
+  params:
+    positions:
+      lr: 0.00016 # 3DGS value: 0.00016 initial and decayed to 0.0000016
+    density:
+      lr: 0.05 # 3DGS value: 0.05
+    features_albedo:
+      lr: 0.0025 # 3DGS value: 0.0025
+    features_specular:
+      lr: ${div:${optimizer.params.features_albedo.lr},20} # 3DGS value 20x smaller than lr of features_albedo
+    rotation:
+      lr: 0.001 # 3DGS value: 0.001
+    scale:
+      lr: 0.005 # 3DGS value: 0.005
+
+scheduler:
+  positions:
+    # In the 3DGS paper they additionally have a parameter lr_delay_mult, but is is not being used so I drop it here
+    type: exp
+    lr_init: ${optimizer.params.positions.lr}
+    lr_final: 0.0000016
+
+    max_steps: 30000
+
+  density:
+    type: skip
+
+loss:
+  use_l1: true
+  lambda_l1: 0.8
+  
+  use_l2: false
+  lambda_l2: 1.0
+
+  use_ssim: true
+  lambda_ssim: 0.2
+
+  use_opacity: false
+  lambda_opacity: 0.0
+
+  use_scale: false
+  lambda_scale: 0.0
+
+hydra:
+  output_subdir: null
+  job:
+    chdir: false
+  run:
+    dir: .

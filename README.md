@@ -16,16 +16,20 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 > [Nicolas Moenne-Loccoz*](https://www.linkedin.com/in/nicolas-moënne-loccoz-71040512/?original_referer=https%3A%2F%2Fwww%2Egoogle%2Ecom%2F&originalSubdomain=ca), [Ashkan Mirzaei*](https://ashmrz.github.io), [Or Perel](https://orperel.github.io/), [Riccardo De Lutio](https://riccardodelutio.github.io/), [Janick Martinez Esturo](https://jme.pub/),   
 > [Gavriel State](https://www.linkedin.com/in/gavstate/?originalSubdomain=ca), [Sanja Fidler](https://www.cs.utoronto.ca/~fidler/), [Nicholas Sharp^](https://nmwsharp.com/), [Zan Gojcic^](https://zgojcic.github.io/) _(*,^ indicates equal contribution)_  
 > _SIGGRAPH Asia 2024 (Journal Track)_  
-> __[Project page](https://research.nvidia.com/labs/toronto-ai/3DGRT)&nbsp;/ [Paper](https://research.nvidia.com/labs/toronto-ai/3DGRT/res/3dgrt_compressed.pdf)&nbsp;/ [Video](https://research.nvidia.com/labs/toronto-ai/3DGRT/res/3dgrt_supplementary_video.mp4)&nbsp;/ [BibTeX](/-/raw/release/assets/3dgrt2024.bib)__
+> __[Project page](https://research.nvidia.com/labs/toronto-ai/3DGRT)&nbsp;/ [Paper](https://research.nvidia.com/labs/toronto-ai/3DGRT/res/3dgrt_compressed.pdf)&nbsp;/ [Video](https://research.nvidia.com/labs/toronto-ai/3DGRT/res/3dgrt_supplementary_video.mp4)&nbsp;/ [BibTeX](assets/3dgrt2024.bib)__
 
 > __3DGUT: Enabling Distorted Cameras and Secondary Rays in Gaussian Splatting__  
 > [Qi Wu*](https://wilsoncernwq.github.io/), [Janick Martinez Esturo*](https://jme.pub/), [Ashkan Mirzaei](https://ashmrz.github.io),   
 > [Nicolas Moenne-Loccoz](https://www.linkedin.com/in/nicolas-moënne-loccoz-71040512/?original_referer=https%3A%2F%2Fwww%2Egoogle%2Ecom%2F&originalSubdomain=ca), [Zan Gojcic](https://zgojcic.github.io/)  _(* indicates equal contribution)_  
-> _CVPR 2025_  
-> __[Project page](https://research.nvidia.com/labs/toronto-ai/3DGUT)&nbsp;/ [Paper](https://research.nvidia.com/labs/toronto-ai/3DGUT/res/3DGUT_ready_main.pdf)&nbsp;/ [Video](https://research.nvidia.com/labs/toronto-ai/3DGUT/#supp_video)&nbsp;/ [BibTeX](/-/raw/release/assets/3dgut2025.bib)__
+> _CVPR 2025 (Oral)_  
+> __[Project page](https://research.nvidia.com/labs/toronto-ai/3DGUT)&nbsp;/ [Paper](https://research.nvidia.com/labs/toronto-ai/3DGUT/res/3DGUT_ready_main.pdf)&nbsp;/ [Video](https://research.nvidia.com/labs/toronto-ai/3DGUT/#supp_video)&nbsp;/ [BibTeX](assets/3dgut2025.bib)__
 
 
 ## 🔥 News
+- ✅[2025/04] Support for image masks.
+- ✅[2025/04] SparseAdam support.
+- ✅[2025/04] MCMC densification strategy support.
+- ✅[2025/04] Stable release [v1.0.0](https://github.com/nv-tlabs/3dgrut/releases/tag/v1.0.0) tagged.
 - ✅[2025/03] Initial code release!
 - ✅[2025/02] [3DGUT](https://research.nvidia.com/labs/toronto-ai/3DGUT/res/3DGUT_ready_main.pdf) was accepted to CVPR 2025!
 - ✅[2024/08] [3DGRT](https://research.nvidia.com/labs/toronto-ai/3DGRT/res/3dgrt_compressed.pdf) was accepted to SIGGRAPH Asia 2024!
@@ -37,15 +41,11 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 - [🔧 1 Dependencies and Installation](#-1-dependencies-and-installation)
   - [Running with Docker](#running-with-docker)
 - [💻 2. Train 3DGRT or 3DGUT scenes](#-2-train-3dgrt-or-3dgut-scenes)
+  - [Using image masks](#using-image-masks)
 - [🎥 3. Rendering from Checkpoints](#-3-rendering-from-checkpoints)
   - [To visualize training progress interactively](#to-visualize-training-progress-interactively)
   - [To visualize a pre-trained checkpoint](#to-visualize-a-pre-trained-checkpoint)
 - [📋 4. Evaluations](#-4-evaluations)
-  - [3DGRT](#3dgrt)
-    - [MipNeRF360 Dataset](#mipnerf360-dataset)
-  - [3DGUT](#3dgut)
-    - [MipNeRF360 Dataset](#mipnerf360-dataset-1)
-    - [Scannet++ Dataset](#scannet-dataset)
 - [🛝 5. Interactive Playground GUI](#-5-interactive-playground-gui)
 - [🎓 6. Citations](#-6-citations)
 - [🙏 7. Acknowledgements](#-7-acknowledgements)
@@ -57,7 +57,7 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 
 <details> 
 <summary> NOTE: gcc versions >11 (expand for details)</summary>
-
+</br>
 Currently the codebase requires gcc <= 11.  If your machine uses the compiler gcc-12 or newer (i.e., in Ubuntu 24.04), you may need to install and use gcc-11. 
 
 First, install gcc 11:
@@ -70,6 +70,24 @@ Then run the install script with the optional `WITH_GCC11` flag, which additiona
 ./install_env.sh 3dgrut WITH_GCC11
 ```
 </details>
+
+<details> 
+<summary> NOTE: Blackwell GPU support</summary>
+</br>
+The current codebase uses CUDA 11.8, which is not compatible with the new Blackwell GPUs (e.g., RTX 5090) or GPUs with compute capability 10.0+.
+An experimental build script has been kindly implemented by <a href="https://www.github.com/johnnynunez">@johnnynunez</a> to support Blackwell GPUs. To enable it:
+
+Run the install script with both the `WITH_GCC11` flag and a CUDA version. Currently, only CUDA 12.8.1 is supported:
+```sh
+CUDA_VERSION=12.8.1 ./install_env.sh 3dgrut_cuda12 WITH_GCC11
+```
+
+To build the docker image, you can use the following command:
+```sh
+docker build --build-arg CUDA_VERSION=12.8.1 -t 3dgrut:cuda128 .
+```
+</details>
+
 </br>
 
 To set up the environment using conda, first clone the repository and run `./install_env.sh` script as:
@@ -118,8 +136,26 @@ python train.py --config-name apps/colmap_3dgrt.yaml path=data/mipnerf360/bonsai
 python train.py --config-name apps/colmap_3dgut.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgut dataset.downsample_factor=2 
 
 # Train Scannet++
+python train.py --config-name apps/scannetpp_3dgrt.yaml path=data/scannetpp/0a5c013435/dslr out_dir=runs experiment_name=0a5c013435_3dgrt
 python train.py --config-name apps/scannetpp_3dgut.yaml path=data/scannetpp/0a5c013435/dslr out_dir=runs experiment_name=0a5c013435_3dgut
 ```
+
+We also support MCMC densification strategy and selective Adam optimizer for 3DGRT and 3DGUT. 
+
+To enable MCMC, use:
+```bash
+python train.py --config-name apps/colmap_3dgrt_mcmc.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgrt dataset.downsample_factor=2 
+python train.py --config-name apps/colmap_3dgut_mcmc.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgut dataset.downsample_factor=2 
+```
+
+To enable selective Adam, use:
+```bash
+python train.py --config-name apps/colmap_3dgrt.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgrt dataset.downsample_factor=2 optimizer.type=selective_adam
+python train.py --config-name apps/colmap_3dgut.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgut dataset.downsample_factor=2 optimizer.type=selective_adam
+```
+
+If you use MCMC and Selective Adam in your research, please cite [3dgs-mcmck](https://github.com/ubc-vision/3dgs-mcmc), [taming-3dgs](https://github.com/humansensinglab/taming-3dgs),
+and [gSplat](https://github.com/nerfstudio-project/gsplat/tree/main) library from which the code was adopted (links to the code are provided in the source files).
 
 > [!Note] 
 > For ScanNet++, we expect the dataset to be preprocessed following [FisheyeGS](https://github.com/zmliao/Fisheye-GS?tab=readme-ov-file#prepare-training-data-on-scannet-dataset)'s method.
@@ -127,6 +163,13 @@ python train.py --config-name apps/scannetpp_3dgut.yaml path=data/scannetpp/0a5c
 > [!Note]  
 > If you're running from PyCharm IDE, enable rich console through:
 > Run Configuration > Modify Options > Emulate terminal in output console*
+
+### Using image masks
+In order to use image masks, you need to provide a mask for each image in the dataset. The mask is a grayscale image (0s and 1s) that masks out the parts of the image that should not be used during training, i.e. all the pixels with value 0 will be ignored in the loss computation. 
+
+The provided masks should have the same resolution as their corresponding images and be stored in the same folder with the same name but with `_mask.png` extension. For example, to mask out the parts of the image `path-to-image/image.jpeg`, the mask should be stored at `path-to-image/image_mask.png`.
+
+**NOTE**: The masks are only used for loss computation and not for computing the metrics.
 
 ## 🎥 3. Rendering from Checkpoints
 Evaluate Checkpoint with Splatting / OptiX Tracer / Torch
@@ -163,8 +206,9 @@ bash ./benchmark/mipnerf360_3dgut_render.sh <results-folder>
 ```
 
 <details>
-<summary><strong>3DGRT Results Produced on RTX 5090</strong></summary>
+<summary><strong><a name="grt-benchmark">3DGRT Results Produced on RTX 5090</a></strong></summary>
 <br/>
+
 
 **NeRF Synthetic Dataset**
 
@@ -184,6 +228,7 @@ bash ./benchmark/nerf_synthetic_render.sh results/nerf_synthetic
 | Mic        | 35.90	| 0.992	| 443.4	| 291 |
 | Ship       | 31.73	| 0.909	| 510.7	| 360 |
 | *Average*  | 33.87	| 0.971	| 479.3	| 347 |
+
 
 **MipNeRF360 Dataset**
 
@@ -208,7 +253,7 @@ bash ./benchmark/mipnerf360_render.sh results/mipnerf360
 
 
 <details>
-<summary><strong>3DGUT Results Produced on RTX 5090</strong></summary>
+<summary><strong><a name="gut-benchmark">3DGUT Results Produced on RTX 5090</a></strong></summary>
 <br/>
 
 **NeRF Synthetic Dataset**
@@ -230,7 +275,10 @@ bash ./benchmark/nerf_synthetic_render.sh results/nerf_synthetic
 | Ship       | 31.72	| 0.908	| 208.5	| 870  |
 | *Average*  | 33.88	| 0.970	| 214.6	| 846  |
 
+
 **MipNeRF360 Dataset**
+
+GS Strategy, Unsorted
 
 ```bash
 bash ./benchmark/mipnerf360.sh paper/3dgut/unsorted_colmap.yaml
@@ -249,6 +297,42 @@ bash ./benchmark/mipnerf360_render.sh results/mipnerf360
 | Stump     | 26.50	| 0.773	| 742.6	| 319 |
 | Treehill  | 22.35	| 0.627	| 809.6	| 299 |
 | *Average* | 27.43	| 0.815	| 686.4	| 317 |
+
+
+MCMC Strategy, Unsorted
+
+```bash
+bash ./benchmark/mipnerf360.sh paper/3dgut/unsorted_colmap_mcmc.yaml
+bash ./benchmark/mipnerf360_render.sh results/mipnerf360
+```
+|           | PSNR  | SSIM	| Train (s) |	FPS |
+|-----------|-------|-------|-------|------|
+| Bicycle   | 25.31	| 0.765	| 502.3	| 361 |
+| Bonsai    | 32.51	| 0.947	| 670.6	| 274 |
+| Counter   | 29.40	| 0.916	| 752.7	| 254 |
+| Flowers   | 21.86	| 0.616	| 553.3	| 298 |
+| Garden    | 27.06	| 0.852	| 512.7	| 360 |
+| Kitchen   | 31.71	| 0.930	| 739.6	| 258 |
+| Room      | 32.04	| 0.928	| 643.7	| 313 |
+| Stump     | 27.06	| 0.795	| 487.0	| 339 |
+| Treehill  | 23.11	| 0.650	| 508.6	| 365 |
+| *Average* | 27.78	| 0.822	| 596.7	| 308 |
+
+GS Strategy, Unsorted, Sparse Adam
+
+|           | PSNR   | SSIM  | Train (s) | FPS |
+|-----------|--------|-------|-----------|-----|
+| Bicycle   | 25.04  | 0.759 | 835.2     | -   |
+| Bonsai    | 32.63  | 0.945 | 457.1     | -   |
+| Counter   | 29.12  | 0.911 | 468.8     | -   |
+| Flowers   | 21.55  | 0.614 | 741.7     | -   |
+| Garden    | 27.12  | 0.855 | 757.4     | -   |
+| Kitchen   | 31.37  | 0.929 | 639.3     | -   |
+| Room      | 31.72  | 0.921 | 415.2     | -   |
+| Stump     | 26.58  | 0.774 | 695.7     | -   |
+| Treehill  | 22.30  | 0.625 | 749.8     | -   |
+| *Average* | 27.49  | 0.815 | 640.0     | -   |
+
 
 **Scannet++ Dataset**
 
@@ -281,8 +365,10 @@ Run the playground UI to visualize a pretrained scene with:
 python playground.py --gs_object <ckpt_path>
 ```
 
-See [Playground README](playground/README.md) for details.
+See [Playground README](threedgrut_playground/README.md) for details.
 
+*Update (2025/04): The playground engine is now exposed and remote rendering is supported,
+see README for details.*
 
 
 ## 🎓 6. Citations

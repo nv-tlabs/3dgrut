@@ -34,11 +34,12 @@ from .utils import create_camera_visualization, get_center_and_diag
 
 
 class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
-    def __init__(self, path, device="cuda", split="train", return_alphas=False, ray_jitter=None, bg_color=None):
+    def __init__(
+        self, path, device="cuda", split="train", ray_jitter=None, bg_color=None
+    ):
         self.root_dir = path
         self.device = device
         self.split = split
-        self.return_alphas = return_alphas
         self.ray_jitter = ray_jitter
         self.bg_color = bg_color
 
@@ -54,10 +55,12 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             device=self.device,
             ray_jitter=self.ray_jitter,
         )
-        self.rays_o_cam = torch.zeros((1, self.image_h, self.image_w, 3), dtype=torch.float32, device=self.device)
-        self.rays_d_cam = directions.reshape((1, self.image_h, self.image_w, 3)).contiguous()
-
-        assert self.colors.dtype == np.uint8, "RGB image must be of type uint8"
+        self.rays_o_cam = torch.zeros(
+            (1, self.image_h, self.image_w, 3), dtype=torch.float32, device=self.device
+        )
+        self.rays_d_cam = directions.reshape(
+            (1, self.image_h, self.image_w, 3)
+        ).contiguous()
 
     def read_intrinsics(self):
         with open(os.path.join(self.root_dir, "transforms_train.json"), "r") as f:
@@ -92,9 +95,9 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.intrinsics = [fx, fy, w / 2, h / 2]
 
     def read_meta(self, split):
-        self.colors = []
-        self.alphas = []
         self.poses = []
+        self.image_paths = []
+        self.mask_paths = []
 
         if split == "trainval":
             with open(os.path.join(self.root_dir, "transforms_train.json"), "r") as f:
@@ -102,24 +105,28 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             with open(os.path.join(self.root_dir, "transforms_val.json"), "r") as f:
                 frames += json.load(f)["frames"]
         else:
-            with open(os.path.join(self.root_dir, f"transforms_{split}.json"), "r") as f:
+            with open(
+                os.path.join(self.root_dir, f"transforms_{split}.json"), "r"
+            ) as f:
                 frames = json.load(f)["frames"]
 
         cam_centers = []
-        for frame in logger.track(frames, description=f"Load Dataset ({split})", color="salmon1"):
+        for frame in logger.track(
+            frames, description=f"Load Dataset ({split})", color="salmon1"
+        ):
             c2w = np.array(frame["transform_matrix"])[:3, :4]
             c2w[:, 1:3] *= -1  # [right up back] to [right down front]
             cam_centers.append(c2w[:3, 3])
             self.poses.append(c2w)
 
-            img_path = os.path.join(self.root_dir, f"{frame['file_path']}") + self.suffix
-            if self.return_alphas:
-                img, alpha = NeRFDataset.__read_image(img_path, self.img_wh, return_alpha=True, bg_color=self.bg_color)
-                self.colors.append(img)
-                self.alphas.append(alpha)
-            else:
-                img = NeRFDataset.__read_image(img_path, self.img_wh, return_alpha=False, bg_color=self.bg_color)
-                self.colors.append(img)
+            img_path = (
+                os.path.join(self.root_dir, f"{frame['file_path']}") + self.suffix
+            )
+            self.image_paths.append(img_path)
+
+            # We assume that the mask is stored in the same folder as the image with the same name but with _mask.png extension.
+            # If the mask does not exist, we will return None in the batch
+            self.mask_paths.append(os.path.splitext(img_path)[0] + "_mask.png")
 
         self.camera_centers = np.array(cam_centers)
 
@@ -127,12 +134,8 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         _, diagonal = get_center_and_diag(self.camera_centers)
         self.cameras_extent = diagonal * 1.1
 
-        if len(self.colors) > 0:
-            self.colors = np.stack(self.colors)  # (N_images, H, W, 3)
-
-        if len(self.alphas) > 0 and self.return_alphas:
-            self.alphas = np.stack(self.alphas)  # (N_images, H, W, 1)
-
+        self.image_paths = np.stack(self.image_paths, dtype=str)
+        self.mask_paths = np.stack(self.mask_paths, dtype=str)
         self.poses = np.array(self.poses).astype(np.float32)  # (N_images, 3, 4)
 
     @torch.no_grad()
@@ -165,10 +168,25 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def __getitem__(self, idx) -> dict:
         out_shape = (1, self.image_h, self.image_w, 3)
-        return {
-            "data": torch.tensor(self.colors[idx]).reshape(out_shape),
+        img = NeRFDataset.__read_image(
+            self.image_paths[idx],
+            self.img_wh,
+            return_alpha=False,
+            bg_color=self.bg_color,
+        )
+
+        output_dict = {
+            "data": torch.tensor(img).reshape(out_shape),
             "pose": torch.tensor(self.poses[idx]).unsqueeze(0),
         }
+
+        if os.path.exists(mask_path := self.mask_paths[idx]):
+            mask = torch.from_numpy(np.array(Image.open(mask_path))).reshape(
+                1, self.image_h, self.image_w, 1
+            )
+            output_dict["mask"] = mask
+
+        return output_dict
 
     def get_gpu_batch_with_intrinsics(self, batch):
         """Add the intrinsics to the batch and move data to GPU."""
@@ -185,6 +203,11 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             "T_to_world": pose,
             "intrinsics": self.intrinsics,
         }
+
+        if "mask" in batch:
+            mask = batch["mask"][0].to(self.device, non_blocking=True) / 255.0
+            mask = (mask > 0.5).to(torch.float32)
+            sample["mask"] = mask
 
         return Batch(**sample)
 
@@ -215,7 +238,9 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                     [0.0, 0.0, 0.0, 1.0],
                 ]
             )
-            trans_mat_world_to_camera = camera_convention_rot @ trans_mat_world_to_camera
+            trans_mat_world_to_camera = (
+                camera_convention_rot @ trans_mat_world_to_camera
+            )
 
             w = self.image_w
             h = self.image_h
@@ -226,8 +251,17 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             fov_w = 2.0 * np.arctan(0.5 * w / f_w)
             fov_h = 2.0 * np.arctan(0.5 * h / f_h)
 
-            rgb = self.colors[i_cam].reshape(h, w, 3) / np.float32(255.0)
-            assert rgb.dtype == np.float32, "RGB image must be of type float32, but got {}".format(rgb.dtype)
+            img = NeRFDataset.__read_image(
+                self.image_paths[i_cam],
+                self.img_wh,
+                return_alpha=False,
+                bg_color=self.bg_color,
+            )
+            rgb = img.reshape(h, w, 3) / np.float32(255.0)
+
+            assert (
+                rgb.dtype == np.float32
+            ), "RGB image must be of type float32, but got {}".format(rgb.dtype)
 
             cam_list.append(
                 {
@@ -245,7 +279,9 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     @staticmethod
     @torch.cuda.amp.autocast(dtype=torch.float32)
-    def __get_ray_directions(H, W, K, device="cpu", ray_jitter=None, return_uv=False, flatten=True):
+    def __get_ray_directions(
+        H, W, K, device="cpu", ray_jitter=None, return_uv=False, flatten=True
+    ):
         """
         Get ray directions for all pixels in camera coordinate [right down front].
         Reference: https://www.scratchapixel.com/lessons/3d-basic-rendering/
@@ -266,11 +302,18 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
         if ray_jitter is None:  # pass by the center
-            directions = torch.stack([(u - cx + 0.5) / fx, (v - cy + 0.5) / fy, torch.ones_like(u)], -1)
+            directions = torch.stack(
+                [(u - cx + 0.5) / fx, (v - cy + 0.5) / fy, torch.ones_like(u)], -1
+            )
         else:
             jitter = ray_jitter(u.shape)
             directions = torch.stack(
-                [((u + jitter[:, :, 0]) - cx) / fx, ((v + jitter[:, :, 1]) - cy) / fy, torch.ones_like(u)], -1
+                [
+                    ((u + jitter[:, :, 0]) - cx) / fx,
+                    ((v + jitter[:, :, 1]) - cy) / fy,
+                    torch.ones_like(u),
+                ],
+                -1,
             )
         if flatten:
             directions = directions.reshape(-1, 3)
@@ -301,7 +344,9 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             # Rotate ray directions from camera coordinate to the world coordinate
             rays_d = directions @ c2w[:, :3].T
         else:
-            rays_d = rearrange(directions, "n c -> n 1 c") @ rearrange(c2w[..., :3], "n a b -> n b a")
+            rays_d = rearrange(directions, "n c -> n 1 c") @ rearrange(
+                c2w[..., :3], "n a b -> n b a"
+            )
             rays_d = rearrange(rays_d, "n 1 c -> n c")
         # The origin of all rays is the camera origin in world coordinate
         rays_o = c2w[..., 3].expand_as(rays_d)
