@@ -1,0 +1,25 @@
+method: MCMCStrategy
+
+print_stats: true
+binom_n_max: 51 # Default value from MCMC paper (no good reason, just a large number https://github.com/ubc-vision/3dgs-mcmc/issues/8)
+opacity_threshold: 0.005 # Minimum opacity -> used to dermine if a Gaussian is alive or dead
+
+relocate:
+  start_iteration: 500 # Start applying the strategy after start_iteration training iterations
+  end_iteration: 25000 # Stop applying the strategy after end_iteration training iterations
+  frequency: 100 # Apply the strategy every frequency iterations
+
+# Perturb the location of the gaussians with noise sampled from the covariance of that Gaussian
+# This is done until the end of training (check if this is the best strategy)
+perturb:
+  start_iteration: 0 # Start applying the strategy after start_iteration training iterations
+  end_iteration: 27500 # Don't stop until the end of training
+  frequency: 1 # Apply the strategy every frequency iterations
+  noise_lr: 500000.0 # MCMC samping noise learning rate. Default to 5e5
+
+# Add new Gaussians to the scene until the maximum number is reached
+add:
+  start_iteration: 500 # Start applying the strategy after start_iteration training iterations
+  end_iteration: 25000 # Stop applying the strategy after end_iteration training iterations
+  frequency: 100 # Apply the strategy every frequency iterations
+  max_n_gaussians: 1000000 # Maximum number of Gaussians

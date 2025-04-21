@@ -154,6 +154,11 @@ extern "C" __global__ void __raygen__rg() {
                     nullptr
 #endif
                 );
+                
+                // NOTE(qi): Race condition here, but as we are writing the same value, it seems it is safe.            
+                if (acceptedHit) {
+                    params.particleVisibility[rayHit.particleId] = 1;
+                }
 
                 rayLastHitDistance = fmaxf(rayLastHitDistance, rayHit.distance);
 

@@ -1,0 +1,18 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base_gs
+  - override /strategy: mcmc
+  - _self_
+
+model:
+  default_density: 0.5
+  default_scale_factor: 0.1
+
+loss:
+  use_opacity: true
+  lambda_opacity: 0.01
+
+  use_scale: true
+  lambda_scale: 0.01

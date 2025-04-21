@@ -22,24 +22,24 @@ struct ShGaussian {
 
     using Particles = TParticles;
 
-    template <typename TRay>
-    static inline __device__ void eval(const threedgut::RenderParameters& params,
-                                       TRay& ray,
-                                       threedgut::MemoryHandles parameters) {
-        if (ray.isValid()) {
+    // template <typename TRay>
+    // static inline __device__ void eval(const threedgut::RenderParameters& params,
+    //                                    TRay& ray,
+    //                                    threedgut::MemoryHandles parameters) {
+    //     if (ray.isValid()) {
+    // 
+    //         // mark the ray as front hit if the traversed volume is sufficiently opaque
+    //         if (ray.transmittance < params.hitTransmittance) {
+    //             ray.hitFront();
+    //         }
+    //     }
+    // }
 
-            // mark the ray as front hit if the traversed volume is sufficiently opaque
-            if (ray.transmittance < params.hitTransmittance) {
-                ray.hitFront();
-            }
-        }
-    }
-
-    template <typename TRay>
-    static inline __device__ void evalBackward(const threedgut::RenderParameters& params,
-                                               TRay& ray,
-                                               threedgut::MemoryHandles parameters,
-                                               threedgut::MemoryHandles parametersGradient) {
-        // NOOP
-    }
+    // template <typename TRay>
+    // static inline __device__ void evalBackward(const threedgut::RenderParameters& params,
+    //                                            TRay& ray,
+    //                                            threedgut::MemoryHandles parameters,
+    //                                            threedgut::MemoryHandles parametersGradient) {
+    //     // NOOP
+    // }
 };

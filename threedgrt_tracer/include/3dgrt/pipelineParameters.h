@@ -29,6 +29,7 @@ struct PipelineParameters {
     const ParticleDensity* particleDensity; ///< position, scale, quaternions, density
     const float* particleRadiance;          ///< spherical harmonics coefficients
     const void* particleExtendedData;       ///< pipeline specific particle data
+    int32_t* particleVisibility;       ///< pipeline specific particle data
 
     PackedTensorAccessor32<float, 4> rayRadiance;    ///< output integrated ray radiance
     PackedTensorAccessor32<float, 4> rayDensity;     ///< output integrated ray density

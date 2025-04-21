@@ -160,6 +160,8 @@ struct GUTKBufferRenderer : Params {
             particles.featureIntegrateFwd(hitWeight,
                                           Params::PerRayParticleFeatures ? particles.featuresFromBuffer(hitParticle.idx, ray.direction) : tcnn::max(particleFeatures[hitParticle.idx], 0.f),
                                           ray.features);
+
+            if (hitWeight > 0.0f) ray.countHit();
         }
 
         if (ray.transmittance < Particles::MinTransmittanceThreshold) {

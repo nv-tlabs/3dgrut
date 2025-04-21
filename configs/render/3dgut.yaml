@@ -1,0 +1,26 @@
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - 3dgrt
+  - _self_
+
+method: 3dgut
+
+particle_kernel_degree: 2
+particle_kernel_min_response: 0.0
+min_transmittance: 0.0001
+
+splat: # 3DGUT-specific settings
+  # culling
+  rect_bounding: true
+  tight_opacity_bounding: true
+  tile_based_culling: true
+  # projection
+  n_rolling_shutter_iterations: 5
+  ut_alpha: 1.0
+  ut_beta: 2.0
+  ut_kappa: 0.0
+  ut_in_image_margin_factor: 0.1
+  ut_require_all_sigma_points_valid: false
+  # rendering
+  k_buffer_size: 0  # 0 means unsorted
+  global_z_order: true

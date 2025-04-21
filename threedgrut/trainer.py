@@ -31,7 +31,7 @@ from torchmetrics.image import StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 import threedgrut.datasets as datasets
-from threedgrut.datasets.protocols import BoundedMultiViewDataset, Batch
+from threedgrut.datasets.protocols import BoundedMultiViewDataset
 from threedgrut.datasets.utils import MultiEpochsDataLoader, DEFAULT_DEVICE
 from threedgrut.model.losses import ssim
 from threedgrut.model.model import MixtureOfGaussians
@@ -40,8 +40,8 @@ from threedgrut.strategy.base import BaseStrategy
 from threedgrut.utils.gui import GUI
 from threedgrut.utils.logger import logger
 from threedgrut.utils.timer import CudaTimer
-from threedgrut.utils.misc import jet_map, create_summary_writer
-
+from threedgrut.utils.misc import jet_map, create_summary_writer, check_step_condition
+from threedgrut.optimizers import SelectiveAdam
 
 class Trainer3DGRUT:
     """Trainer for paper: "3D Gaussian Ray Tracing: Fast Tracing of Particle Scenes" """
@@ -180,13 +180,17 @@ class Trainer3DGRUT:
     def init_densification_and_pruning_strategy(self, conf: DictConfig) -> None:
         """Set pre-train / post-train iteration logic. i.e. densification and pruning"""
         assert self.model is not None
-        match self.conf.model.strategy:
+        match self.conf.strategy.method:
             case "GSStrategy":
                 from threedgrut.strategy.gs import GSStrategy
-
                 self.strategy = GSStrategy(conf, self.model)
+                logger.info("🔆 Using GS strategy")
+            case "MCMCStrategy":
+                from threedgrut.strategy.mcmc import MCMCStrategy
+                self.strategy = MCMCStrategy(conf, self.model)
+                logger.info("🔆 Using MCMC strategy")
             case _:
-                raise ValueError(f"unrecognized model.strategy {conf.model.strategy}")
+                raise ValueError(f"unrecognized model.strategy {conf.strategy.method}")
 
     def setup_training(self, conf: DictConfig, model: MixtureOfGaussians, train_dataset: BoundedMultiViewDataset):
         """
@@ -229,6 +233,12 @@ class Trainer3DGRUT:
         else:
             logger.info(f"🤸 Initiating new 3dgrut training..")
             match conf.initialization.method:
+                case "random":
+                    model.init_from_random_point_cloud(
+                        num_gaussians=conf.initialization.num_gaussians,
+                        xyz_max=conf.initialization.xyz_max,
+                        xyz_min=conf.initialization.xyz_min,
+                    )
                 case "colmap":
                     observer_points = torch.tensor(
                         train_dataset.get_observer_points(), dtype=torch.float32, device=self.device
@@ -241,12 +251,6 @@ class Trainer3DGRUT:
                     except FileNotFoundError as e:
                         logger.error(e)
                         raise e
-                case "random":
-                    model.init_from_random_point_cloud(
-                        num_gaussians=conf.initialization.num_gaussians,
-                        xyz_max=conf.initialization.xyz_max,
-                        xyz_min=conf.initialization.xyz_min,
-                    )
                 case "checkpoint":
                     checkpoint = torch.load(conf.initialization.path)
                     model.init_from_checkpoint(checkpoint, setup_optimizer=False)
@@ -330,7 +334,7 @@ class Trainer3DGRUT:
         lpips = self.criterions["lpips"]
 
         # Move losses to cpu once
-        metrics["losses"] = {k: v.item() for k, v in losses.items()}
+        metrics["losses"] = {k: v.detach().item() for k, v in losses.items()}
 
         is_compute_train_hit_metrics = (split == "training") and (step % self.conf.writer.hit_stat_frequency == 0)
         is_compute_validation_metrics = split == "validation"
@@ -384,6 +388,12 @@ class Trainer3DGRUT:
         """
         rgb_gt = gpu_batch.rgb_gt
         rgb_pred = outputs["pred_rgb"]
+        mask = gpu_batch.mask
+        
+        # Mask out the invalid pixels if the mask is provided
+        if mask is not None:
+            rgb_gt = rgb_gt * mask
+            rgb_pred = rgb_pred * mask
 
         # L1 loss
         loss_l1 = torch.zeros(1, device=self.device)
@@ -411,9 +421,25 @@ class Trainer3DGRUT:
                 loss_ssim = 1.0 - ssim(pred_rgb_full, rgb_gt_full)
                 lambda_ssim = self.conf.loss.lambda_ssim
 
+        # Opacity regularization
+        loss_opacity = torch.zeros(1, device=self.device)
+        lambda_opacity = 0.0
+        if self.conf.loss.use_opacity:
+            with torch.cuda.nvtx.range(f"loss-opacity"):
+                loss_opacity = torch.abs(self.model.get_density()).mean()
+                lambda_opacity = self.conf.loss.lambda_opacity
+
+        # Scale regularization
+        loss_scale = torch.zeros(1, device=self.device)
+        lambda_scale = 0.0
+        if self.conf.loss.use_scale:
+            with torch.cuda.nvtx.range(f"loss-scale"):
+                loss_scale = torch.abs(self.model.get_scale()).mean()
+                lambda_scale = self.conf.loss.lambda_scale
+
         # Total loss
-        loss = lambda_l1 * loss_l1 + lambda_l2 * loss_l2 + lambda_ssim * loss_ssim
-        return dict(total_loss=loss, l1_loss=loss_l1, l2_loss=loss_l2, ssim_loss=loss_ssim)
+        loss = lambda_l1 * loss_l1 + lambda_ssim * loss_ssim + lambda_opacity * loss_opacity + lambda_scale * loss_scale
+        return dict(total_loss=loss, l1_loss=lambda_l1 * loss_l1, l2_loss=lambda_l2 * loss_l2, ssim_loss=lambda_ssim * loss_ssim, opacity_loss=lambda_opacity * loss_opacity, scale_loss=lambda_scale * loss_scale)
 
     @torch.cuda.nvtx.range("log_validation_iter")
     def log_validation_iter(
@@ -525,7 +551,12 @@ class Trainer3DGRUT:
             if self.conf.loss.use_ssim:
                 ssim_loss = np.mean(batch_metrics["losses"]["ssim_loss"])
                 writer.add_scalar("loss/ssim/train", ssim_loss, global_step)
-
+            if self.conf.loss.use_opacity:
+                opacity_loss = np.mean(batch_metrics["losses"]["opacity_loss"])
+                writer.add_scalar("loss/opacity/train", opacity_loss, global_step)
+            if self.conf.loss.use_scale:
+                scale_loss = np.mean(batch_metrics["losses"]["scale_loss"])
+                writer.add_scalar("loss/scale/train", scale_loss, global_step)
             if "psnr" in batch_metrics:
                 writer.add_scalar("psnr/train", batch_metrics["psnr"], self.global_step)
             if "ssim" in batch_metrics:
@@ -548,6 +579,7 @@ class Trainer3DGRUT:
                     )
 
             writer.add_scalar("num_particles/train", self.model.num_gaussians, self.global_step)
+            writer.add_scalar("train/num_GS", self.model.num_gaussians, self.global_step)
 
             # # NOTE: hack to easily compare with 3DGS
             # writer.add_scalar("train_loss_patches/total_loss", loss, global_step)
@@ -682,7 +714,7 @@ class Trainer3DGRUT:
 
             # Backward strategy step
             with torch.cuda.nvtx.range(f"train_{global_step}_pre_bwd"):
-                self.strategy.pre_backward(step=global_step)
+                self.strategy.pre_backward(step=global_step, scene_extent=self.scene_extent, train_dataset=self.train_dataset, batch=gpu_batch, writer=self.tracking.writer)
 
             # Back-propagate the gradients and update the parameters
             with torch.cuda.nvtx.range(f"train_{global_step}_bwd"):
@@ -690,30 +722,34 @@ class Trainer3DGRUT:
                 batch_losses["total_loss"].backward()
                 profilers["backward"].end()
 
-            # Update densification buffer:
-            if global_step < conf.model.densify.end_iteration:
-                with torch.cuda.nvtx.range(f"train_{global_step}_grad_buffer"):
-                    self.strategy.update_gradient_buffer(sensor_position=gpu_batch.T_to_world[0, :3, 3])
-
-            # Clamp density
-            if global_step > 0 and conf.model.density_activation == "none":
-                with torch.cuda.nvtx.range(f"train_{global_step}_clamp_density"):
-                    model.clamp_density()
-
-            # Make a scheduler step
-            with torch.cuda.nvtx.range(f"train_{global_step}_scheduler"):
-                model.scheduler_step(global_step)
-
             # Post backward strategy step
             with torch.cuda.nvtx.range(f"train_{global_step}_post_bwd"):
                 scene_updated = self.strategy.post_backward(
-                    step=global_step, scene_extent=self.scene_extent, train_dataset=self.train_dataset
+                    step=global_step, scene_extent=self.scene_extent, train_dataset=self.train_dataset, batch=gpu_batch, writer=self.tracking.writer
                 )
 
             # Optimizer step
             with torch.cuda.nvtx.range(f"train_{global_step}_backprop"):
-                model.optimizer.step()
+                if isinstance(model.optimizer, SelectiveAdam):
+                    assert outputs['mog_visibility'].shape == model.density.shape, f"Visibility shape {outputs['mog_visibility'].shape} does not match density shape {model.density.shape}"
+                    model.optimizer.step(outputs['mog_visibility'])
+                else:
+                    model.optimizer.step()
                 model.optimizer.zero_grad()
+
+            # Scheduler step
+            with torch.cuda.nvtx.range(f"train_{global_step}_scheduler"):
+                model.scheduler_step(global_step)
+
+            # Post backward strategy step
+            with torch.cuda.nvtx.range(f"train_{global_step}_post_opt_step"):
+                scene_updated = self.strategy.post_optimizer_step(
+                    step=global_step, scene_extent=self.scene_extent, train_dataset=self.train_dataset, batch=gpu_batch, writer=self.tracking.writer
+                )
+
+            # Update the SH if required
+            if self.model.progressive_training and check_step_condition(global_step, 0, 1e6, self.model.feature_dim_increase_interval):
+                self.model.increase_num_active_features()
 
             # Update the BVH if required
             if scene_updated or (
@@ -740,7 +776,6 @@ class Trainer3DGRUT:
             metrics.append(batch_metrics)
 
             # !!! Below global step has been incremented !!!
-
             with torch.cuda.nvtx.range(f"train_{global_step-1}_log_iter"):
                 self.log_training_iter(gpu_batch, outputs, batch_metrics, iter)
 

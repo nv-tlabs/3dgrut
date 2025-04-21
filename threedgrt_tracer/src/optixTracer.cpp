@@ -844,7 +844,7 @@ void OptixTracer::buildBVH(torch::Tensor mogPos,
     CUDA_CHECK_LAST();
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 OptixTracer::trace(uint32_t frameNumber,
                    torch::Tensor rayToWorld,
                    torch::Tensor rayOri,
@@ -861,7 +861,8 @@ OptixTracer::trace(uint32_t frameNumber,
     torch::Tensor rayHit            = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 2}, opts);
     torch::Tensor rayNrm            = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 3}, opts);
     torch::Tensor rayHitsCount      = torch::zeros({rayOri.size(0), rayOri.size(1), rayOri.size(2), 1}, opts);
-
+    torch::Tensor particleVisibility = torch::zeros({particleDensity.size(0), 1}, opts);
+    
     PipelineParameters paramsHost;
     paramsHost.handle = _state->gasHandle;
     paramsHost.aabb   = _state->gasAABB;
@@ -883,6 +884,7 @@ OptixTracer::trace(uint32_t frameNumber,
     paramsHost.particleDensity      = getPtr<const ParticleDensity>(particleDensity);
     paramsHost.particleRadiance     = getPtr<const float>(particleRadiance);
     paramsHost.particleExtendedData = reinterpret_cast<const void*>(_state->gPipelineParticleData);
+    paramsHost.particleVisibility   = getPtr<int32_t>(particleVisibility);
 
     paramsHost.rayRadiance    = packed_accessor32<float, 4>(rayRad);
     paramsHost.rayDensity     = packed_accessor32<float, 4>(rayDns);
@@ -902,7 +904,7 @@ OptixTracer::trace(uint32_t frameNumber,
 
     CUDA_CHECK_LAST();
 
-    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(rayRad, rayDns, rayHit, rayNrm, rayHitsCount);
+    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(rayRad, rayDns, rayHit, rayNrm, rayHitsCount, particleVisibility);
 }
 
 std::tuple<torch::Tensor, torch::Tensor>

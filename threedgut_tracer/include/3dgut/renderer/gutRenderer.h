@@ -65,8 +65,10 @@ public:
     Status renderForward(const RenderParameters& params,
                          const tcnn::vec3* sensorRayOriginCudaPtr,
                          const tcnn::vec3* sensorRayDirectionCudaPtr,
+                         float* worldHitCountCudaPtr,
                          float* worldHitDistanceCudaPtr,
                          tcnn::vec4* radianceDensityCudaPtr,
+                         int* particlesVisibilityCudaPtr,
                          Parameters& parameters,
                          int cudaDeviceIndex,
                          cudaStream_t cudaStream);
