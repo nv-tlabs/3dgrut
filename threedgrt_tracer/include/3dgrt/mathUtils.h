@@ -532,7 +532,7 @@ static __device__ inline float4 matmul_bw_quat(const float3& p, const float3& g,
     return make_float4(dr, dx, dy, dz);
 }
 
-static __device__ inline void invRotationMatrix(const float4& q, float33& ret) {
+static __device__ inline void quaternionWXYZToMatrix(const float4& q, float33& ret) {
     const float r = q.x;
     const float x = q.y;
     const float y = q.z;
@@ -543,49 +543,6 @@ static __device__ inline void invRotationMatrix(const float4& q, float33& ret) {
     ret[1] = make_float3(2.f * (x * y + r * z), (1.f - 2.f * (x * x + z * z)), 2.f * (y * z - r * x));
     ret[2] = make_float3(2.f * (x * z - r * y), 2.f * (y * z + r * x), (1.f - 2.f * (x * x + y * y)));
 }
-
-static __device__ inline void rotationMatrix(const float4& q, float33& ret) {
-    const float r = q.x;
-    const float x = q.y;
-    const float y = q.z;
-    const float z = q.w;
-
-    // Compute rotation matrix from quaternion
-    ret[0] = make_float3((1.f - 2.f * (y * y + z * z)), 2.f * (x * y + r * z), 2.f * (x * z - r * y));
-    ret[1] = make_float3(2.f * (x * y - r * z), (1.f - 2.f * (x * x + z * z)), 2.f * (y * z + r * x));
-    ret[2] = make_float3(2.f * (x * z + r * y), 2.f * (y * z - r * x), (1.f - 2.f * (x * x + y * y)));
-}
-
-// static __device__ inline void rotationMatrix(const float4& quat, float33& mat)
-// {
-//     const float q0 = quat.x;
-//     const float q1 = quat.y;
-//     const float q2 = quat.z;
-//     const float q3 = quat.w;
-
-//     const float q00 = q0*q0;
-//     const float q01 = q0*q1;
-//     const float q02 = q0*q2;
-//     const float q03 = q0*q3;
-
-//     const float q12 = q1*q2;
-//     const float q13 = q1*q3;
-
-//     const float q23 = q2*q3;
-
-//     // column-major matrix
-//     mat[0][0] = 2 * (q00 + q1*q1) - 1;
-//     mat[0][1] = 2 * (q12 + q03);
-//     mat[0][2] = 2 * (q13 - q02);
-
-//     mat[1][0] = 2 * (q12 - q03);
-//     mat[1][1] = 2 * (q00 + q2*q2) - 1;
-//     mat[1][2] = 2 * (q23 + q01);
-
-//     mat[2][0] = 2 * (q13 + q02);
-//     mat[2][1] = 2 * (q23 - q01);
-//     mat[2][2] = 2 * (q00 + q3*q3) - 1;
-// }
 
 // ===============================================================
 // Implementation of the atomicMinfloat using ordered int
