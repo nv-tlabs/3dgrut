@@ -37,22 +37,28 @@ def make(name: str, config, ray_jitter):
                 config.path,
                 split="train",
                 downsample_factor=config.dataset.downsample_factor,
+                test_split_interval=config.dataset.test_split_interval,
                 ray_jitter=ray_jitter,
             )
             val_dataset = ColmapDataset(
                 config.path,
                 split="val",
                 downsample_factor=config.dataset.downsample_factor,
+                test_split_interval=config.dataset.test_split_interval,
             )
         case "scannetpp":
             train_dataset = ScannetppDataset(
                 config.path,
                 split="train",
                 ray_jitter=ray_jitter,
+                downsample_factor=config.dataset.downsample_factor,
+                test_split_interval=config.dataset.test_split_interval,
             )
             val_dataset = ScannetppDataset(
                 config.path,
                 split="val",
+                downsample_factor=config.dataset.downsample_factor,
+                test_split_interval=config.dataset.test_split_interval,
             )
         case _:
             raise ValueError(

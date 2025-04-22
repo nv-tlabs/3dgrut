@@ -47,13 +47,14 @@ from .camera_models import (
 
 class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def __init__(
-        self, path, device="cuda", split="train", downsample_factor=1, ray_jitter=None
+        self, path, device="cuda", split="train", downsample_factor=1, test_split_interval=8, ray_jitter=None,
     ):
         self.path = path
         self.device = device
         self.split = split
         self.downsample_factor = downsample_factor
         self.ray_jitter = ray_jitter
+        self.test_split_interval = test_split_interval
 
         # GPU cache of processed camera intrinsics
         self.intrinsics = {}
@@ -63,12 +64,15 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.get_scene_info()
         self.load_camera_data()
 
-        llff_test_split = 8
         indices = np.arange(self.n_frames)
-        if split == "train":
-            indices = np.mod(indices, llff_test_split) != 0
-        else:
-            indices = np.mod(indices, llff_test_split) == 0
+
+        # If test_split_interval is set, every test_split_interval frame will be excluded from the training set
+        # If test_split_interval is negative, all images will be used for training and testing
+        if self.test_split_interval >= 0:
+            if split == "train":
+                indices = np.mod(indices, self.test_split_interval) != 0
+            else:
+                indices = np.mod(indices, self.test_split_interval) == 0
         self.poses = self.poses[indices].astype(np.float32)  # poses is a numpy array
         self.image_paths = self.image_paths[
             indices
