@@ -32,7 +32,7 @@ struct ParticeFetchedDensity {
     float density;
 };
 
-__forceinline__ __device__ void rotationMatrixTranspose(const float4& q, float33& ret) {
+__forceinline__ __device__ void quaternionWXYZToMatrix(const float4& q, float33& ret) {
     const float r = q.x;
     const float x = q.y;
     const float y = q.z;
@@ -191,13 +191,13 @@ static inline __device__ void fetchParticleDensity(
     const ParticleDensity* particlesDensity,
     float3& particlePosition,
     float3& particleScale,
-    float33& particleInvRotation,
+    float33& particleRotation,
     float& particleDensity) {
     const ParticleDensity particleData = particlesDensity[particleIdx];
 
     particlePosition = particleData.position;
     particleScale    = particleData.scale;
-    rotationMatrixTranspose(particleData.quaternion, particleInvRotation);
+    quaternionWXYZToMatrix(particleData.quaternion, particleRotation);
     particleDensity = particleData.density;
 }
 
@@ -359,7 +359,7 @@ __device__ inline bool processHitFwd(
     float3* normal) {
     float3 particlePosition;
     float3 particleScale;
-    float33 particleInvRotation;
+    float33 particleRotation;
     float particleDensity;
 
     fetchParticleDensity(
@@ -367,14 +367,14 @@ __device__ inline bool processHitFwd(
         particlesDensity,
         particlePosition,
         particleScale,
-        particleInvRotation,
+        particleRotation,
         particleDensity);
 
     const float3 giscl   = make_float3(1 / particleScale.x, 1 / particleScale.y, 1 / particleScale.z);
     const float3 gposc   = (rayOrigin - particlePosition);
-    const float3 gposcr  = (gposc * particleInvRotation);
+    const float3 gposcr  = (gposc * particleRotation);
     const float3 gro     = giscl * gposcr;
-    const float3 rayDirR = rayDirection * particleInvRotation;
+    const float3 rayDirR = rayDirection * particleRotation;
     const float3 grdu    = giscl * rayDirR;
     const float3 grd     = safe_normalize(grdu);
 
@@ -409,7 +409,7 @@ __device__ inline bool processHitFwd(
 
         if (normal) {
             constexpr float ellispoidSqRadius = 9.0f;
-            const float3 particleScaleRotated = (particleInvRotation * particleScale);
+            const float3 particleScaleRotated = (particleRotation * particleScale);
             *normal += weight * (SurfelPrimitive ? make_float3(0, 0, (grd.z > 0 ? 1 : -1) * particleScaleRotated.z) : safe_normalize((gro + grd * (dot(grd, -1 * gro) - sqrtf(ellispoidSqRadius - grayDist))) * particleScaleRotated));
         }
     }
@@ -428,21 +428,21 @@ __device__ inline bool intersectCustomParticle(
     float& hitDistance) {
     float3 particlePosition;
     float3 particleScale;
-    float33 particleInvRotation;
+    float33 particleRotation;
     float particleDensity;
     fetchParticleDensity(
         particleIdx,
         particlesDensity,
         particlePosition,
         particleScale,
-        particleInvRotation,
+        particleRotation,
         particleDensity);
 
     const float3 giscl   = make_float3(1 / particleScale.x, 1 / particleScale.y, 1 / particleScale.z);
     const float3 gposc   = (rayOrigin - particlePosition);
-    const float3 gposcr  = (gposc * particleInvRotation);
+    const float3 gposcr  = (gposc * particleRotation);
     const float3 gro     = giscl * gposcr;
-    const float3 rayDirR = rayDirection * particleInvRotation;
+    const float3 rayDirR = rayDirection * particleRotation;
     const float3 grdu    = giscl * rayDirR;
     const float3 grd     = safe_normalize(grdu);
 
@@ -501,7 +501,7 @@ __device__ inline void processHitBwd(
     float depthGrad) {
     float3 particlePosition;
     float3 gscl;
-    float33 particleInvRotation;
+    float33 particleRotation;
     float particleDensity;
     float4 grot;
 
@@ -509,16 +509,16 @@ __device__ inline void processHitBwd(
         particlePosition = particleData.position;
         gscl             = particleData.scale;
         grot             = particleData.quaternion;
-        rotationMatrixTranspose(grot, particleInvRotation);
+        quaternionWXYZToMatrix(grot, particleRotation);
         particleDensity = particleData.density;
     }
 
     // project ray in the gaussian
     const float3 giscl   = make_float3(1 / gscl.x, 1 / gscl.y, 1 / gscl.z);
     const float3 gposc   = (rayOrigin - particlePosition);
-    const float3 gposcr  = (gposc * particleInvRotation);
+    const float3 gposcr  = (gposc * particleRotation);
     const float3 gro     = giscl * gposcr;
-    const float3 rayDirR = rayDirection * particleInvRotation;
+    const float3 rayDirR = rayDirection * particleRotation;
     const float3 grdu    = giscl * rayDirR;
     const float3 grd     = safe_normalize(grdu);
     const float3 gcrod   = SurfelPrimitive ? gro + grd * -gro.z / grd.z : cross(grd, gro);
@@ -703,7 +703,7 @@ __device__ inline void processHitBwd(
         // ---> gposcr = matmul(gposc, grotMat)
         // ===> d_gposcr / d_gposc = matmul_bw_vec(grotMat)
         // ===> d_gposcr / d_grotmat = matmul_bw_mat(gposc)
-        const float3 gposcGrd     = matmul_bw_vec(particleInvRotation, gposcrGrd);
+        const float3 gposcGrd     = matmul_bw_vec(particleRotation, gposcrGrd);
         const float4 grotGrdPoscr = matmul_bw_quat(gposc, gposcrGrd, grot);
 
         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>

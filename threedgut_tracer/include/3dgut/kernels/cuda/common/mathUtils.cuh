@@ -532,7 +532,7 @@ static __device__ inline float4 matmul_bw_quat(const float3& p, const float3& g,
     return make_float4(dr, dx, dy, dz);
 }
 
-static __device__ inline void quaternionWXYZToMatrix(const float4& q, float33& ret) {
+static __device__ inline void quaternionWXYZToMatrixTranspose(const float4& q, float33& ret) {
     const float r = q.x;
     const float x = q.y;
     const float y = q.z;

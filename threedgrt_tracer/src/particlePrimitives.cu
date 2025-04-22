@@ -77,7 +77,7 @@ __global__ void computeGaussianEnclosingOctaHedronKernel(
         const uint32_t sTriIdx  = octaHedronNumTri * idx;
 
         float33 rot;
-        quaternionWXYZToMatrix(gRot[idx], rot);
+        quaternionWXYZToMatrixTranspose(gRot[idx], rot);
         const float3 scl   = gScl[idx];
         const float3 trans = gPos[idx];
 
@@ -122,7 +122,7 @@ __global__ void computeGaussianEnclosingTriHexaKernel(
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < gNum) {
         float33 rot;
-        quaternionWXYZToMatrix(gRot[idx], rot);
+        quaternionWXYZToMatrixTranspose(gRot[idx], rot);
         const float3 scl   = gScl[idx];
         const float3 trans = gPos[idx];
 
@@ -172,7 +172,7 @@ __global__ void computeGaussianEnclosingTriSurfelKernel(
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < gNum) {
         float33 rot;
-        quaternionWXYZToMatrix(gRot[idx], rot);
+        quaternionWXYZToMatrixTranspose(gRot[idx], rot);
         const float3 scl   = gScl[idx];
         const float3 trans = gPos[idx];
 
@@ -227,7 +227,7 @@ __global__ void computeGaussianEnclosingTriBaryKernel(
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < gNum) {
         float33 rot;
-        quaternionWXYZToMatrix(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
+        quaternionWXYZToMatrixTranspose(make_float4(gRot[idx][0], gRot[idx][1], gRot[idx][2], gRot[idx][3]), rot);
         const float3 scl   = make_float3(gScl[idx][0], gScl[idx][1], gScl[idx][2]);
         const float3 trans = make_float3(gPos[idx][0], gPos[idx][1], gPos[idx][2]);
 
@@ -291,7 +291,7 @@ __global__ void computeGaussianEnclosingTetraHedronKernel(
         const uint32_t sTriIdx  = tetraHedronNumTri * idx;
 
         float33 rot;
-        quaternionWXYZToMatrix(gRot[idx], rot);
+        quaternionWXYZToMatrixTranspose(gRot[idx], rot);
         const float3 scl   = gScl[idx];
         const float3 trans = gPos[idx];
 
@@ -354,7 +354,7 @@ __global__ void computeGaussianEnclosingDiamondKernel(
         const uint32_t sTriIdx  = diamondNumTri * idx;
 
         float33 rot;
-        quaternionWXYZToMatrix(gRot[idx], rot);
+        quaternionWXYZToMatrixTranspose(gRot[idx], rot);
         const float3 scl   = gScl[idx];
         const float3 trans = gPos[idx];
 
@@ -461,7 +461,7 @@ __global__ void computeGaussianEnclosingIcosaHedronKernel(
         const uint32_t sTriIdx  = icosaHedronNumTri * idx;
 
         float33 rot;
-        quaternionWXYZToMatrix(gRot[idx], rot);
+        quaternionWXYZToMatrixTranspose(gRot[idx], rot);
         const float3 scl   = gScl[idx];
         const float3 trans = gPos[idx];
 
@@ -508,7 +508,7 @@ __global__ void computeGaussianEnclosingAABBKernel(
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < gNum) {
         float33 rot;
-        quaternionWXYZToMatrix(gRot[idx], rot);
+        quaternionWXYZToMatrixTranspose(gRot[idx], rot);
         const float3 scl   = gScl[idx];
         const float3 trans = gPos[idx];
 
@@ -556,7 +556,7 @@ __global__ void computeGaussianEnclosingInstancesKernel(
     if (idx < gNum) {
 
         float33 rot;
-        quaternionWXYZToMatrix(gRot[idx], rot);
+        quaternionWXYZToMatrixTranspose(gRot[idx], rot);
         const float3 scl   = gScl[idx];
         const float3 trans = gPos[idx];
 
