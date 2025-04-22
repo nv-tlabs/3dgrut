@@ -23,7 +23,7 @@ from torchmetrics import PeakSignalNoiseRatio
 from torchmetrics.image import StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
-from threedgrut.datasets import NeRFDataset, ColmapDataset, ScannetppDataset
+import threedgrut.datasets as datasets
 from threedgrut.model.model import MixtureOfGaussians
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import create_summary_writer
@@ -57,20 +57,7 @@ class Renderer:
     def create_test_dataloader(self, conf):
         """Create the test dataloader for the given configuration."""
 
-        match conf.dataset.type:
-            case "nerf":
-                dataset = NeRFDataset(
-                    conf.path, split="test", bg_color=conf.model.background.color
-                )
-            case "colmap":
-                dataset = ColmapDataset(conf.path, split="val", downsample_factor=conf.dataset.downsample_factor)
-            case "scannetpp":
-                dataset = ScannetppDataset(conf.path, split="val")
-            case _:
-                raise ValueError(
-                    f'Unsupported dataset type: {conf.dataset.type}. Choose between: ["colmap", "nerf", "scannetpp"].'
-                )
-
+        dataset = datasets.make_test(name=conf.dataset.type, config=conf)
         dataloader = torch.utils.data.DataLoader(dataset, num_workers=8, batch_size=1, shuffle=False, collate_fn=None)
         return dataset, dataloader
 
