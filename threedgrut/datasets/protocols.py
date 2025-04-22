@@ -24,7 +24,9 @@ import numpy as np
 class Batch:
     rays_ori: torch.Tensor  # [B, H, W, 3] ray origins in arbitrary space
     rays_dir: torch.Tensor  # [B, H, W, 3] ray directions in arbitrary space
-    T_to_world: torch.Tensor  # [B, 4, 4] transformation matrix from the ray space to the world space
+    T_to_world: (
+        torch.Tensor
+    )  # [B, 4, 4] transformation matrix from the ray space to the world space
     rgb_gt: Optional[torch.Tensor] = None
     mask: Optional[torch.Tensor] = None
     intrinsics: Optional[list] = None
@@ -33,17 +35,27 @@ class Batch:
 
     def __post_init__(self):
         batch_size = self.T_to_world.shape[0]
-        assert self.rays_ori.shape[0] == batch_size, "rays_ori must have the same batch size"
-        assert self.rays_dir.shape[0] == batch_size, "rays_dir must have the same batch size"
+        assert (
+            self.rays_ori.shape[0] == batch_size
+        ), "rays_ori must have the same batch size"
+        assert (
+            self.rays_dir.shape[0] == batch_size
+        ), "rays_dir must have the same batch size"
         if self.rgb_gt is not None:
             assert self.rgb_gt.ndim == 4, "rgb_gt must be a 4D tensor [B, H, W, 3]"
-            assert self.rgb_gt.shape[0] == batch_size, "rgb_gt must have the same batch size"
+            assert (
+                self.rgb_gt.shape[0] == batch_size
+            ), "rgb_gt must have the same batch size"
         if self.mask is not None:
             assert self.mask.ndim == 4, "mask must be a 3D tensor [B, H, W, 1]"
-            assert self.mask.shape[0] == batch_size, "mask must have the same batch size"
+            assert (
+                self.mask.shape[0] == batch_size
+            ), "mask must have the same batch size"
         if self.intrinsics:
             assert isinstance(self.intrinsics, list), "intrinsics must be a list"
-            assert len(self.intrinsics) == 4, "intrinsics must have 4 elements [fx, fy, cx, cy]"
+            assert (
+                len(self.intrinsics) == 4
+            ), "intrinsics must have 4 elements [fx, fy, cx, cy]"
 
 
 class BoundedMultiViewDataset(Protocol):
@@ -53,11 +65,11 @@ class BoundedMultiViewDataset(Protocol):
         """Returns the bounding box of the scene as a tuple of vec3 (min,max)"""
         ...
 
-    def get_scene_extent(self) -> float: 
+    def get_scene_extent(self) -> float:
         """TODO"""
         ...
 
-    def get_observer_points(self) -> np.ndarray: 
+    def get_observer_points(self) -> np.ndarray:
         """TODO"""
         ...
 

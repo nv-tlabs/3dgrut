@@ -47,7 +47,13 @@ from .camera_models import (
 
 class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def __init__(
-        self, path, device="cuda", split="train", downsample_factor=1, test_split_interval=8, ray_jitter=None,
+        self,
+        path,
+        device="cuda",
+        split="train",
+        downsample_factor=1,
+        test_split_interval=8,
+        ray_jitter=None,
     ):
         self.path = path
         self.device = device
