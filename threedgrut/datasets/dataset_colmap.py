@@ -73,8 +73,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         indices = np.arange(self.n_frames)
 
         # If test_split_interval is set, every test_split_interval frame will be excluded from the training set
-        # If test_split_interval is negative, all images will be used for training and testing
-        if self.test_split_interval >= 0:
+        # If test_split_interval is non-positive, all images will be used for training and testing
+        if self.test_split_interval > 0:
             if split == "train":
                 indices = np.mod(indices, self.test_split_interval) != 0
             else:
