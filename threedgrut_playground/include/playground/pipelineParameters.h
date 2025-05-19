@@ -50,10 +50,8 @@ struct alignas(16) PBRMaterial
 struct PlaygroundPipelineParameters: PipelineParameters
 {
     PackedTensorAccessor32<float, 3> rayMaxT; ///< ray max t for termination
-    bool useEnvmap;
-    bool useEnvmapAsBackground;
-    float3 backgroundColor;     // Optional, only if useEnvmap is False
-    cudaTextureObject_t envmap; // Optional, only if useEnvmap is True
+    cudaTextureObject_t envmap;               // for envmaps and solid background color
+    float2 envmapOffset;                      // rotates env map along (theta, phi) axis
 
     // -- Playground specific launch params --
     OptixTraversableHandle triHandle;   // Handle to BVH of mesh primitives: mirrors, glasses, pbr..

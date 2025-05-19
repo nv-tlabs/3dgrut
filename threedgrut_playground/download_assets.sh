@@ -69,4 +69,8 @@ for asset in "${assets[@]}"; do
     download_file "$asset"
 done
 
+echo "Downloading sample envmaps from PolyHaven"
+wget -q --show-progress -O "$output_dir/drackenstein_quarry_puresky_2k.hdr" "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/drackenstein_quarry_puresky_2k.hdr"
+wget -q --show-progress -O "$output_dir/drackenstein_quarry_puresky_4k.hdr" "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/4k/drackenstein_quarry_puresky_4k.hdr"
+
 echo "✅ Download complete. Files saved in '$output_dir'"

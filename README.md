@@ -26,6 +26,7 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 
 
 ## 🔥 News
+- ✅[2025/06] Playground supports PBR meshes and environment maps.
 - ✅[2025/04] Support for image masks.
 - ✅[2025/04] SparseAdam support.
 - ✅[2025/04] MCMC densification strategy support.

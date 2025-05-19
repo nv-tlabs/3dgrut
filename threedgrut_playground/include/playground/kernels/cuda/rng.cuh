@@ -51,15 +51,28 @@ static __host__ __device__ __inline__ unsigned int lcg2(unsigned int& prev)
     return prev;
 }
 
-// Generate random float in [0, 1)
+// Generate random float in [0, 1) - using Linear Congruential Generator (LCG)
 static __host__ __device__ __inline__ float rnd(unsigned int& prev)
 {
     return ((float)lcg(prev) / (float)0x01000000);
 }
 
+// Generate random float3 in [0, 1) - using Linear Congruential Generator (LCG)
 static __host__ __device__ __inline__ float3 rnd3(unsigned int& prev)
 {
     return make_float3(rnd(prev),rnd(prev),rnd(prev));
+}
+
+// Generate random float3 in [0, 1) - using Permuted Congruential Generator (PCG)
+static __device__ __inline__ float3 rnd_pcg3d(uint3 v)
+{
+  v.x = v.x * 1664525u + 1013904223u;
+  v.y = v.y * 1664525u + 1013904223u;
+  v.z = v.z * 1664525u + 1013904223u;
+  v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y;
+  v.x ^= v.x >> 16u; v.y ^= v.y >> 16u; v.z ^= v.z >> 16u;
+  v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y;
+  return make_float3(v.x, v.y, v.z) * (1.0/float(0xffffffffu));
 }
 
 #endif
