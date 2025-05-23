@@ -12,6 +12,7 @@ import torch
 import torchvision.transforms.functional as F
 import kaolin
 
+#Below referenced threedgrut_playground code
 from threedgrut.utils.logger import logger
 from threedgrut.gui.ps_extension import initialize_cugl_interop
 from threedgrut_playground.utils.video_out import VideoRecorder
@@ -28,6 +29,9 @@ engine = Engine3DGRUT(
     mesh_assets_folder=mesh_assets_folder,
     default_config=default_config
 )
+
+# Below code referenced viser https://github.com/nerfstudio-project/viser
+# and viser 3dgs example: https://github.com/WangFeng18/3d-gaussian-splatting/blob/main/visergui.py
 
 def qvec2rotmat(qvec):
     return np.array(
@@ -126,7 +130,7 @@ class ViserViewer:
         # img_np = img_np[..., ::-1]  # RGB to BGR
         return img_np
 
-
+    # refrenced https://github.com/nv-tlabs/3dgrut/blob/main/threedgrut_playground/ps_gui.py#L132
     @torch.no_grad()
     def update(self):
         if self.need_update:
