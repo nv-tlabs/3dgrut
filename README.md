@@ -42,6 +42,7 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
   - [Running with Docker](#running-with-docker)
 - [💻 2. Train 3DGRT or 3DGUT scenes](#-2-train-3dgrt-or-3dgut-scenes)
   - [Using image masks](#using-image-masks)
+  - [Exporting USDZ for use in Omniverse and Isaac Sim](#exporting-usdz-for-use-in-omniverse-and-isaac-sim)
 - [🎥 3. Rendering from Checkpoints](#-3-rendering-from-checkpoints)
   - [To visualize training progress interactively](#to-visualize-training-progress-interactively)
   - [To visualize a pre-trained checkpoint](#to-visualize-a-pre-trained-checkpoint)
@@ -109,7 +110,7 @@ Build the docker image:
 git clone --recursive https://github.com/nv-tlabs/3dgrut.git
 cd 3dgrut
 docker build . -t 3dgrut
-````
+```
 
 Run it:
 ```bash
@@ -171,12 +172,34 @@ The provided masks should have the same resolution as their corresponding images
 
 **NOTE**: The masks are only used for loss computation and not for computing the metrics.
 
+### Exporting USDZ for use in Omniverse and Isaac Sim
+
+Omniverse Kit 107.3 and Isaac Sim 5.0 are able to support rendering 3D Gaussians in a specific custom USDZ-based format that uses an extension of the UsdVolVolume Schema.
+
+The 3DGRUT repository can output trained scenes to this format by enabling the `export_usdz` flag:
+
+```bash
+python train.py --config-name apps/colmap_3dgut.yaml path=data/mipnerf360/garden/ out_dir=runs experiment_name=garden_3dgut dataset.downsample_factor=2 export_usdz.enabled=true
+```
+
+> [!NOTE]
+> The USD output schema is currently compatible with Isaac Sim 5.0, but how USD and reconstruction workflows work together is highly likely to change in future versions.
+
+#### Converting PLY files to USDZ
+
+If you have existing Gaussian data in PLY format, for example, from 3DGS, you can convert it to the USDZ format using the `ply_to_usd.py` script:
+
+```bash
+python -m threedgrut.export.scripts.ply_to_usd path/to/your/model.ply --output_file path/to/output.usdz
+```
+
+This is useful for converting 3DGS models from other sources to the USDZ format.
+
 ## 🎥 3. Rendering from Checkpoints
 Evaluate Checkpoint with Splatting / OptiX Tracer / Torch
 ```bash
 python render.py --checkpoint runs/lego/ckpt_last.pt --out-dir outputs/eval
 ```
-
 
 ### To visualize training progress interactively
 ```bash

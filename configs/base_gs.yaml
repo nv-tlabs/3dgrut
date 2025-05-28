@@ -38,13 +38,17 @@ import_ingp:
   init_global_step: 0
 
 export_ply:
-  enabled: False 
+  enabled: false
   path: ""
 import_ply:
-  enabled: False 
+  enabled: false
   path: ""
   init_global_step: 0
-  
+
+export_usdz:
+  enabled: false
+  path: ""
+
 model:
   density_activation: sigmoid
   scale_activation: exp

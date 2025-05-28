@@ -614,6 +614,9 @@ class Trainer3DGRUT:
         if conf.export_ply.enabled:
             ply_path = conf.export_ply.path if conf.export_ply.path else os.path.join(out_dir, "export_last.ply")
             self.model.export_ply(ply_path)
+        if conf.export_usdz.enabled:
+            usdz_path = conf.export_usdz.path if conf.export_usdz.path else os.path.join(out_dir, "export_last.usdz")
+            self.model.export_usdz(usdz_path)
 
         # Evaluate on test set
         if conf.test_last:
