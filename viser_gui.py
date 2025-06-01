@@ -2,10 +2,14 @@ from threading import Thread
 import torch
 import numpy as np
 import time
-import viser
-import viser.transforms as tf
+try:
+    import viser
+    import viser.transforms as tf
+except ImportError:
+    print('viser not installed, please run "pip install viser"')
 import cv2
 from collections import deque
+import argparse
 
 import numpy as np
 import torch
@@ -18,45 +22,21 @@ from threedgrut.gui.ps_extension import initialize_cugl_interop
 from threedgrut_playground.utils.video_out import VideoRecorder
 from threedgrut_playground.engine import Engine3DGRUT, OptixPrimitiveTypes
 
-gs_object = "/workspace/runs/lego-3004_092246/ckpt_last.pt"
-# gs_object = "/workspace/runs/flowers-0504_030839/ours_7000/ckpt_7000.pt"
-mesh_assets_folder = "./threedgrut_playground/assets"
-# default_config = "apps/colmap_3dgut.yaml"
-default_config = "apps/colmap_3dgrt.yaml"
+from kaolin.render.camera import Camera
+from threedgrut.utils.misc import quaternion_to_so3
 
-engine = Engine3DGRUT(
-    gs_object=gs_object,
-    mesh_assets_folder=mesh_assets_folder,
-    default_config=default_config
-)
 
 # Below code referenced viser https://github.com/nerfstudio-project/viser
 # and viser 3dgs example: https://github.com/WangFeng18/3d-gaussian-splatting/blob/main/visergui.py
 
-def qvec2rotmat(qvec):
-    return np.array(
-        [
-            [
-                1 - 2 * qvec[2] ** 2 - 2 * qvec[3] ** 2,
-                2 * qvec[1] * qvec[2] - 2 * qvec[0] * qvec[3],
-                2 * qvec[3] * qvec[1] + 2 * qvec[0] * qvec[2],
-            ],
-            [
-                2 * qvec[1] * qvec[2] + 2 * qvec[0] * qvec[3],
-                1 - 2 * qvec[1] ** 2 - 2 * qvec[3] ** 2,
-                2 * qvec[2] * qvec[3] - 2 * qvec[0] * qvec[1],
-            ],
-            [
-                2 * qvec[3] * qvec[1] - 2 * qvec[0] * qvec[2],
-                2 * qvec[2] * qvec[3] + 2 * qvec[0] * qvec[1],
-                1 - 2 * qvec[1] ** 2 - 2 * qvec[2] ** 2,
-            ],
-        ]
-    )
-
 def get_c2w(camera):
     c2w = np.eye(4, dtype=np.float32)
-    c2w[:3, :3] = qvec2rotmat(camera.wxyz)
+    # camera.wxyz: (4,) numpy, quaternion (w, x, y, z)
+    # quaternion_to_so3 expects (N,4) torch, so convert
+    q = np.asarray(camera.wxyz)[None, :]
+    q_torch = torch.from_numpy(q).float()
+    R = quaternion_to_so3(q_torch)[0].cpu().numpy()
+    c2w[:3, :3] = R
     c2w[:3, 3] = camera.position
     return c2w
 
@@ -65,15 +45,24 @@ def get_w2c(camera):
     w2c = np.linalg.inv(c2w)
     return w2c
 
+# argparse for parameters
+def parse_args():
+    parser = argparse.ArgumentParser(description="Viser remote viewer for 3dgrut")
+    parser.add_argument('--gs_object', type=str, default="./runs/lego-3004_092246/ckpt_last.pt")
+    parser.add_argument('--mesh_assets_folder', type=str, default="./threedgrut_playground/assets")
+    parser.add_argument('--default_config', type=str, default="apps/colmap_3dgrt.yaml")
+    parser.add_argument('--port', type=int, default=8080)
+    parser.add_argument('--target_fps', type=float, default=20.0)
+    return parser.parse_args()
+
 class ViserViewer:
-    def __init__(self, viewer_ip_port):
+    def __init__(self, viewer_ip_port, engine, target_fps=20.0):
         self.engine = engine
         self.port = viewer_ip_port
-
+        self.target_fps = target_fps
         self.render_times = deque(maxlen=3)
         self.server = viser.ViserServer(port=self.port)
         self.reset_view_button = self.server.gui.add_button("Reset View")
-
         self.need_update = False
         self.resolution_slider = self.server.gui.add_slider(
             "Resolution", min=384, max=4096, step=2, initial_value=1024
@@ -84,40 +73,26 @@ class ViserViewer:
         self.far_plane_slider = self.server.gui.add_slider(
             "Far", min=30.0, max=1000.0, step=10.0, initial_value=1000.0
         )
-
         self.fps = self.server.gui.add_text("FPS", initial_value="-1", disabled=True)
-
         @self.resolution_slider.on_update
         def _(_):
             self.need_update = True
-
         @self.near_plane_slider.on_update
         def _(_):
             self.need_update = True
-
         @self.far_plane_slider.on_update
         def _(_):
             self.need_update = True
-
         @self.reset_view_button.on_click
         def _(_):
             self.need_update = True
             for client in self.server.get_clients().values():
-                client.camera.up_direction = tf.SO3(client.camera.wxyz) @ np.array(
-                    [0.0, -1.0, 0.0]
-                )
-
-        @self.resolution_slider.on_update
-        def _(_):
-            self.need_update = True
-
+                client.camera.up_direction = tf.SO3(client.camera.wxyz) @ np.array([0.0, -1.0, 0.0])
         @self.server.on_client_connect
         def _(client: viser.ClientHandle):
             @client.camera.on_update
             def _(_):
                 self.need_update = True
-
-        self.debug_idx = 0
 
     def fast_render(self, in_cam, is_first_pass=False):
         # Called during interactions, disables effects for quick rendering
@@ -140,11 +115,8 @@ class ViserViewer:
                 try:
                     W = self.resolution_slider.value
                     H = int(self.resolution_slider.value/camera.aspect)
-                    from kaolin.render.camera import Camera
                     view_matrix = get_c2w(client.camera)
-                    # view_matrix = get_w2c(client.camera)
                     fov_y = client.camera.fov
-                    # fov_y = client.camera.fov * np.pi / 180
                     width, height = W, H
                     near, far = self.near_plane_slider.value, self.far_plane_slider.value
                     kaolin_camera = Camera.from_args(
@@ -156,11 +128,6 @@ class ViserViewer:
                             device=self.engine.device
                         )
                     
-                    # kaolin_camera.change_coordinate_system(
-                    #     torch.tensor([[1, 0, 0],
-                    #                 [0, 0, 1],
-                    #                 [0, -1, 0]]
-                    # ))
                     start_cuda = torch.cuda.Event(enable_timing=True)
                     end_cuda = torch.cuda.Event(enable_timing=True)
                     start_cuda.record()
@@ -175,12 +142,23 @@ class ViserViewer:
                     interval = 1
                     continue
                 client.scene.set_background_image(out, format="jpeg")
-                self.debug_idx += 1
             self.render_times.append(interval)
             self.fps.value = f"{1.0 / np.mean(self.render_times):.3g}"
+            self.need_update = False
 
 if __name__ == "__main__":
-    viewer = ViserViewer(viewer_ip_port=8080)
+    args = parse_args()
+    engine = Engine3DGRUT(
+        gs_object=args.gs_object,
+        mesh_assets_folder=args.mesh_assets_folder,
+        default_config=args.default_config,
+    )
+    viewer = ViserViewer(viewer_ip_port=args.port, engine=engine, target_fps=args.target_fps)
+    last_time = time.time()
     while True:
+        start = time.time()
         viewer.update()
-        time.sleep(0.05)
+        # 动态FPS控制
+        elapsed = time.time() - start
+        sleep_time = max(0, (1.0 / args.target_fps) - elapsed)
+        time.sleep(sleep_time)
