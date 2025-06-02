@@ -174,7 +174,7 @@ The provided masks should have the same resolution as their corresponding images
 
 ### Exporting USDZ for use in Omniverse and Isaac Sim
 
-Omniverse Kit 107.3 and Isaac Sim 5.0 are able to support rendering 3D Gaussians in a specific custom USDZ-based format that uses an extension of the UsdVolVolume Schema.
+As a beta feature, Omniverse Kit 107.3 and Isaac Sim 5.0 are able to support rendering 3D Gaussians in a specific custom USDZ-based format that uses an extension of the UsdVolVolume Schema.
 
 The 3DGRUT repository can output trained scenes to this format by enabling the `export_usdz` flag:
 
@@ -183,7 +183,7 @@ python train.py --config-name apps/colmap_3dgut.yaml path=data/mipnerf360/garden
 ```
 
 > [!NOTE]
-> The USD output schema is currently compatible with Isaac Sim 5.0, but how USD and reconstruction workflows work together is highly likely to change in future versions.
+> The USD output schema is currently compatible with Isaac Sim 5.0, but how USD and reconstruction workflows work together is highly likely to change in future versions. This is a beta feature.
 
 #### Converting PLY files to USDZ
 
