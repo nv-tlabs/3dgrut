@@ -97,7 +97,7 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
     def get_covariance(self) -> torch.Tensor:
         scales = self.get_scale()
 
-        S = torch.zeros((self.num_gaussians(), 3, 3), dtype=scales.dtype, device=self.device)
+        S = torch.zeros((self.num_gaussians, 3, 3), dtype=scales.dtype, device=self.device)
         R = quaternion_to_so3(self.get_rotation())
 
         S[:, 0, 0] = scales[:, 0]
