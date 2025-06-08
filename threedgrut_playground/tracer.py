@@ -202,10 +202,8 @@ class Tracer:
         materials=None,
         is_sync_materials=True,
         refractive_index=None,
-        background_color=None,
         envmap=None,
-        enable_envmap=False,
-        use_envmap_as_background=False,
+        envmap_offset=None,
         max_pbr_bounces=7
     ):
         if ray_max_t is None:
@@ -220,10 +218,10 @@ class Tracer:
             materials = []
         else:
             materials = [self.to_native_pbr_material(m) for m in materials]
-        if background_color is None:
-            background_color = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
         if envmap is None:
-            envmap = torch.empty([0, 0, 0], dtype=torch.float32)
+            envmap = torch.zeros([4, 4, 4], dtype=torch.float32)
+        if envmap_offset is None:
+            envmap = torch.zeros([2], dtype=torch.float32)
 
         poses = torch.tensor([
             [1, 0, 0, 0],
@@ -246,6 +244,7 @@ class Tracer:
             particle_density = torch.concat([mog_pos, mog_dns, mog_rot, mog_scl, torch.zeros_like(mog_dns)], dim=1)
             sph_degree = gaussians.n_active_features
             min_transmittance = self.conf.render.min_transmittance
+            envmap_offset = envmap_offset.contiguous()
 
             (
                 pred_rgb,
@@ -274,10 +273,8 @@ class Tracer:
                 materials,
                 is_sync_materials,
                 refractive_index,
-                background_color,
                 envmap,
-                enable_envmap,
-                use_envmap_as_background,
+                envmap_offset,
                 max_pbr_bounces
             )
 

@@ -68,7 +68,7 @@ HybridOptixTracer::HybridOptixTracer(
 
     _playgroundState = new PlaygroundState();
     memset(_playgroundState, 0, sizeof(PlaygroundState));
-    // Use same context as gaussians program
+    // Use same context as Gaussians program
     _playgroundState->context = _state->context;
     _playgroundState->fNum = 0;
     _playgroundState->vNum = 0;
@@ -297,10 +297,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     const std::vector<CPBRMaterial>& materials,
     bool shouldSyncMaterials,
     torch::Tensor refractiveIndex,
-    torch::Tensor backgroundColor,
     torch::Tensor envmap,
-    bool enableEnvmap,
-    bool useEnvmapAsBackground,
+    torch::Tensor envmapOffset,
     const unsigned int maxPBRBounces) {
 
     // ----- 3dgrt launch params -----
@@ -355,19 +353,14 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     paramsHost.playgroundOpts = playgroundOpts;
     paramsHost.triHandle = _playgroundState->gasHandle;
     paramsHost.trace_state = packed_accessor32<int32_t, 4>(traceState);
-    paramsHost.backgroundColor = make_float3(
-        backgroundColor[0].item<float>(), backgroundColor[1].item<float>(), backgroundColor[2].item<float>()
-    );
-    paramsHost.useEnvmap = false;
-    paramsHost.useEnvmapAsBackground = useEnvmapAsBackground;
+    CudaTexture2DFloat4Object cuEnvMap = CudaTexture2DFloat4Object();
     int envmapHeight = envmap.size(0);
     int envmapWidth = envmap.size(1);
-    CudaTexture2DFloat4Object cuEnvMap = CudaTexture2DFloat4Object();
     if (envmapHeight > 0 && envmapWidth > 0)
     {
         cuEnvMap.reset(envmap.data_ptr<float>(), envmapHeight, envmapWidth);
-        paramsHost.useEnvmap = enableEnvmap;
         paramsHost.envmap = cuEnvMap.tex();
+        paramsHost.envmapOffset = make_float2(envmapOffset.data_ptr<float>()[0], envmapOffset.data_ptr<float>()[1]);
     }
 
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();

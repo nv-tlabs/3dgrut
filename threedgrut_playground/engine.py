@@ -33,6 +33,7 @@ from threedgrut_playground.utils.mesh_io import (
 from threedgrut_playground.utils.depth_of_field import DepthOfField
 from threedgrut_playground.utils.video_out import VideoRecorder
 from threedgrut_playground.utils.spp import SPP
+from threedgrut_playground.utils.environment import Environment
 from threedgrut_playground.utils.kaolin_future.transform import ObjectTransform
 from threedgrut_playground.utils.kaolin_future.fisheye import generate_fisheye_rays
 
@@ -123,10 +124,11 @@ class OptixPrimitiveTypes(IntEnum):
     MIRROR = 1
     GLASS = 2
     DIFFUSE = 3
+    PBR = 4
 
     @classmethod
     def names(cls):
-        return ['None', 'Mirror', 'Glass', 'Diffuse Mesh']
+        return ['None', 'Mirror', 'Glass', 'Diffuse Mesh', 'PBR Mesh']
 
 
 @dataclass
@@ -260,8 +262,8 @@ class Primitives:
             print(material_name, material)
     ```
     """
-    SUPPORTED_MESH_EXTENSIONS = ['.obj', '.glb']     # Supported mesh file formats
-    DEFAULT_REFRACTIVE_INDEX = 1.33                  # Default IOR for transparent materials
+    SUPPORTED_MESH_EXTENSIONS = ['.obj', '.glb', '.gltf']   # Supported mesh file formats
+    DEFAULT_REFRACTIVE_INDEX = 1.33                         # Default IOR for transparent materials
     PROCEDURAL_SHAPES: Dict[str, Callable[[torch.device], kaolin.rep.SurfaceMesh]] = dict(
         Quad=create_quad_mesh
     )                                                # Supported procedural shapes -> constructor function
@@ -269,8 +271,6 @@ class Primitives:
     def __init__(self,
         tracer: Tracer,
         mesh_assets_folder: str,
-        enable_envmap: bool = False,
-        use_envmap_as_background: bool = False,
         scene_scale: Optional[torch.Tensor] = None,
         mesh_autoscale_func: Callable[[torch.Tensor, kaolin.rep.SurfaceMesh, ObjectTransform], None] = set_mesh_scale_to_scene,
         device: Optional[torch.device] = None
@@ -280,8 +280,6 @@ class Primitives:
         Args:
             tracer (Tracer): OptixTracer instance for ray tracing, should reference the same tracer as the engine.
             mesh_assets_folder (str): Directory containing mesh asset files to load from.
-            enable_envmap (bool, optional): Enable environment mapping. Defaults to False.
-            use_envmap_as_background (bool, optional): Use envmap as background, not just for lighting. Defaults to False.
             scene_scale (Optional[torch.Tensor], optional): Scene dimensions of shape (3,). 
                 Defaults to [1.0, 1.0, 1.0].
             mesh_autoscale_func (Callable, optional): Function to autoscale meshes when new primitives are added.
@@ -303,10 +301,6 @@ class Primitives:
         self.use_smooth_normals: bool = True
         """ Whether to skip PBR texture lookups """
         self.disable_pbr_textures: bool = False
-        """ Whether environment mapping is enabled (currently non-functional) """
-        self.enable_envmap: bool = enable_envmap
-        """ Whether to use envmap as background """
-        self.use_envmap_as_background: bool = use_envmap_as_background
         """ Overall scene scale factor, shape (3,) """
         if scene_scale is None:
             self.scene_scale: torch.Tensor = torch.tensor([1.0, 1.0, 1.0], device='cpu')
@@ -376,6 +370,105 @@ class Primitives:
                 roughness_factor=0.0,
                 transmission_factor=0.0,
                 ior=1.0
+            ),
+            brushed_copper=PBRMaterial(
+                material_id=2,
+                diffuse_factor=torch.tensor([0.95, 0.64, 0.54, 1.0], device=device, dtype=torch.float32),
+                emissive_factor=torch.zeros(3, device=device, dtype=torch.float32),
+                metallic_factor=1.0,
+                roughness_factor=0.5,
+                transmission_factor=0.0,
+                ior=1.1
+            ),
+            blue_glass=PBRMaterial(
+                material_id=3,
+                diffuse_factor=torch.tensor([0.1, 0.2, 0.8, 0.8], device=device, dtype=torch.float32),
+                emissive_factor=torch.zeros(3, device=device, dtype=torch.float32),
+                metallic_factor=0.0,
+                roughness_factor=0.1,
+                transmission_factor=0.95,
+                ior=1.52
+            ),
+            jade=PBRMaterial(
+                material_id=4,
+                diffuse_factor=torch.tensor([0.2, 0.8, 0.5, 0.9], device=device, dtype=torch.float32),
+                emissive_factor=torch.zeros(3, device=device, dtype=torch.float32),
+                metallic_factor=0.0,
+                roughness_factor=0.3,
+                transmission_factor=0.4,
+                ior=1.66
+            ),
+            polished_marble=PBRMaterial(
+                material_id=5,
+                diffuse_factor=torch.tensor([0.9, 0.9, 0.95, 1.0], device=device, dtype=torch.float32),
+                emissive_factor=torch.zeros(3, device=device, dtype=torch.float32),
+                metallic_factor=0.0,
+                roughness_factor=0.1,
+                transmission_factor=0.0,
+                ior=1.6
+            ),
+            diamond=PBRMaterial(
+                material_id=6,
+                diffuse_factor=torch.tensor([0.98, 0.98, 0.98, 0.2], device=device, dtype=torch.float32),
+                emissive_factor=torch.zeros(3, device=device, dtype=torch.float32),
+                metallic_factor=0.0,
+                roughness_factor=0.02,
+                transmission_factor=0.99,
+                ior=2.42
+            ),
+            rose_gold=PBRMaterial(
+                material_id=7,
+                diffuse_factor=torch.tensor([0.92, 0.72, 0.75, 1.0], device=device, dtype=torch.float32),
+                emissive_factor=torch.zeros(3, device=device, dtype=torch.float32),
+                metallic_factor=1.0,
+                roughness_factor=0.15,
+                transmission_factor=0.0,
+                ior=1.1
+            ),
+            luminous_yellow=PBRMaterial(
+                material_id=8,
+                diffuse_factor=torch.tensor([0.2, 0.9, 0.3, 1.0], device=device, dtype=torch.float32),
+                emissive_factor=torch.tensor([0.8, 0.8, 0.4], device=device, dtype=torch.float32),
+                metallic_factor=0.0,
+                roughness_factor=0.7,
+                transmission_factor=0.0,
+                ior=1.0
+            ),
+            ruby_red=PBRMaterial(
+                material_id=9,
+                diffuse_factor=torch.tensor([0.9, 0.1, 0.2, 0.9], device=device, dtype=torch.float32),
+                emissive_factor=torch.zeros(3, device=device, dtype=torch.float32),
+                metallic_factor=0.0,
+                roughness_factor=0.1,
+                transmission_factor=0.3,
+                ior=1.76  # Ruby-like IOR
+            ),
+            blue_plastic=PBRMaterial(
+                material_id=10,
+                diffuse_factor=torch.tensor([0.1, 0.2, 0.8, 1.0], device=device, dtype=torch.float32),
+                emissive_factor=torch.zeros(3, device=device, dtype=torch.float32),
+                metallic_factor=0.0,
+                roughness_factor=0.4,
+                transmission_factor=0.0,
+                ior=1.45
+            ),
+            oak_wood=PBRMaterial(
+                material_id=11,
+                diffuse_factor=torch.tensor([0.65, 0.5, 0.35, 1.0], device=device, dtype=torch.float32),
+                emissive_factor=torch.zeros(3, device=device, dtype=torch.float32),
+                metallic_factor=0.0,
+                roughness_factor=0.75,
+                transmission_factor=0.0,
+                ior=1.3
+            ),
+            black_rubber = PBRMaterial(
+                material_id=12,
+                diffuse_factor=torch.tensor([0.1, 0.1, 0.1, 1.0], device=device, dtype=torch.float32),
+                emissive_factor=torch.zeros(3, device=device, dtype=torch.float32),
+                metallic_factor=0.0,
+                roughness_factor=0.9,
+                transmission_factor=0.0,
+                ior=1.5
             )
         )
         return default_materials
@@ -407,9 +500,14 @@ class Primitives:
         # Generate tangents mas, if available
         num_verts = len(mesh.vertices)
         num_faces = len(mesh.faces)
+        is_precomputed_tangents = mesh.has_attribute('vertex_tangents') and mesh.vertex_tangents is not None
         has_tangents = torch.ones([num_verts, 1], device=device, dtype=torch.bool) \
-            if mesh.vertex_tangents is not None \
+            if is_precomputed_tangents \
             else torch.zeros([num_verts, 1], device=device, dtype=torch.bool)
+        vertex_tangents = mesh.vertex_tangents \
+            if is_precomputed_tangents \
+            else torch.zeros([num_verts, 3], device=device, dtype=torch.float)
+
         # Create identity transform and set scale to scene size
         transform = ObjectTransform(device=device)
         if self.mesh_autoscale_func is not None:\
@@ -426,7 +524,7 @@ class Primitives:
             triangles=mesh.faces.int(),
             vertex_normals=mesh.vertex_normals.float(),
             has_tangents=has_tangents.bool(),
-            vertex_tangents=mesh.vertex_tangents.float(),
+            vertex_tangents=vertex_tangents.float(),
             material_uv=mesh.face_uvs.float(),
             material_id=mesh.material_assignments.unsqueeze(1).int(),
             primitive_type=primitive_type,
@@ -679,13 +777,20 @@ class Engine3DGRUT:
     AVAILABLE_CAMERAS = ['Pinhole', 'Fisheye']
     ANTIALIASING_MODES = ['4x MSAA', '8x MSAA', '16x MSAA', 'Quasi-Random (Sobol)']
 
-    def __init__(self, gs_object: str, mesh_assets_folder: str, default_config: str):
+    def __init__(
+        self,
+        gs_object: str,
+        mesh_assets_folder: str,
+        default_config: str,
+        envmap_assets_folder: Optional[str]=None
+    ):
         self.scene_mog, self.scene_name = self.load_3dgrt_object(gs_object, config_name=default_config)
         self.tracer = Tracer(self.scene_mog.conf)
         self.device = self.scene_mog.device
 
-        self.envmap = None  # Currently disabled
         self.frame_id = 0
+        """ Environment definitions, such as envmap, tonemapping used, and forced background color. """
+        self.environment = Environment(envmap_assets_folder, device=self.device)
 
         # -- Outwards facing, these are the useful settings to configure --
         """ Type of camera used to render the scene """
@@ -710,15 +815,11 @@ class Engine3DGRUT:
         self.use_optix_denoiser = True
         """ Enables / disables gaussian rendering """
         self.disable_gaussian_tracing = False
-        """ If enabled, blends a white background with non-opaque pixels """
-        self.force_white_bg = False
 
         scene_scale = self.scene_mog.positions.max(dim=0)[0] - self.scene_mog.positions.min(dim=0)[0]
         self.primitives = Primitives(
             tracer=self.tracer,
             mesh_assets_folder=mesh_assets_folder,
-            enable_envmap=self.envmap is not None,
-            use_envmap_as_background=self.envmap is not None,
             scene_scale=scene_scale,
             device=self.device
         )
@@ -726,8 +827,6 @@ class Engine3DGRUT:
             geometry_type='Sphere', primitive_type=OptixPrimitiveTypes.GLASS, device=self.device
         )
         self.rebuild_bvh(self.scene_mog)
-        if self.envmap is not None:
-            self.force_white_bg = False
 
         self.last_state = dict(
             camera=None,
@@ -745,6 +844,7 @@ class Engine3DGRUT:
         """ Accumulate a new frame to the buffer, using the previous frames and the current frame.
         """
         prev_frames = torch.pow(prev_frames, gamma)
+        new_frame = self.environment.tonemap(new_frame)
         buffer = ((prev_frames * num_frames_accumulated) + new_frame) / (num_frames_accumulated + batch_size)
         buffer = torch.pow(buffer, 1.0 / gamma)
         return buffer
@@ -758,8 +858,15 @@ class Engine3DGRUT:
             i = self.depth_of_field.spp_accumulated_for_frame
             extrinsics_R = camera.R.squeeze(0).to(dtype=rays.rays_ori.dtype)
             dof_rays_ori, dof_rays_dir = self.depth_of_field(extrinsics_R, rays)
+            # Disable path tracer under certain settings, useful for comparing with the vanilla volumetric tracer
             if not self.primitives.enabled or not self.primitives.has_visible_objects():
-                dof_rb = self.scene_mog.trace(rays_o=dof_rays_ori, rays_d=dof_rays_dir)
+                if self.disable_gaussian_tracing:
+                    dof_rb = dict(
+                        pred_rgb = torch.zeros_like(rays.rays_ori),
+                        pred_opacity = torch.zeros_like(rays.rays_ori[:,:,0:1])
+                    )
+                else:
+                    dof_rb = self.scene_mog.trace(rays_o=dof_rays_ori, rays_d=dof_rays_dir)
             else:
                 dof_rb = self._render_playground_hybrid(dof_rays_ori, dof_rays_dir)
 
@@ -772,9 +879,15 @@ class Engine3DGRUT:
         if self.use_spp and self.spp.has_more_to_accumulate():
             # Store current spp index
             i = self.spp.spp_accumulated_for_frame
-
+            # Disable path tracer under certain settings, useful for comparing with the vanilla volumetric tracer
             if not self.primitives.enabled or not self.primitives.has_visible_objects():
-                spp_rb = self.scene_mog.trace(rays_o=rays.rays_ori, rays_d=rays.rays_dir)
+                if self.disable_gaussian_tracing:
+                    spp_rb = dict(
+                        pred_rgb = torch.zeros_like(rays.rays_ori),
+                        pred_opacity = torch.zeros_like(rays.rays_ori[:,:,0:1])
+                    )
+                else:
+                    spp_rb = self.scene_mog.trace(rays_o=rays.rays_ori, rays_d=rays.rays_dir)
             else:
                 spp_rb = self._render_playground_hybrid(rays.rays_ori, rays.rays_dir)
             batch_rgb = spp_rb['pred_rgb'].sum(dim=0).unsqueeze(0)
@@ -817,14 +930,12 @@ class Engine3DGRUT:
 
         self.primitives.rebuild_bvh_if_needed()
 
-        envmap = self.envmap
-        if self.force_white_bg:
-            background_color = torch.ones(3)
-            envmap = None
-        elif isinstance(mog.background, BackgroundColor):
-            background_color = mog.background.color
-        else:
-            background_color = torch.zeros(3)
+        # !! Background color only affects RGB channels (not alpha) !!
+        # force_white_bg: pixels are blended with white according to remaining alpha
+        # mog.background is solid color: pixels are blended with background color of mog model
+        # otherwise: no background color will be blended (== pixels are blended with black).
+        envmap = self.environment.get_envmap()
+        envmap_offset = self.environment.get_envmap_offset()
 
         rendered_results = self.tracer.render_playground(
             gaussians=mog,
@@ -843,32 +954,28 @@ class Engine3DGRUT:
             materials=sorted(self.primitives.registered_materials.values(), key=lambda mat: mat.material_id),
             is_sync_materials=self.is_materials_dirty,
             refractive_index=self.primitives.stacked_fields.refractive_index_tensor[:, None],
-            background_color=background_color,
             envmap=envmap,
-            enable_envmap=self.primitives.enable_envmap,
-            use_envmap_as_background=self.primitives.use_envmap_as_background,
+            envmap_offset=envmap_offset,
             max_pbr_bounces=self.max_pbr_bounces
         )
 
         pred_rgb = rendered_results['pred_rgb']
         pred_opacity = rendered_results['pred_opacity']
 
-        if envmap is None or not self.primitives.use_envmap_as_background:
-            if self.force_white_bg:
-                pred_rgb += (1.0 - pred_opacity)
-            else:
-                poses = torch.tensor([
-                    [1, 0, 0, 0],
-                    [0, 1, 0, 0],
-                    [0, 0, 1, 0]
-                ], dtype=torch.float32)
-                pred_rgb, pred_opacity = mog.background(
-                    poses.contiguous(),
-                    rendered_results['last_ray_d'].contiguous(),
-                    pred_rgb,
-                    pred_opacity,
-                    False
-                )
+        # If no envmap is used for background, saturate the color channels by blending the mog background
+        if envmap is None or not self.environment.is_ignore_envmap():
+            poses = torch.tensor([
+                [1, 0, 0, 0],
+                [0, 1, 0, 0],
+                [0, 0, 1, 0]
+            ], dtype=torch.float32)
+            pred_rgb, pred_opacity = mog.background(
+                poses.contiguous(),
+                rendered_results['last_ray_d'].contiguous(),
+                pred_rgb,
+                pred_opacity,
+                False
+            )
 
         # Mark materials as uploaded
         self.is_materials_dirty = False
@@ -942,12 +1049,20 @@ class Engine3DGRUT:
         rays = self.raygen(camera, use_spp=is_use_spp)
 
         if is_first_pass:
+            # Disable path tracer under certain settings, useful for comparing with the vanilla volumetric tracer
             if not self.primitives.enabled or not self.primitives.has_visible_objects():
-                rb = self.scene_mog.trace(rays_o=rays.rays_ori, rays_d=rays.rays_dir)
+                if self.disable_gaussian_tracing:
+                    rb = dict(
+                        pred_rgb=torch.zeros_like(rays.rays_ori),
+                        pred_opacity=torch.zeros_like(rays.rays_ori[:, :, 0:1])
+                    )
+                else:
+                    rb = self.scene_mog.trace(rays_o=rays.rays_ori, rays_d=rays.rays_dir)
             else:
                 rb = self._render_playground_hybrid(rays.rays_ori, rays.rays_dir)
 
             rb = dict(rgb=rb['pred_rgb'], opacity=rb['pred_opacity'])
+            rb['rgb'] = self.environment.tonemap(rb['rgb'])
             rb['rgb'] = torch.pow(rb['rgb'], 1.0 / self.gamma_correction)
             rb['rgb'] = rb['rgb'].mean(dim=0).unsqueeze(0)
             rb['opacity'] = rb['opacity'].mean(dim=0).unsqueeze(0)
