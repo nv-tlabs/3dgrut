@@ -193,7 +193,6 @@ class MixtureOfGaussians(torch.nn.Module):
 
     def init_from_colmap(self, root_path: str, observer_pts):
         # Special case for scannetpp dataset
-        print(self.conf.dataset.type)
         if self.conf.dataset.type == "scannetpp":
             points_file = os.path.join(root_path, "colmap", "points3D.txt")
             pts, rgb, _ = read_colmap_points3D_text(points_file)
@@ -202,6 +201,7 @@ class MixtureOfGaussians(torch.nn.Module):
 
         else:
             points_file = os.path.join(root_path, "sparse/0", "points3D.bin")
+            # also handle nonbinary points files
             if not os.path.isfile(points_file):
                 points_file = os.path.join(root_path, "sparse/0", "points3D.txt")
                 pts, rgb, _ = read_colmap_points3D_text(points_file)
