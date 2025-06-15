@@ -742,23 +742,23 @@ class Trainer3DGRUT:
                 model.scheduler_step(global_step)
 
             # Post backward strategy step
-            with torch.cuda.nvtx.range(f"train_{global_step}_post_opt_step"):
-                scene_updated = self.strategy.post_optimizer_step(
-                    step=global_step, scene_extent=self.scene_extent, train_dataset=self.train_dataset, batch=gpu_batch, writer=self.tracking.writer
-                )
+            # with torch.cuda.nvtx.range(f"train_{global_step}_post_opt_step"):
+            #     scene_updated = self.strategy.post_optimizer_step(
+            #         step=global_step, scene_extent=self.scene_extent, train_dataset=self.train_dataset, batch=gpu_batch, writer=self.tracking.writer
+            #     )
 
             # Update the SH if required
             if self.model.progressive_training and check_step_condition(global_step, 0, 1e6, self.model.feature_dim_increase_interval):
                 self.model.increase_num_active_features()
 
             # Update the BVH if required
-            if scene_updated or (
-                conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0
-            ):
-                with torch.cuda.nvtx.range(f"train_{global_step}_bvh"):
-                    profilers["build_as"].start()
-                    model.build_acc(rebuild=True)
-                    profilers["build_as"].end()
+            # if scene_updated or (
+            #     conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0
+            # ):
+            #     with torch.cuda.nvtx.range(f"train_{global_step}_bvh"):
+            #         profilers["build_as"].start()
+            #         model.build_acc(rebuild=True)
+            #         profilers["build_as"].end()
 
             # Increment the global step
             self.global_step += 1
@@ -783,8 +783,9 @@ class Trainer3DGRUT:
                 if global_step in conf.checkpoint.iterations:
                     self.save_checkpoint()
 
-            with torch.cuda.nvtx.range(f"train_{global_step-1}_update_gui"):
-                self.render_gui(scene_updated)  # Updating the GUI
+            # with torch.cuda.nvtx.range(f"train_{global_step-1}_update_gui"):
+            #     self.render_gui(scene_updated)  # Updating the GUI
+            del gpu_batch
 
         self.log_training_pass(metrics)
 

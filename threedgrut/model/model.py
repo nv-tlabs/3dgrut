@@ -193,6 +193,7 @@ class MixtureOfGaussians(torch.nn.Module):
 
     def init_from_colmap(self, root_path: str, observer_pts):
         # Special case for scannetpp dataset
+        print(self.conf.dataset.type)
         if self.conf.dataset.type == "scannetpp":
             points_file = os.path.join(root_path, "colmap", "points3D.txt")
             pts, rgb, _ = read_colmap_points3D_text(points_file)
@@ -202,28 +203,32 @@ class MixtureOfGaussians(torch.nn.Module):
         else:
             points_file = os.path.join(root_path, "sparse/0", "points3D.bin")
             if not os.path.isfile(points_file):
-                raise ValueError(f"colmap points file {points_file} not found")
+                points_file = os.path.join(root_path, "sparse/0", "points3D.txt")
+                pts, rgb, _ = read_colmap_points3D_text(points_file)
+                file_pts = torch.tensor(pts, dtype=torch.float32, device=self.device)
+                file_rgb = torch.tensor(rgb, dtype=torch.uint8, device=self.device)
+            else:
 
-            with open(points_file, "rb") as file:
-                n_pts = read_next_bytes(file, 8, "Q")[0]
-                logger.info(f"Found {n_pts} colmap points")
+                with open(points_file, "rb") as file:
+                    n_pts = read_next_bytes(file, 8, "Q")[0]
+                    logger.info(f"Found {n_pts} colmap points")
 
-                file_pts = np.zeros((n_pts, 3), dtype=np.float32)
-                file_rgb = np.zeros((n_pts, 3), dtype=np.float32)
+                    file_pts = np.zeros((n_pts, 3), dtype=np.float32)
+                    file_rgb = np.zeros((n_pts, 3), dtype=np.float32)
 
-                for i_pt in range(n_pts):
-                    # read the points
-                    pt_data = read_next_bytes(file, 43, "QdddBBBd")
-                    file_pts[i_pt, :] = np.array(pt_data[1:4])
-                    file_rgb[i_pt, :] = np.array(pt_data[4:7])
-                    # NOTE: error stored in last element of file, currently not used
+                    for i_pt in range(n_pts):
+                        # read the points
+                        pt_data = read_next_bytes(file, 43, "QdddBBBd")
+                        file_pts[i_pt, :] = np.array(pt_data[1:4])
+                        file_rgb[i_pt, :] = np.array(pt_data[4:7])
+                        # NOTE: error stored in last element of file, currently not used
 
-                    # skip the track data
-                    t_len = read_next_bytes(file, num_bytes=8, format_char_sequence="Q")[0]
-                    read_next_bytes(file, num_bytes=8 * t_len, format_char_sequence="ii" * t_len)
+                        # skip the track data
+                        t_len = read_next_bytes(file, num_bytes=8, format_char_sequence="Q")[0]
+                        read_next_bytes(file, num_bytes=8 * t_len, format_char_sequence="ii" * t_len)
 
-            file_pts = torch.tensor(file_pts, dtype=torch.float32, device=self.device)
-            file_rgb = torch.tensor(file_rgb, dtype=torch.uint8, device=self.device)
+                file_pts = torch.tensor(file_pts, dtype=torch.float32, device=self.device)
+                file_rgb = torch.tensor(file_rgb, dtype=torch.uint8, device=self.device)
 
         assert file_rgb.dtype == torch.uint8, "Expecting RGB values to be in [0, 255] range"
         self.default_initialize_from_points(file_pts, observer_pts, file_rgb, 
