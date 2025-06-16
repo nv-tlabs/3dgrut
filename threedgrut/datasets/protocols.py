@@ -32,6 +32,7 @@ class Batch:
     intrinsics: Optional[list] = None
     intrinsics_OpenCVPinholeCameraModelParameters: Optional[dict] = None
     intrinsics_OpenCVFisheyeCameraModelParameters: Optional[dict] = None
+    camera_id: Optional[list] = None
 
     def __post_init__(self):
         batch_size = self.T_to_world.shape[0]
