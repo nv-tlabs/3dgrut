@@ -19,11 +19,13 @@ from pathlib import Path
 from typing import Any, Dict
 
 import msgpack
+import numpy as np
 import torch
 
 from threedgrut.export.base import ExportableModel, ModelExporter
 from threedgrut.export.nurec_templates import NamedSerialized, fill_3dgut_template
 from threedgrut.export.usd_util import serialize_nurec_usd, serialize_usd_default_layer, write_to_usdz
+from threedgrut.export.normalizing_transform import estimate_normalizing_transform
 from threedgrut.utils.logger import logger
 
 
@@ -36,12 +38,13 @@ class USDZExporter(ModelExporter):
 
     @torch.no_grad()
     def export(self, model: ExportableModel, output_path: Path,
-               conf: Dict[str, Any] = None, **kwargs) -> None:
+               dataset=None, conf: Dict[str, Any] = None, **kwargs) -> None:
         """Export the model to a USDZ file.
 
         Args:
             model: The model to export (must implement ExportableModel)
             output_path: Path where the USDZ file will be saved
+            dataset: Optional dataset to get camera poses for upright transform
             conf: Configuration parameters for the renderer
             **kwargs: Additional parameters for export
         """
@@ -51,6 +54,7 @@ class USDZExporter(ModelExporter):
             raise ValueError(
                 f"Not supported for USDZ export: {conf.render.method}")
 
+        # Get model data
         positions = model.get_positions().detach().cpu().numpy()
         rotations = model.get_rotation(
             preactivation=True).detach().cpu().numpy()
@@ -60,6 +64,18 @@ class USDZExporter(ModelExporter):
         features_albedo = model.get_features_albedo().detach().cpu().numpy()
         features_specular = model.get_features_specular().detach().cpu().numpy()
         n_active_features = model.get_n_active_features()
+
+        # Apply normalizing transform if enabled and dataset is provided
+        normalizing_transform = np.eye(4)
+        if (conf.export_usdz.apply_normalizing_transform and
+            dataset is not None):
+            try:
+                poses = dataset.get_poses()
+                normalizing_transform = estimate_normalizing_transform(poses)
+                logger.info("Applying normalizing transform to USDZ export")
+            except Exception as e:
+                logger.warning(f"Failed to apply normalizing transform: {e}")
+                normalizing_transform = np.eye(4)
 
         # Set up common parameters
         template_params = {
@@ -115,7 +131,7 @@ class USDZExporter(ModelExporter):
         )
 
         # Create USD representations
-        gauss_usd = serialize_nurec_usd(model_file, positions)
+        gauss_usd = serialize_nurec_usd(model_file, positions, normalizing_transform)
         default_usd = serialize_usd_default_layer(gauss_usd)
 
         # Write the final USDZ file

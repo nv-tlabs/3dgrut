@@ -114,7 +114,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         for frame in logger.track(
             frames, description=f"Load Dataset ({split})", color="salmon1"
         ):
-            c2w = np.array(frame["transform_matrix"])[:3, :4]
+            c2w = np.array(frame["transform_matrix"], dtype=np.float32)
             c2w[:, 1:3] *= -1  # [right up back] to [right down front]
             cam_centers.append(c2w[:3, 3])
             self.poses.append(c2w)
@@ -136,7 +136,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         self.image_paths = np.stack(self.image_paths, dtype=str)
         self.mask_paths = np.stack(self.mask_paths, dtype=str)
-        self.poses = np.array(self.poses).astype(np.float32)  # (N_images, 3, 4)
+        self.poses = np.array(self.poses).astype(np.float32)  # (N_images, 4, 4)
 
     @torch.no_grad()
     def compute_spatial_extents(self):
@@ -162,6 +162,22 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def get_observer_points(self):
         return self.camera_centers
+
+    def get_poses(self) -> np.ndarray:
+        """Get camera poses as 4x4 transformation matrices.
+
+        NeRF Dataset Implementation:
+        Converts from NeRF's "right up back" coordinate system to 3DGRUT's
+        "right down front" convention by negating Y and Z axes during loading.
+
+        Original NeRF Convention: [right, up, back]
+        3DGRUT Convention: [right, down, front]
+        Conversion: c2w[:, 1:3] *= -1  # Negate Y and Z columns
+
+        Returns:
+            np.ndarray: Camera poses with shape (N, 4, 4) in "right down front" convention
+        """
+        return self.poses
 
     def __len__(self):
         return len(self.poses)
@@ -225,8 +241,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         cam_list = []
         for i_cam, pose in enumerate(self.poses):
-            trans_mat = np.eye(4)
-            trans_mat[:3, :4] = pose
+            trans_mat = pose
             trans_mat_world_to_camera = np.linalg.inv(trans_mat)
 
             # these cameras follow the opposite convention from polyscope

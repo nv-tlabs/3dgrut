@@ -93,7 +93,7 @@ def main():
 
         # 4. Export to USDZ
         logger.info(f"Exporting with USDZExporter: {output_path}")
-        exporter.export(model, output_path, conf=conf)
+        exporter.export(model, output_path, dataset=None, conf=conf)
 
         logger.info(f"Successfully exported to {output_path}")
     except Exception as e:

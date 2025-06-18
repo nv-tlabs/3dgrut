@@ -73,6 +73,22 @@ class BoundedMultiViewDataset(Protocol):
         """TODO"""
         ...
 
+    def get_poses(self) -> np.ndarray:
+        """Get camera poses as 4x4 transformation matrices.
+
+        Returns camera-to-world (C2W) transformation matrices using the 3DGRUT
+        "right down front" camera coordinate system convention.
+
+        Camera Coordinate System:
+            - Right: +X axis points to the camera's right
+            - Down: +Y axis points downward
+            - Front: +Z axis points forward (viewing direction)
+
+        Returns:
+            np.ndarray: Camera poses with shape (N, 4, 4)
+        """
+        ...
+
     def get_gpu_batch_with_intrinsics(self, batch: dict) -> Batch:
         """Add the intrinsics to the batch and move data to GPU."""
         ...

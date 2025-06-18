@@ -89,13 +89,14 @@ def serialize_usd_stage_to_bytes(stage: Usd.Stage) -> bytes:
     return content
 
 
-def serialize_nurec_usd(model_file, positions: np.ndarray) -> NamedUSDStage:
+def serialize_nurec_usd(model_file, positions: np.ndarray, normalizing_transform: np.ndarray = np.eye(4)) -> NamedUSDStage:
     """
     Create a USD file for the 3DGS model.
 
     Args:
         model_file: NamedSerialized object containing the compressed msgpack data
         positions: Positions extracted from PLY file for AABB calculation
+        normalizing_transform: 4x4 transformation matrix to normalize the scene (defaults to identity)
 
     Returns:
         NamedUSDStage object containing the USD stage
@@ -119,22 +120,6 @@ def serialize_nurec_usd(model_file, positions: np.ndarray) -> NamedUSDStage:
     # Initialize the USD stage with standard settings
     stage = initialize_usd_stage()
 
-    # Add transforms to the world xform
-    world_xform = UsdGeom.Xform.Get(stage, "/World")
-    if world_xform:
-        # Define transform operations
-        rotation_op = world_xform.AddRotateZYXOp()
-        scale_op = world_xform.AddScaleOp()
-        translate_op = world_xform.AddTranslateOp()
-
-        # Default upright orientation given coordinate conventions
-        rotation_op.Set(Gf.Vec3d(90.0, 0.0, 180.0))
-        scale_op.Set(Gf.Vec3d(1.0, 1.0, 1.0))
-        translate_op.Set(Gf.Vec3d(0.0, 0.0, 0.0))
-
-        # Set operation order (translate first, then rotate, then scale)
-        world_xform.SetXformOpOrder([translate_op, rotation_op, scale_op])
-
     # Set up render settings
     render_settings = {
         "rtx:rendermode": "RaytracedLighting",
@@ -154,6 +139,22 @@ def serialize_nurec_usd(model_file, positions: np.ndarray) -> NamedUSDStage:
     gauss_path = "/World/gauss"
     gauss_volume = UsdVol.Volume.Define(stage, gauss_path)
     gauss_prim = gauss_volume.GetPrim()
+
+    # Apply normalizing transform (identity by default)
+    # Default conversion matrix from 3DGRUT to USDZ
+    default_conv_tf = np.array([
+        [-1.0,  0.0,  0.0,  0.0],
+        [ 0.0,  0.0, -1.0,  0.0],
+        [ 0.0, -1.0,  0.0,  0.0],
+        [ 0.0,  0.0,  0.0,  1.0]
+    ])
+
+    normalizing_inverse = np.linalg.inv(normalizing_transform)
+    corrected_matrix = normalizing_inverse @ default_conv_tf
+
+    # Apply transform directly to the gauss volume
+    matrix_op = gauss_volume.AddTransformOp()
+    matrix_op.Set(Gf.Matrix4d(*corrected_matrix.flatten()))
 
     # Define nurec volume properties
     gauss_prim.CreateAttribute(

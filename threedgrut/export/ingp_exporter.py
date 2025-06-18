@@ -32,12 +32,14 @@ class INGPExporter(ModelExporter):
     """
 
     @torch.no_grad()
-    def export(self, model: ExportableModel, output_path: Path, force_half: bool, **kwargs) -> None:
+    def export(self, model: ExportableModel, output_path: Path, dataset=None, conf=None, force_half: bool = False, **kwargs) -> None:
         """Export the model to an INGP file.
 
         Args:
             model: The model to export (must implement ExportableModel)
             output_path: Path where the INGP file will be saved
+            dataset: Optional dataset (not used for INGP export)
+            conf: Optional configuration (not used for INGP export)
             force_half: Whether to force use of float16 precision
             **kwargs: Additional parameters (not used for INGP export)
         """
