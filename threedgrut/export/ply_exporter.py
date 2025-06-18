@@ -47,12 +47,14 @@ class PLYExporter(ModelExporter):
         return l
 
     @torch.no_grad()
-    def export(self, model: ExportableModel, output_path: Path, **kwargs) -> None:
+    def export(self, model: ExportableModel, output_path: Path, dataset=None, conf=None, **kwargs) -> None:
         """Export the model to a PLY file.
 
         Args:
             model: The model to export (must implement ExportableModel)
             output_path: Path where the PLY file will be saved
+            dataset: Optional dataset (not used for PLY export)
+            conf: Optional configuration (not used for PLY export)
             **kwargs: Additional parameters (not used for PLY export)
         """
         logger.info(f"exporting ply file to {output_path}...")

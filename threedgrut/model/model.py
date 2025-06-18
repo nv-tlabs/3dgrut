@@ -30,7 +30,6 @@ from threedgrut.datasets.utils import read_next_bytes, read_colmap_points3D_text
 from threedgrut.export.base import ExportableModel
 from threedgrut.export.ingp_exporter import INGPExporter
 from threedgrut.export.ply_exporter import PLYExporter
-from threedgrut.export.usdz_exporter import USDZExporter
 from threedgrut.model.geometry import nearest_neighbor_dist_cpuKD, k_nearest_neighbors
 import threedgrt_tracer, threedgut_tracer
 from threedgrut.utils.logger import logger
@@ -608,7 +607,7 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
     @torch.no_grad()
     def export_ingp(self, mogt_path: str, force_half: bool):
         exporter = INGPExporter()
-        exporter.export(self, Path(mogt_path), force_half)
+        exporter.export(self, Path(mogt_path), force_half=force_half)
 
     @torch.no_grad()
     def init_from_ingp(self, ingp_path, init_model=True):
@@ -715,7 +714,3 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
             self.setup_optimizer()
             self.validate_fields()
 
-    @torch.no_grad()
-    def export_usdz(self, usdz_path_str: str):
-        exporter = USDZExporter()
-        exporter.export(self, Path(usdz_path_str), conf=self.conf)

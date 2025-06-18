@@ -67,5 +67,5 @@ class ModelExporter(abc.ABC):
     """
 
     @abc.abstractmethod
-    def export(self, model: ExportableModel, output_path: Path, **kwargs) -> None:
+    def export(self, model: ExportableModel, output_path: Path, dataset=None, conf=None, **kwargs) -> None:
         pass

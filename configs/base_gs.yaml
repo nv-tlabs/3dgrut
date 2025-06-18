@@ -48,6 +48,7 @@ import_ply:
 export_usdz:
   enabled: false
   path: ""
+  apply_normalizing_transform: true
 
 model:
   density_activation: sigmoid
