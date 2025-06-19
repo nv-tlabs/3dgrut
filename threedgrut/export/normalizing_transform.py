@@ -4,7 +4,7 @@ import numpy as np
 def estimate_normalizing_transform(poses: np.ndarray) -> np.ndarray:
     """Estimate transform to normalize camera poses.
 
-    Moves the average camera position to the origin and aligns the average 
+    Moves the average camera position to the origin and aligns the average
     down direction with world Y-axis.
 
     Args:
@@ -21,7 +21,6 @@ def estimate_normalizing_transform(poses: np.ndarray) -> np.ndarray:
 
     # Extract down vectors (Y-axis) directly from all camera poses
     down_vectors = poses[:, :3, 1]  # Shape: (N, 3)
-    
     # Compute average down direction
     avg_down = np.mean(down_vectors, axis=0)
     avg_down = avg_down / np.linalg.norm(avg_down)  # Normalize
@@ -49,6 +48,7 @@ def estimate_normalizing_transform(poses: np.ndarray) -> np.ndarray:
     # Create 4x4 transformation matrix
     transform = np.eye(4)
     transform[:3, :3] = rotation_matrix
-    transform[:3, 3] = -rotation_matrix @ avg_position  # Apply rotation then translation
-    
+    # Apply rotation then translation
+    transform[:3, 3] = -rotation_matrix @ avg_position
+
     return transform

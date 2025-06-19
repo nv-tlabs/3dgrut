@@ -68,7 +68,7 @@ class USDZExporter(ModelExporter):
         # Apply normalizing transform if enabled and dataset is provided
         normalizing_transform = np.eye(4)
         if (conf.export_usdz.apply_normalizing_transform and
-            dataset is not None):
+                dataset is not None):
             try:
                 poses = dataset.get_poses()
                 normalizing_transform = estimate_normalizing_transform(poses)
@@ -131,7 +131,8 @@ class USDZExporter(ModelExporter):
         )
 
         # Create USD representations
-        gauss_usd = serialize_nurec_usd(model_file, positions, normalizing_transform)
+        gauss_usd = serialize_nurec_usd(
+            model_file, positions, normalizing_transform)
         default_usd = serialize_usd_default_layer(gauss_usd)
 
         # Write the final USDZ file
