@@ -305,6 +305,22 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def get_observer_points(self):
         return self.camera_centers
 
+    def get_poses(self) -> np.ndarray:
+        """Get camera poses as 4x4 transformation matrices.
+
+        COLMAP Dataset Implementation:
+        COLMAP naturally provides poses in a coordinate system compatible with
+        3DGRUT's "right down front" convention, so no coordinate conversion is needed.
+
+        The poses are constructed from COLMAP's world-to-camera matrices by:
+        1. Building W2C from rotation (qvec_to_so3) and translation (tvec)
+        2. Inverting to get camera-to-world: C2W = inv(W2C)
+
+        Returns:
+            np.ndarray: Camera poses with shape (N, 4, 4) in "right down front" convention
+        """
+        return self.poses
+
     def get_intrinsics_idx(self, extr_idx: int):
         return self.cam_extrinsics[extr_idx].camera_id
 

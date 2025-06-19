@@ -120,7 +120,7 @@ class MCMCStrategy(BaseStrategy):
     @torch.no_grad()
     def add_new_gaussians(self) -> None:
         # Get the current number of gaussians
-        current_num_gaussians = self.model.get_num_gaussians()
+        current_num_gaussians = self.model.num_gaussians
         target_num_gaussians = min(self.conf.strategy.add.max_n_gaussians, int(1.05 * current_num_gaussians))
         num_gaussians_to_add = max(0, target_num_gaussians - current_num_gaussians)
 

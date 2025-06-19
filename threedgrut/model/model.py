@@ -15,6 +15,7 @@
 
 import gzip
 import os
+from pathlib import Path
 from typing import Any
 
 import msgpack
@@ -25,6 +26,9 @@ from plyfile import PlyData, PlyElement
 import threedgrut.model.background as background
 from threedgrut.datasets.protocols import Batch
 from threedgrut.datasets.utils import read_next_bytes, read_colmap_points3D_text
+from threedgrut.export.base import ExportableModel
+from threedgrut.export.ingp_exporter import INGPExporter
+from threedgrut.export.ply_exporter import PLYExporter
 from threedgrut.model.geometry import nearest_neighbor_dist_cpuKD, k_nearest_neighbors
 import threedgrt_tracer, threedgut_tracer
 from threedgrut.utils.logger import logger
@@ -38,7 +42,7 @@ from threedgrut.utils.misc import (
 from threedgrut.utils.render import RGB2SH
 from threedgrut.optimizers import SelectiveAdam
 
-class MixtureOfGaussians(torch.nn.Module):
+class MixtureOfGaussians(torch.nn.Module, ExportableModel):
     """ """
 
     @property
@@ -54,6 +58,18 @@ class MixtureOfGaussians(torch.nn.Module):
 
     def get_positions(self) -> torch.Tensor:
         return self.positions
+
+    def get_max_n_features(self) -> int:
+        return self.max_n_features
+
+    def get_n_active_features(self) -> int:
+        return self.n_active_features
+
+    def get_features_albedo(self) -> torch.Tensor:
+        return self.features_albedo
+
+    def get_features_specular(self) -> torch.Tensor:
+        return self.features_specular
 
     def get_features(self):
         return torch.cat((self.features_albedo, self.features_specular), dim=1)
@@ -79,7 +95,7 @@ class MixtureOfGaussians(torch.nn.Module):
     def get_covariance(self) -> torch.Tensor:
         scales = self.get_scale()
 
-        S = torch.zeros((self.get_num_gaussians(), 3, 3), dtype=scales.dtype, device=self.device)
+        S = torch.zeros((self.num_gaussians, 3, 3), dtype=scales.dtype, device=self.device)
         R = quaternion_to_so3(self.get_rotation())
 
         S[:, 0, 0] = scales[:, 0]
@@ -87,9 +103,6 @@ class MixtureOfGaussians(torch.nn.Module):
         S[:, 2, 2] = scales[:, 2]
 
         return R @ S @ S.transpose(1, 2) @ R.transpose(1, 2)
-
-    def get_num_gaussians(self) -> int:
-        return len(self.positions)
 
     def get_model_parameters(self) -> dict:
         assert self.optimizer is not None, "Optimizer need to be initialized when storing the checkpoint"
@@ -595,32 +608,10 @@ class MixtureOfGaussians(torch.nn.Module):
         inputs = Batch(T_to_world=T_to_world, rays_ori=rays_o, rays_dir=rays_d)
         return self.renderer.render(self, inputs)
 
+    @torch.no_grad()
     def export_ingp(self, mogt_path: str, force_half: bool):
-        export_dtype = torch.float16 if force_half else self.positions.dtype
-        logger.info(f"exporting mogt file to {mogt_path}...")
-        mogt_config: dict[str, Any] = {}
-        mogt_config["nre_data"] = {"version": "0.0.1", "model": "mogt"}
-        mogt_config["precision"] = "half" if export_dtype == torch.float16 else "single"
-        mogt_config["mog_num"] = self.num_gaussians
-        mogt_config["mog_sph_degree"] = self.max_n_features
-        mogt_config["mog_positions"] = (
-            self.positions.flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        )
-        mogt_config["mog_scales"] = (
-            self.get_scale().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        )
-        mogt_config["mog_rotations"] = (
-            self.get_rotation().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        )
-        mogt_config["mog_densities"] = (
-            self.get_density().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        )
-        mogt_config["mog_features"] = (
-            self.get_features().flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        )
-        with gzip.open(ingp_filepath := mogt_path, "wb") as f:
-            packed = msgpack.packb(mogt_config)
-            f.write(packed)
+        exporter = INGPExporter()
+        exporter.export(self, Path(mogt_path), force_half=force_half)
 
     @torch.no_grad()
     def init_from_ingp(self, ingp_path, init_model=True):
@@ -671,41 +662,10 @@ class MixtureOfGaussians(torch.nn.Module):
             self.setup_optimizer()
             self.validate_fields()
 
-    def construct_list_of_attributes(self):
-        l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
-        # All channels except the 3 DC
-        for i in range(self.features_albedo.shape[1]):
-            l.append('f_dc_{}'.format(i))
-        for i in range(self.features_specular.shape[1]):
-            l.append('f_rest_{}'.format(i))
-        l.append('opacity')
-        for i in range(self.scale.shape[1]):
-            l.append('scale_{}'.format(i))
-        for i in range(self.rotation.shape[1]):
-            l.append('rot_{}'.format(i))
-        return l
-
     @torch.no_grad()
-    def export_ply(self, mogt_path:str):
-        logger.info(f"exporting ply file to {mogt_path}...")
-        mogt_pos =  self.positions.detach().cpu().numpy()
-        num_gaussians = mogt_pos.shape[0]
-        mogt_nrm = np.repeat(np.array([[0,0,1]], dtype=np.float32),repeats=num_gaussians, axis=0)
-        mogt_albedo = self.features_albedo.detach().cpu().numpy()
-        num_speculars = (self.max_n_features + 1) ** 2 - 1
-        mogt_specular = self.features_specular.detach().cpu().numpy().reshape((num_gaussians,num_speculars,3))
-        mogt_specular = mogt_specular.transpose(0, 2, 1).reshape((num_gaussians,num_speculars*3))
-        mogt_densities = self.density.detach().cpu().numpy()
-        mogt_scales = self.scale.detach().cpu().numpy()
-        mogt_rotation = self.rotation.detach().cpu().numpy()
-
-        dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
-
-        elements = np.empty(num_gaussians, dtype=dtype_full)
-        attributes = np.concatenate((mogt_pos, mogt_nrm, mogt_albedo, mogt_specular, mogt_densities, mogt_scales, mogt_rotation), axis=1)
-        elements[:] = list(map(tuple, attributes))
-        el = PlyElement.describe(elements, 'vertex')
-        PlyData([el]).write(mogt_path)
+    def export_ply(self, mogt_path: str):
+        exporter = PLYExporter()
+        exporter.export(self, Path(mogt_path))
 
     @torch.no_grad()
     def init_from_ply(self, mogt_path:str, init_model=True):
