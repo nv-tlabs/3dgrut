@@ -41,25 +41,27 @@ extern "C"
 }
 
 struct HybridRayPayload {
-    float t_hit;               // ray t of latest intersection
+    // Path tracer control
     float3 rayOri;             // next ray origin to use
-    float3 rayDir;             // next ray dir to use, if ray was reflected, refracted, etc
     unsigned int numBounces;   // current number of reflectance bounces
+    float3 rayDir;             // next ray dir to use, if ray was reflected, refracted, etc
+    float t_hit;               // ray t of latest intersection
     unsigned int rndSeed;      // random seed for current ray
 
-    // PBR params
+    // Volumetric radiance integration params
+    RayData* rayData;
+
+    // PBR  params
     float3 accumulatedColor;    // Amount of RGB color accumulated so far by ray
     float  accumulatedAlpha;    // Amount of density accumulated by the ray so far. Solid mesh faces count as opaque.
     float3 directLight;         // Total light to be reflected off the surfaces seen so far
     unsigned int pbrNumBounces; // Current number of PBR ray iterations, to limit reflections, refractions, etc
-    bool rayMissed;             // True if ray missed
-
-    float blockingRadiance;     // Total radiance accumulated only by volumetric radiance integration so far
-    float lastPBRTransmittance; // Transmittance of last PBR surface hit, accumulated together with volumetric density
-    float3 lastRayOri;          // Last ray origin used to trace gaussians
-    float3 lastRayDir;          // Last ray direction used to trace gaussians
-
-    RayData* rayData;
+    float3 pathThroughput;      // How much of the original light energy remains along current path
+    float3 bsdfValue;           // How much light is scattered in the sampled direction (reflected or transmitted),
+                                // recomputed each iteration
+    float3 nextEmissive;        // Light emitted due to last PBR surface hit
+                                // recomputed each iteration
+    bool rayMissed;             // True if ray missed the mesh primitives
 };
 
 constexpr float epsT = 1e-9;                   // Minimal offset to ray t to avoid zero t
@@ -214,26 +216,35 @@ static __device__ __forceinline__ float4 traceGaussians(
         rayData.density - prevRayData.density
    );
 
-    payload->lastRayOri = rayOrigin;
-    payload->lastRayDir = rayDirection;
-
    return accumulated_radiance;
 }
 
 
 static __device__ __forceinline__ float3 getBackgroundColor(const float3 rayDir)
 {
-    if (!params.useEnvmap) {
-        return params.backgroundColor;
-    }
-    else {
-        float theta = atan2(rayDir.x, rayDir.z);
-        float phi = M_PIf * 0.5f - acosf(rayDir.y);
-        float u = (theta + M_PIf) * (0.5f * M_1_PIf);
-        float v = 0.5f * (1.0f + sin(phi));
-        float4 env = tex2D<float4>(params.envmap, u, v);
-        return make_float3(env.x, env.y, env.z);
-    }
+    // Apply rotation to the ray direction based on offset: convert offset from [0,1] range to rotation angles
+    float rotY = params.envmapOffset.x * 2.0f * M_PIf;      // Yaw   (around Y-axis)
+    float rotX = 2.0 * params.envmapOffset.y * M_PIf;       // Pitch (around X-axis)
+
+    // Apply yaw rotation
+    float3 rotatedDir;
+    rotatedDir.x = rayDir.x * cosf(rotY) - rayDir.z * sinf(rotY);
+    rotatedDir.z = rayDir.x * sinf(rotY) + rayDir.z * cosf(rotY);
+    rotatedDir.y = rayDir.y;
+
+    // Apply pitch rotation
+    float3 doubleRotatedDir;
+    doubleRotatedDir.x = rotatedDir.x;
+    doubleRotatedDir.y = rotatedDir.y * cosf(rotX) - rotatedDir.z * sinf(rotX);
+    doubleRotatedDir.z = rotatedDir.y * sinf(rotX) + rotatedDir.z * cosf(rotX);
+
+    // Compute texture coordinates from the rotated direction
+    float theta = atan2(doubleRotatedDir.x, doubleRotatedDir.z);
+    float phi = M_PIf * 0.5f - acosf(clamp(doubleRotatedDir.y, -1.0f, 1.0f));
+    float u = (theta + M_PIf) * (0.5f * M_1_PIf);
+    float v = 0.5f * (1.0f + sin(phi));
+    float4 env = tex2D<float4>(params.envmap, u, v);
+    return make_float3(env.x, env.y, env.z);
 }
 
 #endif

@@ -101,6 +101,7 @@ class GSStrategy(BaseStrategy):
 
         return scene_updated
 
+    @torch.no_grad()
     @torch.cuda.nvtx.range("update-gradient-buffer")
     def update_gradient_buffer(self, sensor_position: torch.Tensor) -> None:
         params_grad = self.model.positions.grad

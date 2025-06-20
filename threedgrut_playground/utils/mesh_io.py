@@ -32,7 +32,12 @@ def _to_tensor(mat_data, is_normalize=False, is_pad_to_float4=False, device=None
         return None
     elif isinstance(mat_data, PIL.Image.Image):
         mat_data = np.array(mat_data)
-    mat_tensor = torch.tensor(mat_data, device=device)
+
+    if isinstance(mat_data, torch.Tensor):
+        mat_tensor = mat_data.clone().detach().to(device=device)
+    else:
+        mat_tensor = torch.tensor(mat_data, device=device)
+
     if is_normalize and not torch.is_floating_point(mat_tensor):
         mat_tensor = mat_tensor.float() / 255.0
     # pad float3 texture to float4 due to cuda's tex2d
@@ -81,8 +86,6 @@ def load_materials(mesh, device):
     for mat in materials:
         diffuseFactor = mat.diffuse_color if mat.diffuse_color is not None \
             else torch.tensor([1.0, 1.0, 1.0, 1.0], device=device)
-        metallicFactor = mat.metallic_value if mat.metallic_value is not None else 0.0
-        roughnessFactor = mat.roughness_value if mat.roughness_value is not None else 0.0
 
         diffuseTexture = mat.diffuse_texture
         if diffuseTexture is not None:
@@ -93,30 +96,44 @@ def load_materials(mesh, device):
         # Create a 2dim texture
         metallicRoughnessTexture = None
         if mat.metallic_texture is not None and mat.roughness_texture is not None:
-            metallicRoughnessTexture = torch.stack([
+            metallicRoughnessTexture = torch.cat([
                 mat.metallic_texture,
                 mat.roughness_texture,
             ], dim=2)
         elif mat.metallic_texture is not None and mat.roughness_texture is None:
-            metallicRoughnessTexture = torch.stack([
+            metallicRoughnessTexture = torch.cat([
                 mat.metallic_texture,
-                torch.ones_like(mat.metallic_texture)
+                torch.zeros_like(mat.metallic_texture)
             ], dim=2)
         elif mat.metallic_texture is  None and mat.roughness_texture is not None:
-            metallicRoughnessTexture = torch.stack([
-                torch.ones_like(mat.roughness_texture),
+            metallicRoughnessTexture = torch.cat([
+                torch.zeros_like(mat.roughness_texture),
                 mat.roughness_texture,
             ], dim=2)
 
+        if mat.metallic_value is not None:
+            metallicFactor = mat.metallic_value
+        elif metallicRoughnessTexture is not None:
+            metallicFactor = 1.0
+        else:
+            metallicFactor = 0.0
+        if mat.roughness_value is not None:
+            roughnessFactor = mat.roughness_value
+        elif metallicRoughnessTexture is not None:
+            roughnessFactor = 1.0
+        else:
+            roughnessFactor = 0.0
+
         # kaolin pre-scales normal channel: https://github.com/NVIDIAGameWorks/kaolin/blob/master/kaolin/io/gltf.py#L241
         normalTexture = mat.normals_texture
+
         transmissionFactor = mat.transmittance_value if mat.transmittance_value is not None else 0.0
         ior = mat.ior_value if mat.ior_value is not None else 1.0
 
         loaded_mat = dict(
             material_name=mat.material_name,
             diffuse_map=_to_tensor(diffuseTexture, is_normalize=True, is_pad_to_float4=True),
-            metallic_roughness_map=_to_tensor(metallicRoughnessTexture, is_normalize=True, is_pad_to_float4=True),
+            metallic_roughness_map=_to_tensor(metallicRoughnessTexture, is_normalize=False, is_pad_to_float4=True),
             normal_map=_to_tensor(normalTexture, is_normalize=False, is_pad_to_float4=True),
             diffuse_factor=_to_tensor(diffuseFactor, is_normalize=True, device='cpu', is_pad_to_float4=True),
             metallic_factor=float(metallicFactor),
@@ -141,7 +158,6 @@ def load_mesh(path: str, device):
                          f'Supported types: .obj, .glb, .gltf')
 
     mesh = mesh.float_tensors_to(torch.float32)
-    mesh.faces = mesh.faces.to(torch.int32)
 
     # Center object
     mesh.vertices -= mesh.vertices.mean(dim=0)
@@ -155,8 +171,7 @@ def load_mesh(path: str, device):
     num_faces = len(mesh.faces)
     mesh = mesh.to(device=device)
 
-    mesh.vertex_tangents = mesh.vertex_tangents if mesh.has_attribute('vertex_tangents') \
-        else torch.zeros([num_verts, 3], device=device, dtype=torch.float32)
+    mesh.vertex_tangents = mesh.vertex_tangents if mesh.has_attribute('vertex_tangents') else None
 
     mesh.uvs = mesh.uvs if mesh.has_attribute('uvs') else mesh.vertices.new_zeros(num_verts, 2)
     # If uvs + face_uvs_idx are available, use to compute face_uvs
@@ -173,7 +188,7 @@ def load_mesh(path: str, device):
 
 def create_procedural_mesh(vertices, faces, face_uvs, device):
     mesh = kaolin.rep.SurfaceMesh(vertices=vertices, faces=faces, face_uvs=face_uvs)
-    mesh.vertex_tangents = torch.zeros([len(mesh.vertices), 3], dtype=torch.bool)
+    mesh.vertex_tangents = None
     mesh.material_assignments = torch.zeros([len(mesh.faces)], device=device)
     return mesh.to(device)
 

@@ -20,22 +20,22 @@ enum PlaygroundPrimitiveTypes
     PGRNDPrimitiveNone = 0,
     PGRNDPrimitiveMirror = 1,
     PGRNDPrimitiveGlass = 2,
-    PGRNDPrimitiveDiffuse = 3
+    PGRNDPrimitiveDiffuse = 3,
+    PGRNDPrimitivePBR = 4
 };
 
 enum PlaygroundTraceState
 {
-    PGRNDTraceRTLastGaussiansPass = 0,   // Tracing gaussians with volumetric rendering - until scene extents are hit
-    PGRNDTracePrimitivesPass = 1,        // Tracing mirrors, glasses, meshes..
-    PGRNDTraceRTGaussiansPass = 2,       // Tracing gaussians with volumetric rendering
-    PGRNDTraceTerminate = 3,             // Terminate current ray
+    PGRNDTracePrimitivesPass = 0,        // Tracing mirrors, glasses, meshes..
+    PGRNDTraceRTGaussiansPass = 1,       // Tracing Gaussians with volumetric rendering
+    PGRNDTraceTerminate = 2              // Terminate current ray
 };
 
 enum PlaygroundRenderOptions
 {
     PGRNDRenderNone = 0,
     PGRNDRenderSmoothNormals = 1<<0,           // Geometry: If enabled, will interpolate precomputed vertex normals
-    PGRNDRenderDisableGaussianTracing = 1<<1,  // Disable gaussian tracing -- only meshes will be rendered
+    PGRNDRenderDisableGaussianTracing = 1<<1,  // Disable Gaussian tracing -- only meshes will be rendered
     PGRNDRenderDisablePBRTextures = 1<<2       // Disable PBR textures, use base material values only
 };
 

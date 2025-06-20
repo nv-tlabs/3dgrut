@@ -33,6 +33,9 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 import threedgrut.datasets as datasets
 from threedgrut.datasets.protocols import BoundedMultiViewDataset
 from threedgrut.datasets.utils import MultiEpochsDataLoader, DEFAULT_DEVICE
+from threedgrut.export.ingp_exporter import INGPExporter
+from threedgrut.export.ply_exporter import PLYExporter
+from threedgrut.export.usdz_exporter import USDZExporter
 from threedgrut.model.losses import ssim
 from threedgrut.model.model import MixtureOfGaussians
 from threedgrut.render import Renderer
@@ -610,10 +613,16 @@ class Trainer3DGRUT:
         logger.log_rule("Exporting Models")
         if conf.export_ingp.enabled:
             ingp_path = conf.export_ingp.path if conf.export_ingp.path else os.path.join(out_dir, "export_last.ingp")
-            self.model.export_ingp(ingp_path, conf.export_ingp.force_half)
+            exporter = INGPExporter()
+            exporter.export(self.model, Path(ingp_path), dataset=self.train_dataset, conf=conf, force_half=conf.export_ingp.force_half)
         if conf.export_ply.enabled:
             ply_path = conf.export_ply.path if conf.export_ply.path else os.path.join(out_dir, "export_last.ply")
-            self.model.export_ply(ply_path)
+            exporter = PLYExporter()
+            exporter.export(self.model, Path(ply_path), dataset=self.train_dataset, conf=conf)
+        if conf.export_usdz.enabled:
+            usdz_path = conf.export_usdz.path if conf.export_usdz.path else os.path.join(out_dir, "export_last.usdz")
+            exporter = USDZExporter()
+            exporter.export(self.model, Path(usdz_path), dataset=self.train_dataset, conf=conf)
 
         # Evaluate on test set
         if conf.test_last:
