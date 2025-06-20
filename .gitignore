@@ -34,3 +34,35 @@ results/
 thirdparty/ncore/
 
 playground/assets/
+
+# Testing related
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.tox/
+.nox/
+
+# Claude settings
+.claude/*
+
+# Poetry
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE files
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
