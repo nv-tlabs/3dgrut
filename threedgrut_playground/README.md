@@ -39,7 +39,6 @@ The **Playground** is an interactive demo app that showcases various effects in 
   - [🚀 Future Content](#-future-content)
 
 
-
 ## 🔧 Installation
 
 1. [Install 3dgrut](../README.md), following instructions on main page.
@@ -77,6 +76,14 @@ available through Jupyter notebook: `threedgrut_playground/headless.ipynyb`.
 The playground functionality is exposed through the main engine file:
 `threedgrut_playground/engine.py`.
 
+A more mature example of the Jupyter GUI is available as an [NVIDIA-kaolin tutorial](https://github.com/NVIDIAGameWorks/kaolin/blob/master/examples/tutorial/physics/simulatable_3dgrut.ipynb).
+
+In addition, a simple viser based GUI is available as a contribution from the community (by @tangkangqi):
+```bash
+python threedgrut_playground/viser_gui.py --gs_object=<CHECKPOINT>
+```
+Please note that the viser version does not expose most feature controls of the playground.
+Further contributions to `threedgrut_playground/visor_gui.py` are welcome!
 
 ### 👻 Add your own assets
 3. If desired, gather your own additional mesh assets (`.obj`, `.glb`, `.gltf` formats), and place them under `threedgrut_playground/assets/`.
