@@ -1,3 +1,7 @@
+> [!Warning]  
+> This is a fork for enabling multiple cameras with multiple calibration sets to be used.
+> Only the colmap import was touched to archive this result.
+
 <p align="center">
   <img height="100" src="assets/3dgrut_logo.png">
 </p>
