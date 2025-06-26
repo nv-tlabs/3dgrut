@@ -84,6 +84,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         
         self.poses = self.poses[indices].astype(np.float32)
         self.image_paths = self.image_paths[indices]
+        self.mask_paths = self.mask_paths[indices]
         self.camera_ids = np.array(self.camera_ids)[indices]  # Filter camera IDs too
         self.camera_centers = self.camera_centers[indices]
         
@@ -111,38 +112,51 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         return f"images{downsample_suffix}"
 
     def get_scene_info(self):
-        # For multi-camera, we may need to handle several different image dimensions
-        # We'll store dimensions per camera and use the first camera as reference
+        # For multi-camera, we store dimensions per camera and calculate scaling factors per camera
         self.camera_dimensions = {}
+        self.camera_scaling_factors = {}
         self.n_frames = len(self.cam_extrinsics)
         
-        # Get dimensions for each unique camera
-        for intr in self.cam_intrinsics:
-            self.camera_dimensions[intr.id] = {
-                'width': intr.width,
-                'height': intr.height
+        # Get actual dimensions and scaling factors for each unique camera
+        processed_cameras = set()
+        for extr in self.cam_extrinsics:
+            camera_id = extr.camera_id
+            if camera_id in processed_cameras:
+                continue
+                
+            # Find corresponding intrinsic parameters
+            intrinsic = next(intr for intr in self.cam_intrinsics if intr.id == camera_id)
+            
+            # Get actual image dimensions for this camera
+            image_path = os.path.join(
+                self.path,
+                self.get_images_folder(),
+                extr.name,
+            )
+            
+            if os.path.exists(image_path):
+                image = np.asarray(Image.open(image_path))
+                actual_h, actual_w = image.shape[:2]
+            else:
+                # Fallback - assume no downsampling
+                actual_h = intrinsic.height // max(1, self.downsample_factor)
+                actual_w = intrinsic.width // max(1, self.downsample_factor)
+            
+            self.camera_dimensions[camera_id] = {
+                'width': actual_w,
+                'height': actual_h
             }
-        
-        # Use first camera as reference for dataset-wide dimensions
-        first_camera_id = self.cam_intrinsics[0].id
-        first_intrinsic = next(intr for intr in self.cam_intrinsics if intr.id == first_camera_id)
-        
-        # Get actual image dimensions from first image
-        image_path = os.path.join(
-            self.path,
-            self.get_images_folder(),
-            self.cam_extrinsics[0].name,
-        )
-        image = np.asarray(Image.open(image_path))
-        self.image_h = image.shape[0]
-        self.image_w = image.shape[1]
-        
-        # Calculate scaling factor based on first camera
-        self.scaling_factor = int(round(first_intrinsic.height / self.image_h))
+            
+            # Calculate scaling factor for this camera
+            self.camera_scaling_factors[camera_id] = int(round(intrinsic.height / actual_h))
+            processed_cameras.add(camera_id)
 
-    def create_camera_intrinsics(self, intr, image_h, image_w):
-        """Create camera intrinsics for a specific camera with given dimensions."""
-        scaling_factor = int(round(intr.height / image_h))
+    def create_camera_intrinsics(self, intr, camera_id):
+        """Create camera intrinsics for a specific camera using stored dimensions."""
+        # Get the actual dimensions and scaling factor for this camera
+        dims = self.camera_dimensions[camera_id]
+        image_h, image_w = dims['height'], dims['width']
+        scaling_factor = self.camera_scaling_factors[camera_id]
         
         # Generate UV coordinates for this camera's resolution
         u = np.tile(np.arange(image_w), image_h)
@@ -187,7 +201,6 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 focal_length=focal_length,
                 radial_coeffs=radial_coeffs,
                 resolution=resolution,
-                # NOTE: fixed max angle might not apply to all datasets / better estimate from available data
                 max_angle=max_angle,
                 shutter_type=ShutterType.GLOBAL,
             )
@@ -223,26 +236,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def load_camera_data(self):
         """Load the camera data and generate rays for each camera."""
         
-        # Create intrinsics for each unique camera with its actual image dimensions
+        # Create intrinsics for each unique camera using stored dimensions
         for intr in self.cam_intrinsics:
-            # For each camera, we need to check what the actual image dimensions are
-            # Find a sample image from this camera
-            sample_extr = next(ext for ext in self.cam_extrinsics if ext.camera_id == intr.id)
-            image_path = os.path.join(
-                self.path, self.get_images_folder(), os.path.basename(sample_extr.name)
-            )
-            
-            # Get actual image dimensions for this camera
-            if os.path.exists(image_path):
-                sample_image = np.asarray(Image.open(image_path))
-                cam_image_h, cam_image_w = sample_image.shape[:2]
-            else:
-                # Fallback to scaled dimensions
-                cam_image_h = intr.height // self.scaling_factor
-                cam_image_w = intr.width // self.scaling_factor
-            
-            # Create intrinsics for this specific camera
-            self.intrinsics[intr.id] = self.create_camera_intrinsics(intr, cam_image_h, cam_image_w)
+            self.intrinsics[intr.id] = self.create_camera_intrinsics(intr, intr.id)
 
         # Load poses and paths
         self.poses = []
@@ -311,7 +307,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def get_intrinsics_idx(self, frame_idx: int):
         """Get the camera ID for a given frame index."""
         return self.camera_ids[frame_idx]
-    
+
     def __len__(self) -> int:
         return self.n_frames
 
@@ -339,7 +335,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         if os.path.exists(mask_path := self.mask_paths[idx]):
             try:
                 mask = torch.from_numpy(np.array(Image.open(mask_path).convert('L'))).reshape(
-                    1, self.image_h, self.image_w, 1
+                    1, actual_h, actual_w, 1
                 )
                 output_dict["mask"] = mask
             except:
@@ -366,7 +362,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             "rays_dir": rays_dir,
             "T_to_world": pose,
             f"intrinsics_{camera_name}": camera_params_dict,
-            "camera_id": [camera_id],  # Include camera ID in sample
+            "camera_id": camera_id,  # Include camera ID in sample
         }
 
         if "mask" in batch:
