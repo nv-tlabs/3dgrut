@@ -36,9 +36,15 @@ from threedgrut_playground.engine import Engine3DGRUT, OptixPrimitiveTypes
 class Playground:
     AVAILABLE_CONTROLLERS = ['Turntable', 'First Person', 'Free']
 
-    def __init__(self, gs_object, mesh_assets_folder, default_config, buffer_mode="device2device"):
-
-        self.engine = Engine3DGRUT(gs_object, mesh_assets_folder, default_config)
+    def __init__(
+        self,
+        gs_object,
+        mesh_assets_folder,
+        default_config,
+        envmap_assets_folder=None,
+        buffer_mode="device2device"
+    ):
+        self.engine = Engine3DGRUT(gs_object, mesh_assets_folder, default_config, envmap_assets_folder)
         self.scene_mog = self.engine.scene_mog
         self.primitives = self.engine.primitives
         self.video_recorder = self.engine.video_recorder
@@ -385,6 +391,79 @@ class Playground:
             psim.PopItemWidth()
             psim.TreePop()
 
+    def _draw_environment_widget(self):
+        psim.SetNextItemOpen(True, psim.ImGuiCond_FirstUseEver)
+        if psim.TreeNode("Environment"):
+            # Environment map selection
+            available_maps = self.engine.environment.available_envmaps
+            current_map_idx = available_maps.index(self.engine.environment.current_name) \
+                if self.engine.environment.current_name in available_maps else 0
+
+            map_changed, new_map_idx = psim.Combo("Env Map", current_map_idx, available_maps)
+            if map_changed:
+                self.engine.environment.set_env(available_maps[new_map_idx])
+                self.is_force_canvas_dirty = True
+
+            # Only show tonemapping controls if we have an HDR environment map loaded
+            if self.engine.environment.current_name not in self.engine.environment.FIXED_ENVMAP_OPTIONS:
+                psim.SameLine()
+                # Tonemapper selection
+                tonemapper_idx = self.engine.environment.TONEMAPPER_OPTIONS.index(self.engine.environment.tonemapper)
+                tonemapper_changed, new_tonemapper_idx = psim.Combo(
+                    "Tonemapper",
+                    tonemapper_idx,
+                    self.engine.environment.TONEMAPPER_OPTIONS
+                )
+                if tonemapper_changed:
+                    self.engine.environment.tonemapper = self.engine.environment.TONEMAPPER_OPTIONS[new_tonemapper_idx]
+                    self.is_force_canvas_dirty = True
+
+                psim.PushItemWidth(100)
+                env_offset_changed, env_offset = psim.SliderFloat2(
+                    "Offset",
+                    self.engine.environment.envmap_offset,
+                    v_min=-0.5,
+                    v_max=+0.5,
+                    format="%.2f"
+                )
+                if env_offset_changed:
+                    self.engine.environment.envmap_offset[0] = env_offset[0]
+                    self.engine.environment.envmap_offset[1] = env_offset[1]
+                    self.is_force_canvas_dirty = True
+
+                psim.PopItemWidth()
+                psim.PushItemWidth(120)
+
+                # IBL intensity control
+                ibl_intensity_changed, self.engine.environment.ibl_intensity = psim.SliderFloat(
+                    "IBL Intensity",
+                    self.engine.environment.ibl_intensity,
+                    v_min=0.1,
+                    v_max=10.0,
+                    format="%.3f",
+                    power=1.0
+                )
+                if ibl_intensity_changed:
+                    self.is_force_canvas_dirty = True
+
+                psim.SameLine()
+
+                # Exposure control
+                exposure_changed, self.engine.environment.exposure = psim.SliderFloat(
+                    "Exposure",
+                    self.engine.environment.exposure,
+                    v_min=-10.0,
+                    v_max=10.0,
+                    format="%.3f",
+                    power=2.0
+                )
+                if exposure_changed:
+                    self.is_force_canvas_dirty = True
+
+                psim.PopItemWidth()
+
+            psim.TreePop()
+
     def _draw_video_recording_controls(self):
         psim.SetNextItemOpen(False, psim.ImGuiCond_FirstUseEver)
         if psim.TreeNode("Record Trajectory Video"):
@@ -644,7 +723,7 @@ class Playground:
                     psim.SetNextItemOpen(True, psim.ImGuiCond_FirstUseEver)
                     if psim.TreeNode("Properties"):
 
-                        if obj.primitive_type == OptixPrimitiveTypes.DIFFUSE:
+                        if obj.primitive_type in (OptixPrimitiveTypes.DIFFUSE, OptixPrimitiveTypes.PBR):
                             self._draw_diffuse_pbr_settings_widget(obj)
                         if obj.primitive_type == OptixPrimitiveTypes.GLASS:
                             self._draw_glass_settings_widget(obj)
@@ -755,10 +834,11 @@ class Playground:
 
     def _draw_general_primitive_settings_widget(self):
         primitives_disabled = not self.primitives.enabled
-        settings_changed, self.primitives.enabled = psim.Checkbox(
-            "Disable Primitives", primitives_disabled
+        settings_changed, primitives_disabled = psim.Checkbox(
+            "Disable Path Tracer", primitives_disabled
         )
-        self.primitives.enabled = not self.primitives.enabled
+        self.primitives.enabled = not primitives_disabled
+
         self.is_force_canvas_dirty = self.is_force_canvas_dirty or settings_changed
 
         psim.SameLine()
@@ -778,24 +858,6 @@ class Playground:
         )
         self.is_force_canvas_dirty = self.is_force_canvas_dirty or settings_changed
 
-        psim.SameLine()
-
-        settings_changed, self.engine.force_white_bg = psim.Checkbox(
-            "Force White BG", self.engine.force_white_bg
-        )
-        self.is_force_canvas_dirty = self.is_force_canvas_dirty or settings_changed
-        if self.engine.envmap is not None:
-            psim.SameLine()
-            settings_changed, self.primitives.enable_envmap = psim.Checkbox(
-                "Enable Envmap", self.primitives.enable_envmap
-            )
-            self.is_force_canvas_dirty = self.is_force_canvas_dirty or settings_changed
-            psim.SameLine()
-            settings_changed, self.primitives.use_envmap_as_background = psim.Checkbox(
-                "Use Envmap As Background", self.primitives.use_envmap_as_background
-            )
-            self.is_force_canvas_dirty = self.is_force_canvas_dirty or settings_changed
-
         psim.PushItemWidth(100)
         is_add_primitive = psim.Button("Add Primitive")
         psim.PopItemWidth()
@@ -813,7 +875,7 @@ class Playground:
             geom_idx = self.gui_aux_fields['add_geom_select_type']
             self.primitives.add_primitive(
                 geometry_type=available_geometries[geom_idx],
-                primitive_type=OptixPrimitiveTypes.GLASS,
+                primitive_type=OptixPrimitiveTypes.PBR,
                 device=self.scene_mog.device
             )
             self.primitives.rebuild_bvh_if_needed(True, True)
@@ -941,7 +1003,7 @@ class Playground:
     def _draw_diffuse_pbr_settings_widget(self, obj):
         has_single_material = torch.min(obj.material_id) == torch.max(obj.material_id)
         if not has_single_material:
-            psim.Text('Multiple Materials')
+            psim.Text('Multiple materials object.')
         else:
             current_mat_id = obj.material_id[0].item()
             mat_id_to_mat_idx = {m.material_id: idx for idx, (m_name, m) in
@@ -994,6 +1056,8 @@ class Playground:
         self._draw_preset_settings_widget()
         psim.Separator()
         self._draw_render_widget()
+        psim.Separator()
+        self._draw_environment_widget()
         psim.Separator()
         self._draw_video_recording_controls()
         psim.Separator()

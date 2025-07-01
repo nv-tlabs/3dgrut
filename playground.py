@@ -19,15 +19,16 @@ import os
 import argparse
 
 
-def run_demo(gs_object, mesh_assets_folder, default_gs_config, buffer_mode):
+def run_demo(gs_object, mesh_assets_folder, envmap_assets_folder, default_gs_config, buffer_mode):
     """
     How to run:
     > python playground.py --gs_object <ckpt_path>
                           [--mesh_assets <mesh_folder_path>]
                           [--default_gs_config <config_name>]
+                          [--envmap_assets <hdr_folder_path>]
                           [--buffer_mode <host2device | device2device>]
     """
-    playground = Playground(gs_object, mesh_assets_folder, default_gs_config, buffer_mode)
+    playground = Playground(gs_object, mesh_assets_folder, default_gs_config, envmap_assets_folder, buffer_mode)
     playground.run()
 
 
@@ -52,6 +53,12 @@ if __name__ == "__main__":
         help="Name of default config to use for .ingp, .ply files, or .pt files not trained with 3dgrt."
     )
     parser.add_argument(
+        '--envmap_assets',
+        type=str,
+        default=os.path.join(os.path.dirname(__file__), 'threedgrut_playground', 'assets'),
+        help="Optional path to folder containing .hdr environment maps to use for lighting mesh assets."
+    )
+    parser.add_argument(
         '--buffer_mode',
         type=str,
         choices=["host2device", "device2device"],
@@ -64,6 +71,7 @@ if __name__ == "__main__":
     run_demo(
         gs_object=args.gs_object,
         mesh_assets_folder=args.mesh_assets,
+        envmap_assets_folder=args.envmap_assets,
         default_gs_config=args.default_gs_config,
         buffer_mode=args.buffer_mode
     )

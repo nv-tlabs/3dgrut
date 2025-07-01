@@ -20,16 +20,6 @@ import cv2
 from tqdm import tqdm
 from scipy.interpolate import splprep, splev
 from kaolin.render.camera import Camera
-from threedgrut.utils.logger import logger
-from threedgrut.model.model import MixtureOfGaussians
-from threedgrut.model.background import BackgroundColor
-from threedgrut_playground.utils.mesh_io import load_mesh, load_materials, load_missing_material_info, create_procedural_mesh
-from threedgrut_playground.utils.depth_of_field import DepthOfField
-from threedgrut_playground.utils.spp import SPP
-from threedgrut_playground.tracer import Tracer
-from threedgrut_playground.utils.kaolin_future.transform import ObjectTransform
-from threedgrut_playground.utils.kaolin_future.conversions import polyscope_from_kaolin_camera, polyscope_to_kaolin_camera
-from threedgrut_playground.utils.kaolin_future.fisheye import generate_fisheye_rays
 from threedgrut_playground.utils.kaolin_future.interpolated_cameras import camera_path_generator
 
 
