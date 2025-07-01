@@ -8,10 +8,10 @@ path: ???
 experiment_name: ""
 resume: ""
 out_dir: "./runs"
-n_iterations: 30000
+n_iterations: 2000
 with_gui: false
 gui_update_from_device: true
-val_frequency: 5000
+val_frequency: 99999
 num_workers: 24
 use_wandb: false
 wandb_project: "3dgrt"
@@ -24,7 +24,7 @@ enable_frame_timings: false
 
 enable_writer: true
 writer:
-  hit_stat_frequency: 999999
+  hit_stat_frequency: 1
   max_num_hits: 128
   log_image_views: ${int_list:[ 0, 13, 27, 43, 78 ]}
 

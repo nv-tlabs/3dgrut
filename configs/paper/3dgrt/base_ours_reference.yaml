@@ -13,9 +13,9 @@ render:
   particle_kernel_min_alpha: ${div:1.0,255.0}
   particle_kernel_max_alpha: 0.99
   particle_radiance_sph_degree: 3
-  primitive_type: icosahedron
+  primitive_type: sphere
   min_transmittance: 0.001
   max_consecutive_bvh_update: 15
   enable_normals: false
-  enable_hitcounts: false
+  enable_hitcounts: true
   enable_kernel_timings: false

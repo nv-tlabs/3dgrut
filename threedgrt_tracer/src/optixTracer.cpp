@@ -34,6 +34,7 @@
 #include <nvrtc.h>
 #include <optix.h>
 #include <optix_function_table_definition.h>
+#include <nvToolsExt.h>
 
 //------------------------------------------------------------------------------
 //
@@ -577,6 +578,10 @@ void OptixTracer::buildBVH(torch::Tensor mogPos,
                            bool allow_update) {
 
     const uint32_t gNum = mogPos.size(0);
+    // Emit a marker with just gNum
+    char marker[64];
+    snprintf(marker, sizeof(marker), "gnum_%u", gNum);
+    nvtxMarkA(marker);
 
     const uint32_t primitiveOpts = _state->particleKernelDensityClamping ? MOGRenderOpts::MOGRenderAdaptiveKernelClamping : MOGRenderOpts::MOGRenderNone;
 
