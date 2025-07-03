@@ -21,6 +21,7 @@ def estimate_normalizing_transform(poses: np.ndarray) -> np.ndarray:
 
     # Extract down vectors (Y-axis) directly from all camera poses
     down_vectors = poses[:, :3, 1]  # Shape: (N, 3)
+
     # Compute average down direction
     avg_down = np.mean(down_vectors, axis=0)
     avg_down = avg_down / np.linalg.norm(avg_down)  # Normalize

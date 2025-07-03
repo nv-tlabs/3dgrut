@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import gzip
-import io
 import os
 from pathlib import Path
 from typing import Any
@@ -22,7 +21,7 @@ from typing import Any
 import msgpack
 import numpy as np
 import torch
-from plyfile import PlyData
+from plyfile import PlyData, PlyElement
 
 import threedgrut.model.background as background
 from threedgrut.datasets.protocols import Batch

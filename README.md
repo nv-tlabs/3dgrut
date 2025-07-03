@@ -202,6 +202,7 @@ Evaluate Checkpoint with Splatting / OptiX Tracer / Torch
 python render.py --checkpoint runs/lego/ckpt_last.pt --out-dir outputs/eval
 ```
 
+
 ### To visualize training progress interactively
 ```bash
 python train.py --config-name apps/nerf_synthetic_3dgut.yaml path=data/nerf_synthetic/lego with_gui=True 

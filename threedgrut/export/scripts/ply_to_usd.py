@@ -41,6 +41,7 @@ def load_default_config(
     Args:
         config_name: Name of the configuration YAML file to load
         config_path: Path to the configuration directory
+
     Returns:
         The loaded configuration object
     """
