@@ -19,6 +19,8 @@ from omegaconf import DictConfig, OmegaConf
 from threedgrut.utils.logger import logger
 from threedgrut.utils.timer import timing_options
 
+
+print("AA")
 OmegaConf.register_new_resolver("int_list", lambda l: [int(x) for x in l])
 
 # # Uncomment the following lines to enable debug timing
