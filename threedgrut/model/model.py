@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import gzip
-import io
 import os
 from pathlib import Path
 from typing import Any
@@ -22,7 +21,7 @@ from typing import Any
 import msgpack
 import numpy as np
 import torch
-from plyfile import PlyData
+from plyfile import PlyData, PlyElement
 
 import threedgrut.model.background as background
 from threedgrut.datasets.protocols import Batch
@@ -215,29 +214,34 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
 
         else:
             points_file = os.path.join(root_path, "sparse/0", "points3D.bin")
+            # also handle nonbinary points files
             if not os.path.isfile(points_file):
-                raise ValueError(f"colmap points file {points_file} not found")
+                points_file = os.path.join(root_path, "sparse/0", "points3D.txt")
+                pts, rgb, _ = read_colmap_points3D_text(points_file)
+                file_pts = torch.tensor(pts, dtype=torch.float32, device=self.device)
+                file_rgb = torch.tensor(rgb, dtype=torch.uint8, device=self.device)
+            else:
 
-            with open(points_file, "rb") as file:
-                n_pts = read_next_bytes(file, 8, "Q")[0]
-                logger.info(f"Found {n_pts} colmap points")
+                with open(points_file, "rb") as file:
+                    n_pts = read_next_bytes(file, 8, "Q")[0]
+                    logger.info(f"Found {n_pts} colmap points")
 
-                file_pts = np.zeros((n_pts, 3), dtype=np.float32)
-                file_rgb = np.zeros((n_pts, 3), dtype=np.float32)
+                    file_pts = np.zeros((n_pts, 3), dtype=np.float32)
+                    file_rgb = np.zeros((n_pts, 3), dtype=np.float32)
 
-                for i_pt in range(n_pts):
-                    # read the points
-                    pt_data = read_next_bytes(file, 43, "QdddBBBd")
-                    file_pts[i_pt, :] = np.array(pt_data[1:4])
-                    file_rgb[i_pt, :] = np.array(pt_data[4:7])
-                    # NOTE: error stored in last element of file, currently not used
+                    for i_pt in range(n_pts):
+                        # read the points
+                        pt_data = read_next_bytes(file, 43, "QdddBBBd")
+                        file_pts[i_pt, :] = np.array(pt_data[1:4])
+                        file_rgb[i_pt, :] = np.array(pt_data[4:7])
+                        # NOTE: error stored in last element of file, currently not used
 
-                    # skip the track data
-                    t_len = read_next_bytes(file, num_bytes=8, format_char_sequence="Q")[0]
-                    read_next_bytes(file, num_bytes=8 * t_len, format_char_sequence="ii" * t_len)
+                        # skip the track data
+                        t_len = read_next_bytes(file, num_bytes=8, format_char_sequence="Q")[0]
+                        read_next_bytes(file, num_bytes=8 * t_len, format_char_sequence="ii" * t_len)
 
-            file_pts = torch.tensor(file_pts, dtype=torch.float32, device=self.device)
-            file_rgb = torch.tensor(file_rgb, dtype=torch.uint8, device=self.device)
+                file_pts = torch.tensor(file_pts, dtype=torch.float32, device=self.device)
+                file_rgb = torch.tensor(file_rgb, dtype=torch.uint8, device=self.device)
 
         assert file_rgb.dtype == torch.uint8, "Expecting RGB values to be in [0, 255] range"
         self.default_initialize_from_points(file_pts, observer_pts, file_rgb, 
@@ -714,3 +718,50 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
             self.setup_optimizer()
             self.validate_fields()
 
+    def copy_fields(self, other, deepcopy=False):
+        """ Copies fields from other onto self """
+        if self.optimizer is not None:
+            raise NotImplementedError("Operations that create copies of the model during training "
+                                      "are currently not supported.")
+
+        if deepcopy:
+            self.positions = torch.nn.Parameter(other.positions.clone())
+            self.rotation = torch.nn.Parameter(other.rotation.clone())
+            self.scale = torch.nn.Parameter(other.scale.clone())
+            self.density = torch.nn.Parameter(other.density.clone())
+            self.features_albedo = torch.nn.Parameter(other.features_albedo.clone())
+            self.features_specular = torch.nn.Parameter(other.features_specular.clone())
+        else: # shared tensors
+            self.positions = torch.nn.Parameter(other.positions)
+            self.rotation = torch.nn.Parameter(other.rotation)
+            self.scale = torch.nn.Parameter(other.scale)
+            self.density = torch.nn.Parameter(other.density)
+            self.features_albedo = torch.nn.Parameter(other.features_albedo)
+            self.features_specular = torch.nn.Parameter(other.features_specular)
+        self.max_sh_degree = other.max_sh_degree
+        self.n_active_features = other.n_active_features
+        self.scene_extent = other.scene_extent
+        self.progressive_training = other.progressive_training
+        self.feature_dim_increase_interval = other.feature_dim_increase_interval
+        self.feature_dim_increase_step = other.feature_dim_increase_step
+        self.background = other.background
+        self.validate_fields()
+
+    def clone(self):
+        other = MixtureOfGaussians(conf=self.conf, scene_extent=self.scene_extent)
+        other.copy_fields(self, deepcopy=True)
+        return other
+
+    def __getitem__(self, idx):
+        sliced = MixtureOfGaussians(conf=self.conf, scene_extent=self.scene_extent)
+        sliced.copy_fields(self, deepcopy=False)
+        sliced.positions = torch.nn.Parameter(sliced.positions[idx])
+        sliced.rotation = torch.nn.Parameter(sliced.rotation[idx])
+        sliced.scale = torch.nn.Parameter(sliced.scale[idx])
+        sliced.density = torch.nn.Parameter(sliced.density[idx])
+        sliced.features_albedo = torch.nn.Parameter(sliced.features_albedo[idx])
+        sliced.features_specular = torch.nn.Parameter(sliced.features_specular[idx])
+        return sliced
+
+    def __len__(self):
+        return self.positions.shape[0] if self.positions is not None else 0

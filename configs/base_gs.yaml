@@ -44,7 +44,7 @@ import_ply:
   enabled: false
   path: ""
   init_global_step: 0
-
+  
 export_usdz:
   enabled: false
   path: ""

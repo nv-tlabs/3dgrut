@@ -9,6 +9,8 @@ The **Playground** is an interactive demo app that showcases various effects in 
 
 ## 🔥 News
 
+- ✅[2025/06] 3DGRUT's playground engine is featured in [Kaolin's CVPR 2025 Tutorial](https://kaolin.readthedocs.io/en/latest/notes/cvpr2025.html).
+- ✅[2025/06] Playground v2.0 releaed: Path tracing of PBR meshes and environment maps added.
 - ✅[2025/04] Headless mode added (Engine3DGRUT is now exposed as api).
 - ✅[2025/03] Playground v1.0 released (3dgrt + Glass, Mirrors, Diffuse Meshes, Depth of Field)
 
@@ -29,7 +31,9 @@ The **Playground** is an interactive demo app that showcases various effects in 
       - [🫙 Glass](#-glass)
       - [🪞 Mirror](#-mirror)
       - [🔵 Diffused Mesh](#-diffused-mesh)
+      - [💎 PBR Mesh](#-pbr-mesh)
     - [🖌️ Materials](#-materials)
+    - [🌇️ Environment Maps](#-environment-maps)
     - [⚙️ Quick Settings](#-quick-settings)
     - [📸 Depth of Field](#-depth-of-field)
     - [✨ Antialiasing](#-antialiasing)
@@ -37,7 +41,6 @@ The **Playground** is an interactive demo app that showcases various effects in 
     - [🛠️ Render Definitions](#-render-definitions)
     - [Other Features](#-other-features)
   - [🚀 Future Content](#-future-content)
-
 
 
 ## 🔧 Installation
@@ -50,7 +53,7 @@ conda install -c conda-forge mesa-libgl-devel-cos7-x86_64 # may be necessary for
 pip install -r threedgrut_playground/requirements.txt
 ```
 
-3. Download a pack of interesting mesh assets:
+3. Download a pack of interesting mesh assets and env maps:
 ```bash
 chmod +x ./threedgrut_playground/download_assets.sh
 ./threedgrut_playground/download_assets.sh
@@ -77,12 +80,23 @@ available through Jupyter notebook: `threedgrut_playground/headless.ipynyb`.
 The playground functionality is exposed through the main engine file:
 `threedgrut_playground/engine.py`.
 
+A more mature example of the Jupyter GUI is available as an [NVIDIA-kaolin tutorial](https://github.com/NVIDIAGameWorks/kaolin/blob/master/examples/tutorial/physics/simulatable_3dgrut.ipynb).
+
+In addition, a simple viser based GUI is available as a contribution from the community (by @tangkangqi):
+```bash
+python threedgrut_playground/viser_gui.py --gs_object=<CHECKPOINT>
+```
+Please note that the viser version does not expose most feature controls of the playground.
+Further contributions to `threedgrut_playground/visor_gui.py` are welcome!
 
 ### 👻 Add your own assets
 3. If desired, gather your own additional mesh assets (`.obj`, `.glb`, `.gltf` formats), and place them under `threedgrut_playground/assets/`.
 The playground will load them automatically as available *primitives* as soon as the app starts.
 Some interesting shapes are [available here](https://github.com/alecjacobson/common-3d-test-models/tree/master).
 A subset of those are downloaded with the `download_assets.sh` script.
+
+As of June 2025, the script will also download some sample `.hdr` env-maps, which
+can be used to provide global light to PBR meshes.
 
 5. Have fun experimenting! 
 
@@ -91,11 +105,14 @@ A subset of those are downloaded with the `download_assets.sh` script.
 ```
 python playground.py --gs_object <ckpt_path>  
                      [--mesh_assets <mesh_folder_path>]
+                     [--envmap_assets <hdr_folder_path>]
                      [--default_gs_config <config_name>]
                      [--buffer_mode <"host2device" | "device2device">]
 ```
 The full run command includes the following optional args:
 * `--mesh_assets`: Path to folder containing mesh assets of .obj or .glb format. 
+  * Defaults to `threedgrut_playground/assets`.
+* `--envmap_assets`: Path to folder containing environment maps of .hdr format.
   * Defaults to `threedgrut_playground/assets`.
 * `--default_gs_config`: Name of default config to use for .ingp, .ply files, or .pt files not trained with 3dgrt.
   * Defaults to `apps/colmap_3dgrt.yaml`.
@@ -116,6 +133,8 @@ properties. These changes are memorized but not applied yet.
 depending on redirection computed in step 1.
 
 The process continues until the ray misses or accumulates enough radiance.
+When a ray misses, if env maps are enabled, they will also contribute radiance to the ray. 
+That is - both env maps and gaussians are used to light PBR primitives in the scene.
 
 For antialiasing and depth of field, multiple rendering passes are used with ray jittering.
 
@@ -161,6 +180,21 @@ diffuse mesh color.
 
 Diffused Mesh primitives can assign different materials.
 
+#### 💎 PBR Mesh
+PBR Meshes use Cook-Torrance shading, to render meshes with Physically Based materials.
+The path tracer supports BRDF and BTDF of meshes alongside volumetric radiance intergration of Gaussian fields.
+
+The approach taken by this path tracer is pragmatic, 
+rather than principled, as hybrid rendering is an open research problem:
+Here, 3DGRT particles are treated as radiating particles, while meshes absorb and scatter light.
+Note that 3DGRT uses baked light for radiance, and therefore Gaussian particles are not affected by light sources.
+In addition, envmaps assume HDR, which may require some tuning to match the rest of the scene.
+
+PBR Meshes rely on Monte Carlo for high quality rendering, and therefore require antialiasing toggled on.
+Quality improves with the number of SPPs.
+
+PBR Mesh primitives can assign different materials, and their properties may be edited in the materials section.
+
 ### 🖌️ Materials
 
 The materials section includes a property editor for all loaded materials in the scene.
@@ -168,6 +202,26 @@ The materials section includes a property editor for all loaded materials in the
 By default, a *solid* and *checkboard* materials should always be available (the latter using a texture for diffuse color).
 
 If `.gltf` / `.glb` files are loaded with additional materials, these materials would appear under this menu.
+
+### 🌇️ Environment Maps
+
+Environment maps can be loaded to provide global light in the scene, and override the model background.
+
+When the engine loads, a list of available env maps is populated. Then envmaps can be selected from the dropdown.
+
+Note that env maps are only enabled when path tracing is enabled, and at least 1 mesh primitive is added to the scene.
+
+Env maps provide light in High Dynamic Range (HDR). The IBL Intensity (Image Based Lighting Intensity) and Exposure
+allow to scale the range up and down, to adjust the light according to the selected env map and scene.
+
+IBL Intensity is a linear scalar multiplier applied to the env map before path tracing.
+
+After the path tracer runs and an image is rendered, Exposure is applied with $$hdr=hdr*2^{exposure},$$
+just before tone mapping takes place.
+
+Tone mapping, if enabled, is applied next, followed by gamma correction.
+
+The position of the env map can also be adjusted by the offset sliders.
 
 ### ⚙️ Quick Settings
 
