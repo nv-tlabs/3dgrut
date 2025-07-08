@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 import gzip
 import os
 from pathlib import Path
@@ -684,8 +685,26 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
 
         extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
         extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+
+        if len(extra_f_names) == 0:
+            # No f_rest_* attributes
+            detected_sh_degree = 0
+        else:
+            # Solve for sh_degree: len(extra_f_names) = 3 * ((sh_degree + 1)^2 - 1)
+            num_speculars_per_channel = len(extra_f_names) // 3
+            detected_sh_degree = int(math.sqrt(num_speculars_per_channel + 1) - 1)
+
+            # Validate integer results
+            expected_features = 3 * ((detected_sh_degree + 1) ** 2 - 1)
+            if len(extra_f_names) != expected_features:
+                raise ValueError(f"Invalid number of f_rest_* attributes in PLY file: found {len(extra_f_names)}, "
+                                f"expected {expected_features} for SH degree {detected_sh_degree}")
+
+        logger.info(f"PLY file contains SH degree {detected_sh_degree} (was configured as {self.max_n_features})")
+        self.max_n_features = detected_sh_degree
+        self.n_active_features = detected_sh_degree
+
         num_speculars = (self.max_n_features + 1) ** 2 - 1
-        assert len(extra_f_names)==3*num_speculars
         mogt_specular = np.zeros((num_gaussians, len(extra_f_names)))
         for idx, attr_name in enumerate(extra_f_names):
             mogt_specular[:, idx] = np.asarray(plydata.elements[0][attr_name])
