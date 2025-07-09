@@ -700,16 +700,28 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
                 raise ValueError(f"Invalid number of f_rest_* attributes in PLY file: found {len(extra_f_names)}, "
                                 f"expected {expected_features} for SH degree {detected_sh_degree}")
 
-        logger.info(f"PLY file contains SH degree {detected_sh_degree} (was configured as {self.max_n_features})")
-        self.max_n_features = detected_sh_degree
         self.n_active_features = detected_sh_degree
 
-        num_speculars = (self.max_n_features + 1) ** 2 - 1
+        compiled_max_degree = self.conf.render.particle_radiance_sph_degree
+        self.max_n_features = compiled_max_degree
+
+        # Features need to be padded to match the compiled degree
+        num_speculars_in_file = (detected_sh_degree + 1) ** 2 - 1
+        num_speculars_compiled = (compiled_max_degree + 1) ** 2 - 1
+
+        # Load the features from the file
         mogt_specular = np.zeros((num_gaussians, len(extra_f_names)))
         for idx, attr_name in enumerate(extra_f_names):
             mogt_specular[:, idx] = np.asarray(plydata.elements[0][attr_name])
-        mogt_specular = mogt_specular.reshape((num_gaussians,3,num_speculars))
-        mogt_specular = mogt_specular.transpose(0, 2, 1).reshape((num_gaussians,num_speculars*3))
+        mogt_specular = mogt_specular.reshape((num_gaussians,3,num_speculars_in_file))
+        mogt_specular = mogt_specular.transpose(0, 2, 1).reshape((num_gaussians,num_speculars_in_file*3))
+
+        # Pad features to match compiled degree if necessary
+        if detected_sh_degree < compiled_max_degree:
+            logger.info(f"Padding SH features from degree {detected_sh_degree} to {compiled_max_degree}")
+            padded_specular = np.zeros((num_gaussians, num_speculars_compiled * 3))
+            padded_specular[:, :num_speculars_in_file*3] = mogt_specular
+            mogt_specular = padded_specular
 
         scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
         scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
