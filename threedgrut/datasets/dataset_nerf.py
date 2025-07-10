@@ -48,19 +48,80 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
 
         # GPU-cached camera rays
+        self._initialize_ray_cache()
+
+    def _initialize_ray_cache(self):
+        """Initialize ray cache using CPU-based storage for multiprocessing compatibility."""
+        # Store ray computation parameters on CPU for multiprocessing compatibility
+        self._ray_cache_params = {
+            'image_h': None,  # Will be set when needed
+            'image_w': None,  # Will be set when needed
+            'K': self.K.copy(),  # CPU numpy array
+            'device': self.device,
+            'ray_jitter': self.ray_jitter,
+        }
+        
+        # Cache for per-worker GPU tensors (thread-local storage)
+        self._worker_gpu_cache = {}
+        self._rays_initialized = False
+
+    def _get_worker_id(self):
+        """Get current worker ID for thread-local caching."""
+        import threading
+        import multiprocessing as mp
+        
+        # Get worker ID from current process/thread
+        try:
+            worker_info = torch.utils.data.get_worker_info()
+            if worker_info is not None:
+                return f"worker_{worker_info.id}"
+            else:
+                return "main_process"
+        except:
+            return f"thread_{threading.get_ident()}"
+
+    def _create_worker_gpu_cache(self):
+        """Create GPU-cached ray directions for current worker."""
+        worker_id = self._get_worker_id()
+        
+        # Check if this worker already has cached tensors
+        if worker_id in self._worker_gpu_cache:
+            return self._worker_gpu_cache[worker_id]
+        
+        # Create GPU tensors for this worker
         directions = NeRFDataset.__get_ray_directions(
             self.image_h,
             self.image_w,
-            torch.tensor(self.K, device=self.device),
+            torch.tensor(self._ray_cache_params['K'], device=self.device),
             device=self.device,
-            ray_jitter=self.ray_jitter,
+            ray_jitter=self._ray_cache_params['ray_jitter'],
         )
-        self.rays_o_cam = torch.zeros(
+        rays_o_cam = torch.zeros(
             (1, self.image_h, self.image_w, 3), dtype=torch.float32, device=self.device
         )
-        self.rays_d_cam = directions.reshape(
+        rays_d_cam = directions.reshape(
             (1, self.image_h, self.image_w, 3)
         ).contiguous()
+        
+        # Cache for this worker
+        self._worker_gpu_cache[worker_id] = (rays_o_cam, rays_d_cam)
+        return rays_o_cam, rays_d_cam
+
+    def _get_ray_tensors(self):
+        """Get ray tensors for current worker, creating them if needed."""
+        return self._create_worker_gpu_cache()
+
+    def reload_intrinsics(self):
+        self.read_intrinsics()
+        self.read_meta(self.split)
+        self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
+        
+        # Update ray cache parameters with new intrinsics
+        self._ray_cache_params['K'] = self.K.copy()
+        
+        # Clear existing worker caches to force recreation with new intrinsics
+        self._worker_gpu_cache.clear()
+        self._rays_initialized = False
 
     def read_intrinsics(self):
         with open(os.path.join(self.root_dir, "transforms_train.json"), "r") as f:
@@ -212,10 +273,13 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         assert data.dtype == torch.float32
         assert pose.dtype == torch.float32
 
+        # Get ray tensors for current worker (creates them if needed)
+        rays_o_cam, rays_d_cam = self._get_ray_tensors()
+
         sample = {
             "rgb_gt": data,
-            "rays_ori": self.rays_o_cam,
-            "rays_dir": self.rays_d_cam,
+            "rays_ori": rays_o_cam,
+            "rays_dir": rays_d_cam,
             "T_to_world": pose,
             "intrinsics": self.intrinsics,
         }

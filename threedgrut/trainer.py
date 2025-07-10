@@ -137,23 +137,28 @@ class Trainer3DGRUT:
         self.init_gui(conf, self.model, self.train_dataset, self.val_dataset, self.scene_bbox)
 
     def init_dataloaders(self, conf: DictConfig):
+        from threedgrut.datasets.utils import configure_dataloader_for_platform
+        
         train_dataset, val_dataset = datasets.make(name=conf.dataset.type, config=conf, ray_jitter=None)
-        train_dataloader = MultiEpochsDataLoader(
-            train_dataset,
-            num_workers=conf.num_workers,
-            batch_size=1,
-            shuffle=True,
-            pin_memory=True,
-            persistent_workers=True if conf.num_workers > 0 else False,
-        )
-        val_dataloader = torch.utils.data.DataLoader(
-            val_dataset,
-            num_workers=conf.num_workers,
-            batch_size=1,
-            shuffle=False,
-            pin_memory=True,
-            persistent_workers=True if conf.num_workers > 0 else False,
-        )
+        train_dataloader_kwargs = configure_dataloader_for_platform({
+            'num_workers': conf.num_workers,
+            'batch_size': 1,
+            'shuffle': True,
+            'pin_memory': True,
+            'persistent_workers': True if conf.num_workers > 0 else False,
+        })
+        
+        val_dataloader_kwargs = configure_dataloader_for_platform({
+            'num_workers': conf.num_workers,
+            'batch_size': 1,
+            'shuffle': False,
+            'pin_memory': True,
+            'persistent_workers': True if conf.num_workers > 0 else False,
+        })
+        
+        train_dataloader = MultiEpochsDataLoader(train_dataset, **train_dataloader_kwargs)
+        val_dataloader = torch.utils.data.DataLoader(val_dataset, **val_dataloader_kwargs)
+        
         self.train_dataset = train_dataset
         self.train_dataloader = train_dataloader
         self.val_dataset = val_dataset
