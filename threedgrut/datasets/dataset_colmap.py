@@ -15,6 +15,7 @@
 
 import os
 import copy
+import platform
 
 import numpy as np
 from PIL import Image
@@ -65,6 +66,10 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         # GPU cache of processed camera intrinsics
         self.intrinsics = {}
 
+        # Worker-based GPU cache for multiprocessing compatibility
+        self._worker_gpu_cache = {}
+        self._intrinsics_initialized = False
+
         # Get the scene data
         self.load_intrinsics_and_extrinsics()
         self.get_scene_info()
@@ -91,6 +96,31 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         # Update the number of frames to only include the samples from the split
         self.n_frames = self.poses.shape[0]
+    
+    def reload_intrinsics(self):
+        self.intrinsics = {}
+
+        self.load_intrinsics_and_extrinsics()
+        self.get_scene_info()
+        self.load_camera_data()
+        indices = np.arange(self.n_frames)
+
+        # If test_split_interval is set, every test_split_interval frame will be excluded from the training set
+        # If test_split_interval is non-positive, all images will be used for training and testing
+        if self.test_split_interval > 0:
+            if self.split == "train":
+                indices = np.mod(indices, self.test_split_interval) != 0
+            else:
+                indices = np.mod(indices, self.test_split_interval) == 0
+
+        self.camera_centers = self.camera_centers[indices]
+        self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
+
+        # Update the number of frames to only include the samples from the split
+        self.n_frames = self.poses.shape[0]
+        
+        # Reset initialization flag
+        self._intrinsics_initialized = False
 
     def load_intrinsics_and_extrinsics(self):
         try:
@@ -131,6 +161,15 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def load_camera_data(self):
         """Load the camera data and generate rays for each camera."""
+        
+        # Store camera data on CPU for multiprocessing compatibility
+        # GPU tensors will be created per-worker as needed
+        self._camera_data_params = {}
+        self._store_camera_params_cpu()
+        self._intrinsics_initialized = True
+
+    def _store_camera_params_cpu(self):
+        """Store camera parameters on CPU for multiprocessing compatibility."""
 
         def create_pinhole_camera(focalx, focaly, w, h):
             # Generate UV coordinates
@@ -280,6 +319,48 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.image_paths = np.stack(self.image_paths, dtype=str)
         self.mask_paths = np.stack(self.mask_paths, dtype=str)
 
+    def _get_worker_id(self):
+        """Get current worker ID for thread-local caching."""
+        import threading
+        
+        # Get worker ID from current process/thread
+        try:
+            worker_info = torch.utils.data.get_worker_info()
+            if worker_info is not None:
+                return f"worker_{worker_info.id}"
+            else:
+                return "main_process"
+        except:
+            return f"thread_{threading.get_ident()}"
+    
+    def _ensure_intrinsics_initialized(self):
+        """Ensure intrinsics cache is initialized for current worker."""
+        worker_id = self._get_worker_id()
+        
+        # Check if this worker has intrinsics cached
+        if worker_id not in self._worker_gpu_cache:
+            # Need to create intrinsics for this worker
+            self._create_worker_intrinsics_cache(worker_id)
+    
+    def _create_worker_intrinsics_cache(self, worker_id):
+        """Create intrinsics cache for a specific worker."""
+        if not self._intrinsics_initialized:
+            # If main intrinsics aren't loaded, create them first
+            self._store_camera_params_cpu()
+            self._intrinsics_initialized = True
+        
+        # For now, fall back to the original approach for each worker
+        # This ensures each worker creates its own GPU tensors
+        worker_intrinsics = {}
+        
+        for intr_id, (params_dict, rays_ori, rays_dir, camera_name) in self.intrinsics.items():
+            # Create new GPU tensors for this worker
+            worker_rays_ori = rays_ori.to(self.device, non_blocking=True)
+            worker_rays_dir = rays_dir.to(self.device, non_blocking=True)
+            worker_intrinsics[intr_id] = (params_dict, worker_rays_ori, worker_rays_dir, camera_name)
+        
+        self._worker_gpu_cache[worker_id] = worker_intrinsics
+
     @torch.no_grad()
     def compute_spatial_extents(self):
         camera_origins = torch.FloatTensor(self.poses[:, :, 3])
@@ -356,12 +437,19 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         assert data.dtype == torch.float32
         assert pose.dtype == torch.float32
 
-        camera_params_dict, rays_ori, rays_dir, camera_name = self.intrinsics[intr]
+        # Ensure intrinsics cache is properly initialized for current worker
+        self._ensure_intrinsics_initialized()
+        
+        # Get intrinsics for current worker
+        worker_id = self._get_worker_id()
+        worker_intrinsics = self._worker_gpu_cache.get(worker_id, self.intrinsics)
+        
+        camera_params_dict, rays_ori, rays_dir, camera_name = worker_intrinsics[intr]
 
         sample = {
             "rgb_gt": data,
-            "rays_ori": rays_ori.to(self.device),
-            "rays_dir": rays_dir.to(self.device),
+            "rays_ori": rays_ori,
+            "rays_dir": rays_dir,
             "T_to_world": pose,
             f"intrinsics_{camera_name}": camera_params_dict,
         }
