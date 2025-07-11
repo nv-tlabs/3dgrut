@@ -94,12 +94,12 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         ]  # image_paths is a numpy str array of image paths
 
         self.camera_centers = self.camera_centers[indices]
-        
+
         self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
 
         # Update the number of frames to only include the samples from the split
         self.n_frames = self.poses.shape[0]
-    
+
     def reload_intrinsics(self):
         self.intrinsics = {}
 
@@ -121,7 +121,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         # Update the number of frames to only include the samples from the split
         self.n_frames = self.poses.shape[0]
-        
+
         # Reset initialization flag
         self._intrinsics_initialized = False
 
@@ -148,24 +148,26 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.camera_dimensions = {}
         self.camera_scaling_factors = {}
         self.n_frames = len(self.cam_extrinsics)
-        
+
         # Get actual dimensions and scaling factors for each unique camera
         processed_cameras = set()
         for extr in self.cam_extrinsics:
             camera_id = extr.camera_id
             if camera_id in processed_cameras:
                 continue
-                
+
             # Find corresponding intrinsic parameters
-            intrinsic = next(intr for intr in self.cam_intrinsics if intr.id == camera_id)
-            
+            intrinsic = next(
+                intr for intr in self.cam_intrinsics if intr.id == camera_id
+            )
+
             # Get actual image dimensions for this camera
             image_path = os.path.join(
                 self.path,
                 self.get_images_folder(),
                 extr.name,
             )
-            
+
             if os.path.exists(image_path):
                 image = np.asarray(Image.open(image_path))
                 actual_h, actual_w = image.shape[:2]
@@ -173,19 +175,18 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 # Fallback - assume no downsampling
                 actual_h = intrinsic.height // max(1, self.downsample_factor)
                 actual_w = intrinsic.width // max(1, self.downsample_factor)
-            
-            self.camera_dimensions[camera_id] = {
-                'width': actual_w,
-                'height': actual_h
-            }
-            
+
+            self.camera_dimensions[camera_id] = {"width": actual_w, "height": actual_h}
+
             # Calculate scaling factor for this camera
-            self.camera_scaling_factors[camera_id] = int(round(intrinsic.height / actual_h))
+            self.camera_scaling_factors[camera_id] = int(
+                round(intrinsic.height / actual_h)
+            )
             processed_cameras.add(camera_id)
 
     def load_camera_data(self):
         """Load the camera data and generate rays for each camera."""
-        
+
         # Store camera data on CPU for multiprocessing compatibility
         # GPU tensors will be created per-worker as needed
         self._camera_data_params = {}
@@ -214,12 +215,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             )
             return (
                 params.to_dict(),
-                torch.tensor(
-                    rays_o_cam, dtype=torch.float32
-                ).reshape(out_shape),
-                torch.tensor(
-                    rays_d_cam, dtype=torch.float32
-                ).reshape(out_shape),
+                torch.tensor(rays_o_cam, dtype=torch.float32).reshape(out_shape),
+                torch.tensor(rays_d_cam, dtype=torch.float32).reshape(out_shape),
                 type(params).__name__,
             )
 
@@ -248,13 +245,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 max_angle=max_angle,
                 shutter_type=ShutterType.GLOBAL,
             )
-            pixel_coords = torch.tensor(
-                np.stack([u, v], axis=1), dtype=torch.int32
-            )
+            pixel_coords = torch.tensor(np.stack([u, v], axis=1), dtype=torch.int32)
             image_points = pixels_to_image_points(pixel_coords)
-            rays_d_cam = image_points_to_camera_rays(
-                params, image_points
-            )
+            rays_d_cam = image_points_to_camera_rays(params, image_points)
             rays_o_cam = torch.zeros_like(rays_d_cam)
             return (
                 params.to_dict(),
@@ -263,7 +256,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 type(params).__name__,
             )
 
-        cam_id_to_image_name = {extr.camera_id: extr.name for extr in self.cam_extrinsics}
+        cam_id_to_image_name = {
+            extr.camera_id: extr.name for extr in self.cam_extrinsics
+        }
 
         for intr in self.cam_intrinsics:
             # height = intr.height // self.scaling_factor
@@ -277,7 +272,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 with Image.open(image_path) as img:
                     width, height = img.size
             except FileNotFoundError:
-                logger.error(f"Image {image_path} not found. Cannot determine dimensions for intrinsic ID {intr.id}.")
+                logger.error(
+                    f"Image {image_path} not found. Cannot determine dimensions for intrinsic ID {intr.id}."
+                )
                 continue
             # assert abs(height / self.scaling_factor - self.image_h) <= 1
             # assert abs(width / self.scaling_factor - self.image_w) <= 1
@@ -304,9 +301,11 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 # Fallback to scaled dimensions
                 cam_image_h = intr.height // self.scaling_factor
                 cam_image_w = intr.width // self.scaling_factor
-            
+
             # Create intrinsics for this specific camera
-            self.intrinsics[intr.id] = self.create_camera_intrinsics(intr, cam_image_h, cam_image_w)
+            self.intrinsics[intr.id] = self.create_camera_intrinsics(
+                intr, cam_image_h, cam_image_w
+            )
 
         # Load poses and paths
         self.poses = []
@@ -329,10 +328,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             C2W = np.linalg.inv(W2C)
             self.poses.append(C2W)
             cam_centers.append(C2W[:3, 3])
-            
-            image_path = os.path.join(
-                self.path, self.get_images_folder(), extr.name
-            )
+
+            image_path = os.path.join(self.path, self.get_images_folder(), extr.name)
             self.image_paths.append(image_path)
             self.camera_ids.append(extr.camera_id)  # Store camera ID for each frame
 
@@ -350,7 +347,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def _get_worker_id(self):
         """Get current worker ID for thread-local caching."""
         import threading
-        
+
         # Get worker ID from current process/thread
         try:
             worker_info = torch.utils.data.get_worker_info()
@@ -360,33 +357,43 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 return "main_process"
         except:
             return f"thread_{threading.get_ident()}"
-    
+
     def _ensure_intrinsics_initialized(self):
         """Ensure intrinsics cache is initialized for current worker."""
         worker_id = self._get_worker_id()
-        
+
         # Check if this worker has intrinsics cached
         if worker_id not in self._worker_gpu_cache:
             # Need to create intrinsics for this worker
             self._create_worker_intrinsics_cache(worker_id)
-    
+
     def _create_worker_intrinsics_cache(self, worker_id):
         """Create intrinsics cache for a specific worker."""
         if not self._intrinsics_initialized:
             # If main intrinsics aren't loaded, create them first
             self._store_camera_params_cpu()
             self._intrinsics_initialized = True
-        
+
         # For now, fall back to the original approach for each worker
         # This ensures each worker creates its own GPU tensors
         worker_intrinsics = {}
-        
-        for intr_id, (params_dict, rays_ori, rays_dir, camera_name) in self.intrinsics.items():
+
+        for intr_id, (
+            params_dict,
+            rays_ori,
+            rays_dir,
+            camera_name,
+        ) in self.intrinsics.items():
             # Create new GPU tensors for this worker
             worker_rays_ori = rays_ori.to(self.device, non_blocking=True)
             worker_rays_dir = rays_dir.to(self.device, non_blocking=True)
-            worker_intrinsics[intr_id] = (params_dict, worker_rays_ori, worker_rays_dir, camera_name)
-        
+            worker_intrinsics[intr_id] = (
+                params_dict,
+                worker_rays_ori,
+                worker_rays_dir,
+                camera_name,
+            )
+
         self._worker_gpu_cache[worker_id] = worker_intrinsics
 
     @torch.no_grad()
@@ -439,14 +446,14 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def __getitem__(self, idx) -> dict:
         # Get the camera ID for this frame
         camera_id = self.camera_ids[idx]
-        
+
         # Load image and get its actual dimensions
         image_data = np.asarray(Image.open(self.image_paths[idx]))
         actual_h, actual_w = image_data.shape[:2]
-        
+
         # Use actual image dimensions for output shape
         out_shape = (1, actual_h, actual_w, 3)
-        
+
         assert image_data.dtype == np.uint8, "Image data must be of type uint8"
 
         output_dict = {
@@ -459,9 +466,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         # Only add mask to dictionary if it exists
         if os.path.exists(mask_path := self.mask_paths[idx]):
             try:
-                mask = torch.from_numpy(np.array(Image.open(mask_path).convert('L'))).reshape(
-                    1, actual_h, actual_w, 1
-                )
+                mask = torch.from_numpy(
+                    np.array(Image.open(mask_path).convert("L"))
+                ).reshape(1, actual_h, actual_w, 1)
                 output_dict["mask"] = mask
             except:
                 print(1)
@@ -470,21 +477,21 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def get_gpu_batch_with_intrinsics(self, batch):
         """Add the intrinsics to the batch and move data to GPU."""
-        
+
         data = batch["data"][0].to(self.device, non_blocking=True) / 255.0
         pose = batch["pose"][0].to(self.device, non_blocking=True)
         intr = batch["intr"][0].item()
-        
+
         assert data.dtype == torch.float32
         assert pose.dtype == torch.float32
 
         # Ensure intrinsics cache is properly initialized for current worker
         self._ensure_intrinsics_initialized()
-        
+
         # Get intrinsics for current worker
         worker_id = self._get_worker_id()
         worker_intrinsics = self._worker_gpu_cache.get(worker_id, self.intrinsics)
-        
+
         camera_params_dict, rays_ori, rays_dir, camera_name = worker_intrinsics[intr]
 
         sample = {
@@ -505,7 +512,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def create_dataset_camera_visualization(self):
         """Create a visualization of the dataset cameras."""
-        
+
         cam_list = []
 
         for i_cam, pose in enumerate(self.poses):
@@ -513,13 +520,17 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             trans_mat_world_to_camera = np.linalg.inv(trans_mat)
 
             # Camera convention rotation
-            camera_convention_rot = np.array([
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, -1.0, 0.0, 0.0],
-                [0.0, 0.0, -1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0],
-            ])
-            trans_mat_world_to_camera = camera_convention_rot @ trans_mat_world_to_camera
+            camera_convention_rot = np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, -1.0, 0.0, 0.0],
+                    [0.0, 0.0, -1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            )
+            trans_mat_world_to_camera = (
+                camera_convention_rot @ trans_mat_world_to_camera
+            )
 
             # Get camera ID and corresponding intrinsics
             camera_id = self.camera_ids[i_cam]
@@ -528,7 +539,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             # Load actual image to get dimensions
             image_data = np.asarray(Image.open(self.image_paths[i_cam]))
             h, w = image_data.shape[:2]
-            
+
             f_w = intr["focal_length"][0]
             f_h = intr["focal_length"][1]
 
@@ -537,17 +548,21 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
             assert image_data.dtype == np.uint8, "Image data must be of type uint8"
             rgb = image_data.reshape(h, w, 3) / np.float32(255.0)
-            assert rgb.dtype == np.float32, f"RGB image must be float32, got {rgb.dtype}"
+            assert (
+                rgb.dtype == np.float32
+            ), f"RGB image must be float32, got {rgb.dtype}"
 
-            cam_list.append({
-                "ext_mat": trans_mat_world_to_camera,
-                "w": w,
-                "h": h,
-                "fov_w": fov_w,
-                "fov_h": fov_h,
-                "rgb_img": rgb,
-                "split": self.split,
-                "camera_id": camera_id,  # Include camera ID for reference
-            })
+            cam_list.append(
+                {
+                    "ext_mat": trans_mat_world_to_camera,
+                    "w": w,
+                    "h": h,
+                    "fov_w": fov_w,
+                    "fov_h": fov_h,
+                    "rgb_img": rgb,
+                    "split": self.split,
+                    "camera_id": camera_id,  # Include camera ID for reference
+                }
+            )
 
         create_camera_visualization(cam_list)
