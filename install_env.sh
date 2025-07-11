@@ -133,13 +133,15 @@ if [ "$CUDA_VERSION" = "11.8.0" ]; then
 elif [ "$CUDA_VERSION" = "12.8.1" ]; then
     echo "Installing CUDA 12.8.1 ..."
     conda install -y cuda-toolkit cmake ninja gcc_linux-64=$GCC_VERSION -c nvidia/label/cuda-12.8.1
-    pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
     pip3 install --force-reinstall "numpy<2"
 
     # TODO move to using wheel once kaolin is available
     rm -fr thirdparty/kaolin
     git clone --recursive https://github.com/NVIDIAGameWorks/kaolin.git thirdparty/kaolin
     pushd thirdparty/kaolin
+    git checkout c2da967b9e0d8e3ebdbd65d3e8464d7e39005203  # ping to a fixed commit for reproducibility
+    sed -i 's!AT_DISPATCH_FLOATING_TYPES_AND_HALF(feats_in.type()!AT_DISPATCH_FLOATING_TYPES_AND_HALF(feats_in.scalar_type()!g' kaolin/csrc/render/spc/raytrace_cuda.cu
     pip install --upgrade pip
     pip install --no-cache-dir ninja imageio imageio-ffmpeg
     pip install --no-cache-dir        \
