@@ -17,7 +17,6 @@
 
 #include <cuda.h>
 #if defined(_MSC_VER)
-#define NOMINMAX
 #include <windows.h>
 #endif
 #include <cuda_gl_interop.h>
