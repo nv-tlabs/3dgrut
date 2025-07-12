@@ -1,7 +1,3 @@
-> [!Warning]  
-> This is a fork for enabling multiple cameras with multiple calibration sets to be used.
-> Only the colmap import was touched to archive this result.
-
 <p align="center">
   <img height="100" src="assets/3dgrut_logo.png">
 </p>
@@ -30,6 +26,8 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 
 
 ## 🔥 News
+- ✅[2025/07] Support for datasets with multiple sensors.
+- ✅[2025/07] Support for Windows has been added.
 - ✅[2025/06] Playground supports PBR meshes and environment maps.
 - ✅[2025/04] Support for image masks.
 - ✅[2025/04] SparseAdam support.
