@@ -336,89 +336,77 @@ def read_colmap_points3D_binary(path_to_model_file):
 def read_colmap_intrinsics_text(path):
     """
     Read camera intrinsics from a COLMAP text file.
-
     Args:
         path: Path to the cameras.txt file
-
     Returns:
-        List of Camera objects sorted by camera ID
+        Dict of Camera objects indexed by camera ID
     """
-    cameras = []
+    cameras = {}
     with open(path, "r") as fid:
         # Skip comment lines at the start
         lines = (line.strip() for line in fid)
         lines = (line for line in lines if line and not line.startswith("#"))
-
         for line in lines:
             # Unpack elements directly using split with maxsplit
             camera_id, model, width, height, *params = line.split()
-            cameras.append(
-                Camera(
-                    id=int(camera_id),
-                    model=model,
-                    width=int(width),
-                    height=int(height),
-                    params=np.array([float(p) for p in params]),
-                )
+            camera_id = int(camera_id)
+            width, height = int(width), int(height)
+            assert camera_id not in cameras, f"Camera ID {camera_id} already exists"
+            cameras[camera_id] = Camera(
+                id=camera_id,
+                model=model,
+                width=width,
+                height=height,
+                params=np.array([float(p) for p in params]),
             )
-
-    return sorted(cameras, key=lambda x: x.id)
+    return cameras
 
 
 def read_colmap_intrinsics_binary(path_to_model_file):
     """
     Read camera intrinsics from a COLMAP binary file.
-
     Args:
         path_to_model_file: Path to the cameras.bin file
-
     Returns:
-        List of Camera objects sorted by camera ID
-
+        Dict of Camera objects indexed by camera ID
     Raises:
         ValueError: If the number of cameras read doesn't match the expected count
         KeyError: If an invalid camera model ID is encountered
     """
-    cameras = []
+    cameras = {}
     with open(path_to_model_file, "rb") as fid:
         # Read number of cameras
         num_cameras = read_next_bytes(fid, 8, "Q")[0]
-
         for _ in range(num_cameras):
             # Read fixed-size camera properties
             camera_id, model_id, width, height = read_next_bytes(
                 fid, num_bytes=24, format_char_sequence="iiQQ"
             )
-
             # Get camera model information
             try:
                 camera_model = CAMERA_MODEL_IDS[model_id]
             except KeyError:
                 raise KeyError(f"Invalid camera model ID: {model_id}")
-
             # Read camera parameters
             params = read_next_bytes(
                 fid,
                 num_bytes=8 * camera_model.num_params,
                 format_char_sequence="d" * camera_model.num_params,
             )
-
             # Create camera object
-            cameras.append(
-                Camera(
-                    id=camera_id,
-                    model=camera_model.model_name,
-                    width=width,
-                    height=height,
-                    params=np.array(params),
-                )
+            assert camera_id not in cameras, f"Camera ID {camera_id} already exists"
+            cameras[camera_id] = Camera(
+                id=camera_id,
+                model=camera_model.model_name,
+                width=width,
+                height=height,
+                params=np.array(params),
             )
-
     # Verify camera count
-    if len(cameras) != num_cameras:
-        raise ValueError(f"Expected {num_cameras} cameras, but read {len(cameras)}")
-
-    return sorted(cameras, key=lambda x: x.id)
+    assert (
+        len(cameras) == num_cameras
+    ), f"Expected {num_cameras} cameras, but read {len(cameras)}"
+    return cameras
 
 
 def qvec_to_so3(qvec):
@@ -451,13 +439,10 @@ class Image(BaseImage):
 def read_colmap_extrinsics_binary(path_to_model_file):
     """
     Read camera extrinsics from a COLMAP binary file.
-
     Args:
         path_to_model_file: Path to the images.bin file
-
     Returns:
         List of Image objects sorted by image name
-
     Raises:
         ValueError: If string parsing or data reading fails
     """
@@ -465,15 +450,12 @@ def read_colmap_extrinsics_binary(path_to_model_file):
     with open(path_to_model_file, "rb") as fid:
         # Read number of registered images
         num_reg_images = read_next_bytes(fid, 8, "Q")[0]
-
         for _ in range(num_reg_images):
             # Read image properties (id, rotation, translation, camera_id)
             props = read_next_bytes(fid, num_bytes=64, format_char_sequence="idddddddi")
-
             image_id, *qvec_tvec, camera_id = props
             qvec = np.array(qvec_tvec[:4])
             tvec = np.array(qvec_tvec[4:7])
-
             # Read image name (null-terminated string)
             image_name = ""
             while True:
@@ -486,7 +468,6 @@ def read_colmap_extrinsics_binary(path_to_model_file):
                     raise ValueError(
                         f"Invalid character in image name at position {len(image_name)}"
                     )
-
             # Read 2D points
             num_points2D = read_next_bytes(fid, 8, "Q")[0]
             point_data = read_next_bytes(
@@ -494,7 +475,6 @@ def read_colmap_extrinsics_binary(path_to_model_file):
                 num_bytes=24 * num_points2D,
                 format_char_sequence="ddq" * num_points2D,
             )
-
             # Parse point data into coordinates and IDs
             xys = np.array(
                 [
@@ -505,7 +485,6 @@ def read_colmap_extrinsics_binary(path_to_model_file):
             point3D_ids = np.array(
                 [int(point_data[i + 2]) for i in range(0, len(point_data), 3)]
             )
-
             # Create image object
             images.append(
                 Image(
@@ -518,20 +497,16 @@ def read_colmap_extrinsics_binary(path_to_model_file):
                     point3D_ids=point3D_ids,
                 )
             )
-
     return sorted(images, key=lambda x: x.name)
 
 
 def read_colmap_extrinsics_text(path):
     """
     Read camera extrinsics from a COLMAP text file.
-
     Args:
         path: Path to the images.txt file
-
     Returns:
         List of Image objects sorted by image name
-
     Raises:
         ValueError: If file format is invalid or data parsing fails
     """
@@ -540,7 +515,6 @@ def read_colmap_extrinsics_text(path):
         # Skip comment lines and get valid lines
         lines = (line.strip() for line in fid)
         lines = (line for line in lines if line and not line.startswith("#"))
-
         # Process lines in pairs (image info + points info)
         try:
             while True:
@@ -548,28 +522,23 @@ def read_colmap_extrinsics_text(path):
                 image_line = next(lines, None)
                 if image_line is None:
                     break
-
                 # Parse image properties
                 elems = image_line.split()
                 if len(elems) < 10:  # Minimum required elements
                     raise ValueError(f"Invalid image line format: {image_line}")
-
                 image_id = int(elems[0])
                 qvec = np.array([float(x) for x in elems[1:5]])
                 tvec = np.array([float(x) for x in elems[5:8]])
                 camera_id = int(elems[8])
                 image_name = elems[9]
-
                 # Read points line
                 points_line = next(lines, None)
                 if points_line is None:
                     raise ValueError(f"Missing points data for image {image_name}")
-
                 # Parse 2D points and 3D point IDs
                 point_elems = points_line.split()
                 if len(point_elems) % 3 != 0:
                     raise ValueError(f"Invalid points format for image {image_name}")
-
                 xys = np.array(
                     [
                         (float(point_elems[i]), float(point_elems[i + 1]))
@@ -579,7 +548,6 @@ def read_colmap_extrinsics_text(path):
                 point3D_ids = np.array(
                     [int(point_elems[i + 2]) for i in range(0, len(point_elems), 3)]
                 )
-
                 # Create image object
                 images.append(
                     Image(
@@ -592,10 +560,8 @@ def read_colmap_extrinsics_text(path):
                         point3D_ids=point3D_ids,
                     )
                 )
-
         except (ValueError, IndexError) as e:
             raise ValueError(f"Error parsing extrinsics file: {e}")
-
     return sorted(images, key=lambda x: x.name)
 
 
@@ -650,3 +616,18 @@ def configure_dataloader_for_platform(dataloader_kwargs: dict) -> dict:
             kwargs["worker_init_fn"] = worker_init_fn
 
     return kwargs
+
+
+def get_worker_id():
+    """Get current worker ID for thread-local caching."""
+    import threading
+
+    # Get worker ID from current process/thread
+    try:
+        worker_info = torch.utils.data.get_worker_info()
+        if worker_info is not None:
+            return f"worker_{worker_info.id}"
+        else:
+            return "main_process"
+    except:
+        return f"thread_{threading.get_ident()}"

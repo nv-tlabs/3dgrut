@@ -36,6 +36,7 @@ from .utils import (
     read_colmap_extrinsics_text,
     read_colmap_intrinsics_binary,
     read_colmap_intrinsics_text,
+    get_worker_id,
 )
 from .camera_models import (
     ShutterType,
@@ -63,48 +64,19 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.ray_jitter = ray_jitter
         self.test_split_interval = test_split_interval
 
-        # GPU cache of processed camera intrinsics - now per camera ID
-        self.intrinsics = {}
-        # Store camera ID for each frame
-        self.camera_ids = []
-
         # Worker-based GPU cache for multiprocessing compatibility
         self._worker_gpu_cache = {}
-        self._intrinsics_initialized = False
+
+        # (Re)load intrinsics and extrinsics
+        self.reload()
+
+    def reload(self):
+        # GPU cache of processed camera intrinsics - now per camera ID
+        self.intrinsics = {}
 
         # Get the scene data
         self.load_intrinsics_and_extrinsics()
-        self.get_scene_info()
-        self.load_camera_data()
-
-        indices = np.arange(self.n_frames)
-
-        # If test_split_interval is set, every test_split_interval frame will be excluded from the training set
-        # If test_split_interval is non-positive, all images will be used for training and testing
-        if self.test_split_interval > 0:
-            if split == "train":
-                indices = np.mod(indices, self.test_split_interval) != 0
-            else:
-                indices = np.mod(indices, self.test_split_interval) == 0
-        self.cam_extrinsics = [self.cam_extrinsics[i] for i in np.where(indices)[0]]
-
-        self.poses = self.poses[indices].astype(np.float32)  # poses is a numpy array
-        self.image_paths = self.image_paths[
-            indices
-        ]  # image_paths is a numpy str array of image paths
-
-        self.camera_centers = self.camera_centers[indices]
-
-        self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
-
-        # Update the number of frames to only include the samples from the split
-        self.n_frames = self.poses.shape[0]
-
-    def reload_intrinsics(self):
-        self.intrinsics = {}
-
-        self.load_intrinsics_and_extrinsics()
-        self.get_scene_info()
+        self.n_frames = len(self.cam_extrinsics)
         self.load_camera_data()
         indices = np.arange(self.n_frames)
 
@@ -116,14 +88,17 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             else:
                 indices = np.mod(indices, self.test_split_interval) == 0
 
+        self.cam_extrinsics = [self.cam_extrinsics[i] for i in np.where(indices)[0]]
+        self.poses = self.poses[indices].astype(np.float32)
+        self.image_paths = self.image_paths[indices]  # numpy str array of image paths
         self.camera_centers = self.camera_centers[indices]
         self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
 
         # Update the number of frames to only include the samples from the split
         self.n_frames = self.poses.shape[0]
 
-        # Reset initialization flag
-        self._intrinsics_initialized = False
+        # Clear existing worker caches to force recreation with new intrinsics
+        self._worker_gpu_cache.clear()
 
     def load_intrinsics_and_extrinsics(self):
         try:
@@ -143,55 +118,14 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         )
         return f"images{downsample_suffix}"
 
-    def get_scene_info(self):
-        # For multi-camera, we store dimensions per camera and calculate scaling factors per camera
-        self.camera_dimensions = {}
-        self.camera_scaling_factors = {}
-        self.n_frames = len(self.cam_extrinsics)
-
-        # Get actual dimensions and scaling factors for each unique camera
-        processed_cameras = set()
-        for extr in self.cam_extrinsics:
-            camera_id = extr.camera_id
-            if camera_id in processed_cameras:
-                continue
-
-            # Find corresponding intrinsic parameters
-            intrinsic = next(
-                intr for intr in self.cam_intrinsics if intr.id == camera_id
-            )
-
-            # Get actual image dimensions for this camera
-            image_path = os.path.join(
-                self.path,
-                self.get_images_folder(),
-                extr.name,
-            )
-
-            if os.path.exists(image_path):
-                image = np.asarray(Image.open(image_path))
-                actual_h, actual_w = image.shape[:2]
-            else:
-                # Fallback - assume no downsampling
-                actual_h = intrinsic.height // max(1, self.downsample_factor)
-                actual_w = intrinsic.width // max(1, self.downsample_factor)
-
-            self.camera_dimensions[camera_id] = {"width": actual_w, "height": actual_h}
-
-            # Calculate scaling factor for this camera
-            self.camera_scaling_factors[camera_id] = int(
-                round(intrinsic.height / actual_h)
-            )
-            processed_cameras.add(camera_id)
-
     def load_camera_data(self):
-        """Load the camera data and generate rays for each camera."""
-
-        # Store camera data on CPU for multiprocessing compatibility
-        # GPU tensors will be created per-worker as needed
+        """
+        Load the camera data and generate rays for each camera.
+        This function is called on CPU for multiprocessing compatibility
+        GPU tensors will be created per-worker as needed
+        """
         self._camera_data_params = {}
         self._store_camera_params_cpu()
-        self._intrinsics_initialized = True
 
     def _store_camera_params_cpu(self):
         """Store camera parameters on CPU for multiprocessing compatibility."""
@@ -204,7 +138,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             params = OpenCVPinholeCameraModelParameters(
                 resolution=np.array([w, h], dtype=np.int64),
                 shutter_type=ShutterType.GLOBAL,
-                principal_point=np.array([image_w, image_h], dtype=np.float32) / 2,
+                principal_point=np.array([w, h], dtype=np.float32) / 2,
                 focal_length=np.array([focalx, focaly], dtype=np.float32),
                 radial_coeffs=np.zeros((6,), dtype=np.float32),
                 tangential_coeffs=np.zeros((2,), dtype=np.float32),
@@ -260,9 +194,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             extr.camera_id: extr.name for extr in self.cam_extrinsics
         }
 
-        for intr in self.cam_intrinsics:
-            # height = intr.height // self.scaling_factor
-            # width = intr.width // self.scaling_factor
+        for intr in self.cam_intrinsics.values():
+            full_width = intr.width
+            full_height = intr.height
 
             image_name = os.path.basename(cam_id_to_image_name[intr.id])
             image_path = os.path.join(self.path, self.get_images_folder(), image_name)
@@ -276,42 +210,46 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                     f"Image {image_path} not found. Cannot determine dimensions for intrinsic ID {intr.id}."
                 )
                 continue
-            # assert abs(height / self.scaling_factor - self.image_h) <= 1
-            # assert abs(width / self.scaling_factor - self.image_w) <= 1
+
+            # Calculate scaling factor to match the image dimensions to the intrinsic dimensions
+            scaling_factor = int(round(intr.height / height))
+            expected_size = (
+                f"{full_width / scaling_factor}x{full_height / scaling_factor}"
+            )
+            assert (
+                abs(full_width / scaling_factor - width) <= 1
+            ), f"Scaled image dimension {expected_size} (factor {scaling_factor}x) does not match the actual image dimensions {width}x{height}"
+            assert (
+                abs(full_height / scaling_factor - height) <= 1
+            ), f"Scaled image dimension {expected_size} (factor {scaling_factor}x) does not match the actual image dimensions {width}x{height}"
 
             if intr.model == "SIMPLE_PINHOLE":
-                focal_length = intr.params[0] / self.scaling_factor
+                focal_length = intr.params[0] / scaling_factor
                 self.intrinsics[intr.id] = create_pinhole_camera(
                     focal_length, focal_length, width, height
                 )
 
             elif intr.model == "PINHOLE":
-                focal_length_x = intr.params[0] / self.scaling_factor
-                focal_length_y = intr.params[1] / self.scaling_factor
+                focal_length_x = intr.params[0] / scaling_factor
+                focal_length_y = intr.params[1] / scaling_factor
                 self.intrinsics[intr.id] = create_pinhole_camera(
                     focal_length_x, focal_length_y, width, height
                 )
 
             elif intr.model == "OPENCV_FISHEYE":
                 params = copy.deepcopy(intr.params)
-                params[:4] = params[:4] / self.scaling_factor
+                params[:4] = params[:4] / scaling_factor
                 self.intrinsics[intr.id] = create_fisheye_camera(params, width, height)
 
             else:
-                # Fallback to scaled dimensions
-                cam_image_h = intr.height // self.scaling_factor
-                cam_image_w = intr.width // self.scaling_factor
-
-            # Create intrinsics for this specific camera
-            self.intrinsics[intr.id] = self.create_camera_intrinsics(
-                intr, cam_image_h, cam_image_w
-            )
+                assert (
+                    False
+                ), f"Colmap camera model '{intr.model}' not handled: Only undistorted datasets (PINHOLE, SIMPLE_PINHOLE or OPENCV_FISHEYE cameras) supported!"
 
         # Load poses and paths
         self.poses = []
         self.image_paths = []
         self.mask_paths = []
-        self.camera_ids = []
 
         cam_centers = []
         for extr in logger.track(
@@ -331,7 +269,6 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
             image_path = os.path.join(self.path, self.get_images_folder(), extr.name)
             self.image_paths.append(image_path)
-            self.camera_ids.append(extr.camera_id)  # Store camera ID for each frame
 
             # Mask path
             self.mask_paths.append(os.path.splitext(image_path)[0] + "_mask.png")
@@ -344,57 +281,33 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.image_paths = np.stack(self.image_paths, dtype=str)
         self.mask_paths = np.stack(self.mask_paths, dtype=str)
 
-    def _get_worker_id(self):
-        """Get current worker ID for thread-local caching."""
-        import threading
-
-        # Get worker ID from current process/thread
-        try:
-            worker_info = torch.utils.data.get_worker_info()
-            if worker_info is not None:
-                return f"worker_{worker_info.id}"
-            else:
-                return "main_process"
-        except:
-            return f"thread_{threading.get_ident()}"
-
-    def _ensure_intrinsics_initialized(self):
-        """Ensure intrinsics cache is initialized for current worker."""
-        worker_id = self._get_worker_id()
-
-        # Check if this worker has intrinsics cached
-        if worker_id not in self._worker_gpu_cache:
-            # Need to create intrinsics for this worker
-            self._create_worker_intrinsics_cache(worker_id)
-
-    def _create_worker_intrinsics_cache(self, worker_id):
+    def _lazy_worker_intrinsics_cache(self):
         """Create intrinsics cache for a specific worker."""
-        if not self._intrinsics_initialized:
-            # If main intrinsics aren't loaded, create them first
-            self._store_camera_params_cpu()
-            self._intrinsics_initialized = True
+        worker_id = get_worker_id()
 
-        # For now, fall back to the original approach for each worker
-        # This ensures each worker creates its own GPU tensors
-        worker_intrinsics = {}
-
-        for intr_id, (
-            params_dict,
-            rays_ori,
-            rays_dir,
-            camera_name,
-        ) in self.intrinsics.items():
-            # Create new GPU tensors for this worker
-            worker_rays_ori = rays_ori.to(self.device, non_blocking=True)
-            worker_rays_dir = rays_dir.to(self.device, non_blocking=True)
-            worker_intrinsics[intr_id] = (
+        # Check if this worker already has cached tensors
+        if worker_id not in self._worker_gpu_cache:
+            # For now, fall back to the original approach for each worker
+            # This ensures each worker creates its own GPU tensors
+            worker_intrinsics = {}
+            for intr_id, (
                 params_dict,
-                worker_rays_ori,
-                worker_rays_dir,
+                rays_ori,
+                rays_dir,
                 camera_name,
-            )
+            ) in self.intrinsics.items():
+                # Create new GPU tensors for this worker
+                worker_rays_ori = rays_ori.to(self.device, non_blocking=True)
+                worker_rays_dir = rays_dir.to(self.device, non_blocking=True)
+                worker_intrinsics[intr_id] = (
+                    params_dict,
+                    worker_rays_ori,
+                    worker_rays_dir,
+                    camera_name,
+                )
+            self._worker_gpu_cache[worker_id] = worker_intrinsics
 
-        self._worker_gpu_cache[worker_id] = worker_intrinsics
+        return self._worker_gpu_cache[worker_id]
 
     @torch.no_grad()
     def compute_spatial_extents(self):
@@ -444,9 +357,6 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         return self.n_frames
 
     def __getitem__(self, idx) -> dict:
-        # Get the camera ID for this frame
-        camera_id = self.camera_ids[idx]
-
         # Load image and get its actual dimensions
         image_data = np.asarray(Image.open(self.image_paths[idx]))
         actual_h, actual_w = image_data.shape[:2]
@@ -459,19 +369,15 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         output_dict = {
             "data": torch.tensor(image_data).unsqueeze(0),
             "pose": torch.tensor(self.poses[idx]).unsqueeze(0),
-            "intr": camera_id,  # Use actual camera ID
-            "image_dims": (actual_h, actual_w),  # Store actual dimensions
+            "intr": self.get_intrinsics_idx(idx),
         }
 
         # Only add mask to dictionary if it exists
         if os.path.exists(mask_path := self.mask_paths[idx]):
-            try:
-                mask = torch.from_numpy(
-                    np.array(Image.open(mask_path).convert("L"))
-                ).reshape(1, actual_h, actual_w, 1)
-                output_dict["mask"] = mask
-            except:
-                print(1)
+            mask = torch.from_numpy(
+                np.array(Image.open(mask_path).convert("L"))
+            ).reshape(1, actual_h, actual_w, 1)
+            output_dict["mask"] = mask
 
         return output_dict
 
@@ -485,12 +391,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         assert data.dtype == torch.float32
         assert pose.dtype == torch.float32
 
-        # Ensure intrinsics cache is properly initialized for current worker
-        self._ensure_intrinsics_initialized()
-
         # Get intrinsics for current worker
-        worker_id = self._get_worker_id()
-        worker_intrinsics = self._worker_gpu_cache.get(worker_id, self.intrinsics)
+        worker_intrinsics = self._lazy_worker_intrinsics_cache()
 
         camera_params_dict, rays_ori, rays_dir, camera_name = worker_intrinsics[intr]
 
@@ -500,7 +402,6 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             "rays_dir": rays_dir,
             "T_to_world": pose,
             f"intrinsics_{camera_name}": camera_params_dict,
-            # "camera_id": [camera_id],  # Include camera ID in sample
         }
 
         if "mask" in batch:
