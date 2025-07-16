@@ -57,6 +57,9 @@ def setup_playground(conf):
 
     # Compiler options.
     cc_flags = ["-DNVDR_TORCH"]
+    # Add Windows-specific flags
+    if os.name == "nt":
+        cc_flags.append("/DNOMINMAX")
 
     nvcc_flags = [
         "-DNVDR_TORCH",

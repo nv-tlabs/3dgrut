@@ -151,6 +151,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 params.to_dict(),
                 torch.tensor(rays_o_cam, dtype=torch.float32).reshape(out_shape),
                 torch.tensor(rays_d_cam, dtype=torch.float32).reshape(out_shape),
+                torch.tensor(rays_o_cam, dtype=torch.float32).reshape(out_shape),
+                torch.tensor(rays_d_cam, dtype=torch.float32).reshape(out_shape),
                 type(params).__name__,
             )
 
@@ -180,7 +182,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 shutter_type=ShutterType.GLOBAL,
             )
             pixel_coords = torch.tensor(np.stack([u, v], axis=1), dtype=torch.int32)
+            pixel_coords = torch.tensor(np.stack([u, v], axis=1), dtype=torch.int32)
             image_points = pixels_to_image_points(pixel_coords)
+            rays_d_cam = image_points_to_camera_rays(params, image_points)
             rays_d_cam = image_points_to_camera_rays(params, image_points)
             rays_o_cam = torch.zeros_like(rays_d_cam)
             return (
@@ -190,6 +194,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 type(params).__name__,
             )
 
+        cam_id_to_image_name = {
+            extr.camera_id: extr.name for extr in self.cam_extrinsics
+        }
         cam_id_to_image_name = {
             extr.camera_id: extr.name for extr in self.cam_extrinsics
         }
@@ -206,6 +213,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 with Image.open(image_path) as img:
                     width, height = img.size
             except FileNotFoundError:
+                logger.error(
+                    f"Image {image_path} not found. Cannot determine dimensions for intrinsic ID {intr.id}."
+                )
                 logger.error(
                     f"Image {image_path} not found. Cannot determine dimensions for intrinsic ID {intr.id}."
                 )
@@ -271,6 +281,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             self.image_paths.append(image_path)
 
             # Mask path
+            # Mask path
             self.mask_paths.append(os.path.splitext(image_path)[0] + "_mask.png")
 
         self.camera_centers = np.array(cam_centers)
@@ -306,6 +317,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                     camera_name,
                 )
             self._worker_gpu_cache[worker_id] = worker_intrinsics
+
+        return self._worker_gpu_cache[worker_id]
 
         return self._worker_gpu_cache[worker_id]
 

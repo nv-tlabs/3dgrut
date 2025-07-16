@@ -565,9 +565,11 @@ def read_colmap_extrinsics_text(path):
     return sorted(images, key=lambda x: x.name)
 
 
+
 def worker_init_fn(worker_id):
     """
     Worker initialization function for DataLoader multiprocessing.
+
 
     This function ensures that each worker process has a proper CUDA context
     and random number generator state, which is especially important on Windows.
@@ -576,11 +578,13 @@ def worker_init_fn(worker_id):
     import numpy as np
     import torch
 
+
     # Set random seeds for reproducibility
     worker_seed = torch.initial_seed() % 2**32
     random.seed(worker_seed)
     np.random.seed(worker_seed)
     torch.manual_seed(worker_seed)
+
 
     # Initialize CUDA context in worker process
     if torch.cuda.is_available():
@@ -590,13 +594,16 @@ def worker_init_fn(worker_id):
         torch.cuda.synchronize()
 
 
+
 def configure_dataloader_for_platform(dataloader_kwargs: dict) -> dict:
     """
     Configure DataLoader kwargs for the current platform.
 
+
     Args:
         dataloader_kwargs: Dictionary of DataLoader arguments
         force_windows_multiprocessing: If True, allow multiprocessing on Windows despite potential issues
+
 
     Returns:
         Updated DataLoader kwargs
@@ -607,11 +614,22 @@ def configure_dataloader_for_platform(dataloader_kwargs: dict) -> dict:
         original_num_workers = kwargs["num_workers"]
         kwargs["num_workers"] = original_num_workers
 
+
+    if "num_workers" in kwargs:
+        original_num_workers = kwargs["num_workers"]
+        kwargs["num_workers"] = original_num_workers
+
         # Adjust persistent_workers based on actual num_workers
         if "persistent_workers" in kwargs:
             kwargs["persistent_workers"] = kwargs["num_workers"] > 0
 
+        if "persistent_workers" in kwargs:
+            kwargs["persistent_workers"] = kwargs["num_workers"] > 0
+
         # On Windows with multiprocessing, add worker initialization function
+        if platform.system() == "Windows" and kwargs["num_workers"] > 0:
+            kwargs["worker_init_fn"] = worker_init_fn
+
         if platform.system() == "Windows" and kwargs["num_workers"] > 0:
             kwargs["worker_init_fn"] = worker_init_fn
 
