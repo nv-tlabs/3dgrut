@@ -95,7 +95,10 @@ class GUI:
             self.viz_render_subsample = 4
 
         self.train_dataset = train_dataset
+
         self.model = model
+        self.model.build_acc()
+
         ps.init()
         self.ps_point_cloud = ps.register_point_cloud(
             "centers", to_np(model.positions), radius=1e-3, point_render_mode="quad"
