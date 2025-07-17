@@ -21,6 +21,12 @@
 //
 // If you use this code in your research, please cite the above works.
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
+
 #include "gaussian_mcmc.h"
 #include <vector>
 
