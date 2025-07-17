@@ -22,6 +22,12 @@
 //
 // If you use this code in your research, please cite the above works.
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
+
 #include <torch/extension.h>
 
 #include <ATen/TensorUtils.h>
