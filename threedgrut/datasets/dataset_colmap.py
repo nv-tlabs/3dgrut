@@ -434,7 +434,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             )
 
             # Get camera ID and corresponding intrinsics
-            camera_id = self.camera_ids[i_cam]
+            camera_id = self.get_intrinsics_idx(i_cam)
             intr, _, _, _ = self.intrinsics[camera_id]
 
             # Load actual image to get dimensions
@@ -462,7 +462,6 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                     "fov_h": fov_h,
                     "rgb_img": rgb,
                     "split": self.split,
-                    "camera_id": camera_id,  # Include camera ID for reference
                 }
             )
 

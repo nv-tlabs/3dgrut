@@ -22,6 +22,12 @@
 //
 // If you use this code in your research, please cite the above works.
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
+
 #include <ATen/Dispatch.h> // AT_DISPATCH_XXX
 #include <ATen/core/Tensor.h>
 #include <c10/cuda/CUDAStream.h> // at::cuda::getCurrentCUDAStream
