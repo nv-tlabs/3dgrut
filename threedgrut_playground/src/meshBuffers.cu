@@ -33,8 +33,8 @@ inline __host__ uint32_t div_round_up(uint32_t val, uint32_t divisor) {
 
 __global__ void computeMeshFaceBufferKernel(
     const uint32_t fNum,
-    const float3* verts,
-    const int3* faces,
+    const float3* __restrict__ verts,
+    const int3* __restrict__ faces,
     float3* __restrict__ fPrimVrt,
     int3* __restrict__ fPrimTri) {
 
