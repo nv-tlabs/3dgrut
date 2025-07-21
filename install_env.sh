@@ -84,7 +84,6 @@ if [ "$WITH_GCC11" = true ]; then
     GCC_11_PATH=$(which gcc-11)
     GXX_11_PATH=$(which g++-11)
 fi
-GCC_VERSION=$($GCC_11_PATH -dumpversion | cut -d '.' -f 1)
 
 # Create and activate conda environment
 eval "$(conda shell.bash hook)"
@@ -131,8 +130,18 @@ if [ "$CUDA_VERSION" = "11.8.0" ]; then
 
 # CUDA 12.8 supports compute capability 10.0 and 12.0
 elif [ "$CUDA_VERSION" = "12.8.1" ]; then
+
+    # get the GCC version so we can use it in the install command below
+    # the _PATHs might already be set
+    if [ ! "$WITH_GCC11" = true ]; then
+        GCC_11_PATH=$(which gcc)
+        GXX_11_PATH=$(which g++)
+    fi
+
+    gcc_version=$($GCC_11_PATH -dumpversion | cut -d '.' -f 1)
+
     echo "Installing CUDA 12.8.1 ..."
-    conda install -y cuda-toolkit cmake ninja gcc_linux-64=$GCC_VERSION -c nvidia/label/cuda-12.8.1
+    conda install -y cuda-toolkit cmake ninja gcc_linux-64=$gcc_version -c nvidia/label/cuda-12.8.1
     pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
     pip3 install --force-reinstall "numpy<2"
 
