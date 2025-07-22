@@ -338,8 +338,8 @@ class Trainer3DGRUT:
         rgb_pred = outputs["pred_rgb"]
 
         psnr = self.criterions["psnr"]
-        ssim = self.criterions["ssim"]
-        lpips = self.criterions["lpips"]
+        ssim = self.criterions["ssim"] if "ssim" in self.criterions else None
+        lpips = self.criterions["lpips"] if "lpips" in self.criterions else None
 
         # Move losses to cpu once
         metrics["losses"] = {k: v.detach().item() for k, v in losses.items()}
@@ -362,9 +362,11 @@ class Trainer3DGRUT:
             pred_rgb_full_clipped = rgb_pred.clip(0, 1).permute(0, 3, 1, 2)
 
             with torch.cuda.nvtx.range(f"criterions_ssim"):
-                metrics["ssim"] = ssim(pred_rgb_full, rgb_gt_full).item()
+                if ssim is not None:
+                    metrics["ssim"] = ssim(pred_rgb_full, rgb_gt_full).item()
             with torch.cuda.nvtx.range(f"criterions_lpips"):
-                metrics["lpips"] = lpips(pred_rgb_full_clipped, rgb_gt_full).item()
+                if lpips is not None:
+                    metrics["lpips"] = lpips(pred_rgb_full_clipped, rgb_gt_full).item()
 
             if iteration in self.conf.writer.log_image_views:
                 metrics["img_hit_counts"] = jet_map(outputs["hits_count"][-1], self.conf.writer.max_num_hits)
@@ -482,15 +484,21 @@ class Trainer3DGRUT:
         global_step = self.global_step
 
         if "img_pred" in metrics:
-            writer.add_images("image/pred/val", torch.stack(metrics["img_pred"]), global_step, dataformats="NHWC")
+            writer.add_images(
+                "image/pred/val", torch.stack(metrics["img_pred"]), global_step, dataformats="NHWC"
+            )
         if "img_gt" in metrics:
-            writer.add_images("image/gt", torch.stack(metrics["img_gt"]), global_step, dataformats="NHWC")
+            writer.add_images(
+                "image/gt", torch.stack(metrics["img_gt"]), global_step, dataformats="NHWC"
+            )
         if "img_hit_counts" in metrics:
             writer.add_images(
                 "image/hit_counts/val", torch.stack(metrics["img_hit_counts"]), global_step, dataformats="NHWC"
             )
         if "img_pred_dist" in metrics:
-            writer.add_images("image/dist/val", torch.stack(metrics["img_pred_dist"]), global_step, dataformats="NHWC")
+            writer.add_images(
+                "image/dist/val", torch.stack(metrics["img_pred_dist"]), global_step, dataformats="NHWC"
+            )
         if "img_pred_opacity" in metrics:
             writer.add_images(
                 "image/opacity/val", torch.stack(metrics["img_pred_opacity"]), global_step, dataformats="NHWC"
@@ -506,8 +514,10 @@ class Trainer3DGRUT:
 
         mean_psnr = np.mean(metrics["psnr"])
         writer.add_scalar("psnr/val", mean_psnr, global_step)
-        writer.add_scalar("ssim/val", np.mean(metrics["ssim"]), global_step)
-        writer.add_scalar("lpips/val", np.mean(metrics["lpips"]), global_step)
+        if "ssim" in metrics:
+            writer.add_scalar("ssim/val", np.mean(metrics["ssim"]), global_step)
+        if "lpips" in metrics:
+            writer.add_scalar("lpips/val", np.mean(metrics["lpips"]), global_step)
         writer.add_scalar("hits/min/val", np.mean(metrics["hits_min"]), global_step)
         writer.add_scalar("hits/max/val", np.mean(metrics["hits_max"]), global_step)
         writer.add_scalar("hits/mean/val", np.mean(metrics["hits_mean"]), global_step)
@@ -882,6 +892,7 @@ class Trainer3DGRUT:
             n_epochs=f"{self.n_epochs}",
             training_time=f"{stats['elapsed']:.2f} s",
             iteration_speed=f"{self.global_step / stats['elapsed']:.2f} it/s",
+            n_particles=f"{self.model.num_gaussians}",
         )
         logger.log_table(f"🎊 Training Statistics", record=table)
 

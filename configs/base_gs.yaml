@@ -17,7 +17,7 @@ use_wandb: false
 wandb_project: "3dgrt"
 test_last: true
 validate_first: false
-log_frequency: 1
+log_frequency: 1000
 compute_extra_metrics: true
 
 enable_frame_timings: false
