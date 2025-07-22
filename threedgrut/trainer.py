@@ -892,6 +892,7 @@ class Trainer3DGRUT:
             n_epochs=f"{self.n_epochs}",
             training_time=f"{stats['elapsed']:.2f} s",
             iteration_speed=f"{self.global_step / stats['elapsed']:.2f} it/s",
+            n_particles=f"{self.model.num_gaussians}",
         )
         logger.log_table(f"🎊 Training Statistics", record=table)
 
