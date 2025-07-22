@@ -23,13 +23,13 @@ def make(name: str, config, ray_jitter):
         case "nerf":
             train_dataset = NeRFDataset(
                 config.path,
-                split="train",
+                split="trainval",
                 bg_color=config.model.background.color,
                 ray_jitter=ray_jitter,
             )
             val_dataset = NeRFDataset(
                 config.path,
-                split="val",
+                split="trainval",
                 bg_color=config.model.background.color,
             )
         case "colmap":
