@@ -14,10 +14,22 @@ defaults:
 val_frequency: 999999 # never validate
 
 initialization:
-  n_gaussians: 10000 # Initial number of Gaussians
+  n_gaussians: 20000 # Initial number of Gaussians
   xyz_max: 1.0
   xyz_min: 0.0
 
 model:
   background:
-    color: "white"
+    color: white
+
+writer:
+  log_image_views: ${int_list:[]}
+
+checkpoint:
+  iterations: ${int_list:[]}
+
+export_ingp:
+  enabled: false
+
+export_ply:
+  enabled: true
