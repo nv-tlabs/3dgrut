@@ -128,6 +128,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def read_meta(self, split):
         self.poses = []
+        self.image_data = []
         self.image_paths = []
         self.mask_paths = []
 
@@ -155,6 +156,15 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 os.path.join(self.root_dir, f"{frame['file_path']}") + self.suffix
             )
             self.image_paths.append(img_path)
+
+            self.image_data.append(
+                NeRFDataset.__read_image(
+                    img_path,
+                    self.img_wh,
+                    return_alpha=False,
+                    bg_color=self.bg_color,
+                )
+            )
 
             # We assume that the mask is stored in the same folder as the image with the same name but with _mask.png extension.
             # If the mask does not exist, we will return None in the batch
@@ -216,12 +226,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def __getitem__(self, idx) -> dict:
         out_shape = (1, self.image_h, self.image_w, 3)
-        img = NeRFDataset.__read_image(
-            self.image_paths[idx],
-            self.img_wh,
-            return_alpha=False,
-            bg_color=self.bg_color,
-        )
+        img = self.image_data[idx]
 
         output_dict = {
             "data": torch.tensor(img).reshape(out_shape),
