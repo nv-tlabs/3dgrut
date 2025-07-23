@@ -18,8 +18,8 @@
 #include <optix.h>
 
 void computeMeshFaceBuffer(uint32_t fNum,
-                           const float3* __restrict__ verts,
-                           const int3* __restrict__ faces,
+                           const float3* verts,
+                           const int3* faces,
                            float3* fPrimVrt,
                            int3* fPrimTri,
                            cudaStream_t stream);
