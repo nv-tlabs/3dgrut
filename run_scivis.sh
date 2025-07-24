@@ -13,6 +13,13 @@ runjob() {
     local id=$1
 
     local scene=${PREFIX}_0${NUMBERS[id]}
+    
+    # skip if "Training Complete." is in the log
+    if grep -q "Training Complete." $OUT_DIR/nyx_${PREFIX}_$scene.log; then
+        echo "=== Skipping scene: $scene ==="
+        return
+    fi
+
     echo "=== Running scene: $scene ==="
 
     python train.py --config-name apps/scivis_3dgut_gs.yaml \
@@ -26,6 +33,6 @@ runjob() {
 #     runjob $i
 # done
 
-for i in {201..600}; do
+for i in {0..599}; do
     runjob $i
 done
