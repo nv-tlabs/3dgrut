@@ -27,12 +27,6 @@ runjob() {
 }
 
 # Command to submit: sbatch --array=0-1 benchmark/slurm_scivis.sh
-# 600 in total
-
-# for i in {3..200}; do
-#     runjob $i
-# done
-
 for i in {0..599}; do
     runjob $i
 done
