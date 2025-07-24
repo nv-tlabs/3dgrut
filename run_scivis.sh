@@ -1,6 +1,6 @@
 #!/bin/bash
 
-OUT_DIR=results/scivis
+OUT_DIR=results/nyx_0155_00225_055_den
 
 export TORCH_EXTENSIONS_DIR=$OUT_DIR/.cache
 mkdir -p $OUT_DIR
@@ -15,7 +15,7 @@ runjob() {
     local scene=${PREFIX}_0${NUMBERS[id]}
     
     # skip if "Training Complete." is in the log
-    if grep -q "Training Complete." $OUT_DIR/nyx_${PREFIX}_$scene.log; then
+    if grep -q "Training Complete." $OUT_DIR/nyx_$scene.log; then
         echo "=== Skipping scene: $scene ==="
         return
     fi
@@ -23,10 +23,9 @@ runjob() {
     echo "=== Running scene: $scene ==="
 
     python train.py --config-name apps/scivis_3dgut_gs.yaml \
-        path=data/scivisgs/v0.1/nyx/$scene out_dir=$OUT_DIR > $OUT_DIR/nyx_${PREFIX}_$scene.log
+        path=data/scivisgs/v0.1/nyx/$scene out_dir=$OUT_DIR > $OUT_DIR/nyx_$scene.log
 }
 
-# Command to submit: sbatch --array=0-1 benchmark/slurm_scivis.sh
 for i in {0..599}; do
     runjob $i
 done
