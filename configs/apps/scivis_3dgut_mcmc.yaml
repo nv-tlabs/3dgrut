@@ -23,3 +23,15 @@ model:
 strategy:
   add:
     max_n_gaussians: 40000 # Maximum number of Gaussians
+
+writer:
+  log_image_views: ${int_list:[]}
+
+checkpoint:
+  iterations: ${int_list:[]}
+
+export_ingp:
+  enabled: false
+
+export_ply:
+  enabled: true

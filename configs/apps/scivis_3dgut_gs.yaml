@@ -14,7 +14,6 @@ defaults:
 val_frequency: 999999 # never validate
 
 initialization:
-  n_gaussians: 20000 # Initial number of Gaussians
   xyz_max: 1.0
   xyz_min: 0.0
 
