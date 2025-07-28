@@ -199,6 +199,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             full_height = intr.height
 
             image_name = cam_id_to_image_name[intr.id]
+            image_name = os.path.join(os.path.split(image_name)[1], '') if self.get_images_folder() in image_name else image_name
             image_path = os.path.join(self.path, self.get_images_folder(), image_name)
 
             try:
