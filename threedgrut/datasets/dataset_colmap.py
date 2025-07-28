@@ -198,7 +198,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             full_width = intr.width
             full_height = intr.height
 
-            image_name = os.path.basename(cam_id_to_image_name[intr.id])
+            image_name = cam_id_to_image_name[intr.id]
             image_path = os.path.join(self.path, self.get_images_folder(), image_name)
 
             try:
