@@ -118,7 +118,7 @@ def fill_3dgut_template(
     rotation_activation: str = "normalize",
     density_kernel_degree: int = 2,
     density_kernel_density_clamping: bool = False,
-    density_kernel_min_response: float = 0.0,
+    density_kernel_min_response: float = 0.0113,
     radiance_sph_degree: int = 3,
     transmittance_threshold: float = 0.001,
     global_z_order: bool = False,
