@@ -38,7 +38,7 @@ import_ingp:
   init_global_step: 0
 
 export_ply:
-  enabled: false
+  enabled: true
   path: ""
 import_ply:
   enabled: false

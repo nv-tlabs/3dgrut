@@ -41,8 +41,9 @@ class ScannetppDataset(ColmapDataset):
         self.cam_intrinsics = read_colmap_intrinsics_text(cameras_intrinsic_file)
 
         # Remove camera distortions because images are already undistorted
-        for intr in self.cam_intrinsics.values():
-            intr.params[4:] = 0.0
+        """for intr in self.cam_intrinsics.values():
+            intr.params[4:] = 0.0"""
 
     def get_images_folder(self):
+        return "images"
         return "image_undistorted_fisheye"

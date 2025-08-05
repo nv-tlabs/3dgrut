@@ -63,6 +63,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.downsample_factor = downsample_factor
         self.ray_jitter = ray_jitter
         self.test_split_interval = test_split_interval
+        self.use_circular_mask = True
+
 
         # Worker-based GPU cache for multiprocessing compatibility
         self._worker_gpu_cache = {}
@@ -153,6 +155,116 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 torch.tensor(rays_d_cam, dtype=torch.float32).reshape(out_shape),
                 type(params).__name__,
             )
+        import torch
+        import numpy as np
+
+        def export_rays_to_ply(rays_tensor, filename="fisheye_rays.ply", 
+                            subsample_factor=1, ray_length=1.0):
+            """
+            Quick export of camera rays to PLY format
+            
+            Args:
+                rays_tensor: torch.Tensor [N, 3] of ray directions
+                filename: output PLY filename
+                subsample_factor: factor to reduce number of points (1 = all points)
+                ray_length: length to scale the rays for visualization
+            """
+            
+            # Subsample to manageable size
+            rays_np = rays_tensor[::subsample_factor].cpu().numpy()
+            
+            # Scale rays and ensure they're unit vectors
+            rays_normalized = rays_np / np.linalg.norm(rays_np, axis=1, keepdims=True)
+            points = ray_length * rays_normalized
+            
+            # Color by direction for nice visualization
+            # Map X,Y,Z to R,G,B (shift and scale to [0,1])
+            colors = (rays_normalized + 1.0) / 2.0 * 255
+            colors = np.clip(colors, 0, 255).astype(np.uint8)
+            
+            # Write PLY file
+            n_points = len(points)
+            
+            with open(filename, 'w') as f:
+                # PLY header
+                f.write("ply\n")
+                f.write("format ascii 1.0\n")
+                f.write(f"element vertex {n_points}\n")
+                f.write("property float x\n")
+                f.write("property float y\n") 
+                f.write("property float z\n")
+                f.write("property uchar red\n")
+                f.write("property uchar green\n")
+                f.write("property uchar blue\n")
+                f.write("end_header\n")
+                
+                # Write vertices with colors
+                for i in range(n_points):
+                    x, y, z = points[i]
+                    r, g, b = colors[i]
+                    f.write(f"{x:.6f} {y:.6f} {z:.6f} {r} {g} {b}\n")
+            
+            print(f"Exported {n_points} ray endpoints to {filename}")
+            print(f"Original rays: {rays_tensor.shape[0]:,}")
+            print(f"Subsampled by factor {subsample_factor}")
+
+        def export_rays_with_lines_ply(rays_tensor, filename="fisheye_rays_lines.ply",
+                                    subsample_factor=100, ray_length=1.0):
+            """
+            Export rays as line segments from origin to endpoints
+            """
+            
+            # Subsample
+            rays_np = rays_tensor[::subsample_factor].cpu().numpy()
+            rays_normalized = rays_np / np.linalg.norm(rays_np, axis=1, keepdims=True)
+            
+            n_rays = len(rays_normalized)
+            
+            # Create vertices: origin + endpoints
+            vertices = []
+            edges = []
+            
+            # Add origin once
+            vertices.append([0.0, 0.0, 0.0])
+            origin_idx = 0
+            
+            # Add ray endpoints and create edges
+            for i, ray in enumerate(rays_normalized):
+                endpoint = ray_length * ray
+                vertices.append(endpoint)
+                endpoint_idx = i + 1
+                edges.append([origin_idx, endpoint_idx])
+            
+            vertices = np.array(vertices)
+            n_vertices = len(vertices)
+            n_edges = len(edges)
+            
+            # Write PLY with edges
+            with open(filename, 'w') as f:
+                f.write("ply\n")
+                f.write("format ascii 1.0\n")
+                f.write(f"element vertex {n_vertices}\n")
+                f.write("property float x\n")
+                f.write("property float y\n")
+                f.write("property float z\n")
+                f.write(f"element edge {n_edges}\n")
+                f.write("property int vertex1\n")
+                f.write("property int vertex2\n")
+                f.write("end_header\n")
+                
+                # Write vertices
+                for vertex in vertices:
+                    f.write(f"{vertex[0]:.6f} {vertex[1]:.6f} {vertex[2]:.6f}\n")
+                
+                # Write edges
+                for edge in edges:
+                    f.write(f"{edge[0]} {edge[1]}\n")
+            
+            print(f"Exported {n_rays} rays as line segments to {filename}")
+
+        # Usage with your data:
+        # rays = torch.tensor([...])  # Your 14745600x3 tensor
+
 
         def create_fisheye_camera(params, w, h):
             # Generate UV coordinates
@@ -163,13 +275,15 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             principal_point = params[2:4].astype(np.float32)
             focal_length = params[0:2].astype(np.float32)
             radial_coeffs = params[4:].astype(np.float32)
+
             # Estimate max angle for fisheye
             max_radius_pixels = compute_max_radius(
                 resolution.astype(np.float64), principal_point
             )
+            max_radius_pixels = principal_point
             fov_angle_x = 2.0 * max_radius_pixels / focal_length[0]
             fov_angle_y = 2.0 * max_radius_pixels / focal_length[1]
-            max_angle = np.max([fov_angle_x, fov_angle_y]) / 2.0
+            max_angle = np.max([fov_angle_x, fov_angle_y]) / 2.0 # np.pi/2
 
             params = OpenCVFisheyeCameraModelParameters(
                 principal_point=principal_point,
@@ -183,6 +297,34 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             image_points = pixels_to_image_points(pixel_coords)
             rays_d_cam = image_points_to_camera_rays(params, image_points)
             rays_o_cam = torch.zeros_like(rays_d_cam)
+            if self.use_circular_mask:
+                rays_d_cam_full =rays_d_cam
+                cx, cy = w / 2.0, h / 2.0
+                R = min(w, h) / 2.0
+                border_offset = 300.0  # You can make this configurable
+                
+                # Create coordinate grids
+                x_coords = u.reshape(h, w)
+                y_coords = v.reshape(h, w)
+                
+                # Calculate distance from center for each pixel
+                r = np.sqrt((x_coords - cx) ** 2 + (y_coords - cy) ** 2)
+                
+                # Create circular mask
+                mask = (r < (R - border_offset))
+                mask_flat = mask.flatten()
+                
+                # Apply mask: set rays outside the circle to [0, 0, 1] (forward direction)
+                rays_d_cam = rays_d_cam_full.clone()
+                #rays_d_cam[~mask_flat] = torch.tensor([0, 0, 0], dtype=torch.float32)
+                rays_d_cam[~mask_flat] = float('nan')
+                # Create rays_o_cam (origin rays, all zeros)
+                rays_o_cam = torch.zeros_like(rays_d_cam)
+                
+                # Debug print to verify shapes match
+                print(f"rays_d_cam_full shape: {rays_d_cam_full.shape}")
+                print(f"rays_d_cam_masked shape: {rays_d_cam.shape}")
+                print(f"Number of valid pixels in mask: {mask_flat.sum()}")
             return (
                 params.to_dict(),
                 rays_o_cam.to(torch.float32).reshape(out_shape),

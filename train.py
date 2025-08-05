@@ -40,8 +40,8 @@ def main(conf: DictConfig) -> None:
     from threedgrut.trainer import Trainer3DGRUT
 
     # # NOTE: It is also possible to directly instantiate a trainer from a checkpoint/INGP/PLY file
-    # c = OmegaConf.load("example.yaml")
-    # trainer = Trainer3DGRUT.create_from_ckpt("checkpoint.pt", DictConfig(c))
+    #c = OmegaConf.load("/home/ipek/forks/private/3dgrut/configs/apps/scannetpp_3dgut.yaml")
+    #trainer = Trainer3DGRUT.create_from_checkpoint("/home/ipek/forks/private/3dgrut/runs/distorted/woods_100-0108_155447/ckpt_last.pt", conf)
     # trainer = Trainer3DGRUT.create_from_ingp("export_last.ingp", DictConfig(c))
     # trainer = Trainer3DGRUT.create_from_ply("export_last.ply", DictConfig(c))
 

@@ -135,6 +135,43 @@ class Trainer3DGRUT:
         self.setup_training(conf, self.model, self.train_dataset)
         self.init_experiments_tracking(conf)
         self.init_gui(conf, self.model, self.train_dataset, self.val_dataset, self.scene_bbox)
+        self.use_circular_mask = True
+
+    def create_circular_mask(self, image_shape: tuple, border_offset: float = 100.0) -> torch.Tensor:
+        """Create circular mask for fisheye images to exclude black border regions.
+        
+        Args:
+            image_shape: Shape of the image tensor (batch, height, width, channels)
+            border_offset: Optional border offset in pixels to shrink the valid region
+        
+        Returns:
+            torch.Tensor: Binary mask with 1 for valid pixels, 0 for invalid
+        """
+        batch, height, width, channels = image_shape
+        
+        # Create coordinate grids
+        device = self.device
+        y, x = torch.meshgrid(
+            torch.arange(height, device=device, dtype=torch.float32),
+            torch.arange(width, device=device, dtype=torch.float32),
+            indexing='ij'
+        )
+        
+        # Calculate center and radius
+        cx, cy = width / 2.0, height / 2.0
+        R = min(width, height) / 2.0
+        
+        # Calculate distance from center
+        r = torch.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+        
+        # Create circular mask (largest circle that fits in image)
+        circular_mask = (r < (R - border_offset)).float()
+        
+        # Expand to match batch and channel dimensions
+        circular_mask = circular_mask.unsqueeze(0).unsqueeze(-1)  # [1, H, W, 1]
+        circular_mask = circular_mask.repeat(batch, 1, 1, 1)      # [B, H, W, 1]
+        return circular_mask
+
 
     def init_dataloaders(self, conf: DictConfig):
         from threedgrut.datasets.utils import configure_dataloader_for_platform
@@ -337,6 +374,15 @@ class Trainer3DGRUT:
         rgb_gt = gpu_batch.rgb_gt
         rgb_pred = outputs["pred_rgb"]
 
+        if self.use_circular_mask:
+            circular_mask = self.create_circular_mask(rgb_gt.shape, border_offset=300.0)
+            if circular_mask.shape[-1] == 1 and rgb_gt.shape[-1] == 3:
+                circular_mask = circular_mask.repeat(1, 1, 1, 3)
+            
+            # Apply mask
+            rgb_gt = rgb_gt * circular_mask
+            rgb_pred = rgb_pred * circular_mask
+
         psnr = self.criterions["psnr"]
         ssim = self.criterions["ssim"]
         lpips = self.criterions["lpips"]
@@ -397,11 +443,15 @@ class Trainer3DGRUT:
         rgb_gt = gpu_batch.rgb_gt
         rgb_pred = outputs["pred_rgb"]
         mask = gpu_batch.mask
+        if self.use_circular_mask:
+            circular_mask = self.create_circular_mask(rgb_gt.shape, border_offset=300.0)
+            rgb_gt = rgb_gt * circular_mask
+            rgb_pred = rgb_pred * circular_mask
         
-        # Mask out the invalid pixels if the mask is provided
+        """# Mask out the invalid pixels if the mask is provided
         if mask is not None:
             rgb_gt = rgb_gt * mask
-            rgb_pred = rgb_pred * mask
+            rgb_pred = rgb_pred * mask"""
 
         # L1 loss
         loss_l1 = torch.zeros(1, device=self.device)
@@ -689,6 +739,427 @@ class Trainer3DGRUT:
             if ps.window_requests_close():
                 logger.warning("Terminating training from GUI window is not supported. Please terminate it from the terminal.")
 
+    def save_training_images(self, gpu_batch: dict[str, torch.Tensor], outputs: dict[str, torch.Tensor], global_step: int):
+        """Save GT and rendered images during training at specified intervals."""
+        import os
+        from PIL import Image
+        import torch
+        import numpy as np
+        
+        # Create directories for saving images
+        out_dir = self.tracking.output_dir
+        gt_dir = os.path.join(out_dir, "training_images", "gt")
+        render_dir = os.path.join(out_dir, "training_images", "renders")
+        os.makedirs(gt_dir, exist_ok=True)
+        os.makedirs(render_dir, exist_ok=True)
+        
+        # Get GT and predicted images
+        rgb_gt = gpu_batch.rgb_gt[0].detach().cpu()  # Take first image from batch
+        rgb_pred = outputs["pred_rgb"][0].detach().cpu()  # Take first image from batch
+        
+        # Clip values to [0, 1] range
+        rgb_gt = torch.clamp(rgb_gt, 0, 1)
+        rgb_pred = torch.clamp(rgb_pred, 0, 1)
+        
+        # Convert to numpy and scale to [0, 255]
+        gt_np = (rgb_gt.numpy() * 255).astype(np.uint8)
+        pred_np = (rgb_pred.numpy() * 255).astype(np.uint8)
+        
+        # Save images
+        gt_path = os.path.join(gt_dir, f"gt_step_{global_step:06d}.png")
+        render_path = os.path.join(render_dir, f"render_step_{global_step:06d}.png")
+        
+        Image.fromarray(gt_np).save(gt_path)
+        Image.fromarray(pred_np).save(render_path)
+        
+        # Helper function to safely convert tensor to image array
+        def tensor_to_image_array(tensor, normalize_range=None):
+            """Convert tensor to numpy array suitable for PIL Image."""
+            # Move to CPU and detach
+            tensor = tensor.detach().cpu()
+            
+            # Handle different tensor shapes
+            if tensor.dim() == 4:  # (1, H, W, C) or (1, C, H, W)
+                tensor = tensor.squeeze(0)  # Remove batch dimension
+            elif tensor.dim() == 3 and tensor.shape[0] == 1:  # (1, H, W)
+                tensor = tensor.squeeze(0)  # Remove first dimension if it's 1
+            
+            # Normalize if specified
+            if normalize_range is not None:
+                min_val, max_val = normalize_range
+                tensor = torch.clamp(tensor / max_val, 0, 1)
+            else:
+                tensor = torch.clamp(tensor, 0, 1)
+            
+            # Convert to numpy
+            np_array = tensor.numpy()
+            
+            # Handle grayscale to RGB conversion
+            if np_array.ndim == 2:  # Grayscale (H, W)
+                np_array = np.stack([np_array, np_array, np_array], axis=-1)
+            elif np_array.ndim == 3 and np_array.shape[-1] == 1:  # (H, W, 1)
+                np_array = np.repeat(np_array, 3, axis=-1)
+            
+            # Scale to [0, 255] and convert to uint8
+            return (np_array * 255).astype(np.uint8)
+        
+        # Optional: Save additional outputs if available
+        if "pred_dist" in outputs:
+            try:
+                dist_dir = os.path.join(out_dir, "training_images", "distance")
+                os.makedirs(dist_dir, exist_ok=True)
+                
+                pred_dist = outputs["pred_dist"][0]
+                dist_np = tensor_to_image_array(pred_dist, normalize_range=(0, 100))
+                
+                dist_path = os.path.join(dist_dir, f"distance_step_{global_step:06d}.png")
+                Image.fromarray(dist_np).save(dist_path)
+            except Exception as e:
+                logger.warning(f"Failed to save distance image: {e}")
+        
+        if "pred_opacity" in outputs:
+            try:
+                opacity_dir = os.path.join(out_dir, "training_images", "opacity")
+                os.makedirs(opacity_dir, exist_ok=True)
+                
+                pred_opacity = outputs["pred_opacity"][0]
+                opacity_np = tensor_to_image_array(pred_opacity)
+                
+                opacity_path = os.path.join(opacity_dir, f"opacity_step_{global_step:06d}.png")
+                Image.fromarray(opacity_np).save(opacity_path)
+            except Exception as e:
+                logger.warning(f"Failed to save opacity image: {e}")
+        
+        # Save hit counts visualization if available
+        if "hits_count" in outputs:
+            try:
+                hits_dir = os.path.join(out_dir, "training_images", "hits")
+                os.makedirs(hits_dir, exist_ok=True)
+                
+                hits_count = outputs["hits_count"][0]
+                hits_np = tensor_to_image_array(hits_count, normalize_range=(0, 50))  # Adjust max hits as needed
+                
+                hits_path = os.path.join(hits_dir, f"hits_step_{global_step:06d}.png")
+                Image.fromarray(hits_np).save(hits_path)
+            except Exception as e:
+                logger.warning(f"Failed to save hits image: {e}")
+
+        # Compute and save error map
+        try:
+            error_dir = os.path.join(out_dir, "training_images", "error_maps")
+            os.makedirs(error_dir, exist_ok=True)
+            
+            # Ensure both images have the same shape
+            gt_for_error = rgb_gt.numpy()
+            pred_for_error = rgb_pred.numpy()
+            
+            # Compute error map (L1 distance)
+            error_map = np.abs(gt_for_error - pred_for_error)
+            
+            # Average across channels if RGB
+            if error_map.ndim == 3 and error_map.shape[-1] == 3:
+                error_map = error_map.mean(axis=-1)
+            
+            # Normalize error map to [0, 1] for visualization
+            if error_map.max() > 0:
+                error_map = error_map / error_map.max()
+            
+            # Convert to RGB using a colormap
+            import matplotlib.cm as cm
+            colormap = cm.get_cmap('hot')
+            error_rgb = colormap(error_map)[:, :, :3]  # Remove alpha channel
+            error_rgb = (error_rgb * 255).astype(np.uint8)
+            
+            error_path = os.path.join(error_dir, f"error_step_{global_step:06d}.png")
+            Image.fromarray(error_rgb).save(error_path)
+            
+        except Exception as e:
+            logger.warning(f"Failed to save error map: {e}")
+        
+        logger.info(f"💾 Saved training images at step {global_step} to {out_dir}/training_images/")
+
+    # Add these methods to your Trainer3DGRUT class:
+
+    def save_gradient_analysis(self, gpu_batch: dict[str, torch.Tensor], outputs: dict[str, torch.Tensor], global_step: int):
+        """Save gradient norm analysis to understand why large Gaussians aren't being split."""
+        import matplotlib.pyplot as plt
+        import matplotlib.cm as cm
+        
+        try:
+            out_dir = self.tracking.output_dir
+            grad_dir = os.path.join(out_dir, "gradient_analysis")
+            os.makedirs(grad_dir, exist_ok=True)
+            
+            # Get the strategy to access gradient information
+            strategy = self.strategy
+            
+            # Check if we're using GS strategy which has gradient accumulation
+            if not hasattr(strategy, 'densify_grad_norm_accum') or strategy.densify_grad_norm_accum is None:
+                logger.warning("Gradient norm not available for current strategy")
+                return
+            
+            # Log sizes for debugging
+            logger.info(f"Gradient accumulator size: {strategy.densify_grad_norm_accum.shape}")
+            logger.info(f"Model num gaussians: {self.model.num_gaussians}")
+            
+            # Calculate accumulated gradient norms (same as in densify_gaussians method)
+            with torch.no_grad():
+                grad_norms = strategy.densify_grad_norm_accum / strategy.densify_grad_norm_denom
+                grad_norms[grad_norms.isnan()] = 0.0
+                grad_norms = grad_norms.squeeze()
+            
+            # Clone to CPU for visualization
+            grad_norms_cpu = grad_norms.clone().detach().cpu()
+            
+            # Get the split threshold
+            split_threshold = strategy.split_grad_threshold
+            clone_threshold = strategy.clone_grad_threshold
+
+            if 'mog_visibility' in outputs:
+                visibility = outputs['mog_visibility'].detach().cpu()
+                
+                # IMPORTANT: Squeeze visibility IMMEDIATELY to ensure it's 1D
+                while visibility.dim() > 1 and 1 in visibility.shape:
+                    visibility = visibility.squeeze()
+                
+                # If still not 1D, flatten it
+                if visibility.dim() > 1:
+                    visibility = visibility.flatten()
+                
+                logger.info(f"Visibility shape after processing: {visibility.shape}, grad_norms shape: {grad_norms_cpu.shape}")
+                
+                # Handle size mismatch
+                if len(visibility) != len(grad_norms_cpu):
+                    logger.warning(f"Visibility size {len(visibility)} doesn't match grad_norms size {len(grad_norms_cpu)}")
+                    # Use the minimum size
+                    min_size = min(len(visibility), len(grad_norms_cpu))
+                    visibility = visibility[:min_size]
+                    grad_norms_cpu = grad_norms_cpu[:min_size]
+                
+                visibility = visibility.bool()
+            else:
+                visibility = torch.ones(len(grad_norms_cpu), dtype=torch.bool)
+            
+            # Create comprehensive visualizations
+            fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+            fig.suptitle(f'Gradient Norm Analysis - Step {global_step}', fontsize=16)
+            
+            # 1. Histogram of gradient norms
+            ax = axes[0, 0]
+            visible_grads = grad_norms_cpu[visibility]
+            if len(visible_grads) > 0:
+                # Filter out zeros for better visualization
+                non_zero_grads = visible_grads[visible_grads > 0]
+                if len(non_zero_grads) > 0:
+                    ax.hist(non_zero_grads.numpy(), bins=100, alpha=0.7, color='blue', edgecolor='black')
+                    ax.axvline(split_threshold, color='red', linestyle='--', linewidth=2, label=f'Split Threshold: {split_threshold}')
+                    ax.axvline(clone_threshold, color='orange', linestyle='--', linewidth=2, label=f'Clone Threshold: {clone_threshold}')
+                    ax.set_xlabel('Gradient Norm')
+                    ax.set_ylabel('Count')
+                    ax.set_title('Distribution of Gradient Norms (Visible Gaussians, non-zero)')
+                    ax.legend()
+                    ax.set_yscale('log')
+                    ax.set_xscale('log')
+            
+            # 2. Gradient norms vs Gaussian scale
+            ax = axes[0, 1]
+            try:
+                scales = self.model.get_scale().detach().cpu()
+                # Ensure scales match our gradient norms size
+                scales = scales[:len(grad_norms_cpu)]
+                max_scale = scales.max(dim=1)[0]  # Max scale across dimensions
+                
+                non_zero_mask = (grad_norms_cpu > 0) & visibility
+                
+                if non_zero_mask.any():
+                    scatter = ax.scatter(max_scale[non_zero_mask], grad_norms_cpu[non_zero_mask], 
+                                    alpha=0.5, c=grad_norms_cpu[non_zero_mask], cmap='viridis', s=1)
+                    ax.axhline(split_threshold, color='red', linestyle='--', linewidth=2, label=f'Split Threshold: {split_threshold}')
+                    ax.axhline(clone_threshold, color='orange', linestyle='--', linewidth=2, label=f'Clone Threshold: {clone_threshold}')
+                    
+                    # Add scene extent threshold line for scale
+                    scene_extent = self.scene_extent
+                    size_threshold = strategy.relative_size_threshold * scene_extent
+                    ax.axvline(size_threshold, color='green', linestyle='--', linewidth=2, label=f'Size Threshold: {size_threshold:.4f}')
+                    
+                    ax.set_xlabel('Max Gaussian Scale')
+                    ax.set_ylabel('Gradient Norm')
+                    ax.set_title('Gradient Norm vs Gaussian Scale')
+                    ax.set_xscale('log')
+                    ax.set_yscale('log')
+                    ax.legend()
+                    plt.colorbar(scatter, ax=ax, label='Gradient Norm')
+            except Exception as e:
+                logger.warning(f"Failed to create scale plot: {e}")
+                ax.text(0.5, 0.5, f'Error: {str(e)}', transform=ax.transAxes, ha='center')
+            
+            # 3. Gradient norms vs opacity
+            ax = axes[0, 2]
+            try:
+                opacities = self.model.get_density().detach().cpu().squeeze()
+                # Ensure opacities match our gradient norms size
+                opacities = opacities[:len(grad_norms_cpu)]
+                
+                non_zero_mask = (grad_norms_cpu > 0) & visibility
+                
+                if non_zero_mask.any():
+                    scatter = ax.scatter(opacities[non_zero_mask], grad_norms_cpu[non_zero_mask], 
+                                    alpha=0.5, c=grad_norms_cpu[non_zero_mask], cmap='viridis', s=1)
+                    ax.axhline(split_threshold, color='red', linestyle='--', linewidth=2, label=f'Split Threshold: {split_threshold}')
+                    ax.axhline(clone_threshold, color='orange', linestyle='--', linewidth=2, label=f'Clone Threshold: {clone_threshold}')
+                    ax.axvline(strategy.prune_density_threshold, color='purple', linestyle='--', linewidth=2, label=f'Prune Threshold: {strategy.prune_density_threshold}')
+                    ax.set_xlabel('Gaussian Opacity')
+                    ax.set_ylabel('Gradient Norm')
+                    ax.set_title('Gradient Norm vs Opacity')
+                    ax.set_yscale('log')
+                    ax.legend()
+                    plt.colorbar(scatter, ax=ax, label='Gradient Norm')
+            except Exception as e:
+                logger.warning(f"Failed to create opacity plot: {e}")
+                ax.text(0.5, 0.5, f'Error: {str(e)}', transform=ax.transAxes, ha='center')
+            
+            # 4. Why large Gaussians aren't splitting - detailed analysis
+            ax = axes[1, 0]
+            try:
+                scene_extent = self.scene_extent
+                size_threshold = strategy.relative_size_threshold * scene_extent
+                
+                # Identify different categories of Gaussians
+                large_mask = max_scale > size_threshold
+                high_grad_mask = grad_norms_cpu >= split_threshold
+                
+                # Categories
+                categories = []
+                labels = []
+                colors = []
+                
+                if (large_mask & high_grad_mask & visibility).any():
+                    mask = large_mask & high_grad_mask & visibility
+                    categories.append((max_scale[mask], grad_norms_cpu[mask]))
+                    labels.append('Large + High Grad (WILL SPLIT)')
+                    colors.append('red')
+                
+                if (large_mask & ~high_grad_mask & visibility).any():
+                    mask = large_mask & ~high_grad_mask & visibility
+                    categories.append((max_scale[mask], grad_norms_cpu[mask]))
+                    labels.append('Large + Low Grad (NO SPLIT)')
+                    colors.append('blue')
+                
+                if (~large_mask & (grad_norms_cpu >= clone_threshold) & visibility).any():
+                    mask = ~large_mask & (grad_norms_cpu >= clone_threshold) & visibility
+                    categories.append((max_scale[mask], grad_norms_cpu[mask]))
+                    labels.append('Small + High Grad (WILL CLONE)')
+                    colors.append('green')
+                
+                for i, (scales_cat, grads_cat) in enumerate(categories):
+                    ax.scatter(scales_cat, grads_cat, c=colors[i], label=labels[i], alpha=0.6, s=20)
+                
+                ax.axhline(split_threshold, color='red', linestyle='--', linewidth=2, label=f'Split Threshold')
+                ax.axhline(clone_threshold, color='orange', linestyle='--', linewidth=2, label=f'Clone Threshold')
+                ax.axvline(size_threshold, color='green', linestyle='--', linewidth=2, label=f'Size Threshold')
+                
+                ax.set_xlabel('Gaussian Scale')
+                ax.set_ylabel('Gradient Norm')
+                ax.set_title('Densification Decision Map')
+                ax.set_xscale('log')
+                ax.set_yscale('log')
+                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+                ax.grid(True, alpha=0.3)
+            except Exception as e:
+                logger.warning(f"Failed to create decision map: {e}")
+                ax.text(0.5, 0.5, f'Error: {str(e)}', transform=ax.transAxes, ha='center')
+            
+            # 5. Accumulation statistics
+            ax = axes[1, 1]
+            try:
+                denom_values = strategy.densify_grad_norm_denom.squeeze().cpu()
+                denom_values = denom_values[:len(grad_norms_cpu)]  # Match size
+                
+                if len(denom_values) > 0:
+                    ax.hist(denom_values.numpy(), bins=50, alpha=0.7, color='purple', edgecolor='black')
+                    ax.set_xlabel('Accumulation Count')
+                    ax.set_ylabel('Number of Gaussians')
+                    ax.set_title('Gradient Accumulation Counts\n(How many views contributed to each Gaussian)')
+                    ax.set_yscale('log')
+                    
+                    # Add statistics
+                    mean_accum = denom_values.mean().item()
+                    max_accum = denom_values.max().item()
+                    ax.text(0.7, 0.9, f'Mean: {mean_accum:.1f}\nMax: {max_accum}', 
+                            transform=ax.transAxes, verticalalignment='top',
+                            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+            except Exception as e:
+                logger.warning(f"Failed to create accumulation plot: {e}")
+                ax.text(0.5, 0.5, f'Error: {str(e)}', transform=ax.transAxes, ha='center')
+            
+            # 6. Detailed statistics
+            ax = axes[1, 2]
+            ax.axis('off')
+            
+            stats_text = f"Gradient Norm Analysis (Step {global_step})\n"
+            stats_text += "=" * 40 + "\n\n"
+            
+            try:
+                if len(visible_grads) > 0:
+                    stats_text += f"Total Gaussians: {self.model.num_gaussians:,}\n"
+                    stats_text += f"Gradient buffer size: {len(grad_norms_cpu):,}\n"
+                    stats_text += f"Visible Gaussians: {visibility.sum().item():,}\n"
+                    stats_text += f"With Non-Zero Gradient: {(grad_norms_cpu > 0).sum().item():,}\n\n"
+                    
+                    stats_text += f"Thresholds:\n"
+                    stats_text += f"  Split: {split_threshold}\n"
+                    stats_text += f"  Clone: {clone_threshold}\n"
+                    stats_text += f"  Size: {size_threshold:.4f}\n"
+                    stats_text += f"  Prune Opacity: {strategy.prune_density_threshold}\n\n"
+                    
+                    non_zero_grads = visible_grads[visible_grads > 0]
+                    if len(non_zero_grads) > 0:
+                        stats_text += "Gradient Norm Statistics (non-zero):\n"
+                        stats_text += f"  Mean: {non_zero_grads.mean():.6f}\n"
+                        stats_text += f"  Std: {non_zero_grads.std():.6f}\n"
+                        stats_text += f"  Min: {non_zero_grads.min():.6f}\n"
+                        stats_text += f"  Max: {non_zero_grads.max():.6f}\n"
+                        stats_text += f"  Median: {non_zero_grads.median():.6f}\n\n"
+                    
+                    # Densification action predictions
+                    if 'max_scale' in locals():
+                        will_split = (large_mask & high_grad_mask).sum().item()
+                        will_clone = (~large_mask & (grad_norms_cpu >= clone_threshold)).sum().item()
+                        
+                        stats_text += f"Predicted Actions:\n"
+                        stats_text += f"  Will Split: {will_split:,}\n"
+                        stats_text += f"  Will Clone: {will_clone:,}\n\n"
+                        
+                        # Large Gaussian analysis
+                        n_large = large_mask.sum().item()
+                        if n_large > 0:
+                            large_grads = grad_norms_cpu[large_mask]
+                            large_high_grad = (large_grads >= split_threshold).sum().item()
+                            
+                            stats_text += f"Large Gaussians (scale>{size_threshold:.4f}):\n"
+                            stats_text += f"  Count: {n_large:,}\n"
+                            stats_text += f"  With high gradient: {large_high_grad:,} ({100*large_high_grad/n_large:.1f}%)\n"
+                            if (large_grads > 0).any():
+                                stats_text += f"  Mean gradient: {large_grads[large_grads > 0].mean():.6f}\n"
+            except Exception as e:
+                stats_text += f"\nError computing statistics: {str(e)}\n"
+            
+            ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, 
+                    fontsize=9, verticalalignment='top', fontfamily='monospace')
+            
+            plt.tight_layout()
+            save_path = os.path.join(grad_dir, f'gradient_analysis_step_{global_step:06d}.png')
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+            plt.close()
+            
+            logger.info(f"💾 Saved gradient norm analysis to {save_path}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save gradient analysis: {e}")
+            import traceback
+            traceback.print_exc()
+
+
     @torch.cuda.nvtx.range(f"run_train_pass")
     def run_train_pass(self, conf: DictConfig):
         """Runs a single train epoch over the dataset."""
@@ -792,6 +1263,11 @@ class Trainer3DGRUT:
             # !!! Below global step has been incremented !!!
             with torch.cuda.nvtx.range(f"train_{global_step-1}_log_iter"):
                 self.log_training_iter(gpu_batch, outputs, batch_metrics, iter)
+
+            with torch.cuda.nvtx.range(f"train_{global_step-1}_save_images"):
+                if global_step % 1000 == 0:  # Save every 1000 iterations
+                    self.save_training_images(gpu_batch, outputs, global_step)
+                    #self.save_gradient_analysis(gpu_batch, outputs, global_step)
 
             with torch.cuda.nvtx.range(f"train_{global_step-1}_save_ckpt"):
                 if global_step in conf.checkpoint.iterations:

@@ -46,6 +46,8 @@ class Renderer:
         self.dataset, self.dataloader = self.create_test_dataloader(conf)
         self.writer = writer
         self.compute_extra_metrics = compute_extra_metrics
+        self.use_circular_mask = True
+        self.border_offset = 300.0
 
         if conf.model.background.color == "black":
             self.bg_color = torch.zeros((3,), dtype=torch.float32, device="cuda")
@@ -132,6 +134,67 @@ class Renderer:
             writer=writer,
             compute_extra_metrics=compute_extra_metrics,
         )
+    
+    def create_circular_mask(self, image_shape: tuple, border_offset: float = 100.0, device = None) -> torch.Tensor:
+        """Create circular mask for fisheye images to exclude black border regions.
+        
+        Args:
+            image_shape: Shape of the image tensor (batch, height, width, channels)
+            border_offset: Optional border offset in pixels to shrink the valid region
+        
+        Returns:
+            torch.Tensor: Binary mask with 1 for valid pixels, 0 for invalid
+        """
+        batch, height, width, channels = image_shape
+        
+        # Create coordinate grids
+        y, x = torch.meshgrid(
+            torch.arange(height, device=device, dtype=torch.float32),
+            torch.arange(width, device=device, dtype=torch.float32),
+            indexing='ij'
+        )
+        
+        # Calculate center and radius
+        cx, cy = width / 2.0, height / 2.0
+        R = min(width, height) / 2.0
+        
+        # Calculate distance from center
+        r = torch.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+        
+        # Create circular mask (largest circle that fits in image)
+        circular_mask = (r < (R - border_offset)).float()
+        
+        # Expand to match batch and channel dimensions
+        circular_mask = circular_mask.unsqueeze(0).unsqueeze(-1)  # [1, H, W, 1]
+        circular_mask = circular_mask.repeat(batch, 1, 1, 1)      # [B, H, W, 1]
+        return circular_mask
+    
+    def filter_rays_circular(self, rays_o, rays_d, image_shape):
+        """Filter rays to only include those within circular region"""
+        if not self.use_circular_mask:
+            return rays_o, rays_d, None
+            
+        batch_size, height, width, _ = image_shape
+        
+        # Create pixel coordinates for all rays
+        y_coords = torch.arange(height, device=rays_o.device).repeat_interleave(width)
+        x_coords = torch.arange(width, device=rays_o.device).repeat(height)
+        
+        # Calculate center and radius
+        cx, cy = width / 2.0, height / 2.0
+        R = min(width, height) / 2.0
+        
+        # Calculate distance from center
+        r = torch.sqrt((x_coords - cx) ** 2 + (y_coords - cy) ** 2)
+        
+        # Create circular mask
+        valid_mask = (r < (R - self.border_offset))
+        
+        # Filter rays
+        rays_o_filtered = rays_o[valid_mask]
+        rays_d_filtered = rays_d[valid_mask]
+        
+        return rays_o_filtered, rays_d_filtered, valid_mask
 
     @torch.no_grad()
     def render_all(self):
@@ -178,8 +241,16 @@ class Renderer:
             # Compute the outputs of a single batch
             outputs = self.model(gpu_batch)
 
-            pred_rgb_full = outputs["pred_rgb"]
-            rgb_gt_full = gpu_batch.rgb_gt
+            if self.use_circular_mask:
+                circular_mask = self.create_circular_mask(gpu_batch.rgb_gt.shape, border_offset=self.border_offset, device= gpu_batch.rgb_gt.device)
+                if circular_mask.shape[-1] == 1 and gpu_batch.rgb_gt.shape[-1] == 3:
+                    circular_mask = circular_mask.repeat(1, 1, 1, 3)
+        
+                pred_rgb_full = outputs["pred_rgb"]*circular_mask
+                rgb_gt_full = gpu_batch.rgb_gt*circular_mask
+            else:
+                pred_rgb_full = outputs["pred_rgb"]
+                rgb_gt_full = gpu_batch.rgb_gt
 
             # The values are already alpha composited with the background
             torchvision.utils.save_image(
