@@ -39,12 +39,14 @@ def make(name: str, config, ray_jitter):
                 downsample_factor=config.dataset.downsample_factor,
                 test_split_interval=config.dataset.test_split_interval,
                 ray_jitter=ray_jitter,
+                border_offset=config.border_offset,
             )
             val_dataset = ColmapDataset(
                 config.path,
                 split="val",
                 downsample_factor=config.dataset.downsample_factor,
                 test_split_interval=config.dataset.test_split_interval,
+                border_offset=config.border_offset,
             )
         case "scannetpp":
             train_dataset = ScannetppDataset(
@@ -82,6 +84,7 @@ def make_test(name: str, config):
                 split="val",
                 downsample_factor=config.dataset.downsample_factor,
                 test_split_interval=config.dataset.test_split_interval,
+                border_offset=config.border_offset,
             )
         case "scannetpp":
             dataset = ScannetppDataset(

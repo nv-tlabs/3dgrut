@@ -47,7 +47,7 @@ class Renderer:
         self.writer = writer
         self.compute_extra_metrics = compute_extra_metrics
         self.use_circular_mask = True
-        self.border_offset = 300.0
+        self.border_offset = conf.border_offset
 
         if conf.model.background.color == "black":
             self.bg_color = torch.zeros((3,), dtype=torch.float32, device="cuda")
@@ -212,9 +212,9 @@ class Renderer:
         output_path_renders = os.path.join(self.out_dir, f"ours_{int(self.global_step)}", "renders")
         os.makedirs(output_path_renders, exist_ok=True)
 
-        if self.save_gt:
-            output_path_gt = os.path.join(self.out_dir, f"ours_{int(self.global_step)}", "gt")
-            os.makedirs(output_path_gt, exist_ok=True)
+        
+        output_path_gt = os.path.join(self.out_dir, f"ours_{int(self.global_step)}", "gt")
+        os.makedirs(output_path_gt, exist_ok=True)
 
         psnr = []
         ssim = []
@@ -263,14 +263,14 @@ class Renderer:
             if self.writer is not None:
                 test_images.append(pred_img_to_write)
 
-            if self.save_gt:
-                torchvision.utils.save_image(
-                    rgb_gt_full.squeeze(0).permute(2, 0, 1),
-                    os.path.join(output_path_gt, "{0:05d}".format(iteration) + ".png"),
-                )
+            torchvision.utils.save_image(
+                gpu_batch.rgb_gt.squeeze(0).permute(2, 0, 1),
+                os.path.join(output_path_gt, "{0:05d}".format(iteration) + ".png"),
+            )
 
             # Compute the loss
-            psnr_single_img = criterions["psnr"](outputs["pred_rgb"], gpu_batch.rgb_gt).item()
+            #psnr_single_img = criterions["psnr"](outputs["pred_rgb"], gpu_batch.rgb_gt).item()
+            psnr_single_img = criterions["psnr"](pred_rgb_full, rgb_gt_full).item()
             psnr.append(psnr_single_img)  # evaluation on valid rays only
             logger.info(f"Frame {iteration}, PSNR: {psnr[-1]}")
 

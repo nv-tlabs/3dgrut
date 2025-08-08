@@ -17,6 +17,7 @@ import os
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional, Union
+import torchvision
 
 import numpy as np
 
@@ -136,6 +137,7 @@ class Trainer3DGRUT:
         self.init_experiments_tracking(conf)
         self.init_gui(conf, self.model, self.train_dataset, self.val_dataset, self.scene_bbox)
         self.use_circular_mask = True
+        self.border_offset = conf.border_offset
 
     def create_circular_mask(self, image_shape: tuple, border_offset: float = 100.0) -> torch.Tensor:
         """Create circular mask for fisheye images to exclude black border regions.
@@ -375,7 +377,7 @@ class Trainer3DGRUT:
         rgb_pred = outputs["pred_rgb"]
 
         if self.use_circular_mask:
-            circular_mask = self.create_circular_mask(rgb_gt.shape, border_offset=300.0)
+            circular_mask = self.create_circular_mask(rgb_gt.shape, border_offset=self.border_offset)
             if circular_mask.shape[-1] == 1 and rgb_gt.shape[-1] == 3:
                 circular_mask = circular_mask.repeat(1, 1, 1, 3)
             
@@ -414,8 +416,8 @@ class Trainer3DGRUT:
 
             if iteration in self.conf.writer.log_image_views:
                 metrics["img_hit_counts"] = jet_map(outputs["hits_count"][-1], self.conf.writer.max_num_hits)
-                metrics["img_gt"] = gpu_batch.rgb_gt[-1].clip(0, 1.0)
-                metrics["img_pred"] = outputs["pred_rgb"][-1].clip(0, 1.0)
+                metrics["img_gt"] = rgb_gt[-1].clip(0, 1.0) #gpu_batch.rgb_gt[-1].clip(0, 1.0)
+                metrics["img_pred"] = rgb_pred[-1].clip(0, 1.0) #outputs["pred_rgb"][-1].clip(0, 1.0)
                 metrics["img_pred_dist"] = jet_map(outputs["pred_dist"][-1], 100)
                 metrics["img_pred_opacity"] = jet_map(outputs["pred_opacity"][-1], 1)
 
@@ -444,14 +446,27 @@ class Trainer3DGRUT:
         rgb_pred = outputs["pred_rgb"]
         mask = gpu_batch.mask
         if self.use_circular_mask:
-            circular_mask = self.create_circular_mask(rgb_gt.shape, border_offset=300.0)
+            circular_mask = self.create_circular_mask(rgb_gt.shape, border_offset=self.border_offset)
             rgb_gt = rgb_gt * circular_mask
             rgb_pred = rgb_pred * circular_mask
         
-        """# Mask out the invalid pixels if the mask is provided
+        # Mask out the invalid pixels if the mask is provided
         if mask is not None:
-            rgb_gt = rgb_gt * mask
-            rgb_pred = rgb_pred * mask"""
+            rgb_gt = rgb_gt * (1-mask)
+            rgb_pred = rgb_pred * (1-mask)
+            # Save with meaningful paths and step numbering
+            if self.global_step % 5000 == 0:  # Save every 1000 iterations
+                out_dir = self.tracking.output_dir
+                masked_dir = os.path.join(out_dir, "training_images", "masked")
+                os.makedirs(masked_dir, exist_ok=True)
+                gt_masked_path = os.path.join(masked_dir, f"gt_masked_step_{self.global_step:06d}.png")
+                pred_masked_path = os.path.join(masked_dir, f"pred_masked_step_{self.global_step:06d}.png")
+                torchvision.utils.save_image(
+                    rgb_gt[0].permute(2, 0, 1), gt_masked_path
+                )
+                torchvision.utils.save_image(
+                    rgb_pred[0].permute(2, 0, 1), pred_masked_path
+                )
 
         # L1 loss
         loss_l1 = torch.zeros(1, device=self.device)
@@ -496,7 +511,7 @@ class Trainer3DGRUT:
                 lambda_scale = self.conf.loss.lambda_scale
 
         # Total loss
-        loss = lambda_l1 * loss_l1 + lambda_ssim * loss_ssim + lambda_opacity * loss_opacity + lambda_scale * loss_scale
+        loss = lambda_l1*loss_l1 + lambda_ssim * loss_ssim + lambda_opacity * loss_opacity + lambda_scale * loss_scale
         return dict(total_loss=loss, l1_loss=lambda_l1 * loss_l1, l2_loss=lambda_l2 * loss_l2, ssim_loss=lambda_ssim * loss_ssim, opacity_loss=lambda_opacity * loss_opacity, scale_loss=lambda_scale * loss_scale)
 
     @torch.cuda.nvtx.range("log_validation_iter")
@@ -855,21 +870,9 @@ class Trainer3DGRUT:
             
             # Compute error map (L1 distance)
             error_map = np.abs(gt_for_error - pred_for_error)
-            
-            # Average across channels if RGB
-            if error_map.ndim == 3 and error_map.shape[-1] == 3:
-                error_map = error_map.mean(axis=-1)
-            
-            # Normalize error map to [0, 1] for visualization
-            if error_map.max() > 0:
-                error_map = error_map / error_map.max()
-            
-            # Convert to RGB using a colormap
-            import matplotlib.cm as cm
-            colormap = cm.get_cmap('hot')
-            error_rgb = colormap(error_map)[:, :, :3]  # Remove alpha channel
-            error_rgb = (error_rgb * 255).astype(np.uint8)
-            
+                    
+            error_rgb = (error_map * 255).astype(np.uint8)
+                    
             error_path = os.path.join(error_dir, f"error_step_{global_step:06d}.png")
             Image.fromarray(error_rgb).save(error_path)
             

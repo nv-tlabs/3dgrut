@@ -56,6 +56,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         downsample_factor=1,
         test_split_interval=8,
         ray_jitter=None,
+        border_offset=100,
     ):
         self.path = path
         self.device = device
@@ -64,6 +65,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.ray_jitter = ray_jitter
         self.test_split_interval = test_split_interval
         self.use_circular_mask = True
+        self.border_offset = border_offset
 
 
         # Worker-based GPU cache for multiprocessing compatibility
@@ -71,6 +73,36 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         # (Re)load intrinsics and extrinsics
         self.reload()
+
+    # def reload(self):
+    #     # GPU cache of processed camera intrinsics - now per camera ID
+    #     self.intrinsics = {}
+
+    #     # Get the scene data
+    #     self.load_intrinsics_and_extrinsics()
+    #     self.n_frames = len(self.cam_extrinsics)
+    #     self.load_camera_data()
+    #     indices = np.arange(self.n_frames)
+
+    #     # If test_split_interval is set, every test_split_interval frame will be excluded from the training set
+    #     # If test_split_interval is non-positive, all images will be used for training and testing
+    #     if self.test_split_interval > 0:
+    #         if self.split == "train":
+    #             indices = np.mod(indices, self.test_split_interval) != 0
+    #         else:
+    #             indices = np.mod(indices, self.test_split_interval) == 0
+
+    #     self.cam_extrinsics = [self.cam_extrinsics[i] for i in np.where(indices)[0]]
+    #     self.poses = self.poses[indices].astype(np.float32)
+    #     self.image_paths = self.image_paths[indices]  # numpy str array of image paths
+    #     self.camera_centers = self.camera_centers[indices]
+    #     self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
+    #     self.mask_paths = self.mask_paths[indices] 
+    #     # Update the number of frames to only include the samples from the split
+    #     self.n_frames = self.poses.shape[0]
+
+    #     # Clear existing worker caches to force recreation with new intrinsics
+    #     self._worker_gpu_cache.clear()
 
     def reload(self):
         # GPU cache of processed camera intrinsics - now per camera ID
@@ -80,21 +112,46 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.load_intrinsics_and_extrinsics()
         self.n_frames = len(self.cam_extrinsics)
         self.load_camera_data()
+        
+        # Extract frame names/numbers for synchronized splitting
+        frame_identifiers = []
+        for extr in self.cam_extrinsics:
+            # Extract frame identifier from filename (e.g., "frame_000" from "frame_000.png")
+            frame_name = os.path.splitext(os.path.basename(extr.name))[0]
+            
+            # Try to extract numeric part for proper sorting
+            # This handles names like "frame_000", "000", etc.
+            import re
+            numeric_match = re.search(r'(\d+)', frame_name)
+            if numeric_match:
+                frame_number = int(numeric_match.group(1))
+            else:
+                # Fallback: use the full frame name
+                frame_number = hash(frame_name) % 10000  # Convert to pseudo-numeric
+            
+            frame_identifiers.append(frame_number)
+        
+        frame_identifiers = np.array(frame_identifiers)
         indices = np.arange(self.n_frames)
 
-        # If test_split_interval is set, every test_split_interval frame will be excluded from the training set
-        # If test_split_interval is non-positive, all images will be used for training and testing
+        # If test_split_interval is set, split based on frame numbers, not indices
         if self.test_split_interval > 0:
             if self.split == "train":
-                indices = np.mod(indices, self.test_split_interval) != 0
+                # Keep frames where frame_number % test_split_interval != 0
+                split_mask = np.mod(frame_identifiers, self.test_split_interval) != 0
             else:
-                indices = np.mod(indices, self.test_split_interval) == 0
-
-        self.cam_extrinsics = [self.cam_extrinsics[i] for i in np.where(indices)[0]]
+                # Keep frames where frame_number % test_split_interval == 0  
+                split_mask = np.mod(frame_identifiers, self.test_split_interval) == 0
+            
+            indices = indices[split_mask]
+        
+        # Apply the filtering
+        self.cam_extrinsics = [self.cam_extrinsics[i] for i in indices]
         self.poses = self.poses[indices].astype(np.float32)
-        self.image_paths = self.image_paths[indices]  # numpy str array of image paths
+        self.image_paths = self.image_paths[indices]
         self.camera_centers = self.camera_centers[indices]
         self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
+        self.mask_paths = self.mask_paths[indices] 
 
         # Update the number of frames to only include the samples from the split
         self.n_frames = self.poses.shape[0]
@@ -280,7 +337,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             max_radius_pixels = compute_max_radius(
                 resolution.astype(np.float64), principal_point
             )
-            max_radius_pixels = principal_point
+            max_radius_pixels = principal_point[0]
             fov_angle_x = 2.0 * max_radius_pixels / focal_length[0]
             fov_angle_y = 2.0 * max_radius_pixels / focal_length[1]
             max_angle = np.max([fov_angle_x, fov_angle_y]) / 2.0 # np.pi/2
@@ -301,7 +358,6 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 rays_d_cam_full =rays_d_cam
                 cx, cy = w / 2.0, h / 2.0
                 R = min(w, h) / 2.0
-                border_offset = 300.0  # You can make this configurable
                 
                 # Create coordinate grids
                 x_coords = u.reshape(h, w)
@@ -311,7 +367,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 r = np.sqrt((x_coords - cx) ** 2 + (y_coords - cy) ** 2)
                 
                 # Create circular mask
-                mask = (r < (R - border_offset))
+                mask = (r < (R - self.border_offset))
                 mask_flat = mask.flatten()
                 
                 # Apply mask: set rays outside the circle to [0, 0, 1] (forward direction)
@@ -414,7 +470,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             self.image_paths.append(image_path)
 
             # Mask path
-            self.mask_paths.append(os.path.splitext(image_path)[0] + "_mask.png")
+            self.mask_paths.append(os.path.splitext(image_path)[0] + "_mask.jpg")
 
         self.camera_centers = np.array(cam_centers)
         _, diagonal = get_center_and_diag(self.camera_centers)

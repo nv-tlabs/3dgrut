@@ -13,7 +13,7 @@ eval/
 extra_info/
 
 debug_**
-
+*.mp4
 utils/ngc/grid_search_configs
 
 imgui.ini
