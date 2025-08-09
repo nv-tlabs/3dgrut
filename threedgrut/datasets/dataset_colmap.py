@@ -113,46 +113,65 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.n_frames = len(self.cam_extrinsics)
         self.load_camera_data()
         
-        # Extract frame names/numbers for synchronized splitting
-        frame_identifiers = []
-        for extr in self.cam_extrinsics:
-            # Extract frame identifier from filename (e.g., "frame_000" from "frame_000.png")
-            frame_name = os.path.splitext(os.path.basename(extr.name))[0]
-            
-            # Try to extract numeric part for proper sorting
-            # This handles names like "frame_000", "000", etc.
-            import re
-            numeric_match = re.search(r'(\d+)', frame_name)
-            if numeric_match:
-                frame_number = int(numeric_match.group(1))
-            else:
-                # Fallback: use the full frame name
-                frame_number = hash(frame_name) % 10000  # Convert to pseudo-numeric
-            
-            frame_identifiers.append(frame_number)
-        
-        frame_identifiers = np.array(frame_identifiers)
-        indices = np.arange(self.n_frames)
+        # Create boolean mask for filtering
+        indices_mask = np.ones(self.n_frames, dtype=bool)
 
-        # If test_split_interval is set, split based on frame numbers, not indices
+        # If test_split_interval is set, every test_split_interval frame will be excluded from the training set
+        # If test_split_interval is non-positive, all images will be used for training and testing
         if self.test_split_interval > 0:
-            if self.split == "train":
-                # Keep frames where frame_number % test_split_interval != 0
-                split_mask = np.mod(frame_identifiers, self.test_split_interval) != 0
-            else:
-                # Keep frames where frame_number % test_split_interval == 0  
-                split_mask = np.mod(frame_identifiers, self.test_split_interval) == 0
+            # Extract frame numbers from image paths
+            # Assuming paths are like "camera1/frame_001.png", "camera2/frame_001.png", etc.
+            frame_numbers = []
+            for path in self.image_paths:
+                # Extract frame number from path
+                filename = path.split('/')[-1]  # Get filename part
+                # Remove file extension and extract number after last underscore
+                filename_no_ext = filename.split('.')[0]  # Remove extension (.png, .jpg, etc.)
+                frame_num = int(filename_no_ext.split('_')[-1])  # Extract number after last underscore
+                frame_numbers.append(frame_num)
             
-            indices = indices[split_mask]
-        
-        # Apply the filtering
-        self.cam_extrinsics = [self.cam_extrinsics[i] for i in indices]
-        self.poses = self.poses[indices].astype(np.float32)
-        self.image_paths = self.image_paths[indices]
-        self.camera_centers = self.camera_centers[indices]
-        self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
-        self.mask_paths = self.mask_paths[indices] 
+            frame_numbers = np.array(frame_numbers)
+            
+            # Debug: Print frame number statistics
+            print(f"Split: {self.split}")
+            print(f"Total frames: {len(frame_numbers)}")
+            print(f"Frame number range: {frame_numbers.min()} to {frame_numbers.max()}")
+            
+            # Get unique frame numbers and sort them
+            unique_frame_numbers = np.unique(frame_numbers)
+            print(f"Unique frame numbers: {len(unique_frame_numbers)}")
+            print(f"First few unique frame numbers: {unique_frame_numbers[:10]}")
+            print(f"Test split interval: {self.test_split_interval}")
+            
+            # Apply split logic to the POSITION of unique frame numbers, not their values
+            # This ensures every Nth unique frame goes to test, regardless of actual frame numbers
+            test_frame_positions = np.arange(len(unique_frame_numbers)) % self.test_split_interval == 0
+            test_frame_numbers = set(unique_frame_numbers[test_frame_positions])
+            
+            print(f"Test frame numbers: {sorted(list(test_frame_numbers))[:10]}...")
+            
+            # Create mask based on whether each frame's number is in the test set
+            if self.split == "train":
+                indices_mask = np.array([frame_num not in test_frame_numbers for frame_num in frame_numbers])
+            else:  # validation/test split
+                indices_mask = np.array([frame_num in test_frame_numbers for frame_num in frame_numbers])
+            
+            # Debug: Print split results
+            print(f"Frames selected for {self.split}: {indices_mask.sum()}")
+            if indices_mask.sum() == 0:
+                print("ERROR: No frames selected for this split!")
+                raise ValueError(f"No frames selected for split '{self.split}'. Check your test_split_interval and frame numbering.")
 
+        # Apply the filtering
+        indices = np.where(indices_mask)[0]
+        
+        self.cam_extrinsics = [self.cam_extrinsics[i] for i in indices]
+        self.poses = self.poses[indices_mask].astype(np.float32)
+        self.image_paths = self.image_paths[indices_mask]  # numpy str array of image paths
+        self.camera_centers = self.camera_centers[indices_mask]
+        self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
+        self.mask_paths = self.mask_paths[indices_mask] 
+        
         # Update the number of frames to only include the samples from the split
         self.n_frames = self.poses.shape[0]
 
