@@ -15,6 +15,7 @@
 
 import os
 from pathlib import Path
+import cv2
 
 import numpy as np
 import torch
@@ -48,6 +49,9 @@ class Renderer:
         self.compute_extra_metrics = compute_extra_metrics
         self.use_circular_mask = True
         self.border_offset = conf.border_offset
+        metric_mask = torch.from_numpy(cv2.imread(conf.metric_mask_path, cv2.IMREAD_GRAYSCALE)).float()/255.0
+        self.metric_mask = metric_mask.unsqueeze(0).unsqueeze(-1).repeat(1,1,1,3).to(device="cuda")
+
 
         if conf.model.background.color == "black":
             self.bg_color = torch.zeros((3,), dtype=torch.float32, device="cuda")
@@ -246,15 +250,18 @@ class Renderer:
                 if circular_mask.shape[-1] == 1 and gpu_batch.rgb_gt.shape[-1] == 3:
                     circular_mask = circular_mask.repeat(1, 1, 1, 3)
         
-                pred_rgb_full = outputs["pred_rgb"]*circular_mask
+                pred_rgb_render = outputs["pred_rgb"]*circular_mask
                 rgb_gt_full = gpu_batch.rgb_gt*circular_mask
             else:
-                pred_rgb_full = outputs["pred_rgb"]
+                pred_rgb_render = outputs["pred_rgb"]
                 rgb_gt_full = gpu_batch.rgb_gt
+
+            rgb_gt_full = rgb_gt_full * self.metric_mask
+            pred_rgb_full = pred_rgb_render * self.metric_mask
 
             # The values are already alpha composited with the background
             torchvision.utils.save_image(
-                pred_rgb_full.squeeze(0).permute(2, 0, 1),
+                pred_rgb_render.squeeze(0).permute(2, 0, 1),
                 os.path.join(output_path_renders, "{0:05d}".format(iteration) + ".png"),
             )
             pred_img_to_write = pred_rgb_full[-1].clip(0, 1.0)
