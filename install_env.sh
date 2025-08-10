@@ -84,7 +84,6 @@ if [ "$WITH_GCC11" = true ]; then
     GCC_11_PATH=$(which gcc-11)
     GXX_11_PATH=$(which g++-11)
 fi
-GCC_VERSION=$($GCC_11_PATH -dumpversion | cut -d '.' -f 1)
 
 # Create and activate conda environment
 eval "$(conda shell.bash hook)"
@@ -131,15 +130,27 @@ if [ "$CUDA_VERSION" = "11.8.0" ]; then
 
 # CUDA 12.8 supports compute capability 10.0 and 12.0
 elif [ "$CUDA_VERSION" = "12.8.1" ]; then
+
+    # get the GCC version so we can use it in the install command below
+    # the _PATHs might already be set
+    if [ ! "$WITH_GCC11" = true ]; then
+        GCC_11_PATH=$(which gcc)
+        GXX_11_PATH=$(which g++)
+    fi
+
+    gcc_version=$($GCC_11_PATH -dumpversion | cut -d '.' -f 1)
+
     echo "Installing CUDA 12.8.1 ..."
-    conda install -y cuda-toolkit cmake ninja gcc_linux-64=$GCC_VERSION -c nvidia/label/cuda-12.8.1
-    pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+    conda install -y cuda-toolkit cmake ninja gcc_linux-64=$gcc_version -c nvidia/label/cuda-12.8.1
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
     pip3 install --force-reinstall "numpy<2"
 
     # TODO move to using wheel once kaolin is available
     rm -fr thirdparty/kaolin
     git clone --recursive https://github.com/NVIDIAGameWorks/kaolin.git thirdparty/kaolin
     pushd thirdparty/kaolin
+    git checkout c2da967b9e0d8e3ebdbd65d3e8464d7e39005203  # ping to a fixed commit for reproducibility
+    sed -i 's!AT_DISPATCH_FLOATING_TYPES_AND_HALF(feats_in.type()!AT_DISPATCH_FLOATING_TYPES_AND_HALF(feats_in.scalar_type()!g' kaolin/csrc/render/spc/raytrace_cuda.cu
     pip install --upgrade pip
     pip install --no-cache-dir ninja imageio imageio-ffmpeg
     pip install --no-cache-dir        \

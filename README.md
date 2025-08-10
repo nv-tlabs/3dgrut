@@ -26,6 +26,8 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 
 
 ## 🔥 News
+- ✅[2025/07] Support for datasets with multiple sensors (only for COLMAP-style datasets).
+- ✅[2025/07] Support for Windows has been added.
 - ✅[2025/06] Playground supports PBR meshes and environment maps.
 - ✅[2025/04] Support for image masks.
 - ✅[2025/04] SparseAdam support.
@@ -103,6 +105,8 @@ chmod +x install_env.sh
 ./install_env.sh 3dgrut
 conda activate 3dgrut
 ```
+
+On Windows, you can use the `install_env.ps1` script to install the environment.
 
 ### Running with Docker
 

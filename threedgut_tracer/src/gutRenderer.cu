@@ -13,6 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
+
 #include <3dgut/threedgut.cuh>
 
 #include <3dgut/renderer/gutRenderer.h>

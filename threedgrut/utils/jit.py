@@ -63,6 +63,10 @@ def load(
     cflags = [
         "-DNVDR_TORCH",
     ]
+    # Add Windows-specific flags
+    if os.name == "nt":
+        cflags.append("/DNOMINMAX")
+    
     if extra_cflags is not None:
         cflags += extra_cflags
 

@@ -79,19 +79,16 @@ class BackgroundColor(BaseBackground):
 
     @torch.cuda.nvtx.range("background_color.forward")
     def forward(self, ray_to_world, rays_d, rgb, opacity, train: bool):
-
         color = self.color
-
         if self.background_color_type == "random":  # only use random color when training
             if train:
-
                 # NOTE: this uses random color PER PIXEL, other codebases use constant random
                 color = torch.rand_like(rays_d, dtype=torch.float32, device=self.device)
-
                 # this is set up to statefully remember the last random color, we ise this during trainint
                 self.color = color
-
                 rgb = rgb + color * (1.0 - opacity)
+        elif self.background_color_type != "black":
+            rgb = rgb + color * (1.0 - opacity)
 
         return rgb, opacity
 

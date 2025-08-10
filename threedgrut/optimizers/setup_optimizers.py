@@ -49,7 +49,7 @@ def setup_lib_optimizers_cc():
             "-Xcompiler=-fno-strict-aliasing",
         ]
     elif os.name == "nt":
-        cflags = [f"/std:c++{cpp_standard}"]
+        cflags = [f"/std:c++{cpp_standard}", "/DNOMINMAX"]
 
     include_paths = [root_dir]
 
