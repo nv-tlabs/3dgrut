@@ -36,3 +36,6 @@ thirdparty/ncore/
 playground/assets/
 
 traces/
+
+build/
+*nsys-rep

@@ -641,6 +641,8 @@ void OptixTracer::buildBVH(torch::Tensor mogPos,
                                           reinterpret_cast<OptixInstance*>(_state->gPrimAABB), cudaStream);
     } else {
         if (_state->gPrimType == MOGTracingIcosaHedron) {
+            nvtxRangePushA("Primitive: Icosahedron");
+
             _state->gPrimNumVert = 12;
             _state->gPrimNumTri  = 20;
             reallocatePrimGeomBuffer(cudaStream);
@@ -655,24 +657,32 @@ void OptixTracer::buildBVH(torch::Tensor mogPos,
                                                 _state->particleKernelDegree,
                                                 reinterpret_cast<float3*>(_state->gPrimVrt),
                                                 reinterpret_cast<int3*>(_state->gPrimTri), cudaStream);
+
+            nvtxRangePop();
         } else if (_state->gPrimType == MOGTracingOctraHedron) {
+            nvtxRangePushA("Primitive: Octahedron");
+
             _state->gPrimNumVert = 6;
             _state->gPrimNumTri  = 8;
             reallocatePrimGeomBuffer(cudaStream);
 
             computeGaussianEnclosingOctaHedron(gNum,
-                                               getPtr<float3>(mogPos),
-                                               getPtr<float4>(mogRot),
-                                               getPtr<float3>(mogScl),
-                                               getPtr<float>(mogDns),
-                                               _state->particleKernelMinResponse,
-                                               primitiveOpts,
-                                               _state->particleKernelDegree,
-                                               reinterpret_cast<float3*>(_state->gPrimVrt),
-                                               reinterpret_cast<int3*>(_state->gPrimTri),
-                                               cudaStream);
+                                            getPtr<float3>(mogPos),
+                                            getPtr<float4>(mogRot),
+                                            getPtr<float3>(mogScl),
+                                            getPtr<float>(mogDns),
+                                            _state->particleKernelMinResponse,
+                                            primitiveOpts,
+                                            _state->particleKernelDegree,
+                                            reinterpret_cast<float3*>(_state->gPrimVrt),
+                                            reinterpret_cast<int3*>(_state->gPrimTri),
+                                            cudaStream);
             CUDA_CHECK_LAST();
+
+            nvtxRangePop();
         } else if (_state->gPrimType == MOGTracingTriHexa) {
+            nvtxRangePushA("Primitive: TriHexa");
+
             _state->gPrimNumVert = 6;
             _state->gPrimNumTri  = 6;
             reallocatePrimGeomBuffer(cudaStream);
@@ -689,26 +699,34 @@ void OptixTracer::buildBVH(torch::Tensor mogPos,
                                             reinterpret_cast<int3*>(_state->gPrimTri),
                                             cudaStream);
             CUDA_CHECK_LAST();
+
+            nvtxRangePop();
         } else if (_state->gPrimType == MOGTracingTriSurfel) {
+            nvtxRangePushA("Primitive: TriSurfel");
+
             _state->gPrimNumVert = 4;
             _state->gPrimNumTri  = 2;
             reallocatePrimGeomBuffer(cudaStream);
             reallocateBuffer(&_state->gPipelineParticleData, _state->gPipelineParticleDataSz, sizeof(float4) * gNum, cudaStream);
 
             computeGaussianEnclosingTriSurfel(gNum,
-                                              getPtr<float3>(mogPos),
-                                              getPtr<float4>(mogRot),
-                                              getPtr<float3>(mogScl),
-                                              getPtr<float>(mogDns),
-                                              _state->particleKernelMinResponse,
-                                              primitiveOpts,
-                                              _state->particleKernelDegree,
-                                              reinterpret_cast<float3*>(_state->gPrimVrt),
-                                              reinterpret_cast<int3*>(_state->gPrimTri),
-                                              reinterpret_cast<float4*>(_state->gPipelineParticleData),
-                                              cudaStream);
+                                            getPtr<float3>(mogPos),
+                                            getPtr<float4>(mogRot),
+                                            getPtr<float3>(mogScl),
+                                            getPtr<float>(mogDns),
+                                            _state->particleKernelMinResponse,
+                                            primitiveOpts,
+                                            _state->particleKernelDegree,
+                                            reinterpret_cast<float3*>(_state->gPrimVrt),
+                                            reinterpret_cast<int3*>(_state->gPrimTri),
+                                            reinterpret_cast<float4*>(_state->gPipelineParticleData),
+                                            cudaStream);
             CUDA_CHECK_LAST();
+
+            nvtxRangePop();
         } else if (_state->gPrimType == MOGTracingTetraHedron) {
+            nvtxRangePushA("Primitive: Tetrahedron");
+
             _state->gPrimNumVert = 4;
             _state->gPrimNumTri  = 4;
             reallocatePrimGeomBuffer(cudaStream);
@@ -723,22 +741,30 @@ void OptixTracer::buildBVH(torch::Tensor mogPos,
                                                 _state->particleKernelDegree,
                                                 reinterpret_cast<float3*>(_state->gPrimVrt),
                                                 reinterpret_cast<int3*>(_state->gPrimTri), cudaStream);
+
+            nvtxRangePop();
         } else if (_state->gPrimType == MOGTracingSphere) {
+            nvtxRangePushA("Primitive: Sphere");
+
             _state->gPrimNumVert = 0;
-            _state->gPrimNumTri  = 1; // number of primtive per gaussians
+            _state->gPrimNumTri  = 1;
             reallocatePrimGeomBuffer(cudaStream);
 
             computeGaussianEnclosingSphere(gNum,
-                                           getPtr<float3>(mogPos),
-                                           getPtr<float4>(mogRot),
-                                           getPtr<float3>(mogScl),
-                                           getPtr<float>(mogDns),
-                                           _state->particleKernelMinResponse,
-                                           primitiveOpts,
-                                           _state->particleKernelDegree,
-                                           reinterpret_cast<float3*>(_state->gPrimVrt),
-                                           reinterpret_cast<float*>(_state->gPrimTri), cudaStream);
+                                        getPtr<float3>(mogPos),
+                                        getPtr<float4>(mogRot),
+                                        getPtr<float3>(mogScl),
+                                        getPtr<float>(mogDns),
+                                        _state->particleKernelMinResponse,
+                                        primitiveOpts,
+                                        _state->particleKernelDegree,
+                                        reinterpret_cast<float3*>(_state->gPrimVrt),
+                                        reinterpret_cast<float*>(_state->gPrimTri), cudaStream);
+
+            nvtxRangePop();
         } else {
+            nvtxRangePushA("Primitive: Diamond");
+
             _state->gPrimNumVert = 5;
             _state->gPrimNumTri  = 6;
             reallocatePrimGeomBuffer(cudaStream);
@@ -753,6 +779,8 @@ void OptixTracer::buildBVH(torch::Tensor mogPos,
                                             _state->particleKernelDegree,
                                             reinterpret_cast<float3*>(_state->gPrimVrt),
                                             reinterpret_cast<int3*>(_state->gPrimTri), cudaStream);
+
+            nvtxRangePop();
         }
     }
 
@@ -859,6 +887,8 @@ OptixTracer::trace(uint32_t frameNumber,
                    uint32_t renderOpts,
                    int sphDegree,
                    float minTransmittance) {
+                    
+    nvtxRangePushA("Trace: Begin");
 
     const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
     torch::Tensor rayRad            = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 3}, opts);
@@ -898,14 +928,19 @@ OptixTracer::trace(uint32_t frameNumber,
     paramsHost.rayHitsCount   = packed_accessor32<float, 4>(rayHitsCount);
 
     cudaStream_t cudaStream = at::cuda::getCurrentCUDAStream();
+
+    nvtxRangePushA("Trace: Reallocate + Param Upload");
     reallocateParamsDevice(sizeof(paramsHost), cudaStream);
 
     CUDA_CHECK(cudaMemcpyAsync(
         reinterpret_cast<void*>(_state->paramsDevice), &paramsHost, sizeof(paramsHost), cudaMemcpyHostToDevice, cudaStream));
+    nvtxRangePop(); // Trace: Reallocate + Param Upload
 
+    nvtxRangePushA("Trace: OptiX Launch");
     OPTIX_CHECK(optixLaunch(_state->pipelineTracingFwd, cudaStream, _state->paramsDevice,
                             sizeof(PipelineParameters), &_state->sbtTracingFwd, rayRad.size(2),
                             rayRad.size(1), rayRad.size(0)));
+    nvtxRangePop(); // Trace: OptiX Launch
 
     CUDA_CHECK_LAST();
 

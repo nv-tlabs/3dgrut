@@ -8,7 +8,7 @@ path: ???
 experiment_name: ""
 resume: ""
 out_dir: "./runs"
-n_iterations: 2000
+n_iterations: 1
 with_gui: false
 gui_update_from_device: true
 val_frequency: 99999
@@ -20,7 +20,7 @@ validate_first: false
 log_frequency: 1
 compute_extra_metrics: true
 
-enable_frame_timings: false
+enable_frame_timings: true
 
 enable_writer: true
 writer:
