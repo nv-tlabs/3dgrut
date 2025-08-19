@@ -56,7 +56,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         downsample_factor=1,
         test_split_interval=8,
         ray_jitter=None,
-        border_offset=100,
+        border_offset=25,
     ):
         self.path = path
         self.device = device
