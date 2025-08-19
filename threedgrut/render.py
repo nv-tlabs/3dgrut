@@ -49,7 +49,7 @@ class Renderer:
         self.compute_extra_metrics = compute_extra_metrics
         self.use_circular_mask = True
         self.border_offset = conf.border_offset
-        metric_mask = torch.from_numpy(cv2.imread(conf.metric_mask_path, cv2.IMREAD_GRAYSCALE)).float()/255.0
+        metric_mask = torch.from_numpy(cv2.imread("mask.png", cv2.IMREAD_GRAYSCALE)).float()/255.0
         self.metric_mask = metric_mask.unsqueeze(0).unsqueeze(-1).repeat(1,1,1,3).to(device="cuda")
 
 
