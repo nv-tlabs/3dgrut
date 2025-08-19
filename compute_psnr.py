@@ -41,7 +41,7 @@ def calculate_psnr_with_mask(render_dir, gt_dir, mask_path):
 
     psnr_scores = []
     
-    error_dir = os.path.join(os.path.dirname(render_dir), "error_maps")
+    error_dir = os.path.join(os.path.dirname(render_dir), "error_maps-")
     os.makedirs(error_dir, exist_ok=True)
     save_error_maps = True
     for filename in tqdm(image_files, desc="Processing Images"):
@@ -75,24 +75,27 @@ def calculate_psnr_with_mask(render_dir, gt_dir, mask_path):
         gt_masked = gt_circle * metric_mask
         
         psnr_value = psnr_metric(re_masked, gt_masked).item()
-        psnr_scores.append(psnr_value)
+        psnr_scores.append((filename, psnr_value))
 
-    if psnr_scores:
-        mean_psnr = np.mean(psnr_scores)
-        print("\n--- Results ---")
-        print(f"✅ Mean PSNR: {mean_psnr:.4f}")
-        print("----------------")
-    else:
-        print("Could not calculate PSNR. No valid image pairs were processed.")
+    suffix = "wo" if "wo" in render_dir else "w"
+    txt_path = os.path.join(os.path.dirname(render_dir), f"psnr_{suffix}.txt")
+    with open(txt_path, "w") as f:
+        for name, val in psnr_scores:
+            f.write(f"{name}: {val:.4f}\n")
+    mean_psnr = np.mean([v for _, v in psnr_scores])
+    print("\n--- Results ---")
+    print(f"✅ Mean PSNR: {mean_psnr:.4f}")
+    print(f"📄 Per-image scores saved to {txt_path}")
+    print("----------------")
 
 if __name__ == "__main__":
-    # # re_dir = "runs/flat_yalda/wo_distractors-1808_192315/ours_30000/renders"
-    # gt_dir = "runs/flat_yalda/wo_distractors-1808_192315/ours_30000/gt"
-    # re_dir = "runs/flat_yalda/w_distractors-1808_225752/ours_30000/renders"
+    # re_dir = "runs/flat_yalda/wo_distractors-1808_192315/ours_30000/renders"
+    gt_dir = "runs/flat_yalda/wo_distractors-1808_192315/ours_30000/gt"
+    re_dir = "runs/flat_yalda/w_distractors-1808_225752/ours_30000/renders"
     
-    re_dir = "runs/flat_ipek/wo_distractors-1808_192346/ours_30000/renders"
-    gt_dir = "runs/flat_ipek/wo_distractors-1808_192346/ours_30000/gt"
-    # re_dir = "runs/flat_ipek/w_distractors-1808_225743/ours_30000/renders"
+    # re_dir = "runs/flat_ipek/wo_distractors-1808_192346/ours_30000/renders"
+    # gt_dir = "runs/flat_ipek/wo_distractors-1808_192346/ours_30000/gt"
+    # # re_dir = "runs/flat_ipek/w_distractors-1808_225743/ours_30000/renders"
     mask_dir = "mask.png"
     
     calculate_psnr_with_mask(re_dir, gt_dir, mask_dir)
