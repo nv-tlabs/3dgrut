@@ -41,9 +41,10 @@ def calculate_psnr_with_mask(render_dir, gt_dir, mask_path):
 
     psnr_scores = []
     
-    error_dir = os.path.join(os.path.dirname(render_dir), "error_maps-")
-    os.makedirs(error_dir, exist_ok=True)
-    save_error_maps = True
+    save_error_maps = False
+    if save_error_maps:
+        error_dir = os.path.join(os.path.dirname(render_dir), "error_maps")
+        os.makedirs(error_dir, exist_ok=True)
     for filename in tqdm(image_files, desc="Processing Images"):
         render_path = os.path.join(render_dir, filename)
         gt_path = os.path.join(gt_dir, filename)
@@ -89,13 +90,13 @@ def calculate_psnr_with_mask(render_dir, gt_dir, mask_path):
     print("----------------")
 
 if __name__ == "__main__":
-    # re_dir = "runs/flat_yalda/wo_distractors-1808_192315/ours_30000/renders"
-    gt_dir = "runs/flat_yalda/wo_distractors-1808_192315/ours_30000/gt"
-    re_dir = "runs/flat_yalda/w_distractors-1808_225752/ours_30000/renders"
+    # # re_dir = "runs/flat_yalda/wo_distractors-1908_111705/ours_7000/renders"
+    # gt_dir = "runs/flat_yalda/wo_distractors-1908_111705/ours_30000/gt"
+    # re_dir = "runs/flat_yalda/w_distractors-1808_225752/ours_7000/renders"
     
-    # re_dir = "runs/flat_ipek/wo_distractors-1808_192346/ours_30000/renders"
-    # gt_dir = "runs/flat_ipek/wo_distractors-1808_192346/ours_30000/gt"
-    # # re_dir = "runs/flat_ipek/w_distractors-1808_225743/ours_30000/renders"
+    re_dir = "runs/flat_ipek/wo_distractors-1808_192346/ours_30000/renders"
+    gt_dir = "runs/flat_ipek/wo_distractors-1808_192346/ours_30000/gt"
+    # re_dir = "runs/flat_ipek/w_distractors-1808_225743/ours_7000/renders"
     mask_dir = "mask.png"
     
     calculate_psnr_with_mask(re_dir, gt_dir, mask_dir)
