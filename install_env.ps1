@@ -15,6 +15,43 @@ function Check-LastCommand {
     Write-Host "$StepName completed successfully" -ForegroundColor Green
 }
 
+# Function to find Visual Studio cl.exe path
+function Find-VisualStudioCompiler {
+    Write-Host "Searching for Visual Studio C++ compiler..." -ForegroundColor Yellow
+    
+    # Search paths for different VS editions and versions
+    $searchPaths = @(
+        "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\*\bin\Hostx64\x64",
+        "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Tools\MSVC\*\bin\Hostx64\x64", 
+        "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\*\bin\Hostx64\x64",
+        "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\*\bin\Hostx64\x64",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Tools\MSVC\*\bin\Hostx64\x64",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional\VC\Tools\MSVC\*\bin\Hostx64\x64",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Tools\MSVC\*\bin\Hostx64\x64",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\*\bin\Hostx64\x64",
+        # Fallback to x86 host if x64 host not available
+        "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\*\bin\Hostx64\x86",
+        "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Tools\MSVC\*\bin\Hostx64\x86", 
+        "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\*\bin\Hostx64\x86",
+        "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\*\bin\Hostx64\x86"
+    )
+    
+    foreach ($path in $searchPaths) {
+        $resolvedPaths = Get-ChildItem -Path $path -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+        foreach ($resolvedPath in $resolvedPaths) {
+            $clExe = Join-Path $resolvedPath.FullName "cl.exe"
+            if (Test-Path $clExe) {
+                Write-Host "Found Visual Studio compiler at: $($resolvedPath.FullName)" -ForegroundColor Green
+                return $resolvedPath.FullName
+            }
+        }
+    }
+    
+    Write-Host "Warning: Could not find Visual Studio C++ compiler automatically." -ForegroundColor Yellow
+    Write-Host "You may need to install Visual Studio Build Tools or add cl.exe to PATH manually." -ForegroundColor Yellow
+    return $null
+}
+
 Write-Host "`nStarting Conda environment setup: $CondaEnv"
 
 # Initialize conda for PowerShell (this enables conda commands)
@@ -43,9 +80,55 @@ if ($CurrentEnv -ne $CondaEnv) {
 }
 Write-Host "Current environment: $CurrentEnv" -ForegroundColor Green
 
+# Configure Visual Studio C++ compiler for PyTorch JIT compilation
+Write-Host "`nConfiguring Visual Studio C++ compiler for conda environment..." -ForegroundColor Yellow
+$vsCompilerPath = Find-VisualStudioCompiler
+if ($vsCompilerPath) {
+    # Get current PATH from conda environment
+    $currentPath = conda env config vars list -n $CondaEnv | Select-String "PATH" | ForEach-Object { $_.ToString().Split('=', 2)[1] }
+    
+    if ($currentPath) {
+        # Append to existing PATH
+        $newPath = "$vsCompilerPath;$currentPath"
+    } else {
+        # Create new PATH with VS compiler and current system PATH
+        $newPath = "$vsCompilerPath;$env:PATH"
+    }
+    
+    # Set the PATH environment variable for this conda environment
+    conda env config vars set -n $CondaEnv "PATH=$newPath"
+    Check-LastCommand "Visual Studio compiler PATH configuration"
+    
+    Write-Host "Visual Studio compiler added to conda environment PATH" -ForegroundColor Green
+    Write-Host "The compiler will be automatically available when you activate the environment" -ForegroundColor Green
+    
+    # Reactivate environment to pick up the new PATH
+    Write-Host "Reactivating environment to apply PATH changes..." -ForegroundColor Yellow
+    conda deactivate
+    conda activate $CondaEnv
+    Check-LastCommand "Environment reactivation"
+    
+    # Verify the compiler is now accessible
+    Write-Host "Verifying compiler accessibility..." -ForegroundColor Yellow
+    $clTest = Get-Command cl.exe -ErrorAction SilentlyContinue
+    if ($clTest) {
+        Write-Host "Visual Studio compiler (cl.exe) is now accessible: $($clTest.Source)" -ForegroundColor Green
+    } else {
+        Write-Host "Warning: cl.exe still not found in PATH. Manual setup may be required." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "Skipping compiler PATH setup - Visual Studio not found" -ForegroundColor Yellow
+    Write-Host "You may need to install Visual Studio Build Tools and re-run this script" -ForegroundColor Yellow
+}
+
+# Install CUDA toolkit 12.4 (nvcc, headers, libs)
+Write-Host "`nInstalling CUDA toolkit 12.4 (nvcc, etc.)..." -ForegroundColor Yellow
+conda install -y -c nvidia/label/cuda-12.4.0 cuda-toolkit
+Check-LastCommand "CUDA toolkit installation"
+
 # Install PyTorch with CUDA support (CRITICAL: This must complete first)
-Write-Host "`nInstalling PyTorch + CUDA (this may take several minutes)..." -ForegroundColor Yellow
-pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu118
+Write-Host "`nInstalling PyTorch + CUDA 12.4 (this may take several minutes)..." -ForegroundColor Yellow
+pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
 Check-LastCommand "PyTorch installation"
 
 # Verify PyTorch installation
@@ -55,7 +138,7 @@ Check-LastCommand "PyTorch verification"
 
 # Install build tools
 Write-Host "Installing build tools (cmake, ninja)..." -ForegroundColor Yellow
-conda install -y cmake ninja -c nvidia/label/cuda-11.8.0
+conda install -y cmake ninja -c nvidia/label/cuda-12.4.0
 Check-LastCommand "Build tools installation"
 
 # Initialize Git submodules
@@ -79,7 +162,7 @@ Check-LastCommand "Hydra-core installation"
 
 # Install Kaolin
 Write-Host "Installing Kaolin (this may take a while)..." -ForegroundColor Yellow
-pip install https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.5.1_cu118/kaolin-0.17.0-cp311-cp311-win_amd64.whl
+pip install https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.5.1_cu124/kaolin-0.17.0-cp311-cp311-win_amd64.whl
 Check-LastCommand "Kaolin installation"
 
 # Install project in development mode
@@ -93,3 +176,6 @@ Write-Host "=================================================" -ForegroundColor 
 Write-Host "    INSTALLATION COMPLETED SUCCESSFULLY!" -ForegroundColor Green
 Write-Host "=================================================" -ForegroundColor Green
 Write-Host "Environment '$CondaEnv' is ready with all dependencies!" -ForegroundColor Green
+Write-Host ""
+Write-Host "To use the environment:" -ForegroundColor Cyan
+Write-Host "  conda activate $CondaEnv" -ForegroundColor White
