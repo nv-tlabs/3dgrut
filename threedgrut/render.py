@@ -209,8 +209,8 @@ class Renderer:
                 if customized_mask.shape[-1] == 1 and gpu_batch.rgb_gt.shape[-1] == 3:
                     customized_mask = customized_mask.repeat(1, 1, 1, 3)
         
-                pred_rgb_psnr = pred_rgb_full * customized_mask
-                rgb_gt_psnr = rgb_gt_full * customized_mask
+                pred_rgb_metric = pred_rgb_full * customized_mask
+                rgb_gt_metric = rgb_gt_full * customized_mask
 
             # The values are already alpha composited with the background
             torchvision.utils.save_image(
@@ -230,7 +230,7 @@ class Renderer:
 
             # Compute the loss
             #psnr_single_img = criterions["psnr"](outputs["pred_rgb"], gpu_batch.rgb_gt).item()
-            psnr_single_img = criterions["psnr"](pred_rgb_psnr, rgb_gt_psnr).item()
+            psnr_single_img = criterions["psnr"](pred_rgb_metric, rgb_gt_metric).item()
             psnr.append(psnr_single_img)  # evaluation on valid rays only
             logger.info(f"Frame {iteration}, PSNR: {psnr[-1]}")
 
@@ -247,14 +247,14 @@ class Renderer:
             # evaluate on full image
             ssim.append(
                 criterions["ssim"](
-                    pred_rgb_full.permute(0, 3, 1, 2),
-                    rgb_gt_full.permute(0, 3, 1, 2),
+                    pred_rgb_metric.permute(0, 3, 1, 2),
+                    rgb_gt_metric.permute(0, 3, 1, 2),
                 ).item()
             )
             lpips.append(
                 criterions["lpips"](
-                    pred_rgb_full.clip(0, 1).permute(0, 3, 1, 2),
-                    rgb_gt_full.permute(0, 3, 1, 2),
+                    pred_rgb_metric.clip(0, 1).permute(0, 3, 1, 2),
+                    rgb_gt_metric.permute(0, 3, 1, 2),
                 ).item()
             )
 
