@@ -19,6 +19,7 @@ import platform
 
 import numpy as np
 from PIL import Image
+import cv2
 
 import torch
 from torch.utils.data import Dataset
@@ -56,7 +57,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         downsample_factor=1,
         test_split_interval=8,
         ray_jitter=None,
-        border_offset=25,
+        customized_mask_dir="mask.png",
     ):
         self.path = path
         self.device = device
@@ -64,8 +65,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.downsample_factor = downsample_factor
         self.ray_jitter = ray_jitter
         self.test_split_interval = test_split_interval
-        self.use_circular_mask = True
-        self.border_offset = border_offset
+        self.use_customized_mask = True
+        self.customized_mask_dir = customized_mask_dir
 
 
         # Worker-based GPU cache for multiprocessing compatibility
@@ -373,8 +374,10 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             image_points = pixels_to_image_points(pixel_coords)
             rays_d_cam = image_points_to_camera_rays(params, image_points)
             rays_o_cam = torch.zeros_like(rays_d_cam)
+            
+            self.use_circular_mask = False
             if self.use_circular_mask:
-                rays_d_cam_full =rays_d_cam
+                rays_d_cam_full = rays_d_cam
                 cx, cy = w / 2.0, h / 2.0
                 R = min(w, h) / 2.0
                 
@@ -386,7 +389,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 r = np.sqrt((x_coords - cx) ** 2 + (y_coords - cy) ** 2)
                 
                 # Create circular mask
-                mask = (r < (R - self.border_offset))
+                mask = (r < (R))
                 mask_flat = mask.flatten()
                 
                 # Apply mask: set rays outside the circle to [0, 0, 1] (forward direction)
@@ -400,6 +403,22 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 print(f"rays_d_cam_full shape: {rays_d_cam_full.shape}")
                 print(f"rays_d_cam_masked shape: {rays_d_cam.shape}")
                 print(f"Number of valid pixels in mask: {mask_flat.sum()}")
+            
+            if self.use_customized_mask:
+                print("-------- You are using a customized mask. -------")
+                print("Switch to circular mask for full image rendering.")
+                print("-------------------------------------------------")
+                rays_d_cam_full = rays_d_cam
+               
+                mask_custom = cv2.imread(self.customized_mask_dir, cv2.IMREAD_GRAYSCALE).astype(bool)
+                mask_flat = mask_custom.flatten()
+                
+                # Apply mask: set rays outside the mask to [0, 0, 1] (forward direction)
+                rays_d_cam = rays_d_cam_full.clone()
+                rays_d_cam[~mask_flat] = float('nan')
+                # Create rays_o_cam (origin rays, all zeros)
+                rays_o_cam = torch.zeros_like(rays_d_cam)
+
             return (
                 params.to_dict(),
                 rays_o_cam.to(torch.float32).reshape(out_shape),

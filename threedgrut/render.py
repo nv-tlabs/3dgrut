@@ -47,10 +47,8 @@ class Renderer:
         self.dataset, self.dataloader = self.create_test_dataloader(conf)
         self.writer = writer
         self.compute_extra_metrics = compute_extra_metrics
-        self.use_circular_mask = True
-        self.border_offset = conf.border_offset
-        metric_mask = torch.from_numpy(cv2.imread("mask.png", cv2.IMREAD_GRAYSCALE)).float()/255.0
-        self.metric_mask = metric_mask.unsqueeze(0).unsqueeze(-1).repeat(1,1,1,3).to(device="cuda")
+        self.use_customized_mask = True
+        self.customized_mask_dir = conf.customized_mask_dir
 
 
         if conf.model.background.color == "black":
@@ -139,66 +137,25 @@ class Renderer:
             compute_extra_metrics=compute_extra_metrics,
         )
     
-    def create_circular_mask(self, image_shape: tuple, border_offset: float = 100.0, device = None) -> torch.Tensor:
-        """Create circular mask for fisheye images to exclude black border regions.
+    def create_customized_mask(self, image_shape, customized_mask_dir, device=None):
+        """Create customized mask for fisheye images to exclude black border & tripod regions.
         
         Args:
             image_shape: Shape of the image tensor (batch, height, width, channels)
-            border_offset: Optional border offset in pixels to shrink the valid region
+            customized_mask_dir (Optional)
         
         Returns:
             torch.Tensor: Binary mask with 1 for valid pixels, 0 for invalid
         """
         batch, height, width, channels = image_shape
         
-        # Create coordinate grids
-        y, x = torch.meshgrid(
-            torch.arange(height, device=device, dtype=torch.float32),
-            torch.arange(width, device=device, dtype=torch.float32),
-            indexing='ij'
-        )
-        
-        # Calculate center and radius
-        cx, cy = width / 2.0, height / 2.0
-        R = min(width, height) / 2.0
-        
-        # Calculate distance from center
-        r = torch.sqrt((x - cx) ** 2 + (y - cy) ** 2)
-        
-        # Create circular mask (largest circle that fits in image)
-        circular_mask = (r < (R - border_offset)).float()
+        mask_custom = torch.from_numpy(cv2.imread("mask.png", cv2.IMREAD_GRAYSCALE).astype(bool)).to(device)
+        mask_custom = (mask_custom).float()
         
         # Expand to match batch and channel dimensions
-        circular_mask = circular_mask.unsqueeze(0).unsqueeze(-1)  # [1, H, W, 1]
-        circular_mask = circular_mask.repeat(batch, 1, 1, 1)      # [B, H, W, 1]
-        return circular_mask
-    
-    def filter_rays_circular(self, rays_o, rays_d, image_shape):
-        """Filter rays to only include those within circular region"""
-        if not self.use_circular_mask:
-            return rays_o, rays_d, None
-            
-        batch_size, height, width, _ = image_shape
-        
-        # Create pixel coordinates for all rays
-        y_coords = torch.arange(height, device=rays_o.device).repeat_interleave(width)
-        x_coords = torch.arange(width, device=rays_o.device).repeat(height)
-        
-        # Calculate center and radius
-        cx, cy = width / 2.0, height / 2.0
-        R = min(width, height) / 2.0
-        
-        # Calculate distance from center
-        r = torch.sqrt((x_coords - cx) ** 2 + (y_coords - cy) ** 2)
-        
-        # Create circular mask
-        valid_mask = (r < (R - self.border_offset))
-        
-        # Filter rays
-        rays_o_filtered = rays_o[valid_mask]
-        rays_d_filtered = rays_d[valid_mask]
-        
-        return rays_o_filtered, rays_d_filtered, valid_mask
+        mask_custom = mask_custom.unsqueeze(0).unsqueeze(-1)  # [1, H, W, 1]
+        mask_custom = mask_custom.repeat(batch, 1, 1, 1)      # [B, H, W, 1]
+        return mask_custom
 
     @torch.no_grad()
     def render_all(self):
@@ -244,24 +201,20 @@ class Renderer:
 
             # Compute the outputs of a single batch
             outputs = self.model(gpu_batch)
+            pred_rgb_full = outputs["pred_rgb"]
+            rgb_gt_full = gpu_batch.rgb_gt
 
-            if self.use_circular_mask:
-                circular_mask = self.create_circular_mask(gpu_batch.rgb_gt.shape, border_offset=self.border_offset, device= gpu_batch.rgb_gt.device)
-                if circular_mask.shape[-1] == 1 and gpu_batch.rgb_gt.shape[-1] == 3:
-                    circular_mask = circular_mask.repeat(1, 1, 1, 3)
+            if self.use_customized_mask:
+                customized_mask = self.create_customized_mask(gpu_batch.rgb_gt.shape, self.customized_mask_dir, gpu_batch.rgb_gt.device)
+                if customized_mask.shape[-1] == 1 and gpu_batch.rgb_gt.shape[-1] == 3:
+                    customized_mask = customized_mask.repeat(1, 1, 1, 3)
         
-                pred_rgb_render = outputs["pred_rgb"]*circular_mask
-                rgb_gt_full = gpu_batch.rgb_gt*circular_mask
-            else:
-                pred_rgb_render = outputs["pred_rgb"]
-                rgb_gt_full = gpu_batch.rgb_gt
-
-            rgb_gt_full = rgb_gt_full * self.metric_mask
-            pred_rgb_full = pred_rgb_render * self.metric_mask
+                pred_rgb_psnr = pred_rgb_full * customized_mask
+                rgb_gt_psnr = rgb_gt_full * customized_mask
 
             # The values are already alpha composited with the background
             torchvision.utils.save_image(
-                pred_rgb_render.squeeze(0).permute(2, 0, 1),
+                pred_rgb_full.squeeze(0).permute(2, 0, 1),
                 os.path.join(output_path_renders, "{0:05d}".format(iteration) + ".png"),
             )
             pred_img_to_write = pred_rgb_full[-1].clip(0, 1.0)
@@ -271,13 +224,13 @@ class Renderer:
                 test_images.append(pred_img_to_write)
 
             torchvision.utils.save_image(
-                gpu_batch.rgb_gt.squeeze(0).permute(2, 0, 1),
+                rgb_gt_full.squeeze(0).permute(2, 0, 1),
                 os.path.join(output_path_gt, "{0:05d}".format(iteration) + ".png"),
             )
 
             # Compute the loss
             #psnr_single_img = criterions["psnr"](outputs["pred_rgb"], gpu_batch.rgb_gt).item()
-            psnr_single_img = criterions["psnr"](pred_rgb_full, rgb_gt_full).item()
+            psnr_single_img = criterions["psnr"](pred_rgb_psnr, rgb_gt_psnr).item()
             psnr.append(psnr_single_img)  # evaluation on valid rays only
             logger.info(f"Frame {iteration}, PSNR: {psnr[-1]}")
 

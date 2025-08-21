@@ -20,6 +20,7 @@ from typing import Any, Optional, Union
 import torchvision
 
 import numpy as np
+import cv2
 
 import torch
 import torch.utils.data
@@ -136,43 +137,29 @@ class Trainer3DGRUT:
         self.setup_training(conf, self.model, self.train_dataset)
         self.init_experiments_tracking(conf)
         self.init_gui(conf, self.model, self.train_dataset, self.val_dataset, self.scene_bbox)
-        self.use_circular_mask = True
-        self.border_offset = conf.border_offset
-
-    def create_circular_mask(self, image_shape: tuple, border_offset: float = 100.0) -> torch.Tensor:
-        """Create circular mask for fisheye images to exclude black border regions.
+        self.use_customized_mask = True
+        self.customized_mask_dir = conf.customized_mask_dir
+        
+    def create_customized_mask(self, image_shape, customized_mask_dir, device):
+        """Create customized mask for fisheye images to exclude black border & tripod regions.
         
         Args:
             image_shape: Shape of the image tensor (batch, height, width, channels)
-            border_offset: Optional border offset in pixels to shrink the valid region
+            customized_mask_dir (Optional)
         
         Returns:
             torch.Tensor: Binary mask with 1 for valid pixels, 0 for invalid
         """
         batch, height, width, channels = image_shape
         
-        # Create coordinate grids
-        device = self.device
-        y, x = torch.meshgrid(
-            torch.arange(height, device=device, dtype=torch.float32),
-            torch.arange(width, device=device, dtype=torch.float32),
-            indexing='ij'
-        )
-        
-        # Calculate center and radius
-        cx, cy = width / 2.0, height / 2.0
-        R = min(width, height) / 2.0
-        
-        # Calculate distance from center
-        r = torch.sqrt((x - cx) ** 2 + (y - cy) ** 2)
-        
-        # Create circular mask (largest circle that fits in image)
-        circular_mask = (r < (R - border_offset)).float()
+        # Create custom mask
+        mask_custom = torch.from_numpy(cv2.imread("mask.png", cv2.IMREAD_GRAYSCALE).astype(bool)).to(device)
+        mask_custom = (mask_custom).float()
         
         # Expand to match batch and channel dimensions
-        circular_mask = circular_mask.unsqueeze(0).unsqueeze(-1)  # [1, H, W, 1]
-        circular_mask = circular_mask.repeat(batch, 1, 1, 1)      # [B, H, W, 1]
-        return circular_mask
+        mask_custom = mask_custom.unsqueeze(0).unsqueeze(-1)  # [1, H, W, 1]
+        mask_custom = mask_custom.repeat(batch, 1, 1, 1)      # [B, H, W, 1]
+        return mask_custom
 
 
     def init_dataloaders(self, conf: DictConfig):
@@ -376,14 +363,14 @@ class Trainer3DGRUT:
         rgb_gt = gpu_batch.rgb_gt
         rgb_pred = outputs["pred_rgb"]
 
-        if self.use_circular_mask:
-            circular_mask = self.create_circular_mask(rgb_gt.shape, border_offset=self.border_offset)
-            if circular_mask.shape[-1] == 1 and rgb_gt.shape[-1] == 3:
-                circular_mask = circular_mask.repeat(1, 1, 1, 3)
+        if self.use_customized_mask:
+            customized_mask = self.create_customized_mask(rgb_gt.shape, self.customized_mask_dir, self.device)
+            if customized_mask.shape[-1] == 1 and rgb_gt.shape[-1] == 3:
+                customized_mask = customized_mask.repeat(1, 1, 1, 3)
             
             # Apply mask
-            rgb_gt = rgb_gt * circular_mask
-            rgb_pred = rgb_pred * circular_mask
+            rgb_gt = rgb_gt * customized_mask
+            rgb_pred = rgb_pred * customized_mask
 
         psnr = self.criterions["psnr"]
         ssim = self.criterions["ssim"]
@@ -445,10 +432,10 @@ class Trainer3DGRUT:
         rgb_gt = gpu_batch.rgb_gt
         rgb_pred = outputs["pred_rgb"]
         mask = gpu_batch.mask
-        if self.use_circular_mask:
-            circular_mask = self.create_circular_mask(rgb_gt.shape, border_offset=self.border_offset)
-            rgb_gt = rgb_gt * circular_mask
-            rgb_pred = rgb_pred * circular_mask
+        if self.use_customized_mask:
+            customized_mask = self.create_customized_mask(rgb_gt.shape, self.customized_mask_dir, self.device)
+            rgb_gt = rgb_gt * customized_mask
+            rgb_pred = rgb_pred * customized_mask
         
         # Mask out the invalid pixels if the mask is provided
         if mask is not None:
@@ -467,7 +454,7 @@ class Trainer3DGRUT:
                 torchvision.utils.save_image(
                     rgb_pred[0].permute(2, 0, 1), pred_masked_path
                 )
-
+                
         # L1 loss
         loss_l1 = torch.zeros(1, device=self.device)
         lambda_l1 = 0.0
@@ -819,45 +806,45 @@ class Trainer3DGRUT:
             return (np_array * 255).astype(np.uint8)
         
         # Optional: Save additional outputs if available
-        if "pred_dist" in outputs:
-            try:
-                dist_dir = os.path.join(out_dir, "training_images", "distance")
-                os.makedirs(dist_dir, exist_ok=True)
+        # if "pred_dist" in outputs:
+        #     try:
+        #         dist_dir = os.path.join(out_dir, "training_images", "distance")
+        #         os.makedirs(dist_dir, exist_ok=True)
                 
-                pred_dist = outputs["pred_dist"][0]
-                dist_np = tensor_to_image_array(pred_dist, normalize_range=(0, 100))
+        #         pred_dist = outputs["pred_dist"][0]
+        #         dist_np = tensor_to_image_array(pred_dist, normalize_range=(0, 100))
                 
-                dist_path = os.path.join(dist_dir, f"distance_step_{global_step:06d}.png")
-                Image.fromarray(dist_np).save(dist_path)
-            except Exception as e:
-                logger.warning(f"Failed to save distance image: {e}")
+        #         dist_path = os.path.join(dist_dir, f"distance_step_{global_step:06d}.png")
+        #         Image.fromarray(dist_np).save(dist_path)
+        #     except Exception as e:
+        #         logger.warning(f"Failed to save distance image: {e}")
         
-        if "pred_opacity" in outputs:
-            try:
-                opacity_dir = os.path.join(out_dir, "training_images", "opacity")
-                os.makedirs(opacity_dir, exist_ok=True)
+        # if "pred_opacity" in outputs:
+        #     try:
+        #         opacity_dir = os.path.join(out_dir, "training_images", "opacity")
+        #         os.makedirs(opacity_dir, exist_ok=True)
                 
-                pred_opacity = outputs["pred_opacity"][0]
-                opacity_np = tensor_to_image_array(pred_opacity)
+        #         pred_opacity = outputs["pred_opacity"][0]
+        #         opacity_np = tensor_to_image_array(pred_opacity)
                 
-                opacity_path = os.path.join(opacity_dir, f"opacity_step_{global_step:06d}.png")
-                Image.fromarray(opacity_np).save(opacity_path)
-            except Exception as e:
-                logger.warning(f"Failed to save opacity image: {e}")
+        #         opacity_path = os.path.join(opacity_dir, f"opacity_step_{global_step:06d}.png")
+        #         Image.fromarray(opacity_np).save(opacity_path)
+        #     except Exception as e:
+        #         logger.warning(f"Failed to save opacity image: {e}")
         
         # Save hit counts visualization if available
-        if "hits_count" in outputs:
-            try:
-                hits_dir = os.path.join(out_dir, "training_images", "hits")
-                os.makedirs(hits_dir, exist_ok=True)
+        # if "hits_count" in outputs:
+        #     try:
+        #         hits_dir = os.path.join(out_dir, "training_images", "hits")
+        #         os.makedirs(hits_dir, exist_ok=True)
                 
-                hits_count = outputs["hits_count"][0]
-                hits_np = tensor_to_image_array(hits_count, normalize_range=(0, 50))  # Adjust max hits as needed
+        #         hits_count = outputs["hits_count"][0]
+        #         hits_np = tensor_to_image_array(hits_count, normalize_range=(0, 50))  # Adjust max hits as needed
                 
-                hits_path = os.path.join(hits_dir, f"hits_step_{global_step:06d}.png")
-                Image.fromarray(hits_np).save(hits_path)
-            except Exception as e:
-                logger.warning(f"Failed to save hits image: {e}")
+        #         hits_path = os.path.join(hits_dir, f"hits_step_{global_step:06d}.png")
+        #         Image.fromarray(hits_np).save(hits_path)
+        #     except Exception as e:
+        #         logger.warning(f"Failed to save hits image: {e}")
 
         # Compute and save error map
         try:

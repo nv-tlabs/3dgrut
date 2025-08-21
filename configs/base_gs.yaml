@@ -19,7 +19,7 @@ test_last: true
 validate_first: false
 log_frequency: 1
 compute_extra_metrics: true
-border_offset: 25
+customized_mask_dir: "mask.png"
 
 enable_frame_timings: false
 
