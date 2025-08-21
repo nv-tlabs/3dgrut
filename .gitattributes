@@ -1,3 +1,0 @@
-assets/nvidia-hq-playground.gif filter=lfs diff=lfs merge=lfs -text
-assets/nvidia-hq.gif filter=lfs diff=lfs merge=lfs -text
-assets/playground_glass.gif filter=lfs diff=lfs merge=lfs -text
