@@ -90,11 +90,11 @@ class Renderer:
         global_step = checkpoint["global_step"]
 
         conf = checkpoint["config"]
-        # overrides
-        if conf["render"]["method"] == "3dgrt":
-            conf["render"]["particle_kernel_density_clamping"] = True
-            conf["render"]["min_transmittance"] = 0.03
-        conf["render"]["enable_kernel_timings"] = True
+        # # overrides
+        # if conf["render"]["method"] == "3dgrt":
+        #     conf["render"]["particle_kernel_density_clamping"] = True
+        #     conf["render"]["min_transmittance"] = 0.03
+        # conf["render"]["enable_kernel_timings"] = True
 
         object_name = Path(conf.path).stem
         experiment_name = conf["experiment_name"]
