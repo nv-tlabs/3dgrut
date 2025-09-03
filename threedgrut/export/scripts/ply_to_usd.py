@@ -84,7 +84,7 @@ def main():
         conf = load_default_config()
         model = MixtureOfGaussians(conf)
 
-        # 2. Use init_from_ply
+        # 2. Use init_from_ply (now with built-in SH auto-detection for Isaac Sim compatibility)
         logger.info(f"Loading PLY with init_from_ply: {input_path}")
         model.init_from_ply(str(input_path), init_model=False)
 

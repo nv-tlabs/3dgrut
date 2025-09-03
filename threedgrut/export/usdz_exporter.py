@@ -77,6 +77,20 @@ class USDZExporter(ModelExporter):
                 logger.warning(f"Failed to apply normalizing transform: {e}")
                 normalizing_transform = np.eye(4)
 
+        # Auto-detect SH configuration for Isaac Sim compatibility
+        # Ensure radiance_sph_degree matches n_active_features to avoid performance issues
+        effective_radiance_sph_degree = conf.render.particle_radiance_sph_degree
+        if n_active_features == 0:
+            # DC-only case: force radiance_sph_degree to 0 for Isaac Sim performance
+            effective_radiance_sph_degree = 0
+            logger.info("Isaac Sim compatibility: setting radiance_sph_degree=0 for DC-only data")
+        elif n_active_features != conf.render.particle_radiance_sph_degree:
+            # SH degree mismatch: use the actual features available
+            effective_radiance_sph_degree = n_active_features
+            logger.info(f"Isaac Sim compatibility: adjusting radiance_sph_degree from {conf.render.particle_radiance_sph_degree} to {n_active_features}")
+        else:
+            logger.info(f"Using configured radiance_sph_degree={effective_radiance_sph_degree}")
+
         # Set up common parameters
         template_params = {
             "positions": positions,
@@ -93,7 +107,7 @@ class USDZExporter(ModelExporter):
             "rotation_activation": "normalize",  # Always normalize for rotations
             "density_kernel_density_clamping": conf.render.particle_kernel_density_clamping,
             "density_kernel_min_response": conf.render.particle_kernel_min_response,
-            "radiance_sph_degree": conf.render.particle_radiance_sph_degree,
+            "radiance_sph_degree": effective_radiance_sph_degree,
             "transmittance_threshold": conf.render.min_transmittance,
         }
 
