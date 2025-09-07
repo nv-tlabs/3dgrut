@@ -136,6 +136,8 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 frames = json.load(f)["frames"]
             with open(os.path.join(self.root_dir, "transforms_val.json"), "r") as f:
                 frames += json.load(f)["frames"]
+            with open(os.path.join(self.root_dir, "transforms_test.json"), "r") as f:
+                frames += json.load(f)["frames"]
         else:
             with open(
                 os.path.join(self.root_dir, f"transforms_{split}.json"), "r"
