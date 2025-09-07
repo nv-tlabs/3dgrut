@@ -1,0 +1,34 @@
+# @package _global_
+
+# python train.py --config-name apps/scivis_3dgut_gs.yaml out_dir=runs experiment_name=scivis path=data/scivisgs/v0.1/nyx/0155_00215_055_den_00200
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base_gs
+  - /dataset: nerf
+  - /initialization: random
+  - /render: 3dgut
+  - _self_
+
+# overwrite of default parameters
+val_frequency: 999999 # never validate
+
+initialization:
+  xyz_max: 1.0
+  xyz_min: 0.0
+
+model:
+  background:
+    color: white
+
+writer:
+  log_image_views: ${int_list:[]}
+
+checkpoint:
+  iterations: ${int_list:[]}
+
+export_ingp:
+  enabled: false
+
+export_ply:
+  enabled: true

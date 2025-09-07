@@ -1,0 +1,37 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base_mcmc
+  - /dataset: nerf
+  - /initialization: random
+  - /render: 3dgut
+  - _self_
+
+# overwrite of default parameters
+val_frequency: 999999 # never validate
+
+initialization:
+  num_gaussians: 10000
+  xyz_max: 1.0
+  xyz_min: 0.0
+
+model:
+  background:
+    color: white
+
+strategy:
+  add:
+    max_n_gaussians: 40000 # Maximum number of Gaussians
+
+writer:
+  log_image_views: ${int_list:[]}
+
+checkpoint:
+  iterations: ${int_list:[]}
+
+export_ingp:
+  enabled: false
+
+export_ply:
+  enabled: true
