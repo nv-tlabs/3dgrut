@@ -107,8 +107,8 @@ class ObjectTransform:
         """
         mat = torch.eye(4, device=self.device, dtype=self.dtype)
         mat[1, 1] = torch.cos(angle)
-        mat[1, 2] = torch.sin(angle)
-        mat[2, 1] = -torch.sin(angle)
+        mat[1, 2] = -torch.sin(angle)
+        mat[2, 1] = torch.sin(angle)
         mat[2, 2] = torch.cos(angle)
         return mat
 
@@ -121,8 +121,8 @@ class ObjectTransform:
         """
         mat = torch.eye(4, device=self.device, dtype=self.dtype)
         mat[0, 0] = torch.cos(angle)
-        mat[0, 2] = -torch.sin(angle)
-        mat[2, 0] = torch.sin(angle)
+        mat[0, 2] = torch.sin(angle)
+        mat[2, 0] = -torch.sin(angle)
         mat[2, 2] = torch.cos(angle)
         return mat
 
