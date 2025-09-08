@@ -125,7 +125,7 @@ conda activate $CONDA_ENV
 if [ "$CUDA_VERSION" = "11.8.0" ]; then
     echo "Installing CUDA 11.8.0 ..."
     conda install -y cuda-toolkit cmake ninja -c nvidia/label/cuda-11.8.0
-    conda install -y pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 "numpy<2.0" -c pytorch -c nvidia/label/cuda-11.8.0
+    conda install -y pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 "numpy<2.0" "mkl<=2022.1.0" -c pytorch -c nvidia/label/cuda-11.8.0
     pip3 install --find-links https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.2_cu118.html kaolin==0.17.0
 
 # CUDA 12.8 supports compute capability 10.0 and 12.0
