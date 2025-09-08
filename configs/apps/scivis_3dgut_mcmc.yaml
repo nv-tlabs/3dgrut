@@ -11,18 +11,23 @@ defaults:
 # overwrite of default parameters
 val_frequency: 999999 # never validate
 
+#initialization:
+#  num_gaussians: 10_000
+#  xyz_max: 1.0
+#  xyz_min: 0.0
+#
+#model:
+#  background:
+#    color: white
+
 initialization:
-  num_gaussians: 10000
+  num_gaussians: 10000 # Initial number of Gaussians
   xyz_max: 1.0
   xyz_min: 0.0
 
 model:
   background:
     color: white
-
-strategy:
-  add:
-    max_n_gaussians: 40000 # Maximum number of Gaussians
 
 writer:
   log_image_views: ${int_list:[]}
@@ -35,3 +40,7 @@ export_ingp:
 
 export_ply:
   enabled: true
+
+strategy:
+  add:
+    max_n_gaussians: 65536 # Maximum number of Gaussians
