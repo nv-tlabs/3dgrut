@@ -23,3 +23,13 @@ add:
   end_iteration: 25000 # Stop applying the strategy after end_iteration training iterations
   frequency: 100 # Apply the strategy every frequency iterations
   max_n_gaussians: 1000000 # Maximum number of Gaussians
+
+positions_boundaries:
+  minimum:
+    - 0.0
+    - 0.0
+    - 0.0
+  maximum:
+    - 1.0
+    - 1.0
+    - 1.0

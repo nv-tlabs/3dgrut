@@ -73,6 +73,9 @@ class MCMCStrategy(BaseStrategy):
             device=self.model.device,
         )
 
+        self.positions_minimum = torch.tensor(config.strategy.positions_boundaries.minimum, device=self.model.device)
+        self.positions_maximum = torch.tensor(config.strategy.positions_boundaries.maximum, device=self.model.device)
+
     def post_optimizer_step(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
         # Relocate dead gaussians to the alive areas
         if check_step_condition(step, self.conf.strategy.relocate.start_iteration, self.conf.strategy.relocate.end_iteration, self.conf.strategy.relocate.frequency):
@@ -163,6 +166,7 @@ class MCMCStrategy(BaseStrategy):
         noise = torch.bmm(covariance, noise.unsqueeze(-1)).squeeze(-1)
 
         self.model.positions.add_(noise)
+        self.model.positions.clamp_(min=self.positions_minimum, max=self.positions_maximum)
 
     def sample_new_gaussians(
         self, num_gaussians: int, valid_indices: Optional[torch.Tensor] = None
