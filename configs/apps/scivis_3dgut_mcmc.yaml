@@ -11,15 +11,6 @@ defaults:
 # overwrite of default parameters
 val_frequency: 999999 # never validate
 
-#initialization:
-#  num_gaussians: 10_000
-#  xyz_max: 1.0
-#  xyz_min: 0.0
-#
-#model:
-#  background:
-#    color: white
-
 initialization:
   num_gaussians: 100 # Initial number of Gaussians
   xyz_max: 1.0
