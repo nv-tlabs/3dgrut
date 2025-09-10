@@ -21,7 +21,7 @@ val_frequency: 999999 # never validate
 #    color: white
 
 initialization:
-  num_gaussians: 10000 # Initial number of Gaussians
+  num_gaussians: 100 # Initial number of Gaussians
   xyz_max: 1.0
   xyz_min: 0.0
 
@@ -43,4 +43,4 @@ export_ply:
 
 strategy:
   add:
-    max_n_gaussians: 65536 # Maximum number of Gaussians
+    max_n_gaussians: 256 # Maximum number of Gaussians
