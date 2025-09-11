@@ -98,6 +98,8 @@ def main():
         logger.info(f"Successfully exported to {output_path}")
     except Exception as e:
         logger.error(f"Error processing PLY file: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         sys.exit(1)
 
 
