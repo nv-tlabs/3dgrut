@@ -401,8 +401,8 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
             reinterpret_cast<const float3&>(featuresBackward),
             reinterpret_cast<float3&>(features),
             reinterpret_cast<const float3&>(featuresGradient),
-            hitT,
             hitTBackward,
+            hitT,
             hitTGradient);
     }
 
