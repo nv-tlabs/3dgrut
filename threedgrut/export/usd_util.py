@@ -13,19 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import os
 import tempfile
 import zipfile
-import logging
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
-from pxr import Usd, UsdGeom, Gf, Sdf, UsdVol, UsdUtils, Vt
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdUtils, UsdVol, Vt
 
 # Set up logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -89,7 +88,9 @@ def serialize_usd_stage_to_bytes(stage: Usd.Stage) -> bytes:
     return content
 
 
-def serialize_nurec_usd(model_file, positions: np.ndarray, normalizing_transform: np.ndarray = np.eye(4)) -> NamedUSDStage:
+def serialize_nurec_usd(
+    model_file, positions: np.ndarray, normalizing_transform: np.ndarray = np.eye(4)
+) -> NamedUSDStage:
     """
     Create a USD file for the 3DGS model.
 
@@ -109,10 +110,8 @@ def serialize_nurec_usd(model_file, positions: np.ndarray, normalizing_transform
     logger.info(f"Model bounding box: min={min_coord}, max={max_coord}")
 
     # Convert numpy values to Python floats
-    min_x, min_y, min_z = float(min_coord[0]), float(
-        min_coord[1]), float(min_coord[2])
-    max_x, max_y, max_z = float(max_coord[0]), float(
-        max_coord[1]), float(max_coord[2])
+    min_x, min_y, min_z = float(min_coord[0]), float(min_coord[1]), float(min_coord[2])
+    max_x, max_y, max_z = float(max_coord[0]), float(max_coord[1]), float(max_coord[2])
 
     min_list = [min_x, min_y, min_z]
     max_list = [max_x, max_y, max_z]
@@ -130,10 +129,9 @@ def serialize_nurec_usd(model_file, positions: np.ndarray, normalizing_transform
         "rtx:material:enableRefraction": False,
         "rtx:post:tonemap:op": 2,
         "rtx:raytracing:fractionalCutoutOpacity": False,
-        "rtx:matteObject:visibility:secondaryRays": True
+        "rtx:matteObject:visibility:secondaryRays": True,
     }
-    stage.SetMetadataByDictKey(
-        "customLayerData", "renderSettings", render_settings)
+    stage.SetMetadataByDictKey("customLayerData", "renderSettings", render_settings)
 
     # Define UsdVol::Volume
     gauss_path = "/World/gauss"
@@ -142,12 +140,9 @@ def serialize_nurec_usd(model_file, positions: np.ndarray, normalizing_transform
 
     # Apply normalizing transform (identity by default)
     # Default conversion matrix from 3DGRUT to USDZ
-    default_conv_tf = np.array([
-        [-1.0,  0.0,  0.0,  0.0],
-        [ 0.0,  0.0, -1.0,  0.0],
-        [ 0.0, -1.0,  0.0,  0.0],
-        [ 0.0,  0.0,  0.0,  1.0]
-    ])
+    default_conv_tf = np.array(
+        [[-1.0, 0.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+    )
 
     normalizing_inverse = np.linalg.inv(normalizing_transform)
     corrected_matrix = normalizing_inverse @ default_conv_tf
@@ -157,12 +152,10 @@ def serialize_nurec_usd(model_file, positions: np.ndarray, normalizing_transform
     matrix_op.Set(Gf.Matrix4d(*corrected_matrix.flatten()))
 
     # Define nurec volume properties
-    gauss_prim.CreateAttribute(
-        "omni:nurec:isNuRecVolume", Sdf.ValueTypeNames.Bool).Set(True)
+    gauss_prim.CreateAttribute("omni:nurec:isNuRecVolume", Sdf.ValueTypeNames.Bool).Set(True)
 
     # Enable transform of UsdVol::Volume to take effect
-    gauss_prim.CreateAttribute(
-        "omni:nurec:useProxyTransform", Sdf.ValueTypeNames.Bool).Set(False)
+    gauss_prim.CreateAttribute("omni:nurec:useProxyTransform", Sdf.ValueTypeNames.Bool).Set(False)
 
     # Define field assets and link to volumetric Gaussians prim
     density_field_path = gauss_path + "/density_field"
@@ -170,30 +163,20 @@ def serialize_nurec_usd(model_file, positions: np.ndarray, normalizing_transform
     gauss_volume.CreateFieldRelationship("density", density_field_path)
 
     emissive_color_field_path = gauss_path + "/emissive_color_field"
-    emissive_color_field = stage.DefinePrim(
-        emissive_color_field_path, "OmniNuRecFieldAsset")
-    gauss_volume.CreateFieldRelationship(
-        "emissiveColor", emissive_color_field_path)
+    emissive_color_field = stage.DefinePrim(emissive_color_field_path, "OmniNuRecFieldAsset")
+    gauss_volume.CreateFieldRelationship("emissiveColor", emissive_color_field_path)
 
     # Set file paths for field assets
     nurec_relative_path = "./" + model_file.filename
-    density_field.CreateAttribute(
-        "filePath", Sdf.ValueTypeNames.Asset).Set(nurec_relative_path)
-    density_field.CreateAttribute(
-        "fieldName", Sdf.ValueTypeNames.Token).Set("density")
-    density_field.CreateAttribute(
-        "fieldDataType", Sdf.ValueTypeNames.Token).Set("float")
-    density_field.CreateAttribute(
-        "fieldRole", Sdf.ValueTypeNames.Token).Set("density")
+    density_field.CreateAttribute("filePath", Sdf.ValueTypeNames.Asset).Set(nurec_relative_path)
+    density_field.CreateAttribute("fieldName", Sdf.ValueTypeNames.Token).Set("density")
+    density_field.CreateAttribute("fieldDataType", Sdf.ValueTypeNames.Token).Set("float")
+    density_field.CreateAttribute("fieldRole", Sdf.ValueTypeNames.Token).Set("density")
 
-    emissive_color_field.CreateAttribute(
-        "filePath", Sdf.ValueTypeNames.Asset).Set(nurec_relative_path)
-    emissive_color_field.CreateAttribute(
-        "fieldName", Sdf.ValueTypeNames.Token).Set("emissiveColor")
-    emissive_color_field.CreateAttribute(
-        "fieldDataType", Sdf.ValueTypeNames.Token).Set("float3")
-    emissive_color_field.CreateAttribute(
-        "fieldRole", Sdf.ValueTypeNames.Token).Set("emissiveColor")
+    emissive_color_field.CreateAttribute("filePath", Sdf.ValueTypeNames.Asset).Set(nurec_relative_path)
+    emissive_color_field.CreateAttribute("fieldName", Sdf.ValueTypeNames.Token).Set("emissiveColor")
+    emissive_color_field.CreateAttribute("fieldDataType", Sdf.ValueTypeNames.Token).Set("float3")
+    emissive_color_field.CreateAttribute("fieldRole", Sdf.ValueTypeNames.Token).Set("emissiveColor")
 
     # Set identity color correction matrix
     emissive_color_field.CreateAttribute("omni:nurec:ccmR", Sdf.ValueTypeNames.Float4).Set(
@@ -211,16 +194,13 @@ def serialize_nurec_usd(model_file, positions: np.ndarray, normalizing_transform
 
     # Set zero offset
     gauss_offset = [0.0, 0.0, 0.0]
-    gauss_prim.CreateAttribute(
-        "omni:nurec:offset", Sdf.ValueTypeNames.Float3).Set(Gf.Vec3d(gauss_offset))
+    gauss_prim.CreateAttribute("omni:nurec:offset", Sdf.ValueTypeNames.Float3).Set(Gf.Vec3d(gauss_offset))
 
     # Set crop bounds
     min_vec = Gf.Vec3d(min_x, min_y, min_z)
     max_vec = Gf.Vec3d(max_x, max_y, max_z)
-    gauss_prim.CreateAttribute(
-        "omni:nurec:crop:minBounds", Sdf.ValueTypeNames.Float3).Set(min_vec)
-    gauss_prim.CreateAttribute(
-        "omni:nurec:crop:maxBounds", Sdf.ValueTypeNames.Float3).Set(max_vec)
+    gauss_prim.CreateAttribute("omni:nurec:crop:minBounds", Sdf.ValueTypeNames.Float3).Set(min_vec)
+    gauss_prim.CreateAttribute("omni:nurec:crop:maxBounds", Sdf.ValueTypeNames.Float3).Set(max_vec)
 
     # Create empty proxy mesh relationship for forward compatibility
     gauss_prim.CreateRelationship("proxy")
@@ -240,14 +220,12 @@ def update_render_settings(stage: Usd.Stage, referenced_layer: Sdf.Layer) -> Non
         return  # Do nothing if render settings are not present in the referenced layer
 
     new_render_settings = referenced_layer.customLayerData["renderSettings"]
-    current_render_settings = stage.GetRootLayer(
-    ).customLayerData.get("renderSettings", {})
+    current_render_settings = stage.GetRootLayer().customLayerData.get("renderSettings", {})
     if current_render_settings is None:
         current_render_settings = {}
 
     current_render_settings.update(new_render_settings)
-    stage.SetMetadataByDictKey(
-        "customLayerData", "renderSettings", current_render_settings)
+    stage.SetMetadataByDictKey("customLayerData", "renderSettings", current_render_settings)
 
 
 def serialize_usd_default_layer(gauss_stage: NamedUSDStage) -> NamedUSDStage:

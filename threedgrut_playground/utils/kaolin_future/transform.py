@@ -14,18 +14,18 @@
 # limitations under the License.
 
 from __future__ import annotations
+
 from typing import Union
 
 import numpy as np
 import torch
-
 
 """
 This module is to be included in next version of kaolin 0.18.0.
 As of March 26, 2025 the latest public release is kaolin 0.17.0, hence it's included here independently.
 """
 
-PI = torch.pi if hasattr(torch, 'pi') else np.pi  # Fallback for older torch versions
+PI = torch.pi if hasattr(torch, "pi") else np.pi  # Fallback for older torch versions
 
 
 class ObjectTransform:
@@ -43,7 +43,7 @@ class ObjectTransform:
         self._permutation = torch.eye(4, device=self.device, dtype=self.dtype)
 
     def reset(self):
-        """ Restore object transform to unit scale, at the origin, with zero orientation. """
+        """Restore object transform to unit scale, at the origin, with zero orientation."""
         self._translation = torch.zeros(3, device=self.device, dtype=self.dtype)
         self._rotation = torch.zeros(3, device=self.device, dtype=self.dtype)
         self._scale = torch.ones(4, device=self.device, dtype=self.dtype)
@@ -89,7 +89,7 @@ class ObjectTransform:
         if torch.any(permutation > 2):
             raise Exception("Permutation axis out of bounds.")
         self._permutation.fill_(0)
-        self._permutation[(0,1,2), permutation] = 1
+        self._permutation[(0, 1, 2), permutation] = 1
         self._permutation[3, 3] = 1
 
     def _translation_mat(self, t: torch.Tensor) -> torch.Tensor:
@@ -245,7 +245,7 @@ class ObjectTransform:
         return self._permutation @ rotation_mat
 
     def to(self, *args, **kwargs) -> ObjectTransform:
-        """ Shifts the transform to a different device / dtype.
+        """Shifts the transform to a different device / dtype.
         seealso::func:`torch.Tensor.to` for an elaborate explanation of using this method.
 
         Returns:
@@ -255,10 +255,12 @@ class ObjectTransform:
         _rotation = self._rotation.to(*args, **kwargs)
         _scale = self._scale.to(*args, **kwargs)
         _permutation = self._permutation.to(*args, **kwargs)
-        if _translation is not self._translation or \
-           _rotation is not self._rotation or \
-           _scale is not self._scale or \
-           _permutation is not self._permutation:
+        if (
+            _translation is not self._translation
+            or _rotation is not self._rotation
+            or _scale is not self._scale
+            or _permutation is not self._permutation
+        ):
             transform = ObjectTransform(device=_translation.device, dtype=_translation.dtype)
             transform._translation = _translation
             transform._rotation = _rotation
@@ -278,7 +280,7 @@ class ObjectTransform:
 
     @tx.setter
     def tx(self, value):
-        """ Sets the x-axis translation component tensor.
+        """Sets the x-axis translation component tensor.
         Args:
             value: New translation-x value to set
         """
@@ -294,7 +296,7 @@ class ObjectTransform:
 
     @ty.setter
     def ty(self, value):
-        """ Sets the y-axis translation component tensor.
+        """Sets the y-axis translation component tensor.
         Args:
             value: New translation-y value to set
         """
@@ -310,7 +312,7 @@ class ObjectTransform:
 
     @tz.setter
     def tz(self, value):
-        """ Sets the z-axis translation component tensor.
+        """Sets the z-axis translation component tensor.
         Args:
             value: New translation-z value to set
         """
@@ -326,7 +328,7 @@ class ObjectTransform:
 
     @rx.setter
     def rx(self, value):
-        """ Sets the euler angle of the rotation component around the x axis
+        """Sets the euler angle of the rotation component around the x axis
         Args:
             value: New angle-x value to set, in degrees
         """
@@ -342,7 +344,7 @@ class ObjectTransform:
 
     @ry.setter
     def ry(self, value):
-        """ Sets the euler angle of the rotation component around the y axis
+        """Sets the euler angle of the rotation component around the y axis
         Args:
             value: New angle-y value to set, in degrees
         """
@@ -358,7 +360,7 @@ class ObjectTransform:
 
     @rz.setter
     def rz(self, value):
-        """ Sets the euler angle of the rotation component around the z axis
+        """Sets the euler angle of the rotation component around the z axis
         Args:
             value: New angle-z value to set, in degrees
         """
@@ -374,7 +376,7 @@ class ObjectTransform:
 
     @sx.setter
     def sx(self, value):
-        """ Sets the x-axis scale component tensor.
+        """Sets the x-axis scale component tensor.
         Args:
             value: New scale-x value to set
         """
@@ -390,7 +392,7 @@ class ObjectTransform:
 
     @sy.setter
     def sy(self, value):
-        """ Sets the y-axis scale component tensor.
+        """Sets the y-axis scale component tensor.
         Args:
             value: New scale-y value to set
         """
@@ -406,7 +408,7 @@ class ObjectTransform:
 
     @sz.setter
     def sz(self, value):
-        """ Sets the z-axis scale component tensor.
+        """Sets the z-axis scale component tensor.
         Args:
             value: New scale-z value to set
         """

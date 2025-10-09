@@ -15,15 +15,15 @@
 
 from __future__ import annotations
 
-import math
-import struct
 import collections
+import math
+import platform
+import struct
 from dataclasses import dataclass
 from typing import Sequence
 
 import numpy as np
 import torch
-import platform
 
 DEFAULT_DEVICE = torch.device("cuda")
 
@@ -111,9 +111,7 @@ class PointCloud:
             xyz_start=torch.cat([pc.xyz_start for pc in point_clouds_list]),
             xyz_end=torch.cat([pc.xyz_end for pc in point_clouds_list]),
             color=(
-                torch.cat([pc.color for pc in point_clouds_list])
-                if point_clouds_list[0].color is not None
-                else None
+                torch.cat([pc.color for pc in point_clouds_list]) if point_clouds_list[0].color is not None else None
             ),
             device=device,
         )
@@ -167,9 +165,7 @@ class _RepeatSampler(object):
             yield from iter(self.sampler)
 
 
-def compute_max_distance_to_border(
-    image_size_component: float, principal_point_component: float
-) -> float:
+def compute_max_distance_to_border(image_size_component: float, principal_point_component: float) -> float:
     """Given an image size component (x or y) and corresponding principal point component (x or y),
     returns the maximum distance (in image domain units) from the principal point to either image boundary.
     """
@@ -215,25 +211,15 @@ def create_camera_visualization(cam_list):
         elif cam["split"] == "val":
             cam_color = (0.7, 0.1, 0.7)
 
-        ps_cam = ps.register_camera_view(
-            f"{cam['split']}_view_{i_cam:03d}", ps_cam_param, widget_color=cam_color
-        )
+        ps_cam = ps.register_camera_view(f"{cam['split']}_view_{i_cam:03d}", ps_cam_param, widget_color=cam_color)
 
-        ps_cam.add_color_image_quantity(
-            "target image", cam["rgb_img"][:, :, :3], enabled=True
-        )
+        ps_cam.add_color_image_quantity("target image", cam["rgb_img"][:, :, :3], enabled=True)
 
 
-CameraModel = collections.namedtuple(
-    "CameraModel", ["model_id", "model_name", "num_params"]
-)
+CameraModel = collections.namedtuple("CameraModel", ["model_id", "model_name", "num_params"])
 Camera = collections.namedtuple("Camera", ["id", "model", "width", "height", "params"])
-BaseImage = collections.namedtuple(
-    "Image", ["id", "qvec", "tvec", "camera_id", "name", "xys", "point3D_ids"]
-)
-Point3D = collections.namedtuple(
-    "Point3D", ["id", "xyz", "rgb", "error", "image_ids", "point2D_idxs"]
-)
+BaseImage = collections.namedtuple("Image", ["id", "qvec", "tvec", "camera_id", "name", "xys", "point3D_ids"])
+Point3D = collections.namedtuple("Point3D", ["id", "xyz", "rgb", "error", "image_ids", "point2D_idxs"])
 CAMERA_MODELS = {
     CameraModel(model_id=0, model_name="SIMPLE_PINHOLE", num_params=3),
     CameraModel(model_id=1, model_name="PINHOLE", num_params=4),
@@ -247,12 +233,8 @@ CAMERA_MODELS = {
     CameraModel(model_id=9, model_name="RADIAL_FISHEYE", num_params=5),
     CameraModel(model_id=10, model_name="THIN_PRISM_FISHEYE", num_params=12),
 }
-CAMERA_MODEL_IDS = dict(
-    [(camera_model.model_id, camera_model) for camera_model in CAMERA_MODELS]
-)
-CAMERA_MODEL_NAMES = dict(
-    [(camera_model.model_name, camera_model) for camera_model in CAMERA_MODELS]
-)
+CAMERA_MODEL_IDS = dict([(camera_model.model_id, camera_model) for camera_model in CAMERA_MODELS])
+CAMERA_MODEL_NAMES = dict([(camera_model.model_name, camera_model) for camera_model in CAMERA_MODELS])
 
 
 def read_next_bytes(fid, num_bytes, format_char_sequence, endian_character="<"):
@@ -311,18 +293,14 @@ def read_colmap_points3D_binary(path_to_model_file):
 
         for _ in range(num_points):
             # Read the point data
-            binary_point_line_properties = read_next_bytes(
-                fid, num_bytes=43, format_char_sequence="QdddBBBd"
-            )
+            binary_point_line_properties = read_next_bytes(fid, num_bytes=43, format_char_sequence="QdddBBBd")
             # Append coordinates, colors, and error
             xyzs.append(binary_point_line_properties[1:4])
             rgbs.append(binary_point_line_properties[4:7])
             errors.append(binary_point_line_properties[7])
 
             # Skip track length and elements as they're not used
-            track_length = read_next_bytes(fid, num_bytes=8, format_char_sequence="Q")[
-                0
-            ]
+            track_length = read_next_bytes(fid, num_bytes=8, format_char_sequence="Q")[0]
             fid.seek(8 * track_length, 1)
 
     # Convert lists to numpy arrays all at once
@@ -379,9 +357,7 @@ def read_colmap_intrinsics_binary(path_to_model_file):
         num_cameras = read_next_bytes(fid, 8, "Q")[0]
         for _ in range(num_cameras):
             # Read fixed-size camera properties
-            camera_id, model_id, width, height = read_next_bytes(
-                fid, num_bytes=24, format_char_sequence="iiQQ"
-            )
+            camera_id, model_id, width, height = read_next_bytes(fid, num_bytes=24, format_char_sequence="iiQQ")
             # Get camera model information
             try:
                 camera_model = CAMERA_MODEL_IDS[model_id]
@@ -403,9 +379,7 @@ def read_colmap_intrinsics_binary(path_to_model_file):
                 params=np.array(params),
             )
     # Verify camera count
-    assert (
-        len(cameras) == num_cameras
-    ), f"Expected {num_cameras} cameras, but read {len(cameras)}"
+    assert len(cameras) == num_cameras, f"Expected {num_cameras} cameras, but read {len(cameras)}"
     return cameras
 
 
@@ -465,9 +439,7 @@ def read_colmap_extrinsics_binary(path_to_model_file):
                 try:
                     image_name += current_char.decode("utf-8")
                 except UnicodeDecodeError:
-                    raise ValueError(
-                        f"Invalid character in image name at position {len(image_name)}"
-                    )
+                    raise ValueError(f"Invalid character in image name at position {len(image_name)}")
             # Read 2D points
             num_points2D = read_next_bytes(fid, 8, "Q")[0]
             point_data = read_next_bytes(
@@ -476,15 +448,8 @@ def read_colmap_extrinsics_binary(path_to_model_file):
                 format_char_sequence="ddq" * num_points2D,
             )
             # Parse point data into coordinates and IDs
-            xys = np.array(
-                [
-                    (point_data[i], point_data[i + 1])
-                    for i in range(0, len(point_data), 3)
-                ]
-            )
-            point3D_ids = np.array(
-                [int(point_data[i + 2]) for i in range(0, len(point_data), 3)]
-            )
+            xys = np.array([(point_data[i], point_data[i + 1]) for i in range(0, len(point_data), 3)])
+            point3D_ids = np.array([int(point_data[i + 2]) for i in range(0, len(point_data), 3)])
             # Create image object
             images.append(
                 Image(
@@ -540,14 +505,9 @@ def read_colmap_extrinsics_text(path):
                 if len(point_elems) % 3 != 0:
                     raise ValueError(f"Invalid points format for image {image_name}")
                 xys = np.array(
-                    [
-                        (float(point_elems[i]), float(point_elems[i + 1]))
-                        for i in range(0, len(point_elems), 3)
-                    ]
+                    [(float(point_elems[i]), float(point_elems[i + 1])) for i in range(0, len(point_elems), 3)]
                 )
-                point3D_ids = np.array(
-                    [int(point_elems[i + 2]) for i in range(0, len(point_elems), 3)]
-                )
+                point3D_ids = np.array([int(point_elems[i + 2]) for i in range(0, len(point_elems), 3)])
                 # Create image object
                 images.append(
                     Image(
@@ -573,6 +533,7 @@ def worker_init_fn(worker_id):
     and random number generator state, which is especially important on Windows.
     """
     import random
+
     import numpy as np
     import torch
 

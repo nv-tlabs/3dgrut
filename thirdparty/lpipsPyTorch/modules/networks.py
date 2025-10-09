@@ -13,9 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Sequence
-
 from itertools import chain
+from typing import Sequence
 
 import torch
 import torch.nn as nn
@@ -25,24 +24,21 @@ from .utils import normalize_activation
 
 
 def get_network(net_type: str):
-    if net_type == 'alex':
+    if net_type == "alex":
         return AlexNet()
-    elif net_type == 'squeeze':
+    elif net_type == "squeeze":
         return SqueezeNet()
-    elif net_type == 'vgg':
+    elif net_type == "vgg":
         return VGG16()
     else:
-        raise NotImplementedError('choose net_type from [alex, squeeze, vgg].')
+        raise NotImplementedError("choose net_type from [alex, squeeze, vgg].")
 
 
 class LinLayers(nn.ModuleList):
     def __init__(self, n_channels_list: Sequence[int]):
-        super(LinLayers, self).__init__([
-            nn.Sequential(
-                nn.Identity(),
-                nn.Conv2d(nc, 1, 1, 1, 0, bias=False)
-            ) for nc in n_channels_list
-        ])
+        super(LinLayers, self).__init__(
+            [nn.Sequential(nn.Identity(), nn.Conv2d(nc, 1, 1, 1, 0, bias=False)) for nc in n_channels_list]
+        )
 
         for param in self.parameters():
             param.requires_grad = False
@@ -53,10 +49,8 @@ class BaseNet(nn.Module):
         super(BaseNet, self).__init__()
 
         # register buffer
-        self.register_buffer(
-            'mean', torch.Tensor([-.030, -.088, -.188])[None, :, None, None])
-        self.register_buffer(
-            'std', torch.Tensor([.458, .448, .450])[None, :, None, None])
+        self.register_buffer("mean", torch.Tensor([-0.030, -0.088, -0.188])[None, :, None, None])
+        self.register_buffer("std", torch.Tensor([0.458, 0.448, 0.450])[None, :, None, None])
 
     def set_requires_grad(self, state: bool):
         for param in chain(self.parameters(), self.buffers()):
