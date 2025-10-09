@@ -498,7 +498,7 @@ __device__ inline void processHitBwd(
     float3 radianceGrad,
     float integratedDepth,
     float& depth,
-    float depthGrad) {
+    float integratedDepthGrad) {
     float3 particlePosition;
     float3 gscl;
     float33 particleRotation;
@@ -550,11 +550,11 @@ __device__ inline void processHitBwd(
         // ===> d_hitT / d_galpha = gdist * prevTrm - residualHitT * prevTrm
         //                        = (gdist - residualHitT) * prevTrm
         //
-        const float galphaRayHitGrd = (gdist - residualHitT) * transmittance * depthGrad;
+        const float galphaRayHitGrd = (gdist - residualHitT) * transmittance * integratedDepthGrad;
         //
         // ===> d_hitT / d_gsqdist = weight / (2*gdist)
         // ===> d_gsqdist / d_grds =  2 * grds
-        const float3 grdsRayHitGrd = gsqdist > 0.0f ? ((2 * grds * weight) / (2 * gdist)) * depthGrad : make_float3(0.0f);
+        const float3 grdsRayHitGrd = gsqdist > 0.0f ? ((2 * grds * weight) / (2 * gdist)) * integratedDepthGrad : make_float3(0.0f);
 
         // ---> grds = gscl * grd * dot(grd, -1 * gro)
         //
