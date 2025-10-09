@@ -14,37 +14,48 @@
 # limitations under the License.
 
 from __future__ import annotations
-import os
+
 import copy
-import torch
-import kaolin
-from typing import List, Optional, Dict, Tuple, Callable
+import os
+from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
-from dataclasses import dataclass
-from kaolin.render.camera import Camera, generate_centered_pixel_coords, generate_pinhole_rays
-from threedgrut.utils.logger import logger
-from threedgrut.model.model import MixtureOfGaussians
-from threedgrut.model.background import BackgroundColor
-from threedgrut_playground.tracer import Tracer
-from threedgrut_playground.utils.mesh_io import (
-    load_mesh, load_materials, load_missing_material_info, create_procedural_mesh, create_quad_mesh
-)
-from threedgrut_playground.utils.depth_of_field import DepthOfField
-from threedgrut_playground.utils.video_out import VideoRecorder
-from threedgrut_playground.utils.spp import SPP
-from threedgrut_playground.utils.environment import Environment
-from threedgrut_playground.utils.kaolin_future.transform import ObjectTransform
-from threedgrut_playground.utils.kaolin_future.fisheye import generate_fisheye_rays
+from typing import Callable, Dict, List, Optional, Tuple
 
+import kaolin
+import torch
+from kaolin.render.camera import (
+    Camera,
+    generate_centered_pixel_coords,
+    generate_pinhole_rays,
+)
+
+from threedgrut.model.background import BackgroundColor
+from threedgrut.model.model import MixtureOfGaussians
+from threedgrut.utils.logger import logger
+from threedgrut_playground.tracer import Tracer
+from threedgrut_playground.utils.depth_of_field import DepthOfField
+from threedgrut_playground.utils.environment import Environment
+from threedgrut_playground.utils.kaolin_future.fisheye import generate_fisheye_rays
+from threedgrut_playground.utils.kaolin_future.transform import ObjectTransform
+from threedgrut_playground.utils.mesh_io import (
+    create_procedural_mesh,
+    create_quad_mesh,
+    load_materials,
+    load_mesh,
+    load_missing_material_info,
+)
+from threedgrut_playground.utils.spp import SPP
+from threedgrut_playground.utils.video_out import VideoRecorder
 
 #################################
 ##       --- Common ---        ##
 #################################
 
+
 @dataclass
 class RayPack:
-    """ A container for ray tracing data representing a batch of rays.
+    """A container for ray tracing data representing a batch of rays.
 
     This class encapsulates all necessary information for ray tracing operations,
     including ray origins, directions, and optional pixel coordinates and masks.
@@ -53,19 +64,20 @@ class RayPack:
         rays_ori (torch.FloatTensor): Ray origin points of shape (B, H, W, 3) or (N, 3),
             where B is batch size, H and W are image dimensions, and N is number of rays.
             Values are in world coordinates.
-            
+
         rays_dir (torch.FloatTensor): Ray direction vectors of shape (B, H, W, 3) or (N, 3),
             matching rays_ori shape. Directions should be normalized.
-            
+
         pixel_x (Optional[torch.IntTensor]): X-coordinates of pixel samples corresponding to rays,
             shape (H, W). Used for mapping rays back to image space.
-            
+
         pixel_y (Optional[torch.IntTensor]): Y-coordinates of pixel samples corresponding to rays,
             shape (H, W). Used for mapping rays back to image space.
-            
+
         mask (Optional[torch.BoolTensor]): Boolean mask of shape (H, W, 1) indicating valid
             rays. Typically used for fisheye cameras where not all pixels have valid rays.
     """
+
     rays_ori: torch.FloatTensor
     rays_dir: torch.FloatTensor
     pixel_x: Optional[torch.IntTensor] = None
@@ -73,11 +85,10 @@ class RayPack:
     mask: Optional[torch.BoolTensor] = None
 
     def split(self, size: Optional[int] = None) -> List[RayPack]:
-        """ Splits a batch of rays into smaller batches for processing.
-        """
+        """Splits a batch of rays into smaller batches for processing."""
         if size is None:
             return [self]
-        assert self.rays_ori.ndim == 2 and self.rays_dir.ndim == 2, 'Only 1D ray packs can be split'
+        assert self.rays_ori.ndim == 2 and self.rays_dir.ndim == 2, "Only 1D ray packs can be split"
         rays_orig = torch.split(self.rays_ori, size, dim=0)
         rays_dir = torch.split(self.rays_dir, size, dim=0)
         return [RayPack(ray_ori, ray_dir) for ray_ori, ray_dir in zip(rays_orig, rays_dir)]
@@ -85,11 +96,12 @@ class RayPack:
 
 @dataclass
 class PBRMaterial:
-    """ A Physically Based Rendering (PBR) material representation, managed within the engine and passed to the
+    """A Physically Based Rendering (PBR) material representation, managed within the engine and passed to the
     path tracer. This class implements the metallic-roughness PBR material model, supporting both
     texture maps and constant factors. It follows the glTF 2.0 PBR specification
     with additional support for transmission and IOR (Index of Refraction).
     """
+
     material_id: int
     diffuse_map: Optional[torch.Tensor] = None  # (H, W, 4)
     emissive_map: Optional[torch.Tensor] = None  # (H, W, 4)
@@ -111,15 +123,17 @@ class PBRMaterial:
 
 
 class OptixPlaygroundRenderOptions(IntEnum):
-    """ Render options to control the path tracer. """
+    """Render options to control the path tracer."""
+
     NONE = 0
-    SMOOTH_NORMALS = 1              # Use smooth interpolated normals for shading
-    DISABLE_GAUSSIAN_TRACING = 2    # Disable Gaussian volumetric tracing
-    DISABLE_PBR_TEXTURES = 4        # Disable PBR textures
+    SMOOTH_NORMALS = 1  # Use smooth interpolated normals for shading
+    DISABLE_GAUSSIAN_TRACING = 2  # Disable Gaussian volumetric tracing
+    DISABLE_PBR_TEXTURES = 4  # Disable PBR textures
 
 
 class OptixPrimitiveTypes(IntEnum):
-    """ Types of mesh primitives that can be rendered. """
+    """Types of mesh primitives that can be rendered."""
+
     NONE = 0
     MIRROR = 1
     GLASS = 2
@@ -128,15 +142,16 @@ class OptixPrimitiveTypes(IntEnum):
 
     @classmethod
     def names(cls):
-        return ['None', 'Mirror', 'Glass', 'Diffuse Mesh', 'PBR Mesh']
+        return ["None", "Mirror", "Glass", "Diffuse Mesh", "PBR Mesh"]
 
 
 @dataclass
 class OptixPrimitive:
-    """ Holds the data for a single mesh primitive to be rendered, or a stack of multiple primitives.
+    """Holds the data for a single mesh primitive to be rendered, or a stack of multiple primitives.
     That includes the geometry, material, and transform.
     Materials are managed within the engine and referenced by material_id.
     """
+
     geometry_type: str = None
     vertices: torch.Tensor = None
     triangles: torch.Tensor = None
@@ -158,7 +173,7 @@ class OptixPrimitive:
 
     @classmethod
     def stack(cls, primitives: List[OptixPrimitive]) -> OptixPrimitive:
-        """ Stack a list of primitives into a single primitive.
+        """Stack a list of primitives into a single primitive.
         That is - all fields are concatenated along the first dimension.
         """
         device = primitives[0].vertices.device
@@ -177,11 +192,11 @@ class OptixPrimitive:
             material_id=torch.cat([p.material_id for p in primitives if p.material_id is not None], dim=0).int(),
             primitive_type_tensor=torch.cat([p.primitive_type_tensor for p in primitives], dim=0).int(),
             reflectance_scatter=torch.cat([p.reflectance_scatter for p in primitives], dim=0).float(),
-            refractive_index_tensor=torch.cat([p.refractive_index_tensor for p in primitives], dim=0).float()
+            refractive_index_tensor=torch.cat([p.refractive_index_tensor for p in primitives], dim=0).float(),
         )
 
     def apply_transform(self):
-        """ Apply the primitive's transform to the geometry. """
+        """Apply the primitive's transform to the geometry."""
         model_matrix = self.transform.model_matrix()
         rs_comp = model_matrix[None, :3, :3]
         t_comp = model_matrix[None, :3, 3:]
@@ -207,7 +222,7 @@ class OptixPrimitive:
             reflectance_scatter=self.reflectance_scatter,
             refractive_index=self.refractive_index,
             refractive_index_tensor=self.refractive_index_tensor,
-            transform=ObjectTransform(device=self.transform.device)
+            transform=ObjectTransform(device=self.transform.device),
         )
 
 
@@ -215,9 +230,9 @@ def set_mesh_scale_to_scene(
     scene_scale: torch.Tensor,
     mesh: kaolin.rep.SurfaceMesh,
     transform: ObjectTransform,
-    scale_of_new_mesh_to_small_scene = 0.5
+    scale_of_new_mesh_to_small_scene=0.5,
 ) -> None:
-    """ Automatically scales a mesh to fit appropriately within the scene.
+    """Automatically scales a mesh to fit appropriately within the scene.
 
     This function is a heuristic that applies a two-step scaling process:
     1. Normalizes mesh to unit size by dividing by its largest dimension
@@ -239,7 +254,7 @@ def set_mesh_scale_to_scene(
     """
     mesh_scale = ((mesh.vertices.max(dim=0)[0] - mesh.vertices.min(dim=0)[0]).cpu()).to(transform.device)
     transform.scale(1.0 / mesh_scale.max())
-    if scene_scale.max() > 5.0:    # Don't scale for large scenes
+    if scene_scale.max() > 5.0:  # Don't scale for large scenes
         return
     adjusted_scale = scale_of_new_mesh_to_small_scene * scene_scale.to(transform.device)
     largest_axis_scale = adjusted_scale.max()
@@ -247,7 +262,7 @@ def set_mesh_scale_to_scene(
 
 
 class Primitives:
-    """ Manages mesh primitives and their materials within the 3DGRUT rendering engine.
+    """Manages mesh primitives and their materials within the 3DGRUT rendering engine.
 
     This class handles the lifecycle of mesh objects in the scene, including loading,
     transformation, material assignment, and BVH acceleration structure management.
@@ -262,25 +277,29 @@ class Primitives:
             print(material_name, material)
     ```
     """
-    SUPPORTED_MESH_EXTENSIONS = ['.obj', '.glb', '.gltf']   # Supported mesh file formats
-    DEFAULT_REFRACTIVE_INDEX = 1.33                         # Default IOR for transparent materials
+
+    SUPPORTED_MESH_EXTENSIONS = [".obj", ".glb", ".gltf"]  # Supported mesh file formats
+    DEFAULT_REFRACTIVE_INDEX = 1.33  # Default IOR for transparent materials
     PROCEDURAL_SHAPES: Dict[str, Callable[[torch.device], kaolin.rep.SurfaceMesh]] = dict(
         Quad=create_quad_mesh
-    )                                                # Supported procedural shapes -> constructor function
+    )  # Supported procedural shapes -> constructor function
 
-    def __init__(self,
+    def __init__(
+        self,
         tracer: Tracer,
         mesh_assets_folder: str,
         scene_scale: Optional[torch.Tensor] = None,
-        mesh_autoscale_func: Callable[[torch.Tensor, kaolin.rep.SurfaceMesh, ObjectTransform], None] = set_mesh_scale_to_scene,
-        device: Optional[torch.device] = None
+        mesh_autoscale_func: Callable[
+            [torch.Tensor, kaolin.rep.SurfaceMesh, ObjectTransform], None
+        ] = set_mesh_scale_to_scene,
+        device: Optional[torch.device] = None,
     ):
-        """ Initialize the primitives manager for mesh rendering.
+        """Initialize the primitives manager for mesh rendering.
 
         Args:
             tracer (Tracer): OptixTracer instance for ray tracing, should reference the same tracer as the engine.
             mesh_assets_folder (str): Directory containing mesh asset files to load from.
-            scene_scale (Optional[torch.Tensor], optional): Scene dimensions of shape (3,). 
+            scene_scale (Optional[torch.Tensor], optional): Scene dimensions of shape (3,).
                 Defaults to [1.0, 1.0, 1.0].
             mesh_autoscale_func (Callable, optional): Function to autoscale meshes when new primitives are added.
                 Signature: (scene_scale, mesh, transform) -> None.
@@ -303,7 +322,7 @@ class Primitives:
         self.disable_pbr_textures: bool = False
         """ Overall scene scale factor, shape (3,) """
         if scene_scale is None:
-            self.scene_scale: torch.Tensor = torch.tensor([1.0, 1.0, 1.0], device='cpu')
+            self.scene_scale: torch.Tensor = torch.tensor([1.0, 1.0, 1.0], device="cpu")
         else:
             self.scene_scale: torch.Tensor = scene_scale.cpu()
         self.stacked_fields = None
@@ -317,8 +336,8 @@ class Primitives:
         self.mesh_autoscale_func = mesh_autoscale_func
 
     def register_available_assets(self, assets_folder: str) -> Dict[str, Optional[str]]:
-        """ Scans directory for supported mesh files and builds asset registry.
-        Finds all supported mesh files in the given directory and maps their 
+        """Scans directory for supported mesh files and builds asset registry.
+        Finds all supported mesh files in the given directory and maps their
         capitalized names to full file paths.
 
         Args:
@@ -328,20 +347,23 @@ class Primitives:
             Dict[str, str]: Mapping of capitalized mesh names to file paths,
                 with procedural shapes mapping to None
         """
-        available_assets = {Path(asset).stem.capitalize(): os.path.join(assets_folder, asset)
-                            for asset in os.listdir(assets_folder)
-                            if Path(asset).suffix in Primitives.SUPPORTED_MESH_EXTENSIONS}
+        available_assets = {
+            Path(asset).stem.capitalize(): os.path.join(assets_folder, asset)
+            for asset in os.listdir(assets_folder)
+            if Path(asset).suffix in Primitives.SUPPORTED_MESH_EXTENSIONS
+        }
         # Procedural shapes are added manually
         for shape in Primitives.PROCEDURAL_SHAPES.keys():
             available_assets[shape] = None
-        return available_assets # i.e. {MeshName: /path/to/mesh.glb}
+        return available_assets  # i.e. {MeshName: /path/to/mesh.glb}
 
     def register_default_materials(self, device) -> Dict[str, PBRMaterial]:
-        """ Registers default procedural materials which always load with the engine. """
+        """Registers default procedural materials which always load with the engine."""
         checkboard_res = 512
         checkboard_square = 20
-        checkboard_texture = torch.tensor([0.25, 0.25, 0.25, 1.0],
-                                          device=device, dtype=torch.float32).repeat(checkboard_res, checkboard_res, 1)
+        checkboard_texture = torch.tensor([0.25, 0.25, 0.25, 1.0], device=device, dtype=torch.float32).repeat(
+            checkboard_res, checkboard_res, 1
+        )
         for i in range(checkboard_res // checkboard_square):
             for j in range(checkboard_res // checkboard_square):
                 start_x = (2 * i + j % 2) * checkboard_square
@@ -352,14 +374,15 @@ class Primitives:
         default_materials = dict(
             solid=PBRMaterial(
                 material_id=0,
-                diffuse_map=torch.tensor([130 / 255.0, 193 / 255.0, 255 / 255.0, 1.0],
-                                         device=device, dtype=torch.float32).expand(2, 2, 4),
+                diffuse_map=torch.tensor(
+                    [130 / 255.0, 193 / 255.0, 255 / 255.0, 1.0], device=device, dtype=torch.float32
+                ).expand(2, 2, 4),
                 diffuse_factor=torch.ones(4, device=device, dtype=torch.float32),
                 emissive_factor=torch.zeros(3, device=device, dtype=torch.float32),
                 metallic_factor=0.0,
                 roughness_factor=0.0,
                 transmission_factor=0.0,
-                ior=1.0
+                ior=1.0,
             ),
             checkboard=PBRMaterial(
                 material_id=1,
@@ -369,7 +392,7 @@ class Primitives:
                 metallic_factor=0.0,
                 roughness_factor=0.0,
                 transmission_factor=0.0,
-                ior=1.0
+                ior=1.0,
             ),
             brushed_copper=PBRMaterial(
                 material_id=2,
@@ -378,7 +401,7 @@ class Primitives:
                 metallic_factor=1.0,
                 roughness_factor=0.5,
                 transmission_factor=0.0,
-                ior=1.1
+                ior=1.1,
             ),
             blue_glass=PBRMaterial(
                 material_id=3,
@@ -387,7 +410,7 @@ class Primitives:
                 metallic_factor=0.0,
                 roughness_factor=0.1,
                 transmission_factor=0.95,
-                ior=1.52
+                ior=1.52,
             ),
             jade=PBRMaterial(
                 material_id=4,
@@ -396,7 +419,7 @@ class Primitives:
                 metallic_factor=0.0,
                 roughness_factor=0.3,
                 transmission_factor=0.4,
-                ior=1.66
+                ior=1.66,
             ),
             polished_marble=PBRMaterial(
                 material_id=5,
@@ -405,7 +428,7 @@ class Primitives:
                 metallic_factor=0.0,
                 roughness_factor=0.1,
                 transmission_factor=0.0,
-                ior=1.6
+                ior=1.6,
             ),
             diamond=PBRMaterial(
                 material_id=6,
@@ -414,7 +437,7 @@ class Primitives:
                 metallic_factor=0.0,
                 roughness_factor=0.02,
                 transmission_factor=0.99,
-                ior=2.42
+                ior=2.42,
             ),
             rose_gold=PBRMaterial(
                 material_id=7,
@@ -423,7 +446,7 @@ class Primitives:
                 metallic_factor=1.0,
                 roughness_factor=0.15,
                 transmission_factor=0.0,
-                ior=1.1
+                ior=1.1,
             ),
             luminous_yellow=PBRMaterial(
                 material_id=8,
@@ -432,7 +455,7 @@ class Primitives:
                 metallic_factor=0.0,
                 roughness_factor=0.7,
                 transmission_factor=0.0,
-                ior=1.0
+                ior=1.0,
             ),
             ruby_red=PBRMaterial(
                 material_id=9,
@@ -441,7 +464,7 @@ class Primitives:
                 metallic_factor=0.0,
                 roughness_factor=0.1,
                 transmission_factor=0.3,
-                ior=1.76  # Ruby-like IOR
+                ior=1.76,  # Ruby-like IOR
             ),
             blue_plastic=PBRMaterial(
                 material_id=10,
@@ -450,7 +473,7 @@ class Primitives:
                 metallic_factor=0.0,
                 roughness_factor=0.4,
                 transmission_factor=0.0,
-                ior=1.45
+                ior=1.45,
             ),
             oak_wood=PBRMaterial(
                 material_id=11,
@@ -459,22 +482,22 @@ class Primitives:
                 metallic_factor=0.0,
                 roughness_factor=0.75,
                 transmission_factor=0.0,
-                ior=1.3
+                ior=1.3,
             ),
-            black_rubber = PBRMaterial(
+            black_rubber=PBRMaterial(
                 material_id=12,
                 diffuse_factor=torch.tensor([0.1, 0.1, 0.1, 1.0], device=device, dtype=torch.float32),
                 emissive_factor=torch.zeros(3, device=device, dtype=torch.float32),
                 metallic_factor=0.0,
                 roughness_factor=0.9,
                 transmission_factor=0.0,
-                ior=1.5
-            )
+                ior=1.5,
+            ),
         )
         return default_materials
 
     def add_primitive(self, geometry_type: str, primitive_type: OptixPrimitiveTypes, device) -> None:
-        """ Creates a mesh from geometry type, sets up its materials and transforms,
+        """Creates a mesh from geometry type, sets up its materials and transforms,
         and adds it to the scene with automatic scaling.
 
         The new primitive instance is added to the scene with an auto-generated numbered name.
@@ -500,17 +523,21 @@ class Primitives:
         # Generate tangents mas, if available
         num_verts = len(mesh.vertices)
         num_faces = len(mesh.faces)
-        is_precomputed_tangents = mesh.has_attribute('vertex_tangents') and mesh.vertex_tangents is not None
-        has_tangents = torch.ones([num_verts, 1], device=device, dtype=torch.bool) \
-            if is_precomputed_tangents \
+        is_precomputed_tangents = mesh.has_attribute("vertex_tangents") and mesh.vertex_tangents is not None
+        has_tangents = (
+            torch.ones([num_verts, 1], device=device, dtype=torch.bool)
+            if is_precomputed_tangents
             else torch.zeros([num_verts, 1], device=device, dtype=torch.bool)
-        vertex_tangents = mesh.vertex_tangents \
-            if is_precomputed_tangents \
+        )
+        vertex_tangents = (
+            mesh.vertex_tangents
+            if is_precomputed_tangents
             else torch.zeros([num_verts, 3], device=device, dtype=torch.float)
+        )
 
         # Create identity transform and set scale to scene size
         transform = ObjectTransform(device=device)
-        if self.mesh_autoscale_func is not None:\
+        if self.mesh_autoscale_func is not None:
             self.mesh_autoscale_func(self.scene_scale, mesh, transform)  # i.e. set_mesh_scale_to_scene()
         # Face attributes
         prim_type_tensor = mesh.faces.new_full(size=(num_faces,), fill_value=primitive_type.value)
@@ -532,11 +559,11 @@ class Primitives:
             reflectance_scatter=reflectance_scatter.float(),
             refractive_index=refractive_index,
             refractive_index_tensor=refractive_index_tensor.float(),
-            transform=transform
+            transform=transform,
         )
 
     def remove_primitive(self, name: str) -> None:
-        """ Removes a primitive from the scene and updates the BVH.
+        """Removes a primitive from the scene and updates the BVH.
 
         Args:
             name (str): Name of primitive to remove
@@ -545,9 +572,9 @@ class Primitives:
         self.rebuild_bvh_if_needed(True, True)
 
     def duplicate_primitive(self, name: str) -> None:
-        """ Creates a deep copy of an existing primitive with a new name.
+        """Creates a deep copy of an existing primitive with a new name.
         Forces BVH rebuild after duplication.
-            
+
         Args:
             name (str): Name of primitive instance to duplicate
         """
@@ -559,9 +586,9 @@ class Primitives:
         self.rebuild_bvh_if_needed(True, True)
 
     def register_materials(self, materials: List[Dict], model_name: str) -> torch.Tensor:
-        """ Registers new PBR materials and creates index mapping for material assignments in current scene registry.
+        """Registers new PBR materials and creates index mapping for material assignments in current scene registry.
         e.g: the returned tensor will map the material indices of the given materials to the material IDs in the current scene registry.
-        
+
         Args:
             materials (List[Dict]): List of material property dictionaries
             model_name (str): Prefix for material names
@@ -579,24 +606,24 @@ class Primitives:
             if material_name not in self.registered_materials:
                 self.registered_materials[material_name] = PBRMaterial(
                     material_id=len(self.registered_materials),
-                    diffuse_map=mat['diffuse_map'],
-                    emissive_map=mat['emissive_map'],
-                    metallic_roughness_map=mat['metallic_roughness_map'],
-                    normal_map=mat['normal_map'],
-                    diffuse_factor=mat['diffuse_factor'],
-                    emissive_factor=mat['emissive_factor'],
-                    metallic_factor=mat['metallic_factor'],
-                    roughness_factor=mat['roughness_factor'],
-                    alpha_mode=mat['alpha_mode'],
-                    alpha_cutoff=mat['alpha_cutoff'],
-                    transmission_factor=mat['transmission_factor'],
-                    ior=mat['ior']
+                    diffuse_map=mat["diffuse_map"],
+                    emissive_map=mat["emissive_map"],
+                    metallic_roughness_map=mat["metallic_roughness_map"],
+                    normal_map=mat["normal_map"],
+                    diffuse_factor=mat["diffuse_factor"],
+                    emissive_factor=mat["emissive_factor"],
+                    metallic_factor=mat["metallic_factor"],
+                    roughness_factor=mat["roughness_factor"],
+                    alpha_mode=mat["alpha_mode"],
+                    alpha_cutoff=mat["alpha_cutoff"],
+                    transmission_factor=mat["transmission_factor"],
+                    ior=mat["ior"],
                 )
             mat_idx_to_mat_id[mat_idx] = self.registered_materials[material_name].material_id
         return mat_idx_to_mat_id
 
     def create_geometry(self, geometry_type: str, device) -> kaolin.rep.SurfaceMesh:
-        """ Creates mesh geometry either procedurally or from file.
+        """Creates mesh geometry either procedurally or from file.
 
         Args:
             geometry_type (str): Type of geometry to create ('Quad', or any loaded asset from assets folder like 'Sphere').
@@ -635,7 +662,7 @@ class Primitives:
         return mesh
 
     def recompute_stacked_buffers(self) -> None:
-        """ Updates internal buffers for all visible primitives.
+        """Updates internal buffers for all visible primitives.
         Applies transforms and updates per-face properties before
         stacking all visible primitives into combined buffers.
         """
@@ -645,16 +672,19 @@ class Primitives:
             f = obj.triangles
             num_faces = f.shape[0]
             obj.primitive_type_tensor = f.new_full(size=(num_faces,), fill_value=obj.primitive_type.value)
-            obj.refractive_index_tensor = f.new_full(size=(num_faces,),
-                                                     fill_value=obj.refractive_index, dtype=torch.float)
+            obj.refractive_index_tensor = f.new_full(
+                size=(num_faces,), fill_value=obj.refractive_index, dtype=torch.float
+            )
 
         # Stack fields again
         self.stacked_fields = None
         if self.has_visible_objects():
-            self.stacked_fields = OptixPrimitive.stack([p for p in objects if p.primitive_type != OptixPrimitiveTypes.NONE])
+            self.stacked_fields = OptixPrimitive.stack(
+                [p for p in objects if p.primitive_type != OptixPrimitiveTypes.NONE]
+            )
 
     def has_visible_objects(self) -> bool:
-        """ Checks if scene contains any visible primitives.
+        """Checks if scene contains any visible primitives.
 
         Returns:
             bool: True if any primitives have non-NONE type
@@ -663,9 +693,9 @@ class Primitives:
 
     @torch.cuda.nvtx.range("rebuild_bvh (prim)")
     def rebuild_bvh_if_needed(self, force: bool = False, rebuild: bool = True) -> None:
-        """ Rebuilds mesh primitives BVH acceleration structure if needed.
+        """Rebuilds mesh primitives BVH acceleration structure if needed.
         Creates empty BVH if no visible objects.
-        
+
         Args:
             force (bool): Force rebuild regardless of engine "dirty" state
             rebuild (bool): Whether to rebuild or update existing BVH
@@ -677,23 +707,25 @@ class Primitives:
                     mesh_vertices=self.stacked_fields.vertices,
                     mesh_faces=self.stacked_fields.triangles,
                     rebuild=rebuild,
-                    allow_update=True
+                    allow_update=True,
                 )
             else:
                 self.tracer.build_mesh_acc(
-                    mesh_vertices=torch.zeros([3, 3], dtype=torch.float, device='cuda'),
-                    mesh_faces=torch.zeros([1, 3], dtype=torch.int, device='cuda'),
+                    mesh_vertices=torch.zeros([3, 3], dtype=torch.float, device="cuda"),
+                    mesh_faces=torch.zeros([1, 3], dtype=torch.int, device="cuda"),
                     rebuild=True,
-                    allow_update=True
+                    allow_update=True,
                 )
         self.dirty = False
+
 
 #################################
 ##       --- Renderer      --- ##
 #################################
 
+
 class Engine3DGRUT:
-    """ An interface to the core functionality of rendering pretrained 3DGRUT scenes with secondary ray effects &
+    """An interface to the core functionality of rendering pretrained 3DGRUT scenes with secondary ray effects &
     mesh primitives. This engine supports loading pretrained scenes from:
         - 3D Gaussian Ray Tracing (3DGRT)
         - 3D Gaussian Unscented Transform (3DGUT)
@@ -754,7 +786,7 @@ class Engine3DGRUT:
         engine.camera_fov = 45.0
         engine.use_spp = True
         engine.antialiasing_mode = '8x MSAA'
-        
+
         # Add a glass sphere to the scene
         engine.primitives.add_primitive(
             geometry_type='Sphere',
@@ -765,7 +797,7 @@ class Engine3DGRUT:
         # Render a frame
         camera = Camera(...)  # Configure camera parameters
         framebuffer = engine.render(camera)  # Full quality render
-        
+
         # Or for interactive rendering:
         framebuffer = engine.render_pass(camera, is_first_pass=True)
         while engine.has_progressive_effects_to_render():
@@ -774,15 +806,12 @@ class Engine3DGRUT:
         # Rendered pixels are stored in framebuffer['rgb']
         ```
     """
-    AVAILABLE_CAMERAS = ['Pinhole', 'Fisheye']
-    ANTIALIASING_MODES = ['4x MSAA', '8x MSAA', '16x MSAA', 'Quasi-Random (Sobol)']
+
+    AVAILABLE_CAMERAS = ["Pinhole", "Fisheye"]
+    ANTIALIASING_MODES = ["4x MSAA", "8x MSAA", "16x MSAA", "Quasi-Random (Sobol)"]
 
     def __init__(
-        self,
-        gs_object: str,
-        mesh_assets_folder: str,
-        default_config: str,
-        envmap_assets_folder: Optional[str]=None
+        self, gs_object: str, mesh_assets_folder: str, default_config: str, envmap_assets_folder: Optional[str] = None
     ):
         self.scene_mog, self.scene_name = self.load_3dgrt_object(gs_object, config_name=default_config)
         self.tracer = Tracer(self.scene_mog.conf)
@@ -794,7 +823,7 @@ class Engine3DGRUT:
 
         # -- Outwards facing, these are the useful settings to configure --
         """ Type of camera used to render the scene """
-        self.camera_type = 'Pinhole'
+        self.camera_type = "Pinhole"
         """ Camera field of view """
         self.camera_fov = 45.0
         """ Toggles depth of field on / off """
@@ -804,9 +833,9 @@ class Engine3DGRUT:
         """ Toggles antialiasing on / off """
         self.use_spp = True
         """ Currently set antialiasing mode """
-        self.antialiasing_mode = '4x MSAA'
+        self.antialiasing_mode = "4x MSAA"
         """ Component managing the antialiasing settings in the scene """
-        self.spp = SPP(mode='msaa', spp=4, device=self.device)
+        self.spp = SPP(mode="msaa", spp=4, device=self.device)
         """ Gamma correction factor """
         self.gamma_correction = 1.0
         """ Maximum number of PBR material bounces (transmissions & refractions, reflections) """
@@ -818,21 +847,14 @@ class Engine3DGRUT:
 
         scene_scale = self.scene_mog.positions.max(dim=0)[0] - self.scene_mog.positions.min(dim=0)[0]
         self.primitives = Primitives(
-            tracer=self.tracer,
-            mesh_assets_folder=mesh_assets_folder,
-            scene_scale=scene_scale,
-            device=self.device
+            tracer=self.tracer, mesh_assets_folder=mesh_assets_folder, scene_scale=scene_scale, device=self.device
         )
         self.primitives.add_primitive(
-            geometry_type='Sphere', primitive_type=OptixPrimitiveTypes.GLASS, device=self.device
+            geometry_type="Sphere", primitive_type=OptixPrimitiveTypes.GLASS, device=self.device
         )
         self.rebuild_bvh(self.scene_mog)
 
-        self.last_state = dict(
-            camera=None,
-            rgb=None,
-            opacity=None
-        )
+        self.last_state = dict(camera=None, rgb=None, opacity=None)
 
         self.video_recorder = VideoRecorder(renderer=self)
 
@@ -841,8 +863,7 @@ class Engine3DGRUT:
         self.is_materials_dirty = False
 
     def _accumulate_to_buffer(self, prev_frames, new_frame, num_frames_accumulated, gamma, batch_size=1):
-        """ Accumulate a new frame to the buffer, using the previous frames and the current frame.
-        """
+        """Accumulate a new frame to the buffer, using the previous frames and the current frame."""
         prev_frames = torch.pow(prev_frames, gamma)
         new_frame = self.environment.tonemap(new_frame)
         buffer = ((prev_frames * num_frames_accumulated) + new_frame) / (num_frames_accumulated + batch_size)
@@ -851,8 +872,7 @@ class Engine3DGRUT:
 
     @torch.cuda.nvtx.range("_render_depth_of_field_buffer")
     def _render_depth_of_field_buffer(self, rb, camera, rays):
-        """ Render the depth of field buffer, accumulating the previous frames and the current frame.
-        """
+        """Render the depth of field buffer, accumulating the previous frames and the current frame."""
         if self.use_depth_of_field and self.depth_of_field.has_more_to_accumulate():
             # Store current spp index
             i = self.depth_of_field.spp_accumulated_for_frame
@@ -862,20 +882,19 @@ class Engine3DGRUT:
             if not self.primitives.enabled or not self.primitives.has_visible_objects():
                 if self.disable_gaussian_tracing:
                     dof_rb = dict(
-                        pred_rgb = torch.zeros_like(rays.rays_ori),
-                        pred_opacity = torch.zeros_like(rays.rays_ori[:,:,0:1])
+                        pred_rgb=torch.zeros_like(rays.rays_ori),
+                        pred_opacity=torch.zeros_like(rays.rays_ori[:, :, 0:1]),
                     )
                 else:
                     dof_rb = self.scene_mog.trace(rays_o=dof_rays_ori, rays_d=dof_rays_dir)
             else:
                 dof_rb = self._render_playground_hybrid(dof_rays_ori, dof_rays_dir)
 
-            rb['rgb'] = self._accumulate_to_buffer(rb['rgb'], dof_rb['pred_rgb'], i, self.gamma_correction)
-            rb['opacity'] = (rb['opacity'] * i + dof_rb['pred_opacity']) / (i + 1)
+            rb["rgb"] = self._accumulate_to_buffer(rb["rgb"], dof_rb["pred_rgb"], i, self.gamma_correction)
+            rb["opacity"] = (rb["opacity"] * i + dof_rb["pred_opacity"]) / (i + 1)
 
     def _render_spp_buffer(self, rb, rays):
-        """ Render the SPP buffer, accumulating the previous frames and the current frame.
-        """
+        """Render the SPP buffer, accumulating the previous frames and the current frame."""
         if self.use_spp and self.spp.has_more_to_accumulate():
             # Store current spp index
             i = self.spp.spp_accumulated_for_frame
@@ -883,21 +902,22 @@ class Engine3DGRUT:
             if not self.primitives.enabled or not self.primitives.has_visible_objects():
                 if self.disable_gaussian_tracing:
                     spp_rb = dict(
-                        pred_rgb = torch.zeros_like(rays.rays_ori),
-                        pred_opacity = torch.zeros_like(rays.rays_ori[:,:,0:1])
+                        pred_rgb=torch.zeros_like(rays.rays_ori),
+                        pred_opacity=torch.zeros_like(rays.rays_ori[:, :, 0:1]),
                     )
                 else:
                     spp_rb = self.scene_mog.trace(rays_o=rays.rays_ori, rays_d=rays.rays_dir)
             else:
                 spp_rb = self._render_playground_hybrid(rays.rays_ori, rays.rays_dir)
-            batch_rgb = spp_rb['pred_rgb'].sum(dim=0).unsqueeze(0)
-            rb['rgb'] = self._accumulate_to_buffer(rb['rgb'], batch_rgb, i, self.gamma_correction,
-                                                   batch_size=self.spp.batch_size)
-            rb['opacity'] = (rb['opacity'] * i + spp_rb['pred_opacity']) / (i + self.spp.batch_size)
+            batch_rgb = spp_rb["pred_rgb"].sum(dim=0).unsqueeze(0)
+            rb["rgb"] = self._accumulate_to_buffer(
+                rb["rgb"], batch_rgb, i, self.gamma_correction, batch_size=self.spp.batch_size
+            )
+            rb["opacity"] = (rb["opacity"] * i + spp_rb["pred_opacity"]) / (i + self.spp.batch_size)
 
     @torch.cuda.nvtx.range(f"playground._render_playground_hybrid")
     def _render_playground_hybrid(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> Dict[str, torch.Tensor]:
-        """ Internal method for hybrid rendering of Gaussians and mesh primitives.
+        """Internal method for hybrid rendering of Gaussians and mesh primitives.
         Performs ray tracing through the scene, handling both 3D Gaussians and mesh
         primitives with PBR materials. Supports environment mapping and background
         handling.
@@ -956,48 +976,40 @@ class Engine3DGRUT:
             refractive_index=self.primitives.stacked_fields.refractive_index_tensor[:, None],
             envmap=envmap,
             envmap_offset=envmap_offset,
-            max_pbr_bounces=self.max_pbr_bounces
+            max_pbr_bounces=self.max_pbr_bounces,
         )
 
-        pred_rgb = rendered_results['pred_rgb']
-        pred_opacity = rendered_results['pred_opacity']
+        pred_rgb = rendered_results["pred_rgb"]
+        pred_opacity = rendered_results["pred_opacity"]
 
         # If no envmap is used for background, saturate the color channels by blending the mog background
         if envmap is None or not self.environment.is_ignore_envmap():
-            poses = torch.tensor([
-                [1, 0, 0, 0],
-                [0, 1, 0, 0],
-                [0, 0, 1, 0]
-            ], dtype=torch.float32)
+            poses = torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]], dtype=torch.float32)
             pred_rgb, pred_opacity = mog.background(
-                poses.contiguous(),
-                rendered_results['last_ray_d'].contiguous(),
-                pred_rgb,
-                pred_opacity,
-                False
+                poses.contiguous(), rendered_results["last_ray_d"].contiguous(), pred_rgb, pred_opacity, False
             )
 
         # Mark materials as uploaded
         self.is_materials_dirty = False
 
         # Advance frame id (for i.e., random number generator) and avoid int32 overflow
-        self.frame_id = self.frame_id + self.spp.batch_size if self.frame_id <= (2 ** 31 - 1) else 0
+        self.frame_id = self.frame_id + self.spp.batch_size if self.frame_id <= (2**31 - 1) else 0
 
         pred_rgb = torch.clamp(pred_rgb, 0.0, 1.0)  # Make sure image pixels are in valid range
 
-        rendered_results['pred_rgb'] = pred_rgb
+        rendered_results["pred_rgb"] = pred_rgb
         return rendered_results
 
     @torch.cuda.nvtx.range("render_pass")
     @torch.no_grad()
     def render_pass(self, camera: Camera, is_first_pass: bool) -> Dict[str, torch.Tensor]:
-        """ Renders a single frame pass from the provided camera view, with optional progressive effects.
+        """Renders a single frame pass from the provided camera view, with optional progressive effects.
         This method is designed for interactive/real-time rendering scenarios where frame rate is prioritized
         over immediate full quality. It manages an internal state for progressive rendering effects.
 
         A rendering pass in this context is a single frame of the rendered image, where each pixel is rendered with
         a single ray sample.
-        
+
         The rendering process happens in multiple passes when certain effects are enabled:
         1. First pass (is_first_pass=True): Renders base image without antialiasing or depth of field
         2. Subsequent passes (is_first_pass=False): Gradually adds quality improvements if enabled:
@@ -1008,7 +1020,7 @@ class Engine3DGRUT:
         as additional passes are rendered.
         Each repeated call returns the accumulated frame due to the most recent pass.
         This function returns the last cached frame if no more passes remain.
-        
+
         Args:
             camera (Camera): Camera object defining the view to render from
             is_first_pass (bool): Whether this is the first pass for a new frame
@@ -1023,16 +1035,16 @@ class Engine3DGRUT:
             To enable progressive effects:
             ```
             engine = Engine3DGRUT(...)
-            
+
             # Enable antialiasing
             engine.use_spp = True
             engine.antialiasing_mode = '8x MSAA'  # Options: '4x MSAA', '8x MSAA', '16x MSAA', 'Quasi-Random (Sobol)'
-            
+
             # Enable depth of field
             engine.use_depth_of_field = True
             engine.depth_of_field.aperture_size = 0.01
             engine.depth_of_field.focus_z = 1.0
-            
+
             # Render progressively
             rb = engine.render_pass(camera, is_first_pass=True)
             while engine.has_progressive_effects_to_render():
@@ -1042,7 +1054,7 @@ class Engine3DGRUT:
             ```
         """
         # Rendering 3DGRUT requires camera to run on cuda device -- avoid crashing
-        if camera.device.type == 'cpu':
+        if camera.device.type == "cpu":
             camera = camera.cuda()
 
         is_use_spp = not is_first_pass and not self.use_depth_of_field and self.use_spp
@@ -1054,51 +1066,51 @@ class Engine3DGRUT:
                 if self.disable_gaussian_tracing:
                     rb = dict(
                         pred_rgb=torch.zeros_like(rays.rays_ori),
-                        pred_opacity=torch.zeros_like(rays.rays_ori[:, :, 0:1])
+                        pred_opacity=torch.zeros_like(rays.rays_ori[:, :, 0:1]),
                     )
                 else:
                     rb = self.scene_mog.trace(rays_o=rays.rays_ori, rays_d=rays.rays_dir)
             else:
                 rb = self._render_playground_hybrid(rays.rays_ori, rays.rays_dir)
 
-            rb = dict(rgb=rb['pred_rgb'], opacity=rb['pred_opacity'])
-            rb['rgb'] = self.environment.tonemap(rb['rgb'])
-            rb['rgb'] = torch.pow(rb['rgb'], 1.0 / self.gamma_correction)
-            rb['rgb'] = rb['rgb'].mean(dim=0).unsqueeze(0)
-            rb['opacity'] = rb['opacity'].mean(dim=0).unsqueeze(0)
+            rb = dict(rgb=rb["pred_rgb"], opacity=rb["pred_opacity"])
+            rb["rgb"] = self.environment.tonemap(rb["rgb"])
+            rb["rgb"] = torch.pow(rb["rgb"], 1.0 / self.gamma_correction)
+            rb["rgb"] = rb["rgb"].mean(dim=0).unsqueeze(0)
+            rb["opacity"] = rb["opacity"].mean(dim=0).unsqueeze(0)
             self.spp.reset_accumulation()
             self.depth_of_field.reset_accumulation()
         else:
             # Render accumulated effects, i.e. depth of field
-            rb = dict(rgb=self.last_state['rgb_buffer'], opacity=self.last_state['opacity'])
+            rb = dict(rgb=self.last_state["rgb_buffer"], opacity=self.last_state["opacity"])
             if self.use_depth_of_field:
                 self._render_depth_of_field_buffer(rb, camera, rays)
             elif self.use_spp:
                 self._render_spp_buffer(rb, rays)
 
         # Keep a noisy version of the accumulated rgb buffer so we don't repeat denoising per frame
-        rb['rgb_buffer'] = rb['rgb']
+        rb["rgb_buffer"] = rb["rgb"]
         if self.use_optix_denoiser:
-            rb['rgb'] = self.tracer.denoise(rb['rgb'])
+            rb["rgb"] = self.tracer.denoise(rb["rgb"])
 
         if rays.mask is not None:  # mask is for masking away pixels out of view for, i.e. fisheye
             mask = rays.mask[None, :, :, 0]
-            rb['rgb'][mask] = 0.0
-            rb['rgb_buffer'][mask] = 0.0
-            rb['opacity'][mask] = 0.0
+            rb["rgb"][mask] = 0.0
+            rb["rgb_buffer"][mask] = 0.0
+            rb["opacity"][mask] = 0.0
 
         self._cache_last_state(camera=camera, renderbuffers=rb, canvas_size=[camera.height, camera.width])
         return rb
 
     @torch.cuda.nvtx.range("render")
     def render(self, camera: Camera) -> Dict[str, torch.Tensor]:
-        """ Renders a complete frame with all enabled visual effects.
+        """Renders a complete frame with all enabled visual effects.
         e.g. high-quality rendering method that ensures all progressive effects (antialiasing, depth of field)
         are fully computed.
         By default, 3dgrt requires only a single pass to render.
         Toggling on visual effects like antialiasing and depth of field may require additional samples which
         require additional passes. This method is best suited for offline rendering.
-        
+
         Args:
             camera (Camera): Camera object defining the view to render
 
@@ -1122,18 +1134,16 @@ class Engine3DGRUT:
         return renderbuffers
 
     def invalidate_materials_on_gpu(self) -> None:
-        """ Marks the materials on GPU as out of date.
+        """Marks the materials on GPU as out of date.
         Materials and textures will be uploaded to the GPU with the next rendering pass.
         """
         self.is_materials_dirty = True
 
     @torch.cuda.nvtx.range("load_3dgrt_object")
     def load_3dgrt_object(
-        self,
-        object_path: str,
-        config_name: str = 'apps/colmap_3dgrt.yaml'
+        self, object_path: str, config_name: str = "apps/colmap_3dgrt.yaml"
     ) -> Tuple[MixtureOfGaussians, str]:
-        """ Loads a pretrained 3D Gaussian model from various supported file formats.
+        """Loads a pretrained 3D Gaussian model from various supported file formats.
 
         Supports loading from:
         - .pt: PyTorch checkpoint with model and config
@@ -1161,27 +1171,29 @@ class Engine3DGRUT:
             - Does not set up optimizer for checkpoint loading
             - Falls back to filename stem if no object name specified
         """
+
         def load_default_config():
             from hydra.compose import compose
             from hydra.initialize import initialize
-            with initialize(version_base=None, config_path='../configs'):
+
+            with initialize(version_base=None, config_path="../configs"):
                 conf = compose(config_name=config_name)
             return conf
 
-        if object_path.endswith('.pt'):
+        if object_path.endswith(".pt"):
             checkpoint = torch.load(object_path)
             conf = checkpoint["config"]
-            if conf.render['method'] != '3dgrt':
+            if conf.render["method"] != "3dgrt":
                 conf = load_default_config()
             model = MixtureOfGaussians(conf)
             model.init_from_checkpoint(checkpoint, setup_optimizer=False)
             object_name = conf.experiment_name
-        elif object_path.endswith('.ingp'):
+        elif object_path.endswith(".ingp"):
             conf = load_default_config()
             model = MixtureOfGaussians(conf)
             model.init_from_ingp(object_path, init_model=False)
             object_name = Path(object_path).stem
-        elif object_path.endswith('.ply'):
+        elif object_path.endswith(".ply"):
             conf = load_default_config()
             model = MixtureOfGaussians(conf)
             model.init_from_ply(object_path, init_model=False)
@@ -1190,7 +1202,7 @@ class Engine3DGRUT:
             raise ValueError(f"Unknown object type: {object_path}")
 
         if object_name is None or len(object_name) == 0:
-            object_name = Path(object_path).stem    # Fallback to pick object name from path, if none specified
+            object_name = Path(object_path).stem  # Fallback to pick object name from path, if none specified
 
         model.build_acc(rebuild=True)
 
@@ -1198,8 +1210,8 @@ class Engine3DGRUT:
 
     @torch.cuda.nvtx.range("rebuild_bvh (mog)")
     def rebuild_bvh(self, scene_mog: MixtureOfGaussians) -> None:
-        """ Rebuilds all Bounding Volume Hierarchies (BVHs) used by the 3DGRUT engine.
-        
+        """Rebuilds all Bounding Volume Hierarchies (BVHs) used by the 3DGRUT engine.
+
         The engine calls this function internally.
         Users should only call this function directly in case they perform further modifications to the scene.
 
@@ -1211,7 +1223,7 @@ class Engine3DGRUT:
         - The scene is first loaded
         - The scene geometry changes (gaussians moved/added/removed)
         - Primitives are added, removed, or transformed
-        
+
         Args:
             scene_mog (MixtureOfGaussians): The 3D Gaussian model whose BVH needs to be rebuilt
         """
@@ -1220,7 +1232,7 @@ class Engine3DGRUT:
         self.primitives.rebuild_bvh_if_needed()
 
     def did_camera_change(self, camera: Camera) -> bool:
-        """ Checks if the camera view matrix has changed from the last cached state.
+        """Checks if the camera view matrix has changed from the last cached state.
 
         Compares the current camera's view matrix against the cached camera matrix
         from the last render. Used to determine if a new render is needed.
@@ -1233,21 +1245,21 @@ class Engine3DGRUT:
                   False if camera is unchanged or no previous state exists
         """
         current_view_matrix = camera.view_matrix()
-        cached_camera_matrix = self.last_state.get('camera')
+        cached_camera_matrix = self.last_state.get("camera")
         is_camera_changed = cached_camera_matrix is not None and (cached_camera_matrix != current_view_matrix).any()
         return is_camera_changed
 
     def has_cached_buffers(self) -> bool:
-        """ Checks if cached buffers exist for the last rendered frame.
+        """Checks if cached buffers exist for the last rendered frame.
         Normally, buffers of the last rendered frame are cached in the engine state at the end of the render pass.
 
         Returns:
             bool: True if cached buffers exist, False otherwise
         """
-        return self.last_state.get('rgb') is not None and self.last_state.get('opacity') is not None
+        return self.last_state.get("rgb") is not None and self.last_state.get("opacity") is not None
 
     def has_progressive_effects_to_render(self) -> bool:
-        """ Checks if additional progressive rendering passes are needed.
+        """Checks if additional progressive rendering passes are needed.
 
         Determines whether enabled progressive effects (i.e. antialiasing, depth of field)
         require more samples to complete. Used to control progressive rendering loops.
@@ -1258,14 +1270,16 @@ class Engine3DGRUT:
                   - Antialiasing is enabled and needs more samples
                   False if all enabled effects are fully sampled
         """
-        has_dof_buffers_to_render = self.use_depth_of_field and \
-                                    self.depth_of_field.spp_accumulated_for_frame <= self.depth_of_field.spp
-        has_spp_buffers_to_render = not self.use_depth_of_field and \
-                                    self.use_spp and self.spp.spp_accumulated_for_frame <= self.spp.spp
+        has_dof_buffers_to_render = (
+            self.use_depth_of_field and self.depth_of_field.spp_accumulated_for_frame <= self.depth_of_field.spp
+        )
+        has_spp_buffers_to_render = (
+            not self.use_depth_of_field and self.use_spp and self.spp.spp_accumulated_for_frame <= self.spp.spp
+        )
         return has_dof_buffers_to_render or has_spp_buffers_to_render
 
     def is_dirty(self, camera: Camera) -> bool:
-        """ Returns whether the scene state has changed since the last canvas render:
+        """Returns whether the scene state has changed since the last canvas render:
         - Camera has moved
         - Materials have been modified
         - No cached buffers exist (e.g. this is the first frame being rendered)
@@ -1299,21 +1313,21 @@ class Engine3DGRUT:
         return False
 
     def _cache_last_state(self, camera: Camera, renderbuffers: Dict[str, torch.Tensor], canvas_size: Tuple[int, int]):
-        """ Caches the last rendered state for comparison during future renders.
+        """Caches the last rendered state for comparison during future renders.
 
         Args:
             camera (Camera): Current camera view matrix
             renderbuffers (dict): Mapping of buffer name -> buffers of recently rendered frame
             canvas_size (tuple): Canvas size (width, height)
         """
-        self.last_state['canvas_size'] = canvas_size
-        self.last_state['camera'] = copy.deepcopy(camera.view_matrix())
-        self.last_state['rgb'] = renderbuffers['rgb']
-        self.last_state['rgb_buffer'] = renderbuffers['rgb_buffer']
-        self.last_state['opacity'] = renderbuffers['opacity']
+        self.last_state["canvas_size"] = canvas_size
+        self.last_state["camera"] = copy.deepcopy(camera.view_matrix())
+        self.last_state["rgb"] = renderbuffers["rgb"]
+        self.last_state["rgb_buffer"] = renderbuffers["rgb_buffer"]
+        self.last_state["opacity"] = renderbuffers["opacity"]
 
     def _raygen_pinhole(self, camera: Camera, jitter: Optional[torch.Tensor] = None) -> RayPack:
-        """ Generates ray origins and directions for pinhole camera model.
+        """Generates ray origins and directions for pinhole camera model.
 
         Creates rays for each pixel in the image plane using the pinhole camera model.
         Optionally applies jitter for antialiasing.
@@ -1341,7 +1355,7 @@ class Engine3DGRUT:
             rays_ori=rays_o.reshape(1, camera.height, camera.width, 3).float(),
             rays_dir=rays_d.reshape(1, camera.height, camera.width, 3).float(),
             pixel_x=torch.round(pixel_x - 0.5).squeeze(-1),
-            pixel_y=torch.round(pixel_y - 0.5).squeeze(-1)
+            pixel_y=torch.round(pixel_y - 0.5).squeeze(-1),
         )
 
     @torch.cuda.nvtx.range("_raygen_fisheye")
@@ -1364,9 +1378,7 @@ class Engine3DGRUT:
                 - pixel_x/y: Integer pixel coordinates
                 - mask: Boolean mask of valid rays (H, W, 1)
         """
-        pixel_y, pixel_x = generate_centered_pixel_coords(
-            camera.width, camera.height, device=camera.device
-        )
+        pixel_y, pixel_x = generate_centered_pixel_coords(camera.width, camera.height, device=camera.device)
         if jitter is not None:
             jitter = jitter.to(device=pixel_x.device)
             pixel_x += jitter[:, :, 0]
@@ -1379,11 +1391,11 @@ class Engine3DGRUT:
             rays_dir=rays_d.reshape(1, camera.height, camera.width, 3).float(),
             pixel_x=torch.round(pixel_x - 0.5).squeeze(-1),
             pixel_y=torch.round(pixel_y - 0.5).squeeze(-1),
-            mask=mask.reshape(camera.height, camera.width, 1)
+            mask=mask.reshape(camera.height, camera.width, 1),
         )
 
     def raygen(self, camera: Camera, use_spp: bool = False) -> RayPack:
-        """ Generates rays for rendering based on current camera type.
+        """Generates rays for rendering based on current camera type.
 
         Creates ray batch for supported camera models.
         Handles antialiasing by generating multiple jittered ray samples
@@ -1402,9 +1414,9 @@ class Engine3DGRUT:
         rays = []
         for _ in range(ray_batch_size):
             jitter = self.spp(camera.height, camera.width) if use_spp and self.spp is not None else None
-            if self.camera_type == 'Pinhole':
+            if self.camera_type == "Pinhole":
                 next_rays = self._raygen_pinhole(camera, jitter)
-            elif self.camera_type == 'Fisheye':
+            elif self.camera_type == "Fisheye":
                 next_rays = self._raygen_fisheye(camera, jitter)
             else:
                 raise ValueError(f"Unknown camera type: {self.camera_type}")
@@ -1414,5 +1426,5 @@ class Engine3DGRUT:
             pixel_x=rays[0].pixel_x,
             pixel_y=rays[0].pixel_y,
             rays_ori=torch.cat([r.rays_ori for r in rays], dim=0),
-            rays_dir=torch.cat([r.rays_dir for r in rays], dim=0)
+            rays_dir=torch.cat([r.rays_dir for r in rays], dim=0),
         )

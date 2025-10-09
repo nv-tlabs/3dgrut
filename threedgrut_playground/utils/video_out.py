@@ -14,29 +14,34 @@
 # limitations under the License.
 
 from __future__ import annotations
+
+import cv2
 import numpy as np
 import torch
-import cv2
-from tqdm import tqdm
-from scipy.interpolate import splprep, splev
 from kaolin.render.camera import Camera
-from threedgrut_playground.utils.kaolin_future.interpolated_cameras import camera_path_generator
+from scipy.interpolate import splev, splprep
+from tqdm import tqdm
+
+from threedgrut_playground.utils.kaolin_future.interpolated_cameras import (
+    camera_path_generator,
+)
 
 
 class VideoRecorder:
-    """ A module for saving video footage of camera trajectories within the Playground"""
+    """A module for saving video footage of camera trajectories within the Playground"""
 
-    MODES = ['path_smooth', 'path_spline', 'cyclic', 'depth_of_field']
+    MODES = ["path_smooth", "path_spline", "cyclic", "depth_of_field"]
 
-    def __init__(self,
+    def __init__(
+        self,
         renderer,
         trajectory_output_path="output.mp4",
         cameras_save_path="cameras.npy",
-        mode='path_smooth',
+        mode="path_smooth",
         frames_between_cameras=60,
         video_fps=30,
         min_dof=2.5,
-        max_dof=24
+        max_dof=24,
     ):
         """
         Creates a video recorder for saving camera animation along trajectories.
@@ -100,11 +105,16 @@ class VideoRecorder:
             for dof in tqdm(dofs):
                 self.renderer.use_depth_of_field = True
                 self.renderer.depth_of_field.focus_z = dof
-                rgb = self.renderer.render(camera)['rgb']
+                rgb = self.renderer.render(camera)["rgb"]
 
                 if out_video is None:
-                    out_video = cv2.VideoWriter(self.trajectory_output_path, cv2.VideoWriter_fourcc(*'mp4v'),
-                                                self.video_fps, (rgb.shape[2], rgb.shape[1]), True)
+                    out_video = cv2.VideoWriter(
+                        self.trajectory_output_path,
+                        cv2.VideoWriter_fourcc(*"mp4v"),
+                        self.video_fps,
+                        (rgb.shape[2], rgb.shape[1]),
+                        True,
+                    )
                 data = rgb[0].clip(0, 1).detach().cpu().numpy()
                 data = (data * 255).astype(np.uint8)
                 data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
@@ -113,25 +123,30 @@ class VideoRecorder:
             self.renderer.use_depth_of_field = old_use_dof
             self.renderer.depth_of_field.focus_z = old_focus_z
 
-    def render_linear_trajectory(self, interpolation_mode='polynomial'):
+    def render_linear_trajectory(self, interpolation_mode="polynomial"):
         if len(self.trajectory) < 2:
-            raise ValueError('Rendering a path trajectory requires at least 2 cameras.')
-        elif interpolation_mode == 'catmull_rom' and len(self.trajectory) < 4:
-            raise ValueError('Rendering a path with a spline interpolated trajectory requires at least 4 cameras.')
+            raise ValueError("Rendering a path trajectory requires at least 2 cameras.")
+        elif interpolation_mode == "catmull_rom" and len(self.trajectory) < 4:
+            raise ValueError("Rendering a path with a spline interpolated trajectory requires at least 4 cameras.")
 
         out_video = None
         interpolated_path = camera_path_generator(
             trajectory=self.trajectory,
             frames_between_cameras=self.frames_between_cameras,
-            interpolation=interpolation_mode
+            interpolation=interpolation_mode,
         )
 
         for camera in tqdm(interpolated_path):
-            rgb = self.renderer.render(camera)['rgb']
+            rgb = self.renderer.render(camera)["rgb"]
 
             if out_video is None:
-                out_video = cv2.VideoWriter(self.trajectory_output_path, cv2.VideoWriter_fourcc(*'mp4v'),
-                                            self.video_fps, (rgb.shape[2], rgb.shape[1]), True)
+                out_video = cv2.VideoWriter(
+                    self.trajectory_output_path,
+                    cv2.VideoWriter_fourcc(*"mp4v"),
+                    self.video_fps,
+                    (rgb.shape[2], rgb.shape[1]),
+                    True,
+                )
             data = rgb[0].clip(0, 1).detach().cpu().numpy()
             data = (data * 255).astype(np.uint8)
             data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
@@ -140,7 +155,7 @@ class VideoRecorder:
 
     def render_continuous_trajectory(self):
         if len(self.trajectory) < 4:
-            raise ValueError('Rendering a continuous trajectory requires at least 4 cameras.')
+            raise ValueError("Rendering a continuous trajectory requires at least 4 cameras.")
 
         def _fit_bspline(data_points, frames_between_cameras):
             stacked_data_points = torch.stack([dp for dp in data_points], dim=1).cpu().numpy()
@@ -152,15 +167,15 @@ class VideoRecorder:
 
         cam_poses = _fit_bspline(
             data_points=[c.cam_pos().squeeze() for c in self.trajectory],
-            frames_between_cameras=self.frames_between_cameras
+            frames_between_cameras=self.frames_between_cameras,
         )
         cam_ats = _fit_bspline(
             data_points=[c.cam_pos().squeeze() - c.cam_forward().squeeze() for c in self.trajectory],
-            frames_between_cameras=self.frames_between_cameras
+            frames_between_cameras=self.frames_between_cameras,
         )
         cam_ups = _fit_bspline(
             data_points=[c.cam_up().squeeze() for c in self.trajectory],
-            frames_between_cameras=self.frames_between_cameras
+            frames_between_cameras=self.frames_between_cameras,
         )
 
         first_cam = self.trajectory[0]
@@ -172,18 +187,24 @@ class VideoRecorder:
                     at=at,
                     up=up,
                     fov=first_cam.fov(in_degrees=False),
-                    width=first_cam.width, height=first_cam.height,
-                    device=first_cam.device
+                    width=first_cam.width,
+                    height=first_cam.height,
+                    device=first_cam.device,
                 )
             )
 
         out_video = None
         for camera in tqdm(interpolated_path):
-            rgb = self.renderer.render(camera)['rgb']
+            rgb = self.renderer.render(camera)["rgb"]
 
             if out_video is None:
-                out_video = cv2.VideoWriter(self.trajectory_output_path, cv2.VideoWriter_fourcc(*'mp4v'),
-                                            self.video_fps, (rgb.shape[2], rgb.shape[1]), True)
+                out_video = cv2.VideoWriter(
+                    self.trajectory_output_path,
+                    cv2.VideoWriter_fourcc(*"mp4v"),
+                    self.video_fps,
+                    (rgb.shape[2], rgb.shape[1]),
+                    True,
+                )
             data = rgb[0].clip(0, 1).detach().cpu().numpy()
             data = (data * 255).astype(np.uint8)
             data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
@@ -194,13 +215,13 @@ class VideoRecorder:
         """
         Renders the trajectory to a video file, according to the set mode (see init()).
         """
-        if self.mode == 'depth_of_field':
+        if self.mode == "depth_of_field":
             self.render_dof_trajectory()
-        elif self.mode == 'cyclic':
+        elif self.mode == "cyclic":
             self.render_continuous_trajectory()
-        elif self.mode == 'path_smooth':
-            self.render_linear_trajectory('polynomial')
-        elif self.mode == 'path_spline':
-            self.render_linear_trajectory('catmull_rom')
+        elif self.mode == "path_smooth":
+            self.render_linear_trajectory("polynomial")
+        elif self.mode == "path_spline":
+            self.render_linear_trajectory("catmull_rom")
         else:
-            raise ValueError(f'Unknown mode: {self.mode}')
+            raise ValueError(f"Unknown mode: {self.mode}")

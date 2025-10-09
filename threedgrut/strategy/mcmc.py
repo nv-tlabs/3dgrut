@@ -13,10 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# MCMC implementation was adpoted from gSplat library (https://github.com/nerfstudio-project/gsplat/blob/main/gsplat/strategy/mcmc.py), 
+# MCMC implementation was adpoted from gSplat library (https://github.com/nerfstudio-project/gsplat/blob/main/gsplat/strategy/mcmc.py),
 # which is based on the original implementation https://github.com/ubc-vision/3dgs-mcmc that uderlines the work
 #
-# 3D Gaussian Splatting as Markov Chain Monte Carlo by 
+# 3D Gaussian Splatting as Markov Chain Monte Carlo by
 # Shakiba Kheradmand, Daniel Rebain, Gopal Sharma, Weiwei Sun, Yang-Che Tseng, Hossam Isack, Abhishek Kar, Andrea Tagliasacchi and Kwang Moo Yie
 #
 # If you use this code in your research, please cite the above works.
@@ -33,6 +33,7 @@ from threedgrut.utils.misc import _multinomial_sample, check_step_condition
 
 _mcmc_plugin = None
 
+
 def load_mcmc_plugin():
     global _mcmc_plugin
     if _mcmc_plugin is None:
@@ -40,8 +41,10 @@ def load_mcmc_plugin():
             from . import lib_mcmc_cc as gaussian_mcmc
         except ImportError:
             from threedgrut.strategy.src.setup_mcmc import setup_mcmc
+
             gaussian_mcmc = setup_mcmc()
         _mcmc_plugin = gaussian_mcmc
+
 
 class MCMCStrategy(BaseStrategy):
     """Densification and prunning strategy that follows the paper:
@@ -74,15 +77,30 @@ class MCMCStrategy(BaseStrategy):
 
     def post_optimizer_step(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
         # Relocate dead gaussians to the alive areas
-        if check_step_condition(step, self.conf.strategy.relocate.start_iteration, self.conf.strategy.relocate.end_iteration, self.conf.strategy.relocate.frequency):
+        if check_step_condition(
+            step,
+            self.conf.strategy.relocate.start_iteration,
+            self.conf.strategy.relocate.end_iteration,
+            self.conf.strategy.relocate.frequency,
+        ):
             self.relocate_gaussians()
 
         # Add new Gaussians if the maximum number has not been reached
-        if check_step_condition(step, self.conf.strategy.add.start_iteration, self.conf.strategy.add.end_iteration, self.conf.strategy.add.frequency):
+        if check_step_condition(
+            step,
+            self.conf.strategy.add.start_iteration,
+            self.conf.strategy.add.end_iteration,
+            self.conf.strategy.add.frequency,
+        ):
             self.add_new_gaussians()
 
         # Perturb the positions of the Gaussians
-        if check_step_condition(step, self.conf.strategy.perturb.start_iteration, self.conf.strategy.perturb.end_iteration, self.conf.strategy.perturb.frequency):
+        if check_step_condition(
+            step,
+            self.conf.strategy.perturb.start_iteration,
+            self.conf.strategy.perturb.end_iteration,
+            self.conf.strategy.perturb.frequency,
+        ):
             self.perturb_gaussians()
 
         return True
@@ -98,6 +116,7 @@ class MCMCStrategy(BaseStrategy):
 
         if n_dead_gaussians:
             sampled_idxs, new_densities, new_scales = self.sample_new_gaussians(n_dead_gaussians, alive_idxs)
+
             def update_param_fn(name: str, param: torch.Tensor) -> torch.Tensor:
                 if name == "density":
                     param[sampled_idxs] = new_densities
@@ -114,7 +133,6 @@ class MCMCStrategy(BaseStrategy):
 
         if self.conf.strategy.print_stats:
             logger.info(f"Relocated {n_dead_gaussians} ({n_dead_gaussians / len(densities) * 100:.2f}%) gaussians")
-
 
     @torch.no_grad()
     def add_new_gaussians(self) -> None:
@@ -141,7 +159,9 @@ class MCMCStrategy(BaseStrategy):
             self._update_param_with_optimizer(update_param_fn, update_optimizer_fn)
 
         if self.conf.strategy.print_stats:
-            logger.info(f"Added {num_gaussians_to_add} ({num_gaussians_to_add / current_num_gaussians * 100:.2f}%) gaussians")
+            logger.info(
+                f"Added {num_gaussians_to_add} ({num_gaussians_to_add / current_num_gaussians * 100:.2f}%) gaussians"
+            )
 
     @torch.no_grad()
     def perturb_gaussians(self) -> None:
@@ -158,7 +178,9 @@ class MCMCStrategy(BaseStrategy):
             return 1 / (1 + torch.exp(-k * (x - x0)))
 
         # Current positional learning rate multiplied by the config paramater scale
-        noise = torch.randn_like(positions) * (op_sigmoid(1 - densities)) * self.conf.strategy.perturb.noise_lr * current_lr
+        noise = (
+            torch.randn_like(positions) * (op_sigmoid(1 - densities)) * self.conf.strategy.perturb.noise_lr * current_lr
+        )
         noise = torch.bmm(covariance, noise.unsqueeze(-1)).squeeze(-1)
 
         self.model.positions.add_(noise)
@@ -178,7 +200,9 @@ class MCMCStrategy(BaseStrategy):
         sampled_idxs = _multinomial_sample(probabilities, num_gaussians, replacement=True)
         sampled_idxs = valid_indices[sampled_idxs]
 
-        ratios = (torch.bincount(sampled_idxs)[sampled_idxs] + 1).clamp_(min=1, max=self.conf.strategy.binom_n_max).int()
+        ratios = (
+            (torch.bincount(sampled_idxs)[sampled_idxs] + 1).clamp_(min=1, max=self.conf.strategy.binom_n_max).int()
+        )
 
         new_densities, new_scales = _mcmc_plugin.compute_relocation_tensor(
             densities[sampled_idxs].contiguous(),
@@ -189,7 +213,9 @@ class MCMCStrategy(BaseStrategy):
         )
 
         new_densities = self.model.density_activation_inv(
-            torch.clamp(new_densities, max=1.0 - torch.finfo(torch.float32).eps, min=self.conf.strategy.opacity_threshold)
+            torch.clamp(
+                new_densities, max=1.0 - torch.finfo(torch.float32).eps, min=self.conf.strategy.opacity_threshold
+            )
         )
 
         new_scales = self.model.scale_activation_inv(new_scales)

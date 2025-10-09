@@ -13,7 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os, math
+import math
+import os
+
 import torch
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME
@@ -39,8 +41,7 @@ def load(
             for edition in ["Enterprise", "Professional", "BuildTools", "Community"]:
                 paths = sorted(
                     glob.glob(
-                        r"C:\Program Files (x86)\Microsoft Visual Studio\*\%s\VC\Tools\MSVC\*\bin\Hostx64\x64"
-                        % edition
+                        r"C:\Program Files (x86)\Microsoft Visual Studio\*\%s\VC\Tools\MSVC\*\bin\Hostx64\x64" % edition
                     ),
                     reverse=True,
                 )
@@ -51,9 +52,7 @@ def load(
         if os.system("where cl.exe >nul 2>nul") != 0:
             cl_path = find_cl_path()
             if cl_path is None:
-                raise RuntimeError(
-                    "Could not locate a supported Microsoft Visual C++ installation"
-                )
+                raise RuntimeError("Could not locate a supported Microsoft Visual C++ installation")
             os.environ["PATH"] += ";" + cl_path
 
     elif os.name == "posix":
@@ -66,7 +65,7 @@ def load(
     # Add Windows-specific flags
     if os.name == "nt":
         cflags.append("/DNOMINMAX")
-    
+
     if extra_cflags is not None:
         cflags += extra_cflags
 

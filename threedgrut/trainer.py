@@ -19,32 +19,30 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 import numpy as np
-
 import torch
 import torch.utils.data
-
 from addict import Dict
 from omegaconf import DictConfig, OmegaConf
-
 from torchmetrics import PeakSignalNoiseRatio
 from torchmetrics.image import StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 import threedgrut.datasets as datasets
 from threedgrut.datasets.protocols import BoundedMultiViewDataset
-from threedgrut.datasets.utils import MultiEpochsDataLoader, DEFAULT_DEVICE
+from threedgrut.datasets.utils import DEFAULT_DEVICE, MultiEpochsDataLoader
 from threedgrut.export.ingp_exporter import INGPExporter
 from threedgrut.export.ply_exporter import PLYExporter
 from threedgrut.export.usdz_exporter import USDZExporter
 from threedgrut.model.losses import ssim
 from threedgrut.model.model import MixtureOfGaussians
+from threedgrut.optimizers import SelectiveAdam
 from threedgrut.render import Renderer
 from threedgrut.strategy.base import BaseStrategy
 from threedgrut.utils.gui import GUI
 from threedgrut.utils.logger import logger
+from threedgrut.utils.misc import check_step_condition, create_summary_writer, jet_map
 from threedgrut.utils.timer import CudaTimer
-from threedgrut.utils.misc import jet_map, create_summary_writer, check_step_condition
-from threedgrut.optimizers import SelectiveAdam
+
 
 class Trainer3DGRUT:
     """Trainer for paper: "3D Gaussian Ray Tracing: Fast Tracing of Particle Scenes" """
@@ -138,27 +136,31 @@ class Trainer3DGRUT:
 
     def init_dataloaders(self, conf: DictConfig):
         from threedgrut.datasets.utils import configure_dataloader_for_platform
-        
+
         train_dataset, val_dataset = datasets.make(name=conf.dataset.type, config=conf, ray_jitter=None)
-        train_dataloader_kwargs = configure_dataloader_for_platform({
-            'num_workers': conf.num_workers,
-            'batch_size': 1,
-            'shuffle': True,
-            'pin_memory': True,
-            'persistent_workers': True if conf.num_workers > 0 else False,
-        })
-        
-        val_dataloader_kwargs = configure_dataloader_for_platform({
-            'num_workers': conf.num_workers,
-            'batch_size': 1,
-            'shuffle': False,
-            'pin_memory': True,
-            'persistent_workers': True if conf.num_workers > 0 else False,
-        })
-        
+        train_dataloader_kwargs = configure_dataloader_for_platform(
+            {
+                "num_workers": conf.num_workers,
+                "batch_size": 1,
+                "shuffle": True,
+                "pin_memory": True,
+                "persistent_workers": True if conf.num_workers > 0 else False,
+            }
+        )
+
+        val_dataloader_kwargs = configure_dataloader_for_platform(
+            {
+                "num_workers": conf.num_workers,
+                "batch_size": 1,
+                "shuffle": False,
+                "pin_memory": True,
+                "persistent_workers": True if conf.num_workers > 0 else False,
+            }
+        )
+
         train_dataloader = MultiEpochsDataLoader(train_dataset, **train_dataloader_kwargs)
         val_dataloader = torch.utils.data.DataLoader(val_dataset, **val_dataloader_kwargs)
-        
+
         self.train_dataset = train_dataset
         self.train_dataloader = train_dataloader
         self.val_dataset = val_dataset
@@ -191,10 +193,12 @@ class Trainer3DGRUT:
         match self.conf.strategy.method:
             case "GSStrategy":
                 from threedgrut.strategy.gs import GSStrategy
+
                 self.strategy = GSStrategy(conf, self.model)
                 logger.info("🔆 Using GS strategy")
             case "MCMCStrategy":
                 from threedgrut.strategy.mcmc import MCMCStrategy
+
                 self.strategy = MCMCStrategy(conf, self.model)
                 logger.info("🔆 Using MCMC strategy")
             case _:
@@ -397,7 +401,7 @@ class Trainer3DGRUT:
         rgb_gt = gpu_batch.rgb_gt
         rgb_pred = outputs["pred_rgb"]
         mask = gpu_batch.mask
-        
+
         # Mask out the invalid pixels if the mask is provided
         if mask is not None:
             rgb_gt = rgb_gt * mask
@@ -447,7 +451,14 @@ class Trainer3DGRUT:
 
         # Total loss
         loss = lambda_l1 * loss_l1 + lambda_ssim * loss_ssim + lambda_opacity * loss_opacity + lambda_scale * loss_scale
-        return dict(total_loss=loss, l1_loss=lambda_l1 * loss_l1, l2_loss=lambda_l2 * loss_l2, ssim_loss=lambda_ssim * loss_ssim, opacity_loss=lambda_opacity * loss_opacity, scale_loss=lambda_scale * loss_scale)
+        return dict(
+            total_loss=loss,
+            l1_loss=lambda_l1 * loss_l1,
+            l2_loss=lambda_l2 * loss_l2,
+            ssim_loss=lambda_ssim * loss_ssim,
+            opacity_loss=lambda_opacity * loss_opacity,
+            scale_loss=lambda_scale * loss_scale,
+        )
 
     @torch.cuda.nvtx.range("log_validation_iter")
     def log_validation_iter(
@@ -619,7 +630,13 @@ class Trainer3DGRUT:
         if conf.export_ingp.enabled:
             ingp_path = conf.export_ingp.path if conf.export_ingp.path else os.path.join(out_dir, "export_last.ingp")
             exporter = INGPExporter()
-            exporter.export(self.model, Path(ingp_path), dataset=self.train_dataset, conf=conf, force_half=conf.export_ingp.force_half)
+            exporter.export(
+                self.model,
+                Path(ingp_path),
+                dataset=self.train_dataset,
+                conf=conf,
+                force_half=conf.export_ingp.force_half,
+            )
         if conf.export_ply.enabled:
             ply_path = conf.export_ply.path if conf.export_ply.path else os.path.join(out_dir, "export_last.ply")
             exporter = PLYExporter()
@@ -687,7 +704,9 @@ class Trainer3DGRUT:
                 ps.frame_tick()
 
             if ps.window_requests_close():
-                logger.warning("Terminating training from GUI window is not supported. Please terminate it from the terminal.")
+                logger.warning(
+                    "Terminating training from GUI window is not supported. Please terminate it from the terminal."
+                )
 
     @torch.cuda.nvtx.range(f"run_train_pass")
     def run_train_pass(self, conf: DictConfig):
@@ -728,7 +747,13 @@ class Trainer3DGRUT:
 
             # Backward strategy step
             with torch.cuda.nvtx.range(f"train_{global_step}_pre_bwd"):
-                self.strategy.pre_backward(step=global_step, scene_extent=self.scene_extent, train_dataset=self.train_dataset, batch=gpu_batch, writer=self.tracking.writer)
+                self.strategy.pre_backward(
+                    step=global_step,
+                    scene_extent=self.scene_extent,
+                    train_dataset=self.train_dataset,
+                    batch=gpu_batch,
+                    writer=self.tracking.writer,
+                )
 
             # Back-propagate the gradients and update the parameters
             with torch.cuda.nvtx.range(f"train_{global_step}_bwd"):
@@ -739,14 +764,20 @@ class Trainer3DGRUT:
             # Post backward strategy step
             with torch.cuda.nvtx.range(f"train_{global_step}_post_bwd"):
                 scene_updated = self.strategy.post_backward(
-                    step=global_step, scene_extent=self.scene_extent, train_dataset=self.train_dataset, batch=gpu_batch, writer=self.tracking.writer
+                    step=global_step,
+                    scene_extent=self.scene_extent,
+                    train_dataset=self.train_dataset,
+                    batch=gpu_batch,
+                    writer=self.tracking.writer,
                 )
 
             # Optimizer step
             with torch.cuda.nvtx.range(f"train_{global_step}_backprop"):
                 if isinstance(model.optimizer, SelectiveAdam):
-                    assert outputs['mog_visibility'].shape == model.density.shape, f"Visibility shape {outputs['mog_visibility'].shape} does not match density shape {model.density.shape}"
-                    model.optimizer.step(outputs['mog_visibility'])
+                    assert (
+                        outputs["mog_visibility"].shape == model.density.shape
+                    ), f"Visibility shape {outputs['mog_visibility'].shape} does not match density shape {model.density.shape}"
+                    model.optimizer.step(outputs["mog_visibility"])
                 else:
                     model.optimizer.step()
                 model.optimizer.zero_grad()
@@ -758,11 +789,17 @@ class Trainer3DGRUT:
             # Post backward strategy step
             with torch.cuda.nvtx.range(f"train_{global_step}_post_opt_step"):
                 scene_updated = self.strategy.post_optimizer_step(
-                    step=global_step, scene_extent=self.scene_extent, train_dataset=self.train_dataset, batch=gpu_batch, writer=self.tracking.writer
+                    step=global_step,
+                    scene_extent=self.scene_extent,
+                    train_dataset=self.train_dataset,
+                    batch=gpu_batch,
+                    writer=self.tracking.writer,
                 )
 
             # Update the SH if required
-            if self.model.progressive_training and check_step_condition(global_step, 0, 1e6, self.model.feature_dim_increase_interval):
+            if self.model.progressive_training and check_step_condition(
+                global_step, 0, 1e6, self.model.feature_dim_increase_interval
+            ):
                 self.model.increase_num_active_features()
 
             # Update the BVH if required

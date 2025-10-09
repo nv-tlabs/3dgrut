@@ -32,7 +32,9 @@ class INGPExporter(ModelExporter):
     """
 
     @torch.no_grad()
-    def export(self, model: ExportableModel, output_path: Path, dataset=None, conf=None, force_half: bool = False, **kwargs) -> None:
+    def export(
+        self, model: ExportableModel, output_path: Path, dataset=None, conf=None, force_half: bool = False, **kwargs
+    ) -> None:
         """Export the model to an INGP file.
 
         Args:
@@ -55,22 +57,31 @@ class INGPExporter(ModelExporter):
             positions.flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
         )
         mogt_config["mog_scales"] = (
-            model.get_scale(preactivation=True).flatten().to(
-                dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+            model.get_scale(preactivation=True)
+            .flatten()
+            .to(dtype=export_dtype, device="cpu")
+            .detach()
+            .numpy()
+            .tobytes()
         )
         mogt_config["mog_rotations"] = (
-            model.get_rotation(preactivation=True).flatten().to(
-                dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+            model.get_rotation(preactivation=True)
+            .flatten()
+            .to(dtype=export_dtype, device="cpu")
+            .detach()
+            .numpy()
+            .tobytes()
         )
         mogt_config["mog_densities"] = (
-            model.get_density(preactivation=True).flatten().to(
-                dtype=export_dtype, device="cpu").detach().numpy().tobytes()
+            model.get_density(preactivation=True)
+            .flatten()
+            .to(dtype=export_dtype, device="cpu")
+            .detach()
+            .numpy()
+            .tobytes()
         )
-        features = torch.cat((model.get_features_albedo(),
-                             model.get_features_specular()), dim=1)
-        mogt_config["mog_features"] = (
-            features.flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
-        )
+        features = torch.cat((model.get_features_albedo(), model.get_features_specular()), dim=1)
+        mogt_config["mog_features"] = features.flatten().to(dtype=export_dtype, device="cpu").detach().numpy().tobytes()
         with gzip.open(output_path, "wb") as f:
             packed = msgpack.packb(mogt_config)
             f.write(packed)

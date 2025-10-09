@@ -30,9 +30,7 @@ class ScannetppDataset(ColmapDataset):
         test_split_interval=8,
         ray_jitter=None,
     ):
-        super(ScannetppDataset, self).__init__(
-            path, device, split, downsample_factor, test_split_interval, ray_jitter
-        )
+        super(ScannetppDataset, self).__init__(path, device, split, downsample_factor, test_split_interval, ray_jitter)
 
     def load_intrinsics_and_extrinsics(self):
         cameras_extrinsic_file = os.path.join(self.path, "colmap", "images.txt")

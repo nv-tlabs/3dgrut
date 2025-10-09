@@ -13,14 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
 from typing import Optional, Tuple
+
+import torch
 from kaolin.render.camera import Camera, generate_centered_pixel_coords
 
 """
 This module is to be included in next version of kaolin 0.18.0.
 As of March 26, 2025 the latest public release is kaolin 0.17.0, hence it's included here independently.
 """
+
 
 # Private function copied from kaolin, to be deleted
 def _to_ndc_coords(pixel_x, pixel_y, camera):
@@ -30,9 +32,7 @@ def _to_ndc_coords(pixel_x, pixel_y, camera):
 
 
 def generate_fisheye_rays(
-    camera: Camera,
-    coords_grid: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-    eps: float = 1e-9
+    camera: Camera, coords_grid: Optional[Tuple[torch.Tensor, torch.Tensor]] = None, eps: float = 1e-9
 ):
     r"""Default ray generation function for perfect wide-angle fisheye cameras.
 
@@ -70,13 +70,15 @@ def generate_fisheye_rays(
     if coords_grid is None:
         coords_grid = generate_centered_pixel_coords(camera.width, camera.height, device=camera.device)
     else:
-        assert camera.device == coords_grid[0].device, \
-            f"Expected camera and coords_grid[0] to be on the same device, " \
+        assert camera.device == coords_grid[0].device, (
+            f"Expected camera and coords_grid[0] to be on the same device, "
             f"but found {camera.device} and {coords_grid[0].device}."
+        )
 
-        assert camera.device == coords_grid[1].device, \
-            f"Expected camera and coords_grid[1] to be on the same device, " \
+        assert camera.device == coords_grid[1].device, (
+            f"Expected camera and coords_grid[1] to be on the same device, "
             f"but found {camera.device} and {coords_grid[1].device}."
+        )
 
     # coords_grid should remain immutable (a new tensor is implicitly created here)
     pixel_y, pixel_x = coords_grid
@@ -103,14 +105,16 @@ def generate_fisheye_rays(
     )
     mock_dir = torch.zeros_like(rays_dir)
     mock_dir[:, :, 0] = -1.0
-    mock_dir[:, :, 1] = -.05
+    mock_dir[:, :, 1] = -0.05
     rays_dir = torch.where(out_of_fov_mask, mock_dir, rays_dir).unsqueeze(0)
 
     # Generate ray origins in world coordinates
     cam_center = camera.cam_pos()
-    rays_ori = (torch.tensor(cam_center, device=camera.device, dtype=torch.float32)
-                .reshape(1, 1, 1, 3)
-                .expand(1, camera.height, camera.width, 3))
+    rays_ori = (
+        torch.tensor(cam_center, device=camera.device, dtype=torch.float32)
+        .reshape(1, 1, 1, 3)
+        .expand(1, camera.height, camera.width, 3)
+    )
 
     rays_ori = rays_ori.reshape(-1, 3)
     rays_dir = rays_dir.reshape(-1, 3)

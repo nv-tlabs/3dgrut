@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 _3dgrut_gui_plugin = None
@@ -26,6 +27,7 @@ def load_3dgrut_gui_plugin():
             from . import lib3dgrut_gui_cc as tdgui  # type: ignore
         except ImportError:
             from .setup_gui import setup_gui
+
             tdgui = setup_gui()
         _3dgrut_gui_plugin = tdgui
 
@@ -33,6 +35,7 @@ def load_3dgrut_gui_plugin():
 def set_custom_cugl_bindings():
     global _3dgrut_gui_plugin
     import polyscope as ps
+
     load_3dgrut_gui_plugin()
 
     ps_device_func_dict = {
@@ -52,9 +55,11 @@ def set_custom_cugl_bindings():
 def initialize_cugl_interop():
     try:
         import polyscope
+
         try:
-            import cupy
             import cuda
+            import cupy
+
             logger.info("polyscope loaded with cupy, cuda-python for cu-opengl interop.")
             # polyscope is available with cupy / cuda-python, do nothing
         except ImportError:

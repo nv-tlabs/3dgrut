@@ -20,7 +20,7 @@ import torch
 from threedgrut.model.model import MixtureOfGaussians
 from threedgrut.strategy.base import BaseStrategy
 from threedgrut.utils.logger import logger
-from threedgrut.utils.misc import quaternion_to_so3, check_step_condition
+from threedgrut.utils.misc import check_step_condition, quaternion_to_so3
 
 
 class GSStrategy(BaseStrategy):
@@ -56,10 +56,9 @@ class GSStrategy(BaseStrategy):
             self.densify_grad_norm_accum = torch.zeros((num_gaussians, 1), dtype=torch.float, device=self.model.device)
             self.densify_grad_norm_denom = torch.zeros((num_gaussians, 1), dtype=torch.int, device=self.model.device)
 
-
     def post_backward(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
         """Callback function to be executed after the `loss.backward()` call."""
-        
+
         # Update densification buffer:
         if check_step_condition(step, 0, self.conf.strategy.densify.end_iteration, 1):
             with torch.cuda.nvtx.range(f"train_{step}_grad_buffer"):
@@ -77,26 +76,51 @@ class GSStrategy(BaseStrategy):
         scene_updated = False
         # Densify the Gaussians
 
-        if check_step_condition(step, self.conf.strategy.densify.start_iteration, self.conf.strategy.densify.end_iteration, self.conf.strategy.densify.frequency):
+        if check_step_condition(
+            step,
+            self.conf.strategy.densify.start_iteration,
+            self.conf.strategy.densify.end_iteration,
+            self.conf.strategy.densify.frequency,
+        ):
             self.densify_gaussians(scene_extent=scene_extent)
             scene_updated = True
 
         # Prune the Gaussians based on their opacity
-        if check_step_condition(step, self.conf.strategy.prune.start_iteration, self.conf.strategy.prune.end_iteration, self.conf.strategy.prune.frequency):
+        if check_step_condition(
+            step,
+            self.conf.strategy.prune.start_iteration,
+            self.conf.strategy.prune.end_iteration,
+            self.conf.strategy.prune.frequency,
+        ):
             self.prune_gaussians_opacity()
             scene_updated = True
 
         # Prune the Gaussians based on their scales
-        if check_step_condition(step, self.conf.strategy.prune_scale.start_iteration, self.conf.strategy.prune_scale.end_iteration, self.conf.strategy.prune_scale.frequency):
+        if check_step_condition(
+            step,
+            self.conf.strategy.prune_scale.start_iteration,
+            self.conf.strategy.prune_scale.end_iteration,
+            self.conf.strategy.prune_scale.frequency,
+        ):
             self.prune_gaussians_scale(train_dataset)
             scene_updated = True
 
         # Decay the density values
-        if check_step_condition(step, self.conf.strategy.density_decay.start_iteration, self.conf.strategy.density_decay.end_iteration, self.conf.strategy.density_decay.frequency):
+        if check_step_condition(
+            step,
+            self.conf.strategy.density_decay.start_iteration,
+            self.conf.strategy.density_decay.end_iteration,
+            self.conf.strategy.density_decay.frequency,
+        ):
             self.decay_density()
 
         # Reset the Gaussian density
-        if check_step_condition(step, self.conf.strategy.reset_density.start_iteration, self.conf.strategy.reset_density.end_iteration, self.conf.strategy.reset_density.frequency):
+        if check_step_condition(
+            step,
+            self.conf.strategy.reset_density.start_iteration,
+            self.conf.strategy.reset_density.end_iteration,
+            self.conf.strategy.reset_density.frequency,
+        ):
             self.reset_density()
 
         return scene_updated
@@ -116,7 +140,9 @@ class GSStrategy(BaseStrategy):
 
     @torch.cuda.nvtx.range("densify_gaussians")
     def densify_gaussians(self, scene_extent):
-        assert self.model.optimizer is not None, "Optimizer need to be initialized before splitting and cloning the Gaussians"
+        assert (
+            self.model.optimizer is not None
+        ), "Optimizer need to be initialized before splitting and cloning the Gaussians"
         densify_grad_norm = self.densify_grad_norm_accum / self.densify_grad_norm_denom
         densify_grad_norm[densify_grad_norm.isnan()] = 0.0
 
@@ -156,8 +182,7 @@ class GSStrategy(BaseStrategy):
                 p_split = param[mask].repeat(repeats) + offsets  # [2N, 3]
             elif name == "scale":
                 p_split = self.model.scale_activation_inv(
-                    self.model.scale_activation(param[mask].repeat(repeats))
-                    / (0.8 * self.split_n_gaussians)
+                    self.model.scale_activation(param[mask].repeat(repeats)) / (0.8 * self.split_n_gaussians)
                 )
             else:
                 p_split = param[mask].repeat(repeats)
@@ -167,9 +192,7 @@ class GSStrategy(BaseStrategy):
             return p_new
 
         def update_optimizer_fn(key: str, v: torch.Tensor) -> torch.Tensor:
-            v_split = torch.zeros(
-                (self.split_n_gaussians * int(mask.sum()), *v.shape[1:]), device=v.device
-            )
+            v_split = torch.zeros((self.split_n_gaussians * int(mask.sum()), *v.shape[1:]), device=v.device)
             return torch.cat([v[~mask], v_split])
 
         self._update_param_with_optimizer(update_param_fn, update_optimizer_fn)
@@ -277,12 +300,13 @@ class GSStrategy(BaseStrategy):
         self.densify_grad_norm_accum = self.densify_grad_norm_accum[valid_mask]
         self.densify_grad_norm_denom = self.densify_grad_norm_denom[valid_mask]
 
-
     def decay_density(self):
         def update_param_fn(name: str, param: torch.Tensor) -> torch.Tensor:
             assert name == "density", "wrong paramaeter passed to update_param_fn"
-            
-            decayed_densities = self.model.density_activation_inv(self.model.get_density() * self.conf.strategy.density_decay.gamma)
+
+            decayed_densities = self.model.density_activation_inv(
+                self.model.get_density() * self.conf.strategy.density_decay.gamma
+            )
 
             return torch.nn.Parameter(decayed_densities, requires_grad=param.requires_grad)
 
@@ -293,9 +317,7 @@ class GSStrategy(BaseStrategy):
             assert name == "density", "wrong paramaeter passed to update_param_fn"
             densities = torch.clamp(
                 param,
-                max=self.model.density_activation_inv(
-                    torch.tensor(self.new_max_density)
-                ).item(),
+                max=self.model.density_activation_inv(torch.tensor(self.new_max_density)).item(),
             )
             return torch.nn.Parameter(densities)
 

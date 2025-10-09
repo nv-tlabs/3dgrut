@@ -15,32 +15,32 @@
 
 import torch
 
-def make(name:str, config):
+
+def make(name: str, config):
     match name:
-        case 'none':
+        case "none":
             pass
-        case 'random':
+        case "random":
             return RandomRayJitter(
                 enabled=False,  # Start jittering from iteration N
                 apply_every_n_iterations=config.dataset.train.ray_jittering.apply_every_n_iterations,
-                device='cpu'
+                device="cpu",
             )
-        case 'stratified':
+        case "stratified":
             return StratifiedRayJitter(
                 enabled=False,  # Start jittering from iteration N
                 apply_every_n_iterations=config.dataset.train.ray_jittering.apply_every_n_iterations,
                 num_samples=config.dataset.train.ray_jittering.num_samples,
-                device='cpu'
+                device="cpu",
             )
         case _:
-            raise ValueError(f'Unknown ray jitter type: {config.dataset.train.ray_jittering.type}')
+            raise ValueError(f"Unknown ray jitter type: {config.dataset.train.ray_jittering.type}")
 
 
 class StratifiedRayJitter:
-    """ Uses informed stratified sampling which relies on perturbing a fixed anti-aliasing pattern"""
+    """Uses informed stratified sampling which relies on perturbing a fixed anti-aliasing pattern"""
 
-    def __init__(self, enabled=True, apply_every_n_iterations=1, num_samples=16,
-                 fixed_pattern=False, device='cuda'):
+    def __init__(self, enabled=True, apply_every_n_iterations=1, num_samples=16, fixed_pattern=False, device="cuda"):
 
         self.enabled = enabled
         self.apply_every_n_iterations = apply_every_n_iterations
@@ -54,37 +54,50 @@ class StratifiedRayJitter:
 
         # Subpixel offset values used by DirectX MSAA (Source: Ray Tracing Gems II)
         subpixel_means = dict(
-            s1 = [[0.5, 0.5]],
-            s2 = [[0.25, 0.25], [0.75, 0.75]],
-            s4 = [[0.375, 0.125], [0.875, 0.375], [0.625, 0.875], [0.125, 0.625]],
-            s8 = [[0.5625, 0.6875], [0.4375, 0.3125],
-                  [0.8125, 0.4375], [0.3125, 0.8125],
-                  [0.1875, 0.1875], [0.0625, 0.5625],
-                  [0.6875, 0.0625], [0.9375, 0.9375]],
-            s16 = [[0.5625, 0.4375], [0.4375, 0.6875],
-                   [0.3125, 0.375], [0.75, 0.5625],
-                   [0.1875, 0.625], [0.625, 0.1875],
-                   [0.1875, 0.3125], [0.6875, 0.8125],
-                   [0.375, 0.125], [0.5, 0.9375],
-                   [0.25, 0.875], [0.125, 0.25],
-                   [0.0, 0.5], [0.9375, 0.75],
-                   [0.875, 0.0625], [0.0625, 0.0]]
+            s1=[[0.5, 0.5]],
+            s2=[[0.25, 0.25], [0.75, 0.75]],
+            s4=[[0.375, 0.125], [0.875, 0.375], [0.625, 0.875], [0.125, 0.625]],
+            s8=[
+                [0.5625, 0.6875],
+                [0.4375, 0.3125],
+                [0.8125, 0.4375],
+                [0.3125, 0.8125],
+                [0.1875, 0.1875],
+                [0.0625, 0.5625],
+                [0.6875, 0.0625],
+                [0.9375, 0.9375],
+            ],
+            s16=[
+                [0.5625, 0.4375],
+                [0.4375, 0.6875],
+                [0.3125, 0.375],
+                [0.75, 0.5625],
+                [0.1875, 0.625],
+                [0.625, 0.1875],
+                [0.1875, 0.3125],
+                [0.6875, 0.8125],
+                [0.375, 0.125],
+                [0.5, 0.9375],
+                [0.25, 0.875],
+                [0.125, 0.25],
+                [0.0, 0.5],
+                [0.9375, 0.75],
+                [0.875, 0.0625],
+                [0.0625, 0.0],
+            ],
         )
         self.subpixel_means = {k: torch.tensor(v, device=self.device) for k, v in subpixel_means.items()}
 
         # Max distance between points in this pattern
         self.subpixel_offset_max = dict(
-            s1 = 0.5,
-            s2 = 0.3535533905932738,
-            s4 = 0.2795084971874737,
-            s8 = 0.13975424859373686,
-            s16 = 0.04419417382415922
+            s1=0.5, s2=0.3535533905932738, s4=0.2795084971874737, s8=0.13975424859373686, s16=0.04419417382415922
         )
 
-        assert f's{num_samples}' in self.subpixel_means, \
-            f'num_samples={num_samples} not supported. Choose a value in: {list(self.subpixel_means.keys())}'
-        self.pattern = self.subpixel_means[f's{num_samples}']
-        self.relaxation = self.subpixel_offset_max[f's{num_samples}']
+        assert (
+            f"s{num_samples}" in self.subpixel_means
+        ), f"num_samples={num_samples} not supported. Choose a value in: {list(self.subpixel_means.keys())}"
+        self.pattern = self.subpixel_means[f"s{num_samples}"]
+        self.relaxation = self.subpixel_offset_max[f"s{num_samples}"]
         self.fixed_pattern = fixed_pattern
 
         # A generator of jittered sample patterns.
@@ -92,7 +105,7 @@ class StratifiedRayJitter:
         self.samples_generator = self._subsample_gen()
 
     def _shuffle(self, img_shape):
-        """ Change the permuted order of samples """
+        """Change the permuted order of samples"""
         # Permute the order of subpixels in the pattern
         cyclic_order = torch.randperm(self.num_samples, device=self.device)
         # Each pixel starts from a different location in cyclic_order
@@ -102,7 +115,7 @@ class StratifiedRayJitter:
     def _subsample_gen(self):
         cyclic_order, pixel_indices, prev_shape = None, None, None
         while True:
-            img_shape = yield   # Take some image_shape to jitter
+            img_shape = yield  # Take some image_shape to jitter
             if prev_shape != img_shape:
                 cyclic_order, pixel_indices = self._shuffle(img_shape)
 
@@ -124,7 +137,7 @@ class StratifiedRayJitter:
             yield jittered_pixels
 
     def __call__(self, img_shape):
-        """ Given an image shape, returns a pattern of pixel values to sample """
+        """Given an image shape, returns a pattern of pixel values to sample"""
 
         should_apply_jitter = self.num_iterations_not_jittered == 0
         self.num_iterations_not_jittered = (self.num_iterations_not_jittered + 1) % self.apply_every_n_iterations
@@ -137,7 +150,7 @@ class StratifiedRayJitter:
 
 
 class RandomRayJitter:
-    def __init__(self, enabled=True, apply_every_n_iterations=1, device='cuda'):
+    def __init__(self, enabled=True, apply_every_n_iterations=1, device="cuda"):
         self.enabled = enabled
         self.apply_every_n_iterations = apply_every_n_iterations
         self.device = device
