@@ -15,7 +15,7 @@
 
 from setuptools import find_packages, setup
 
-VERSION = '0.0.1'
+VERSION = "0.0.1"
 
 setup(
     name="threedgrut",
@@ -25,7 +25,7 @@ setup(
     description="Official implementation of 3DGRT and 3DGUT research projects.",
     long_description_content_type="text/markdown",
     py_modules=["threedgrut", "threedgrt_tracer", "threedgut_tracer", "playground"],
-    packages=find_packages(where='libs'),
+    packages=find_packages(where="libs"),
     python_requires=">=3.11",
     install_requires=[],
     classifiers=["Operating System :: OS Independent"],

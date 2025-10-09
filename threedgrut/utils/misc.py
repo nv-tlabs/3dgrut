@@ -14,16 +14,14 @@
 # limitations under the License.
 
 import os
-from typing import Callable, Optional
 from datetime import datetime
+from typing import Callable, Optional
 
 import numpy as np
 import numpy.typing as npt
-
 import torch
+from omegaconf import DictConfig, OmegaConf
 from torch.utils.tensorboard.writer import SummaryWriter
-
-from omegaconf import OmegaConf, DictConfig
 
 OmegaConf.register_new_resolver("div", lambda a, b: a / b)
 OmegaConf.register_new_resolver("eq", lambda a, b: a == b)
@@ -160,6 +158,7 @@ def create_summary_writer(conf, object_name, out_dir, experiment_name, use_wandb
     os.makedirs(out_dir, exist_ok=True)
     return writer, out_dir, run_name
 
+
 @torch.no_grad()
 def _multinomial_sample(probabilities: torch.Tensor, n: int, replacement: bool = True) -> torch.Tensor:
     """Sample from a distribution using torch.multinomial or numpy.random.choice.
@@ -194,6 +193,7 @@ def _multinomial_sample(probabilities: torch.Tensor, n: int, replacement: bool =
 
         # Return the sampled indices on the original device
         return sampled_idxs.to(weights.device)
+
 
 def check_step_condition(step: int, start: int, end: int, freq: int) -> bool:
     """Checks if an operation should occur for the given step."""

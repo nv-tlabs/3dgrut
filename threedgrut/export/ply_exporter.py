@@ -17,7 +17,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-
 from plyfile import PlyData, PlyElement
 
 from threedgrut.export.base import ExportableModel, ModelExporter
@@ -33,17 +32,17 @@ class PLYExporter(ModelExporter):
 
     @staticmethod
     def _construct_list_of_attributes(features_albedo, features_specular, scale, rotation):
-        l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
+        l = ["x", "y", "z", "nx", "ny", "nz"]
         # All channels except the 3 DC
         for i in range(features_albedo.shape[1]):
-            l.append('f_dc_{}'.format(i))
+            l.append("f_dc_{}".format(i))
         for i in range(features_specular.shape[1]):
-            l.append('f_rest_{}'.format(i))
-        l.append('opacity')
+            l.append("f_rest_{}".format(i))
+        l.append("opacity")
         for i in range(scale.shape[1]):
-            l.append('scale_{}'.format(i))
+            l.append("scale_{}".format(i))
         for i in range(rotation.shape[1]):
-            l.append('rot_{}'.format(i))
+            l.append("rot_{}".format(i))
         return l
 
     @torch.no_grad()
@@ -60,27 +59,26 @@ class PLYExporter(ModelExporter):
         logger.info(f"exporting ply file to {output_path}...")
         positions = model.get_positions().detach().cpu().numpy()
         num_gaussians = positions.shape[0]
-        mogt_nrm = np.repeat(
-            np.array([[0, 0, 1]], dtype=np.float32), repeats=num_gaussians, axis=0)
+        mogt_nrm = np.repeat(np.array([[0, 0, 1]], dtype=np.float32), repeats=num_gaussians, axis=0)
         mogt_albedo = model.get_features_albedo().detach().cpu().numpy()
         num_speculars = (model.get_max_n_features() + 1) ** 2 - 1
-        mogt_specular = model.get_features_specular().detach(
-        ).cpu().numpy().reshape((num_gaussians, num_speculars, 3))
-        mogt_specular = mogt_specular.transpose(
-            0, 2, 1).reshape((num_gaussians, num_speculars*3))
-        mogt_densities = model.get_density(
-            preactivation=True).detach().cpu().numpy()
-        mogt_scales = model.get_scale(
-            preactivation=True).detach().cpu().numpy()
-        mogt_rotation = model.get_rotation(
-            preactivation=True).detach().cpu().numpy()
+        mogt_specular = model.get_features_specular().detach().cpu().numpy().reshape((num_gaussians, num_speculars, 3))
+        mogt_specular = mogt_specular.transpose(0, 2, 1).reshape((num_gaussians, num_speculars * 3))
+        mogt_densities = model.get_density(preactivation=True).detach().cpu().numpy()
+        mogt_scales = model.get_scale(preactivation=True).detach().cpu().numpy()
+        mogt_rotation = model.get_rotation(preactivation=True).detach().cpu().numpy()
 
-        dtype_full = [(attribute, 'f4') for attribute in PLYExporter._construct_list_of_attributes(
-            mogt_albedo, mogt_specular, mogt_scales, mogt_rotation)]
+        dtype_full = [
+            (attribute, "f4")
+            for attribute in PLYExporter._construct_list_of_attributes(
+                mogt_albedo, mogt_specular, mogt_scales, mogt_rotation
+            )
+        ]
 
         elements = np.empty(num_gaussians, dtype=dtype_full)
-        attributes = np.concatenate((positions, mogt_nrm, mogt_albedo,
-                                    mogt_specular, mogt_densities, mogt_scales, mogt_rotation), axis=1)
+        attributes = np.concatenate(
+            (positions, mogt_nrm, mogt_albedo, mogt_specular, mogt_densities, mogt_scales, mogt_rotation), axis=1
+        )
         elements[:] = list(map(tuple, attributes))
-        el = PlyElement.describe(elements, 'vertex')
+        el = PlyElement.describe(elements, "vertex")
         PlyData([el]).write(output_path)

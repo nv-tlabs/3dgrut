@@ -16,11 +16,12 @@
 import logging
 import os
 from enum import IntEnum
+
 import torch
 import torch.utils.cpp_extension
 
-from threedgrut.utils.timer import CudaTimer
 from threedgrut.datasets.protocols import Batch
+from threedgrut.utils.timer import CudaTimer
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,13 @@ class Tracer:
 
         @staticmethod
         def backward(
-            ctx, ray_radiance_grd, ray_density_grd, ray_hit_distance_grd, ray_normals_grd, ray_hits_count_grd_UNUSED, mog_visibility_grd_UNUSED
+            ctx,
+            ray_radiance_grd,
+            ray_density_grd,
+            ray_hit_distance_grd,
+            ray_normals_grd,
+            ray_hits_count_grd_UNUSED,
+            mog_visibility_grd_UNUSED,
         ):
             (
                 ray_to_world,
@@ -210,10 +217,10 @@ class Tracer:
     def render(self, gaussians, gpu_batch: Batch, train=False, frame_id=0):
         num_gaussians = gaussians.num_gaussians
         with torch.cuda.nvtx.range(f"model.forward({num_gaussians} gaussians)"):
-    
+
             if self.frame_timer is not None:
                 self.frame_timer.start()
-    
+
             (pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count, mog_visibility) = Tracer._Autograd.apply(
                 self.tracer_wrapper,
                 frame_id,
@@ -236,7 +243,7 @@ class Tracer:
             pred_rgb, pred_opacity = gaussians.background(
                 gpu_batch.T_to_world.contiguous(), gpu_batch.rays_dir.contiguous(), pred_rgb, pred_opacity, train
             )
-        
+
         if self.frame_timer is not None:
             self.timings["forward_render"] = self.frame_timer.timing()
 

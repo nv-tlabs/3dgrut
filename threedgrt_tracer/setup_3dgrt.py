@@ -38,7 +38,8 @@ def setup_3dgrt(conf):
 
     # Compile slang kernels
     # TODO: do not overwrite files, use config hash to register the needed version
-    import importlib, subprocess
+    import importlib
+    import subprocess
 
     slang_mod = importlib.import_module("slangtorch")
     slang_build_env = os.environ
@@ -49,10 +50,13 @@ def setup_3dgrt(conf):
     subprocess.check_call(
         [
             "slangc",
-            "-target", "cuda",
-            "-I", slang_build_inc_dir,
-            "-line-directive-mode", "none",
-            "-matrix-layout-row-major", # NB : this is required for cuda target
+            "-target",
+            "cuda",
+            "-I",
+            slang_build_inc_dir,
+            "-line-directive-mode",
+            "none",
+            "-matrix-layout-row-major",  # NB : this is required for cuda target
             "-O2",
             f"-DPARTICLE_RADIANCE_NUM_COEFFS={(conf.render.particle_radiance_sph_degree + 1) ** 2}",
             f"-DGAUSSIAN_PARTICLE_KERNEL_DEGREE={conf.render.particle_kernel_degree}",

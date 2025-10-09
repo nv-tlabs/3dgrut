@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .dataset_nerf import NeRFDataset
 from .dataset_colmap import ColmapDataset
+from .dataset_nerf import NeRFDataset
 from .dataset_scannetpp import ScannetppDataset
 
 

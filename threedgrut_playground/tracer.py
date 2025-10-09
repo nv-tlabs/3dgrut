@@ -16,6 +16,7 @@
 import logging
 import os
 from enum import IntEnum
+
 import torch
 import torch.utils.cpp_extension
 
@@ -44,6 +45,7 @@ def load_playground_plugin(conf):
 # ----------------------------------------------------------------------------
 #
 
+
 class Tracer:
 
     def __init__(self, conf):
@@ -57,7 +59,7 @@ class Tracer:
         load_playground_plugin(conf)
 
         playground_module_path = os.path.dirname(__file__)
-        threedgrt_tracer_module_path = os.path.abspath(os.path.join(playground_module_path, '..', 'threedgrt_tracer'))
+        threedgrt_tracer_module_path = os.path.abspath(os.path.join(playground_module_path, "..", "threedgrt_tracer"))
 
         self.tracer_wrapper = _playground_plugin.HybridOptixTracer(
             threedgrt_tracer_module_path,
@@ -90,28 +92,19 @@ class Tracer:
                 gaussians.scale_activation(gaussians.scale).view(-1, 3).contiguous(),
                 gaussians.density_activation(gaussians.density).view(-1, 1).contiguous(),
                 rebuild_bvh,
-                allow_bvh_update
+                allow_bvh_update,
             )
             self.num_update_bvh = 0 if rebuild_bvh else self.num_update_bvh + 1
 
     def build_mesh_acc(self, mesh_vertices, mesh_faces, rebuild=True, allow_update=True):
         with torch.cuda.nvtx.range(f"build-mesh-bvh-full-build-{rebuild}"):
             self.tracer_wrapper.build_mesh_bvh(
-                mesh_vertices.view(-1, 3).contiguous(),
-                mesh_faces.view(-1, 3).contiguous(),
-                rebuild,
-                allow_update
+                mesh_vertices.view(-1, 3).contiguous(), mesh_faces.view(-1, 3).contiguous(), rebuild, allow_update
             )
 
-    def render(
-        self,
-        gaussians,
-        gpu_batch,
-        train=False,
-        frame_id=0
-    ):
-        assert ('rays_o_cam' in gpu_batch) and ('rays_d_cam' in gpu_batch) and ('poses' in gpu_batch)
-        
+    def render(self, gaussians, gpu_batch, train=False, frame_id=0):
+        assert ("rays_o_cam" in gpu_batch) and ("rays_d_cam" in gpu_batch) and ("poses" in gpu_batch)
+
         num_gaussians = gaussians.num_gaussians
         with torch.cuda.nvtx.range(f"model.forward({num_gaussians} gaussians)"):
             # The feature mask zeros out feature dims the model shouldn't use yet.
@@ -126,17 +119,11 @@ class Tracer:
             mog_scl = gaussians.get_scale().contiguous()
             particle_density = torch.concat([mog_pos, mog_dns, mog_rot, mog_scl, torch.zeros_like(mog_dns)], dim=1)
 
-            (
-                pred_rgb,
-                pred_opacity,
-                pred_dist,
-                pred_normals,
-                hits_count
-            ) = self.tracer_wrapper.trace(
+            (pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count) = self.tracer_wrapper.trace(
                 frame_id,
-                gpu_batch['poses'].contiguous(),
-                gpu_batch['rays_o_cam'].contiguous(),
-                gpu_batch['rays_d_cam'].contiguous(),
+                gpu_batch["poses"].contiguous(),
+                gpu_batch["rays_o_cam"].contiguous(),
+                gpu_batch["rays_d_cam"].contiguous(),
                 particle_density,
                 features.contiguous(),
                 gaussians.n_active_features,
@@ -145,11 +132,7 @@ class Tracer:
 
             # NOTE: disable background
             pred_rgb, pred_opacity = gaussians.background(
-                gpu_batch['poses'].contiguous(),
-                gpu_batch['rays_d_cam'].contiguous(),
-                pred_rgb,
-                pred_opacity,
-                train
+                gpu_batch["poses"].contiguous(), gpu_batch["rays_d_cam"].contiguous(), pred_rgb, pred_opacity, train
             )
 
         return {
@@ -157,17 +140,20 @@ class Tracer:
             "pred_opacity": pred_opacity,
             "pred_dist": pred_dist,
             "pred_normals": torch.nn.functional.normalize(pred_normals, dim=3),
-            "hits_count": hits_count
+            "hits_count": hits_count,
         }
 
     @staticmethod
     def to_native_pbr_material(pbr_mat):
-        make_contiguous_tex = lambda x, c: x.contiguous() if x is not None else torch.empty([0, 0, c],
-                                                                                            dtype=torch.float32)
-        make_contiguous_diffuse = lambda x: x.cpu().contiguous() if x is not None else torch.ones(4,
-                                                                                                  dtype=torch.float32)
-        make_contiguous_emissive = lambda x: x.cpu().contiguous() if x is not None else torch.zeros(4,
-                                                                                                    dtype=torch.float32)
+        make_contiguous_tex = lambda x, c: (
+            x.contiguous() if x is not None else torch.empty([0, 0, c], dtype=torch.float32)
+        )
+        make_contiguous_diffuse = lambda x: (
+            x.cpu().contiguous() if x is not None else torch.ones(4, dtype=torch.float32)
+        )
+        make_contiguous_emissive = lambda x: (
+            x.cpu().contiguous() if x is not None else torch.zeros(4, dtype=torch.float32)
+        )
         cpbr_material = _playground_plugin.CPBRMaterial()
         cpbr_material.material_id = pbr_mat.material_id
         cpbr_material.diffuseMap = make_contiguous_tex(pbr_mat.diffuse_map, 4)
@@ -187,8 +173,8 @@ class Tracer:
     def render_playground(
         self,
         gaussians,
-        ray_o,      # world coords
-        ray_d,      # world coords
+        ray_o,  # world coords
+        ray_d,  # world coords
         playground_opts,
         mesh_faces,
         vertex_normals,
@@ -204,7 +190,7 @@ class Tracer:
         refractive_index=None,
         envmap=None,
         envmap_offset=None,
-        max_pbr_bounces=7
+        max_pbr_bounces=7,
     ):
         if ray_max_t is None:
             ray_max_t = ray_o.new_full(size=ray_o.shape[0:3], fill_value=1e9)
@@ -223,11 +209,7 @@ class Tracer:
         if envmap_offset is None:
             envmap = torch.zeros([2], dtype=torch.float32)
 
-        poses = torch.tensor([
-            [1, 0, 0, 0],
-            [0, 1, 0, 0],
-            [0, 0, 1, 0]
-        ], dtype=torch.float32)
+        poses = torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]], dtype=torch.float32)
 
         num_gaussians = gaussians.num_gaussians
         with torch.cuda.nvtx.range(f"model.forward({num_gaussians} gaussians)"):
@@ -246,13 +228,7 @@ class Tracer:
             min_transmittance = self.conf.render.min_transmittance
             envmap_offset = envmap_offset.contiguous()
 
-            (
-                pred_rgb,
-                pred_opacity,
-                pred_dist,
-                pred_normals,
-                hits_count
-            ) = self.tracer_wrapper.trace_hybrid(
+            (pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count) = self.tracer_wrapper.trace_hybrid(
                 frame_id,
                 poses,
                 ray_o,
@@ -275,7 +251,7 @@ class Tracer:
                 refractive_index,
                 envmap,
                 envmap_offset,
-                max_pbr_bounces
+                max_pbr_bounces,
             )
 
             pred_dist = pred_dist[:, :, :, 0:1]  # return only the hit distance
@@ -286,8 +262,8 @@ class Tracer:
             "pred_dist": pred_dist,
             "pred_normals": torch.nn.functional.normalize(pred_normals, dim=3),
             "hits_count": hits_count,
-            "last_ray_o": ray_o,    # Rewritten by tracer
-            "last_ray_d": ray_d     # Rewritten by tracer
+            "last_ray_o": ray_o,  # Rewritten by tracer
+            "last_ray_d": ray_d,  # Rewritten by tracer
         }
 
     @torch.cuda.nvtx.range("denoise")

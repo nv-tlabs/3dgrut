@@ -14,8 +14,8 @@
 # limitations under the License.
 
 import zipfile
-from typing import Dict, Any, Union
 from dataclasses import dataclass
+from typing import Any, Dict, Union
 
 import numpy as np
 
@@ -25,6 +25,7 @@ class NamedSerialized:
     """
     Class to store serialized data with a filename.
     """
+
     filename: str
     serialized: Union[str, bytes]
 
@@ -47,7 +48,7 @@ def _fill_state_dict_tensors(
     features_albedo: np.ndarray,
     features_specular: np.ndarray,
     n_active_features: int,
-    dtype=np.float16
+    dtype=np.float16,
 ) -> None:
     """
     Helper function to fill the state dict tensors in a template.
@@ -64,43 +65,35 @@ def _fill_state_dict_tensors(
         dtype: Data type to convert to (default: np.float16)
     """
     # Convert data to specified format for efficiency
-    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.positions"] = positions.astype(
-        dtype).tobytes()
-    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.rotations"] = rotations.astype(
-        dtype).tobytes()
-    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.scales"] = scales.astype(
-        dtype).tobytes()
-    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.densities"] = densities.astype(
-        dtype).tobytes()
+    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.positions"] = positions.astype(dtype).tobytes()
+    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.rotations"] = rotations.astype(dtype).tobytes()
+    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.scales"] = scales.astype(dtype).tobytes()
+    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.densities"] = densities.astype(dtype).tobytes()
     template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.features_albedo"] = features_albedo.astype(
-        dtype).tobytes()
+        dtype
+    ).tobytes()
     template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.features_specular"] = features_specular.astype(
-        dtype).tobytes()
+        dtype
+    ).tobytes()
 
     # Create empty extra_signal tensor
     extra_signal = np.zeros((positions.shape[0], 0), dtype=dtype)
     template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.extra_signal"] = extra_signal.tobytes()
 
     # Store n_active_features as binary data (64-bit integer)
-    n_active_features_binary = np.array(
-        [n_active_features], dtype=np.int64).tobytes()
+    n_active_features_binary = np.array([n_active_features], dtype=np.int64).tobytes()
     template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.n_active_features"] = n_active_features_binary
 
     # Store shapes
-    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.positions.shape"] = list(
-        positions.shape)
-    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.rotations.shape"] = list(
-        rotations.shape)
-    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.scales.shape"] = list(
-        scales.shape)
-    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.densities.shape"] = list(
-        densities.shape)
-    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.features_albedo.shape"] = list(
-        features_albedo.shape)
+    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.positions.shape"] = list(positions.shape)
+    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.rotations.shape"] = list(rotations.shape)
+    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.scales.shape"] = list(scales.shape)
+    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.densities.shape"] = list(densities.shape)
+    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.features_albedo.shape"] = list(features_albedo.shape)
     template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.features_specular.shape"] = list(
-        features_specular.shape)
-    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.extra_signal.shape"] = list(
-        extra_signal.shape)
+        features_specular.shape
+    )
+    template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.extra_signal.shape"] = list(extra_signal.shape)
     # Empty array for scalar value
     template["nre_data"]["state_dict"][".gaussians_nodes.gaussians.n_active_features.shape"] = []
 
@@ -131,7 +124,7 @@ def fill_3dgut_template(
     rect_bounding: bool = True,
     tight_opacity_bounding: bool = True,
     tile_based_culling: bool = True,
-    k_buffer_size: int = 0
+    k_buffer_size: int = 0,
 ) -> Dict[str, Any]:
     """
     Create and fill the 3DGUT JSON template with gaussian data.
@@ -211,7 +204,7 @@ def fill_3dgut_template(
                         "ut_kappa": ut_kappa,
                         "ut_require_all_sigma_points": ut_require_all_sigma_points,
                         "image_margin_factor": image_margin_factor,
-                        "min_projected_ray_radius": 0.5477225575051661
+                        "min_projected_ray_radius": 0.5477225575051661,
                     },
                     "culling": {
                         "rect_bounding": rect_bounding,
@@ -219,31 +212,16 @@ def fill_3dgut_template(
                         "tile_based": tile_based_culling,
                         "near_clip_distance": 0.2,  # TODO: Does this have an equivalent in 3DGRUT?
                         # TODO: Does this have an equivalent in 3DGRUT?
-                        "far_clip_distance": 3.402823466e+38
+                        "far_clip_distance": 3.402823466e38,
                     },
-                    "render": {
-                        "mode": "kbuffer",
-                        "k_buffer_size": k_buffer_size
-                    }
+                    "render": {"mode": "kbuffer", "k_buffer_size": k_buffer_size},
                 },
                 "name": "gaussians_primitive",
-                "appearance_embedding": {
-                    "name": "skip-appearance",
-                    "embedding_dim": 0,
-                    "device": "cuda"
-                },
-                "background": {
-                    "name": "skip-background",
-                    "device": "cuda",
-                    "composite_in_linear_space": False
-                }
+                "appearance_embedding": {"name": "skip-appearance", "embedding_dim": 0, "device": "cuda"},
+                "background": {"name": "skip-background", "device": "cuda", "composite_in_linear_space": False},
             },
             "state_dict": {
-                "._extra_state": {
-                    "obj_track_ids": {
-                        "gaussians": []
-                    }
-                },
+                "._extra_state": {"obj_track_ids": {"gaussians": []}},
                 ".gaussians_nodes.gaussians.positions": None,
                 ".gaussians_nodes.gaussians.rotations": None,
                 ".gaussians_nodes.gaussians.scales": None,
@@ -260,15 +238,14 @@ def fill_3dgut_template(
                 ".gaussians_nodes.gaussians.extra_signal.shape": None,
                 ".gaussians_nodes.gaussians.features_albedo.shape": None,
                 ".gaussians_nodes.gaussians.features_specular.shape": None,
-                ".gaussians_nodes.gaussians.n_active_features.shape": None
-            }
+                ".gaussians_nodes.gaussians.n_active_features.shape": None,
+            },
         }
     }
 
     # Fill in the state dict tensors
     _fill_state_dict_tensors(
-        template, positions, rotations, scales, densities,
-        features_albedo, features_specular, n_active_features
+        template, positions, rotations, scales, densities, features_albedo, features_specular, n_active_features
     )
 
     return template

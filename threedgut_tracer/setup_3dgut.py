@@ -13,7 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os, math
+import math
+import os
+
 import torch
 
 from threedgrut.utils import jit
@@ -42,7 +44,7 @@ def setup_3dgut(conf):
     ut_alpha = conf.render.splat.ut_alpha
     ut_beta = conf.render.splat.ut_beta
     ut_kappa = conf.render.splat.ut_kappa
-    ut_delta = math.sqrt(ut_alpha*ut_alpha*(ut_d+ut_kappa))
+    ut_delta = math.sqrt(ut_alpha * ut_alpha * (ut_d + ut_kappa))
 
     defines = [
         f"-DPARTICLE_RADIANCE_NUM_COEFFS={(conf.render.particle_radiance_sph_degree + 1) ** 2}",
@@ -81,7 +83,8 @@ def setup_3dgut(conf):
         "-U__CUDA_NO_HALF_CONVERSIONS__",
         "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
         "-U__CUDA_NO_HALF2_OPERATORS__",
-        "-use_fast_math", "-O3",
+        "-use_fast_math",
+        "-O3",
         *defines,
     ]
 
@@ -95,7 +98,8 @@ def setup_3dgut(conf):
 
     # Compile slang kernels
     # TODO: do not overwrite files, use config hash to register the needed version
-    import importlib, subprocess
+    import importlib
+    import subprocess
 
     slang_mod = importlib.import_module("slangtorch")
     slang_dir = os.path.dirname(slang_mod.__file__)
@@ -107,16 +111,22 @@ def setup_3dgut(conf):
 
     subprocess.check_call(
         [
-            "slangc", "-target", "cuda",
-            "-I", os.path.join(os.path.dirname(__file__), "include"),
-            "-I", os.path.join(os.path.dirname(__file__), "..", "threedgrt_tracer", "include"),
-            "-line-directive-mode", "none",
-            "-matrix-layout-row-major", # NB : this is required for cuda target
+            "slangc",
+            "-target",
+            "cuda",
+            "-I",
+            os.path.join(os.path.dirname(__file__), "include"),
+            "-I",
+            os.path.join(os.path.dirname(__file__), "..", "threedgrt_tracer", "include"),
+            "-line-directive-mode",
+            "none",
+            "-matrix-layout-row-major",  # NB : this is required for cuda target
             "-Wno-41018",
             "-O2",
             *defines,
             f"{os.path.join(slang_build_inc_dir,'threedgut.slang')}",
-            "-o", f"{os.path.join(build_dir,'threedgutSlang.cuh')}",
+            "-o",
+            f"{os.path.join(build_dir,'threedgutSlang.cuh')}",
         ],
         env=slang_build_env,
     )

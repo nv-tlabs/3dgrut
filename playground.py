@@ -14,9 +14,11 @@
 # limitations under the License.
 
 from __future__ import annotations
-from threedgrut_playground.ps_gui import Playground
-import os
+
 import argparse
+import os
+
+from threedgrut_playground.ps_gui import Playground
 
 
 def run_demo(gs_object, mesh_assets_folder, envmap_assets_folder, default_gs_config, buffer_mode):
@@ -35,36 +37,33 @@ def run_demo(gs_object, mesh_assets_folder, envmap_assets_folder, default_gs_con
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--gs_object',
-        type=str,
-        required=True,
-        help="Path of pretrained 3dgrt checkpoint, as .pt / .ingp / .ply file."
+        "--gs_object", type=str, required=True, help="Path of pretrained 3dgrt checkpoint, as .pt / .ingp / .ply file."
     )
     parser.add_argument(
-        '--mesh_assets',
+        "--mesh_assets",
         type=str,
-        default=os.path.join(os.path.dirname(__file__), 'threedgrut_playground', 'assets'),
-        help="Path to folder containing mesh assets of .obj or .glb format."
+        default=os.path.join(os.path.dirname(__file__), "threedgrut_playground", "assets"),
+        help="Path to folder containing mesh assets of .obj or .glb format.",
     )
     parser.add_argument(
-        '--default_gs_config',
+        "--default_gs_config",
         type=str,
-        default='apps/colmap_3dgrt.yaml',
-        help="Name of default config to use for .ingp, .ply files, or .pt files not trained with 3dgrt."
+        default="apps/colmap_3dgrt.yaml",
+        help="Name of default config to use for .ingp, .ply files, or .pt files not trained with 3dgrt.",
     )
     parser.add_argument(
-        '--envmap_assets',
+        "--envmap_assets",
         type=str,
-        default=os.path.join(os.path.dirname(__file__), 'threedgrut_playground', 'assets'),
-        help="Optional path to folder containing .hdr environment maps to use for lighting mesh assets."
+        default=os.path.join(os.path.dirname(__file__), "threedgrut_playground", "assets"),
+        help="Optional path to folder containing .hdr environment maps to use for lighting mesh assets.",
     )
     parser.add_argument(
-        '--buffer_mode',
+        "--buffer_mode",
         type=str,
         choices=["host2device", "device2device"],
         default="device2device",
         help="Buffering mode for passing rendered data from CUDA to OpenGL screen buffer."
-             "Using device2device is recommended."
+        "Using device2device is recommended.",
     )
     args = parser.parse_args()
 
@@ -73,5 +72,5 @@ if __name__ == "__main__":
         mesh_assets_folder=args.mesh_assets,
         envmap_assets_folder=args.envmap_assets,
         default_gs_config=args.default_gs_config,
-        buffer_mode=args.buffer_mode
+        buffer_mode=args.buffer_mode,
     )

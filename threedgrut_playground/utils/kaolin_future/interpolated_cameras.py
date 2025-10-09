@@ -13,12 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Callable, Iterator, List, Union
+
 import numpy as np
 import torch
-from typing import List, Iterator, Union, Callable
-from scipy.special import comb
 from kaolin.math import quat
 from kaolin.render.camera import Camera
+from scipy.special import comb
 
 """
 This module is to be included in next version of kaolin 0.18.0.
@@ -27,20 +28,15 @@ As of March 26, 2025 the latest public release is kaolin 0.17.0, hence it's incl
 
 
 __all__ = [
-    'interpolate_camera_on_polynomial_path',
-    'interpolate_camera_on_spline_path',
-    'infinite_loop_camera_path_generator',
-    'camera_path_generator'
+    "interpolate_camera_on_polynomial_path",
+    "interpolate_camera_on_spline_path",
+    "infinite_loop_camera_path_generator",
+    "camera_path_generator",
 ]
 
 
-def _smoothstep(
-    x: float,
-    x_min: float = 0.0,
-    x_max: float = 1.0,
-    N: int = 3
-):
-    """ Generalized smoothstep polynomials function, used for smooth interpolation of point x in [x_min, x_max].
+def _smoothstep(x: float, x_min: float = 0.0, x_max: float = 1.0, N: int = 3):
+    """Generalized smoothstep polynomials function, used for smooth interpolation of point x in [x_min, x_max].
 
     This function implements a generalized smoothstep that creates a smooth transition
     between 0 and 1 using higher-order polynomials. The resulting curve has zero 1st and 2nd
@@ -54,7 +50,7 @@ def _smoothstep(
         x (float): Input value to be smoothly interpolated
         x_min (float, optional): Minimum value of the input range. Defaults to 0.0.
         x_max (float, optional): Maximum value of the input range. Defaults to 1.0.
-        N (int, optional): Smoothness factor, determines polynomial order (2N + 1). 
+        N (int, optional): Smoothness factor, determines polynomial order (2N + 1).
             Defaults to 3 (7th order polynomial).
 
     Returns:
@@ -67,7 +63,7 @@ def _smoothstep(
 
     result = 0
     for n in range(0, N + 1):
-         result += comb(N + n, n) * comb(2 * N + 1, N - n) * (-x) ** n
+        result += comb(N + n, n) * comb(2 * N + 1, N - n) * (-x) ** n
 
     result *= x ** (N + 1)
     return result
@@ -78,9 +74,9 @@ def _catmull_rom(
     p1: Union[torch.Tensor, float, int],
     p2: Union[torch.Tensor, float, int],
     p3: Union[torch.Tensor, float, int],
-    t: float
+    t: float,
 ):
-    """ Interpolates a scalar or n-dimensional point on a Catmull-Rom spline curve.
+    """Interpolates a scalar or n-dimensional point on a Catmull-Rom spline curve.
     Catmull-Rom splines are C1 continuous cubic splines that guarantee to pass through their control points.
     The spline is defined by four control points, where the interpolation occurs between p1 and p2, while p0 and p3
     influence the tangents.
@@ -100,20 +96,15 @@ def _catmull_rom(
         For tensors, the interpolation is applied element-wise.
     """
     q_t = 0.5 * (
-            (2.0 * p1) +
-            (-p0 + p2) * t +
-            (2*p0 - 5*p1 + 4*p2 - p3) * t**2 +
-            (-p0 + 3*p1- 3*p2 + p3) * t**3
+        (2.0 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t**2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t**3
     )
     return q_t
 
 
 def _lerp(
-    a: Union[torch.Tensor, float, int],
-    b: Union[torch.Tensor, float, int],
-    t: float
+    a: Union[torch.Tensor, float, int], b: Union[torch.Tensor, float, int], t: float
 ) -> Union[torch.Tensor, float, int]:
-    """ Computes LERP, the Linear Interpolation function between two tensors, a and b.
+    """Computes LERP, the Linear Interpolation function between two tensors, a and b.
 
     Args:
         a (torch.Tensor, float, int): Start tensor of arbitrary shape.
@@ -128,19 +119,19 @@ def _lerp(
 
 
 def _quaternion_angular_distance(q1, q2, eps=1e-6):
-    """ Computes the angular distance between two unit quaternions q1 and q2,
+    """Computes the angular distance between two unit quaternions q1 and q2,
     representing the minimum rotation angle needed to align them. The distance is
     invariant to quaternion double-cover (meaning q and -q represent the same rotation).
 
     The returned angle is in the range [0, pi] radians, where:
     - 0 means the quaternions represent the same rotation
     - pi means the quaternions represent opposite rotations
-    
+
     The formula used is: theta = arccos(2(q1·q2)^2 - 1)
     This gives the absolute angular difference regardless of rotation direction.
 
     Input quaternions are assumed to be normalized unit quaternions.
-    
+
     Args:
         q1 (torch.Tensor): First unit quaternion of shape (4,)
         q2 (torch.Tensor): Second unit quaternion of shape (4,)
@@ -169,8 +160,8 @@ def _catmull_rom_q(q0, q1, q2, q3, t, alpha=0.5, eps=1e-6):
     Therefore, the interpolation may slow down near control points.
 
     All input quaternions are assumed to be normalized unit quaternions.
-    
-    See also: 
+
+    See also:
         https://en.wikipedia.org/wiki/Centripetal_Catmull-Rom_spline
 
     Args:
@@ -215,7 +206,7 @@ def _catmull_rom_q(q0, q1, q2, q3, t, alpha=0.5, eps=1e-6):
 
 
 def _slerp_q(a: torch.Tensor, b: torch.Tensor, t: float, eps=1e-6):
-    """ Computes SLERP, the Spherical Linear Interpolation function between two quaternions, a and b.
+    """Computes SLERP, the Spherical Linear Interpolation function between two quaternions, a and b.
     Args:
         a (torch.Tensor): Start unit quaternion of shape (4,).
         b (torch.Tensor): End unit quaternion of shape (4,).
@@ -241,7 +232,7 @@ def _slerp_q(a: torch.Tensor, b: torch.Tensor, t: float, eps=1e-6):
 
 
 def _lerp_q(a: torch.Tensor, b: torch.Tensor, t: float):
-    """ Computes LERP, the Linear Interpolation function between two quaternions, a and b.
+    """Computes LERP, the Linear Interpolation function between two quaternions, a and b.
     Args:
         a (torch.Tensor): Start unit quaternion of shape (4,).
         b (torch.Tensor): End unit quaternion of shape (4,).
@@ -258,14 +249,10 @@ def _lerp_q(a: torch.Tensor, b: torch.Tensor, t: float):
     return a * (1 - t) + b * t
 
 
-
 def interpolate_camera_on_polynomial_path(
-    trajectory: List[Camera],
-    timestep: int,
-    frames_between_cameras: int = 60,
-    N: int = 3
+    trajectory: List[Camera], timestep: int, frames_between_cameras: int = 60, N: int = 3
 ) -> Camera:
-    """ Interpolates a camera from a smoothed path formed by a trajectory of cameras.
+    """Interpolates a camera from a smoothed path formed by a trajectory of cameras.
     The trajectory is assumed to have a list of at least 2 cameras, where the first and last cameras form a
     looped path.
     The interpolation is done using a generalized polynomial function.
@@ -287,11 +274,12 @@ def interpolate_camera_on_polynomial_path(
     traj_idx = (timestep // frames_between_cameras) % len(trajectory)
     cam1 = trajectory[traj_idx]
     cam2 = trajectory[traj_idx + 1]
-    assert cam1.lens_type == cam2.lens_type, \
-        ('interpolate_camera_on_polynomial_path() only support interpolation of cameras with the same lens type, '
-         f'but received cameras of types {cam1.lens_type} and {cam2.lens_type}.')
+    assert cam1.lens_type == cam2.lens_type, (
+        "interpolate_camera_on_polynomial_path() only support interpolation of cameras with the same lens type, "
+        f"but received cameras of types {cam1.lens_type} and {cam2.lens_type}."
+    )
     Xs = _smoothstep(np.linspace(0.0, 1.0, frames_between_cameras), N=N)
-    x = Xs[timestep % frames_between_cameras]   # Interpolation variable
+    x = Xs[timestep % frames_between_cameras]  # Interpolation variable
 
     # Extrinsics
     q1 = quat.quat_from_rot33(cam1.R).squeeze(0)
@@ -301,34 +289,27 @@ def interpolate_camera_on_polynomial_path(
     cam_t = _lerp(cam1.t, cam2.t, x)
     view_matrix = torch.eye(4, dtype=q1.dtype, device=q1.device).unsqueeze(0)
     view_matrix[0, :3, :3] = cam_R
-    view_matrix[0, :3, 3] = cam_t[0,:,0]
+    view_matrix[0, :3, 3] = cam_t[0, :, 0]
 
     # Intrinsics
     intrinsics = dict()
-    if cam1.lens_type == 'pinhole' and cam2.lens_type == 'pinhole':
-        intrinsics['fov'] = (cam1.fov(in_degrees=False), cam2.fov(in_degrees=False))
-    elif cam1.lens_type == 'ortho' and cam2.lens_type == 'ortho':
-        intrinsics['fov_distance'] = (cam1.fov_distance(), cam2.fov_distance())
-    intrinsics = {intr_name: _lerp(intr_val[0],intr_val[1], x) for intr_name, intr_val in intrinsics.items()}
+    if cam1.lens_type == "pinhole" and cam2.lens_type == "pinhole":
+        intrinsics["fov"] = (cam1.fov(in_degrees=False), cam2.fov(in_degrees=False))
+    elif cam1.lens_type == "ortho" and cam2.lens_type == "ortho":
+        intrinsics["fov_distance"] = (cam1.fov_distance(), cam2.fov_distance())
+    intrinsics = {intr_name: _lerp(intr_val[0], intr_val[1], x) for intr_name, intr_val in intrinsics.items()}
     width = round(_lerp(cam1.width, cam2.width, x))
     height = round(_lerp(cam1.height, cam2.height, x))
 
-    cam = Camera.from_args(
-        view_matrix=view_matrix,
-        width=width, height=height,
-        device=cam1.device,
-        **intrinsics
-    )
+    cam = Camera.from_args(view_matrix=view_matrix, width=width, height=height, device=cam1.device, **intrinsics)
 
     return cam
 
 
 def interpolate_camera_on_spline_path(
-    trajectory: List[Camera],
-    timestep: int,
-    frames_between_cameras: int = 60
+    trajectory: List[Camera], timestep: int, frames_between_cameras: int = 60
 ) -> Camera:
-    """ Interpolates a camera from a linear path formed by a trajectory of cameras.
+    """Interpolates a camera from a linear path formed by a trajectory of cameras.
     The trajectory is assumed to have a list of at least 4 cameras.
     The interpolation is done using Catmull-Rom Splines that guarantee to pass through the control points.
 
@@ -351,11 +332,12 @@ def interpolate_camera_on_spline_path(
     cam2 = trajectory[traj_idx]
     cam3 = trajectory[traj_idx + 1]
     cam4 = trajectory[traj_idx + 2]
-    assert cam1.lens_type == cam2.lens_type == cam3.lens_type == cam4.lens_type, \
-        ('interpolate_camera_on_spline_path() only support interpolation of cameras with the same lens type, '
-         f'but received cameras of types {cam1.lens_type}, {cam2.lens_type}, {cam3.lens_type}, {cam4.lens_type}.')
+    assert cam1.lens_type == cam2.lens_type == cam3.lens_type == cam4.lens_type, (
+        "interpolate_camera_on_spline_path() only support interpolation of cameras with the same lens type, "
+        f"but received cameras of types {cam1.lens_type}, {cam2.lens_type}, {cam3.lens_type}, {cam4.lens_type}."
+    )
     Xs = np.linspace(0.0, 1.0, frames_between_cameras)
-    x = Xs[timestep % frames_between_cameras]   # Interpolation variable
+    x = Xs[timestep % frames_between_cameras]  # Interpolation variable
 
     # Extrinsics
     q1 = quat.quat_from_rot33(cam1.R).squeeze(0)
@@ -367,42 +349,42 @@ def interpolate_camera_on_spline_path(
     cam_t = _catmull_rom(cam1.t, cam2.t, cam3.t, cam4.t, x)
     view_matrix = torch.eye(4, dtype=q1.dtype, device=q1.device).unsqueeze(0)
     view_matrix[0, :3, :3] = cam_R
-    view_matrix[0, :3, 3] = cam_t[0,:,0]
+    view_matrix[0, :3, 3] = cam_t[0, :, 0]
 
     # Intrinsics
     intrinsics = dict()
-    if cam1.lens_type == 'pinhole':
-        intrinsics['fov'] = (
+    if cam1.lens_type == "pinhole":
+        intrinsics["fov"] = (
             cam1.fov(in_degrees=False),
             cam2.fov(in_degrees=False),
             cam3.fov(in_degrees=False),
-            cam4.fov(in_degrees=False)
+            cam4.fov(in_degrees=False),
         )
-    elif cam1.lens_type == 'ortho':
-        intrinsics['fov_distance'] = \
-            (cam1.fov_distance(), cam2.fov_distance(), cam3.fov_distance(), cam4.fov_distance())
+    elif cam1.lens_type == "ortho":
+        intrinsics["fov_distance"] = (
+            cam1.fov_distance(),
+            cam2.fov_distance(),
+            cam3.fov_distance(),
+            cam4.fov_distance(),
+        )
     else:
-        raise ValueError(f'Unsupported lens type {cam1.lens_type}')
+        raise ValueError(f"Unsupported lens type {cam1.lens_type}")
 
-
-    intrinsics = {intr_name: _catmull_rom(intr_val[0], intr_val[1], intr_val[2], intr_val[3], x)
-                  for intr_name, intr_val in intrinsics.items()}
+    intrinsics = {
+        intr_name: _catmull_rom(intr_val[0], intr_val[1], intr_val[2], intr_val[3], x)
+        for intr_name, intr_val in intrinsics.items()
+    }
     width = round(_catmull_rom(cam1.width, cam2.width, cam3.width, cam4.width, x))
     height = round(_catmull_rom(cam1.height, cam2.height, cam3.height, cam4.height, x))
 
     # Create camera from view matrix
-    cam = Camera.from_args(
-        view_matrix=view_matrix,
-        width=width, height=height,
-        device=cam1.device,
-        **intrinsics
-    )
+    cam = Camera.from_args(view_matrix=view_matrix, width=width, height=height, device=cam1.device, **intrinsics)
 
     return cam
 
 
 def get_interpolator(interpolation: str, trajectory: List[Camera]) -> Callable:
-    """ Returns an interpolator function based on the interpolation type and trajectory.
+    """Returns an interpolator function based on the interpolation type and trajectory.
     Args:
         interpolation (str): Type of interpolation function used:
             'polynomial' uses a smoothstep polynomial function which tends to overshoot around the keyframes.
@@ -411,12 +393,12 @@ def get_interpolator(interpolation: str, trajectory: List[Camera]) -> Callable:
     Returns:
         Callable: An interpolator function that takes a trajectory, timestep, and frames_between_cameras, and returns a camera.
     """
-    if interpolation == 'polynomial':
-        interpolator =  interpolate_camera_on_polynomial_path
+    if interpolation == "polynomial":
+        interpolator = interpolate_camera_on_polynomial_path
         if len(trajectory) < 2:
             raise ValueError("For polynomial interpolation, cameras trajectory must have at least 2 cameras.")
-    elif interpolation == 'catmull_rom':
-        interpolator =  interpolate_camera_on_spline_path
+    elif interpolation == "catmull_rom":
+        interpolator = interpolate_camera_on_spline_path
         if len(trajectory) < 4:
             raise ValueError("For catmull_rom interpolation, cameras trajectory must have at least 4 cameras.")
     else:
@@ -427,9 +409,9 @@ def get_interpolator(interpolation: str, trajectory: List[Camera]) -> Callable:
 def infinite_loop_camera_path_generator(
     trajectory: List[Camera],
     frames_between_cameras: int = 60,
-    interpolation: str = 'polynomial',
+    interpolation: str = "polynomial",
 ) -> Iterator[Camera]:
-    """ A generator function for returning continuous camera objects an on a smoothed path interpolated
+    """A generator function for returning continuous camera objects an on a smoothed path interpolated
     from a trajectory of cameras.
     The trajectory is assumed to have a list of at least 2 cameras, where the first and last cameras form a
     looped path.
@@ -455,17 +437,13 @@ def infinite_loop_camera_path_generator(
 
     while True:
         yield interpolator(_trajectory, timestep, frames_between_cameras)
-        timestep = max(
-            (timestep + 1) % ((len(trajectory) + 1) * frames_between_cameras), frames_between_cameras
-        )
+        timestep = max((timestep + 1) % ((len(trajectory) + 1) * frames_between_cameras), frames_between_cameras)
 
 
 def camera_path_generator(
-    trajectory: List[Camera],
-    frames_between_cameras: int = 60,
-    interpolation: str = 'catmull_rom'
+    trajectory: List[Camera], frames_between_cameras: int = 60, interpolation: str = "catmull_rom"
 ) -> Iterator[Camera]:
-    """ A finite generator function for returning continuous camera objects an o path interpolated
+    """A finite generator function for returning continuous camera objects an o path interpolated
     from a trajectory of cameras.
     This generator is exhausted after it returns the last point on the path.
     If interpolation is 'polynomial' - the trajectory is assumed to have a list of at least 2 cameras.

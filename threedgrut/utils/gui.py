@@ -22,11 +22,10 @@ import polyscope.imgui as psim
 import torch
 
 from threedgrut.datasets.protocols import Batch, DatasetVisualization
-from threedgrut.datasets.utils import fov2focal, DEFAULT_DEVICE
+from threedgrut.datasets.utils import DEFAULT_DEVICE, fov2focal
 from threedgrut.utils.logger import logger
-from threedgrut.utils.timer import CudaTimer
 from threedgrut.utils.misc import to_np
-
+from threedgrut.utils.timer import CudaTimer
 
 trajectory = []
 
@@ -40,6 +39,7 @@ class GUI:
             logger.info("polyscope set to host2device mode.")
         else:  # device2device
             from threedgrut.gui.ps_extension import initialize_cugl_interop
+
             initialize_cugl_interop()
             logger.info("polyscope set to device2device mode.")
 

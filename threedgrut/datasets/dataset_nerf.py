@@ -16,16 +16,14 @@
 import json
 import os
 
-import torch
-from torch.utils.data import Dataset
-
 import cv2
 import imageio
-from PIL import Image
 import numpy as np
-
+import torch
 from einops import rearrange
 from kornia import create_meshgrid
+from PIL import Image
+from torch.utils.data import Dataset
 
 from threedgrut.utils.logger import logger
 
@@ -34,9 +32,7 @@ from .utils import create_camera_visualization, get_center_and_diag, get_worker_
 
 
 class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
-    def __init__(
-        self, path, device="cuda", split="train", ray_jitter=None, bg_color=None
-    ):
+    def __init__(self, path, device="cuda", split="train", ray_jitter=None, bg_color=None):
         self.root_dir = path
         self.device = device
         self.split = split
@@ -86,9 +82,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 dtype=torch.float32,
                 device=self.device,
             )
-            rays_d_cam = directions.reshape(
-                (1, self.image_h, self.image_w, 3)
-            ).contiguous()
+            rays_d_cam = directions.reshape((1, self.image_h, self.image_w, 3)).contiguous()
             # Cache for this worker
             self._worker_gpu_cache[worker_id] = (rays_o_cam, rays_d_cam)
 
@@ -137,23 +131,17 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             with open(os.path.join(self.root_dir, "transforms_val.json"), "r") as f:
                 frames += json.load(f)["frames"]
         else:
-            with open(
-                os.path.join(self.root_dir, f"transforms_{split}.json"), "r"
-            ) as f:
+            with open(os.path.join(self.root_dir, f"transforms_{split}.json"), "r") as f:
                 frames = json.load(f)["frames"]
 
         cam_centers = []
-        for frame in logger.track(
-            frames, description=f"Load Dataset ({split})", color="salmon1"
-        ):
+        for frame in logger.track(frames, description=f"Load Dataset ({split})", color="salmon1"):
             c2w = np.array(frame["transform_matrix"], dtype=np.float32)
             c2w[:, 1:3] *= -1  # [right up back] to [right down front]
             cam_centers.append(c2w[:3, 3])
             self.poses.append(c2w)
 
-            img_path = (
-                os.path.join(self.root_dir, f"{frame['file_path']}") + self.suffix
-            )
+            img_path = os.path.join(self.root_dir, f"{frame['file_path']}") + self.suffix
             self.image_paths.append(img_path)
 
             # We assume that the mask is stored in the same folder as the image with the same name but with _mask.png extension.
@@ -229,9 +217,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         }
 
         if os.path.exists(mask_path := self.mask_paths[idx]):
-            mask = torch.from_numpy(np.array(Image.open(mask_path))).reshape(
-                1, self.image_h, self.image_w, 1
-            )
+            mask = torch.from_numpy(np.array(Image.open(mask_path))).reshape(1, self.image_h, self.image_w, 1)
             output_dict["mask"] = mask
 
         return output_dict
@@ -288,9 +274,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                     [0.0, 0.0, 0.0, 1.0],
                 ]
             )
-            trans_mat_world_to_camera = (
-                camera_convention_rot @ trans_mat_world_to_camera
-            )
+            trans_mat_world_to_camera = camera_convention_rot @ trans_mat_world_to_camera
 
             w = self.image_w
             h = self.image_h
@@ -309,9 +293,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             )
             rgb = img.reshape(h, w, 3) / np.float32(255.0)
 
-            assert (
-                rgb.dtype == np.float32
-            ), "RGB image must be of type float32, but got {}".format(rgb.dtype)
+            assert rgb.dtype == np.float32, "RGB image must be of type float32, but got {}".format(rgb.dtype)
 
             cam_list.append(
                 {
@@ -329,9 +311,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     @staticmethod
     @torch.cuda.amp.autocast(dtype=torch.float32)
-    def __get_ray_directions(
-        H, W, K, device="cpu", ray_jitter=None, return_uv=False, flatten=True
-    ):
+    def __get_ray_directions(H, W, K, device="cpu", ray_jitter=None, return_uv=False, flatten=True):
         """
         Get ray directions for all pixels in camera coordinate [right down front].
         Reference: https://www.scratchapixel.com/lessons/3d-basic-rendering/
@@ -352,9 +332,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
         if ray_jitter is None:  # pass by the center
-            directions = torch.stack(
-                [(u - cx + 0.5) / fx, (v - cy + 0.5) / fy, torch.ones_like(u)], -1
-            )
+            directions = torch.stack([(u - cx + 0.5) / fx, (v - cy + 0.5) / fy, torch.ones_like(u)], -1)
         else:
             jitter = ray_jitter(u.shape)
             directions = torch.stack(
@@ -394,9 +372,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             # Rotate ray directions from camera coordinate to the world coordinate
             rays_d = directions @ c2w[:, :3].T
         else:
-            rays_d = rearrange(directions, "n c -> n 1 c") @ rearrange(
-                c2w[..., :3], "n a b -> n b a"
-            )
+            rays_d = rearrange(directions, "n c -> n 1 c") @ rearrange(c2w[..., :3], "n a b -> n b a")
             rays_d = rearrange(rays_d, "n 1 c -> n c")
         # The origin of all rays is the camera origin in world coordinate
         rays_o = c2w[..., 3].expand_as(rays_d)

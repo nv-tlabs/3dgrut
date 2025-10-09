@@ -59,15 +59,17 @@ class Renderer:
         from threedgrut.datasets.utils import configure_dataloader_for_platform
 
         dataset = datasets.make_test(name=conf.dataset.type, config=conf)
-        
+
         # Configure DataLoader arguments for the current platform
-        dataloader_kwargs = configure_dataloader_for_platform({
-            'num_workers': 8,
-            'batch_size': 1,
-            'shuffle': False,
-            'collate_fn': None,
-        })
-        
+        dataloader_kwargs = configure_dataloader_for_platform(
+            {
+                "num_workers": 8,
+                "batch_size": 1,
+                "shuffle": False,
+                "collate_fn": None,
+            }
+        )
+
         dataloader = torch.utils.data.DataLoader(dataset, **dataloader_kwargs)
         return dataset, dataloader
 

@@ -23,24 +23,28 @@ import numpy as np
 import torch
 from plyfile import PlyData, PlyElement
 
+import threedgrt_tracer
 import threedgrut.model.background as background
+import threedgut_tracer
 from threedgrut.datasets.protocols import Batch
-from threedgrut.datasets.utils import read_next_bytes, read_colmap_points3D_text
+from threedgrut.datasets.utils import read_colmap_points3D_text, read_next_bytes
 from threedgrut.export.base import ExportableModel
 from threedgrut.export.ingp_exporter import INGPExporter
 from threedgrut.export.ply_exporter import PLYExporter
-from threedgrut.model.geometry import nearest_neighbor_dist_cpuKD, k_nearest_neighbors
-import threedgrt_tracer, threedgut_tracer
+from threedgrut.model.geometry import k_nearest_neighbors, nearest_neighbor_dist_cpuKD
+from threedgrut.optimizers import SelectiveAdam
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import (
     get_activation_function,
     get_scheduler,
+    quaternion_to_so3,
     sh_degree_to_num_features,
     sh_degree_to_specular_dim,
-    to_np, to_torch, quaternion_to_so3
+    to_np,
+    to_torch,
 )
 from threedgrut.utils.render import RGB2SH
-from threedgrut.optimizers import SelectiveAdam
+
 
 class MixtureOfGaussians(torch.nn.Module, ExportableModel):
     """ """
@@ -180,7 +184,7 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
 
         # Rendering method
         if conf.render.method == "3dgrt":
-           self.renderer = threedgrt_tracer.Tracer(conf)
+            self.renderer = threedgrt_tracer.Tracer(conf)
         elif conf.render.method == "3dgut":
             self.renderer = threedgut_tracer.Tracer(conf)
         else:
@@ -244,8 +248,9 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
                 file_rgb = torch.tensor(file_rgb, dtype=torch.uint8, device=self.device)
 
         assert file_rgb.dtype == torch.uint8, "Expecting RGB values to be in [0, 255] range"
-        self.default_initialize_from_points(file_pts, observer_pts, file_rgb, 
-                                            use_observer_pts=self.conf.initialization.use_observation_points)
+        self.default_initialize_from_points(
+            file_pts, observer_pts, file_rgb, use_observer_pts=self.conf.initialization.use_observation_points
+        )
 
     def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
         data = PlyData.read(pc_path)
@@ -596,7 +601,7 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         return self.renderer.render(self, batch, train, frame_id)
 
     def trace(self, rays_o, rays_d, T_to_world=None):
-        """ Traces the model with the given rays. This method is a convenience method for ray-traced inference mode.
+        """Traces the model with the given rays. This method is a convenience method for ray-traced inference mode.
         If T_to_world is None, the rays are assumed to be in world space.
         Otherwise, the rays are assumed to be in camera space.
         rays_ori: torch.Tensor  # [B, H, W, 3] ray origins in arbitrary space
@@ -668,12 +673,17 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         exporter.export(self, Path(mogt_path))
 
     @torch.no_grad()
-    def init_from_ply(self, mogt_path:str, init_model=True):
+    def init_from_ply(self, mogt_path: str, init_model=True):
         plydata = PlyData.read(mogt_path)
 
-        mogt_pos = np.stack((np.asarray(plydata.elements[0]["x"]),
-                        np.asarray(plydata.elements[0]["y"]),
-                        np.asarray(plydata.elements[0]["z"])),  axis=1)
+        mogt_pos = np.stack(
+            (
+                np.asarray(plydata.elements[0]["x"]),
+                np.asarray(plydata.elements[0]["y"]),
+                np.asarray(plydata.elements[0]["z"]),
+            ),
+            axis=1,
+        )
         mogt_densities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
 
         num_gaussians = mogt_pos.shape[0]
@@ -683,42 +693,48 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         mogt_albedo[:, 2] = np.asarray(plydata.elements[0]["f_dc_2"])
 
         extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
-        extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+        extra_f_names = sorted(extra_f_names, key=lambda x: int(x.split("_")[-1]))
         num_speculars = (self.max_n_features + 1) ** 2 - 1
         expected_extra_f_count = 3 * num_speculars
-        
+
         mogt_specular = np.zeros((num_gaussians, expected_extra_f_count))
         if len(extra_f_names) == expected_extra_f_count:
             # Full spherical harmonics data available
             for idx, attr_name in enumerate(extra_f_names):
                 mogt_specular[:, idx] = np.asarray(plydata.elements[0][attr_name])
-            mogt_specular = mogt_specular.reshape((num_gaussians,3,num_speculars))
-            mogt_specular = mogt_specular.transpose(0, 2, 1).reshape((num_gaussians,num_speculars*3))
+            mogt_specular = mogt_specular.reshape((num_gaussians, 3, num_speculars))
+            mogt_specular = mogt_specular.transpose(0, 2, 1).reshape((num_gaussians, num_speculars * 3))
         elif len(extra_f_names) == 0:
             # Only DC components available, create zero-filled higher-order harmonics
             logger.info(f"PLY file only contains DC components, initializing higher-order spherical harmonics to zero")
         else:
             # Partial data - this is unexpected
-            raise ValueError(f"Unexpected number of f_rest_ properties: found {len(extra_f_names)}, expected {expected_extra_f_count} or 0")
+            raise ValueError(
+                f"Unexpected number of f_rest_ properties: found {len(extra_f_names)}, expected {expected_extra_f_count} or 0"
+            )
 
         scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
-        scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
+        scale_names = sorted(scale_names, key=lambda x: int(x.split("_")[-1]))
         mogt_scales = np.zeros((num_gaussians, len(scale_names)))
         for idx, attr_name in enumerate(scale_names):
             mogt_scales[:, idx] = np.asarray(plydata.elements[0][attr_name])
 
         rot_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("rot")]
-        rot_names = sorted(rot_names, key = lambda x: int(x.split('_')[-1]))
+        rot_names = sorted(rot_names, key=lambda x: int(x.split("_")[-1]))
         mogt_rotation = np.zeros((num_gaussians, len(rot_names)))
         for idx, attr_name in enumerate(rot_names):
             mogt_rotation[:, idx] = np.asarray(plydata.elements[0][attr_name])
 
-        self.positions = torch.nn.Parameter(torch.tensor(mogt_pos, dtype=self.positions.dtype,device=self.device))
-        self.features_albedo = torch.nn.Parameter(torch.tensor(mogt_albedo, dtype=self.features_albedo.dtype,device=self.device))
-        self.features_specular = torch.nn.Parameter(torch.tensor(mogt_specular,dtype=self.features_specular.dtype,device=self.device))
-        self.density = torch.nn.Parameter(torch.tensor(mogt_densities,dtype=self.density.dtype,device=self.device))
-        self.scale = torch.nn.Parameter(torch.tensor(mogt_scales,dtype=self.scale.dtype,device=self.device))
-        self.rotation = torch.nn.Parameter(torch.tensor(mogt_rotation,dtype=self.rotation.dtype,device=self.device))
+        self.positions = torch.nn.Parameter(torch.tensor(mogt_pos, dtype=self.positions.dtype, device=self.device))
+        self.features_albedo = torch.nn.Parameter(
+            torch.tensor(mogt_albedo, dtype=self.features_albedo.dtype, device=self.device)
+        )
+        self.features_specular = torch.nn.Parameter(
+            torch.tensor(mogt_specular, dtype=self.features_specular.dtype, device=self.device)
+        )
+        self.density = torch.nn.Parameter(torch.tensor(mogt_densities, dtype=self.density.dtype, device=self.device))
+        self.scale = torch.nn.Parameter(torch.tensor(mogt_scales, dtype=self.scale.dtype, device=self.device))
+        self.rotation = torch.nn.Parameter(torch.tensor(mogt_rotation, dtype=self.rotation.dtype, device=self.device))
 
         self.n_active_features = self.max_n_features
 
@@ -728,10 +744,11 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
             self.validate_fields()
 
     def copy_fields(self, other, deepcopy=False):
-        """ Copies fields from other onto self """
+        """Copies fields from other onto self"""
         if self.optimizer is not None:
-            raise NotImplementedError("Operations that create copies of the model during training "
-                                      "are currently not supported.")
+            raise NotImplementedError(
+                "Operations that create copies of the model during training " "are currently not supported."
+            )
 
         if deepcopy:
             self.positions = torch.nn.Parameter(other.positions.clone())
@@ -740,7 +757,7 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
             self.density = torch.nn.Parameter(other.density.clone())
             self.features_albedo = torch.nn.Parameter(other.features_albedo.clone())
             self.features_specular = torch.nn.Parameter(other.features_specular.clone())
-        else: # shared tensors
+        else:  # shared tensors
             self.positions = torch.nn.Parameter(other.positions)
             self.rotation = torch.nn.Parameter(other.rotation)
             self.scale = torch.nn.Parameter(other.scale)
