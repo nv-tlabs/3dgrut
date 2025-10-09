@@ -687,9 +687,9 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         num_speculars = (self.max_n_features + 1) ** 2 - 1
         expected_extra_f_count = 3 * num_speculars
         
+        mogt_specular = np.zeros((num_gaussians, expected_extra_f_count))
         if len(extra_f_names) == expected_extra_f_count:
             # Full spherical harmonics data available
-            mogt_specular = np.zeros((num_gaussians, len(extra_f_names)))
             for idx, attr_name in enumerate(extra_f_names):
                 mogt_specular[:, idx] = np.asarray(plydata.elements[0][attr_name])
             mogt_specular = mogt_specular.reshape((num_gaussians,3,num_speculars))
@@ -697,7 +697,6 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         elif len(extra_f_names) == 0:
             # Only DC components available, create zero-filled higher-order harmonics
             logger.info(f"PLY file only contains DC components, initializing higher-order spherical harmonics to zero")
-            mogt_specular = np.zeros((num_gaussians, num_speculars * 3))
         else:
             # Partial data - this is unexpected
             raise ValueError(f"Unexpected number of f_rest_ properties: found {len(extra_f_names)}, expected {expected_extra_f_count} or 0")
