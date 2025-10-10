@@ -684,6 +684,22 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
 
         extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
         extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+        
+        # Auto-detect SH degree for Isaac Sim compatibility
+        if len(extra_f_names) == 0:
+            # DC-only PLY: automatically set max_n_features to 0
+            if self.max_n_features != 0:
+                print(f"Auto-detected DC-only PLY file: adjusting max_n_features from {self.max_n_features} to 0 for Isaac Sim compatibility")
+                self.max_n_features = 0
+        elif len(extra_f_names) % 3 == 0:
+            # Infer SH degree from available f_rest properties
+            num_speculars_available = len(extra_f_names) // 3
+            import math
+            inferred_degree = int(round(math.sqrt(num_speculars_available + 1) - 1))
+            if self.max_n_features != inferred_degree:
+                print(f"Auto-detected SH degree {inferred_degree} from PLY file: adjusting max_n_features from {self.max_n_features} to {inferred_degree}")
+                self.max_n_features = inferred_degree
+        
         num_speculars = (self.max_n_features + 1) ** 2 - 1
         expected_extra_f_count = 3 * num_speculars
         
