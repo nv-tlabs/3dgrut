@@ -256,6 +256,13 @@ class Trainer3DGRUT:
                         train_dataset.get_observer_points(), dtype=torch.float32, device=self.device
                     )
                     model.init_from_colmap(conf.path, observer_points)
+                case "accumulated_point_cloud":
+                    observer_points = torch.tensor(
+                        train_dataset.get_observer_points(), dtype=torch.float32, device=self.device
+                    )
+                    ply_path = conf.initialization.accumulated_point_cloud_path
+                    logger.info(f"Initializing from accumulated point cloud: {ply_path}")
+                    model.init_from_accumulated_point_cloud(ply_path, observer_points)
                 case "point_cloud":
                     try:
                         ply_path = os.path.join(conf.path, "point_cloud.ply")
