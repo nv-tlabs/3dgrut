@@ -252,6 +252,55 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
             file_pts, observer_pts, file_rgb, use_observer_pts=self.conf.initialization.use_observation_points
         )
 
+    def init_from_accumulated_point_cloud(self, pc_path: str, observer_pts):
+        """
+        Initialize gaussians from an accumulated point cloud PLY file.
+        Similar to init_from_colmap but loads from a given PLY file instead of sparse/0/points3D.txt
+        
+        Args:
+            pc_path: Path to the PLY point cloud file
+            observer_pts: Observer points tensor for scale initialization
+        """
+        logger.info(f"Loading accumulated point cloud from {pc_path}...")
+        
+        # Read PLY file
+        plydata = PlyData.read(pc_path)
+        vertices = plydata['vertex']
+        
+        # Extract XYZ coordinates
+        xyz = np.stack([
+            vertices['x'],
+            vertices['y'],
+            vertices['z']
+        ], axis=1).astype(np.float32)
+        
+        # Extract RGB colors (check if they exist)
+        if 'red' in vertices and 'green' in vertices and 'blue' in vertices:
+            rgb = np.stack([
+                vertices['red'],
+                vertices['green'],
+                vertices['blue']
+            ], axis=1).astype(np.uint8)
+        else:
+            # If no colors, initialize with random colors
+            logger.warning("No RGB data found in point cloud, using random colors")
+            rgb = np.random.randint(0, 256, size=(len(vertices), 3), dtype=np.uint8)
+        
+        # Convert to torch tensors
+        file_pts = torch.tensor(xyz, dtype=torch.float32, device=self.device)
+        file_rgb = torch.tensor(rgb, dtype=torch.uint8, device=self.device)
+        
+        logger.info(f"Loaded {len(file_pts)} points from accumulated point cloud")
+        
+        # Initialize using the same method as COLMAP
+        assert file_rgb.dtype == torch.uint8, "Expecting RGB values to be in [0, 255] range"
+        self.default_initialize_from_points(
+            file_pts, 
+            observer_pts, 
+            file_rgb, 
+            use_observer_pts=self.conf.initialization.use_observation_points
+        )
+        
     def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
         data = PlyData.read(pc_path)
         num_gaussians = len(data["vertex"])
