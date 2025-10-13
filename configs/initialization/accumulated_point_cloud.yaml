@@ -1,0 +1,5 @@
+method: accumulated_point_cloud
+observation_scale_factor: 0.01
+use_observation_points: true
+accumulated_point_cloud_path: ???  # Path to accumulated point cloud PLY file
+
