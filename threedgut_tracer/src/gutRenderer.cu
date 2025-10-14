@@ -376,8 +376,24 @@ threedgut::Status threedgut::GUTRenderer::renderForward(const RenderParameters& 
 
     {
         const auto renderProfile = DeviceLaunchesLogger::ScopePush{deviceLaunchesLogger, "render::render"};
-        ::render<<<dim3{tileGrid.x, tileGrid.y, 1u}, dim3{GUTParameters::Tiling::BlockX, GUTParameters::Tiling::BlockY, 1u}, 0, cudaStream>>>(
+
+#if FINE_GRAINED_LOAD_BALANCING
+        constexpr uint32_t VirtualTilesPerTile = GUTParameters::Tiling::VirtualTilesPerTile;
+        constexpr uint32_t ThreadsPerBlock = GUTParameters::Tiling::FineGrainedThreadsPerBlock;
+        const uint32_t virtual_tiles_total = tileGrid.x * tileGrid.y * VirtualTilesPerTile;
+        ::renderBalanced<<<virtual_tiles_total, ThreadsPerBlock, 0, cudaStream>>>( // ThreadsPerBlock = FineGrainedWarpsPerBlock * WarpSize
             params,
+            (const tcnn::uvec2*)m_forwardContext->sortedTileRangeIndices.data(),
+            (const uint32_t*)m_forwardContext->sortedTileParticleIdx.data(),
+            (const tcnn::vec4*)m_forwardContext->particlesProjectedConicOpacity.data(),
+            (const float*)m_forwardContext->particlesGlobalDepth.data(),
+            (const float*)m_forwardContext->particlesPrecomputedFeatures.data(),
+            parameters.m_dptrParametersBuffer,
+            tcnn::uvec2{tileGrid.x, tileGrid.y}
+        );
+#else
+        ::render<<<dim3{tileGrid.x, tileGrid.y, 1u}, dim3{GUTParameters::Tiling::BlockX, GUTParameters::Tiling::BlockY, 1u}, 0, cudaStream>>>(
+            params, // threedgut::RenderParameters params
             (const tcnn::uvec2*)m_forwardContext->sortedTileRangeIndices.data(),
             (const uint32_t*)m_forwardContext->sortedTileParticleIdx.data(),
             (const tcnn::vec3*)sensorRayOriginCudaPtr,
@@ -391,7 +407,7 @@ threedgut::Status threedgut::GUTRenderer::renderForward(const RenderParameters& 
             (const float*)m_forwardContext->particlesGlobalDepth.data(),
             (const float*)m_forwardContext->particlesPrecomputedFeatures.data(),
             parameters.m_dptrParametersBuffer);
-        CUDA_CHECK_STREAM_RETURN(cudaStream, m_logger);
+#endif
     }
 
     return Status();
