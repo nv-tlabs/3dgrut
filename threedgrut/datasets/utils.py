@@ -479,7 +479,8 @@ def read_colmap_extrinsics_text(path):
     with open(path, "r") as fid:
         # Skip comment lines and get valid lines
         lines = (line.strip() for line in fid)
-        lines = (line for line in lines if line and not line.startswith("#"))
+        # lines = (line for line in lines if line and not line.startswith("#"))
+        lines = (line for line in lines if line == "" or not line.startswith("#"))
         # Process lines in pairs (image info + points info)
         try:
             while True:
