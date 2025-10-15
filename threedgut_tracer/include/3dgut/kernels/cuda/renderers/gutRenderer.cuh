@@ -114,6 +114,106 @@ __global__ void render(threedgut::RenderParameters params,
     finalizeRay(ray, params, sensorRayOriginPtr, worldHitCountPtr, worldHitDistancePtr, radianceDensityPtr, sensorToWorldTransform);
 }
 
+// Fine-grained load balancing rendering kernel: static allocation per virtual tile
+__global__ void renderBalanced(threedgut::RenderParameters params,
+                                       const tcnn::uvec2* __restrict__ sortedTileRangeIndicesPtr,
+                                       const uint32_t* __restrict__ sortedTileDataPtr,
+                                       const tcnn::vec3* __restrict__ sensorRayOriginPtr,
+                                       const tcnn::vec3* __restrict__ sensorRayDirectionPtr,
+                                       tcnn::mat4x3 sensorToWorldTransform,
+                                       float* __restrict__ worldHitCountPtr,
+                                       float* __restrict__ worldHitDistancePtr,
+                                       tcnn::vec4* __restrict__ radianceDensityPtr,
+                                       const tcnn::vec2* __restrict__ particlesProjectedPositionPtr,
+                                       const tcnn::vec4* __restrict__ particlesProjectedConicOpacityPtr,
+                                       const float* __restrict__ particlesGlobalDepthPtr,
+                                       const float* __restrict__ particlesPrecomputedFeaturesPtr,
+                                       const uint64_t* __restrict__ parameterMemoryHandles,
+                                       const tcnn::uvec2 tileGrid) {
+
+    // Static allocation: each block handles one virtual tile
+    using namespace threedgut;
+    constexpr uint32_t virtualTilesPerTile = GUTParameters::Tiling::VirtualTilesPerTile;
+    const uint32_t virtualTileId = blockIdx.x;
+
+    // Calculate total virtual tiles across all original tiles
+    const uint32_t totalVirtualTiles = tileGrid.x * tileGrid.y * virtualTilesPerTile;
+
+    // Boundary check
+    if (virtualTileId >= totalVirtualTiles) return;
+
+    // Map virtual tile back to original tile coordinates and local position  
+    const uint32_t originalTileId = virtualTileId / virtualTilesPerTile;
+    const uint32_t virtualTileInOriginal = virtualTileId % virtualTilesPerTile;
+
+    const uint32_t originalTileX = originalTileId % tileGrid.x;
+    const uint32_t originalTileY = originalTileId / tileGrid.x;
+
+    // Map virtual tile to pixel coordinates within original tile
+    constexpr uint32_t virtualTilesPerTileX = GUTParameters::Tiling::VirtualTilesPerTileX;
+    constexpr uint32_t virtualTileX = GUTParameters::Tiling::VirtualTileX;
+    constexpr uint32_t virtualTileY = GUTParameters::Tiling::VirtualTileY;
+    constexpr uint32_t warpSize = GUTParameters::Tiling::WarpSize;
+
+    const uint32_t virtualTileXPos = virtualTileInOriginal % virtualTilesPerTileX;  // 0-7
+    const uint32_t virtualTileYPos = virtualTileInOriginal / virtualTilesPerTileX;  // 0-7
+
+    // Calculate base pixel coordinates for this virtual tile
+    const uint32_t basePixelX = virtualTileXPos * virtualTileX;  // 0,2,4,6,8,10,12,14
+    const uint32_t basePixelY = virtualTileYPos * virtualTileY;  // 0,2,4,6,8,10,12,14
+
+    // Warp-level processing: each warp handles one pixel in virtual tile
+    const uint32_t warpId = threadIdx.x / warpSize;
+    const uint32_t laneId = threadIdx.x & (warpSize - 1);
+
+    // Each block processes 1 virtual tile = virtualTileSize pixels, each warp handles 1 pixel
+    constexpr uint32_t virtualTileSize = GUTParameters::Tiling::VirtualTileSize;
+    constexpr uint32_t blockX = GUTParameters::Tiling::BlockX;
+    constexpr uint32_t blockY = GUTParameters::Tiling::BlockY;
+
+    if (warpId < virtualTileSize) { // virtualTileSize warps per block (1 warp per pixel)
+        // Arrange pixels in row-major order within virtualTileX x virtualTileY region
+        // warp 0-3 maps to pixels: (0,0),(1,0),(0,1),(1,1) for 2x2 virtual tile
+        const uint32_t pixelOffsetX = warpId % virtualTileX;
+        const uint32_t pixelOffsetY = warpId / virtualTileX;
+
+        const uint32_t pixelLocalX = basePixelX + pixelOffsetX;
+        const uint32_t pixelLocalY = basePixelY + pixelOffsetY;
+
+        const tcnn::uvec2 pixel = {
+            originalTileX * blockX + pixelLocalX,
+            originalTileY * blockY + pixelLocalY
+        };
+
+        // Initialize ray for current pixel
+        auto ray = initializeRayPerPixel<TGUTRenderer::TRayPayload>(
+            params, pixel, sensorRayOriginPtr, sensorRayDirectionPtr, sensorToWorldTransform);
+
+        // Warp-level parallel rendering using original tile's particle data
+        const tcnn::uvec2 originalTile = {originalTileX, originalTileY};
+
+        TGUTRenderer::evalForwardNoKBufferBalanced(params,
+                                            ray,
+                                            sortedTileRangeIndicesPtr,
+                                            sortedTileDataPtr,
+                                            particlesProjectedPositionPtr,
+                                            particlesProjectedConicOpacityPtr,
+                                            particlesGlobalDepthPtr,
+                                            particlesPrecomputedFeaturesPtr,
+                                            originalTile,
+                                            tileGrid,
+                                            laneId,  // warp lane for parallel processing
+                                            {parameterMemoryHandles});
+
+        // Write final results to output buffers
+        // Only lane 0 should write, as only it has accumulated the correct values
+        if (laneId == 0) {
+            finalizeRay(ray, params, sensorRayOriginPtr, worldHitCountPtr, 
+                        worldHitDistancePtr, radianceDensityPtr, sensorToWorldTransform);
+        }
+    }
+}
+
 __global__ void renderBackward(threedgut::RenderParameters params,
                                const tcnn::uvec2* __restrict__ sortedTileRangeIndicesPtr,
                                const uint32_t* __restrict__ sortedTileDataPtr,

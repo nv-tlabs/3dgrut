@@ -107,6 +107,43 @@ __device__ __inline__ RayPayloadT initializeRay(const threedgut::RenderParameter
     return ray;
 }
 
+
+// Initialize ray based on given pixel coordinates (load-balanced mode)
+template <typename RayPayloadT>
+__device__ __inline__ RayPayloadT initializeRayPerPixel(const threedgut::RenderParameters& params,
+                                                        const tcnn::uvec2& pixel,
+                                                        const tcnn::vec3* __restrict__ sensorRayOriginPtr,
+                                                        const tcnn::vec3* __restrict__ sensorRayDirectionPtr,
+                                                        const tcnn::mat4x3& sensorToWorldTransform) {
+    RayPayloadT ray;
+    ray.flags = RayPayloadT::Default;
+
+    if ((pixel.x >= params.resolution.x) || (pixel.y >= params.resolution.y)) {
+        return ray;
+    }
+
+    ray.idx           = pixel.x + params.resolution.x * pixel.y;
+    ray.hitT          = 0.0f;
+    ray.transmittance = 1.0f;
+    ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
+
+    ray.origin    = sensorToWorldTransform * tcnn::vec4(sensorRayOriginPtr[ray.idx], 1.0f);
+    ray.direction = tcnn::mat3(sensorToWorldTransform) * sensorRayDirectionPtr[ray.idx];
+
+    ray.tMinMax   = params.objectAABB.ray_intersect(ray.origin, ray.direction);
+    ray.tMinMax.x = fmaxf(ray.tMinMax.x, 0.0f);
+
+    if (ray.tMinMax.y > ray.tMinMax.x) {
+        ray.flags |= RayPayloadT::Valid | RayPayloadT::Alive;
+    }
+
+#if GAUSSIAN_ENABLE_HIT_COUNT
+    ray.hitN = 0;
+#endif
+
+    return ray;
+}
+
 template <typename TRayPayload>
 __device__ __inline__ void finalizeRay(const TRayPayload& ray,
                                        const threedgut::RenderParameters& params,
