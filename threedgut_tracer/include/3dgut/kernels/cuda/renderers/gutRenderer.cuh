@@ -133,56 +133,56 @@ __global__ void renderBalanced(threedgut::RenderParameters params,
 
     // Static allocation: each block handles one virtual tile
     using namespace threedgut;
-    constexpr uint32_t VirtualTilesPerTile = GUTParameters::Tiling::VirtualTilesPerTile;
-    const uint32_t virtual_tile_id = blockIdx.x;
+    constexpr uint32_t virtualTilesPerTile = GUTParameters::Tiling::VirtualTilesPerTile;
+    const uint32_t virtualTileId = blockIdx.x;
 
     // Calculate total virtual tiles across all original tiles
-    const uint32_t total_virtual_tiles = tileGrid.x * tileGrid.y * VirtualTilesPerTile;
+    const uint32_t totalVirtualTiles = tileGrid.x * tileGrid.y * virtualTilesPerTile;
 
     // Boundary check
-    if (virtual_tile_id >= total_virtual_tiles) return;
+    if (virtualTileId >= totalVirtualTiles) return;
 
     // Map virtual tile back to original tile coordinates and local position  
-    const uint32_t original_tile_id = virtual_tile_id / VirtualTilesPerTile;
-    const uint32_t virtual_tile_in_original = virtual_tile_id % VirtualTilesPerTile;
+    const uint32_t originalTileId = virtualTileId / virtualTilesPerTile;
+    const uint32_t virtualTileInOriginal = virtualTileId % virtualTilesPerTile;
 
-    const uint32_t original_tile_x = original_tile_id % tileGrid.x;
-    const uint32_t original_tile_y = original_tile_id / tileGrid.x;
+    const uint32_t originalTileX = originalTileId % tileGrid.x;
+    const uint32_t originalTileY = originalTileId / tileGrid.x;
 
     // Map virtual tile to pixel coordinates within original tile
-    constexpr uint32_t VirtualTilesPerTileX = GUTParameters::Tiling::VirtualTilesPerTileX;
-    constexpr uint32_t VirtualTileX = GUTParameters::Tiling::VirtualTileX;
-    constexpr uint32_t VirtualTileY = GUTParameters::Tiling::VirtualTileY;
-    constexpr uint32_t WarpSize = GUTParameters::Tiling::WarpSize;
+    constexpr uint32_t virtualTilesPerTileX = GUTParameters::Tiling::VirtualTilesPerTileX;
+    constexpr uint32_t virtualTileX = GUTParameters::Tiling::VirtualTileX;
+    constexpr uint32_t virtualTileY = GUTParameters::Tiling::VirtualTileY;
+    constexpr uint32_t warpSize = GUTParameters::Tiling::WarpSize;
 
-    const uint32_t virtual_tile_x = virtual_tile_in_original % VirtualTilesPerTileX;  // 0-7
-    const uint32_t virtual_tile_y = virtual_tile_in_original / VirtualTilesPerTileX;  // 0-7
+    const uint32_t virtualTileXPos = virtualTileInOriginal % virtualTilesPerTileX;  // 0-7
+    const uint32_t virtualTileYPos = virtualTileInOriginal / virtualTilesPerTileX;  // 0-7
 
     // Calculate base pixel coordinates for this virtual tile
-    const uint32_t base_pixel_x = virtual_tile_x * VirtualTileX;  // 0,2,4,6,8,10,12,14
-    const uint32_t base_pixel_y = virtual_tile_y * VirtualTileY;  // 0,2,4,6,8,10,12,14
+    const uint32_t basePixelX = virtualTileXPos * virtualTileX;  // 0,2,4,6,8,10,12,14
+    const uint32_t basePixelY = virtualTileYPos * virtualTileY;  // 0,2,4,6,8,10,12,14
 
     // Warp-level processing: each warp handles one pixel in virtual tile
-    const uint32_t warpId = threadIdx.x / WarpSize;
-    const uint32_t laneId = threadIdx.x % WarpSize;
+    const uint32_t warpId = threadIdx.x / warpSize;
+    const uint32_t laneId = threadIdx.x & (warpSize - 1);
 
-    // Each block processes 1 virtual tile = VirtualTileSize pixels, each warp handles 1 pixel
-    constexpr uint32_t VirtualTileSize = GUTParameters::Tiling::VirtualTileSize;
-    constexpr uint32_t BlockX = GUTParameters::Tiling::BlockX;
-    constexpr uint32_t BlockY = GUTParameters::Tiling::BlockY;
+    // Each block processes 1 virtual tile = virtualTileSize pixels, each warp handles 1 pixel
+    constexpr uint32_t virtualTileSize = GUTParameters::Tiling::VirtualTileSize;
+    constexpr uint32_t blockX = GUTParameters::Tiling::BlockX;
+    constexpr uint32_t blockY = GUTParameters::Tiling::BlockY;
 
-    if (warpId < VirtualTileSize) { // VirtualTileSize warps per block (1 warp per pixel)
-        // Arrange pixels in row-major order within VirtualTileX x VirtualTileY region
+    if (warpId < virtualTileSize) { // virtualTileSize warps per block (1 warp per pixel)
+        // Arrange pixels in row-major order within virtualTileX x virtualTileY region
         // warp 0-3 maps to pixels: (0,0),(1,0),(0,1),(1,1) for 2x2 virtual tile
-        const uint32_t pixel_offset_x = warpId % VirtualTileX;
-        const uint32_t pixel_offset_y = warpId / VirtualTileX;
+        const uint32_t pixelOffsetX = warpId % virtualTileX;
+        const uint32_t pixelOffsetY = warpId / virtualTileX;
 
-        const uint32_t pixel_local_x = base_pixel_x + pixel_offset_x;
-        const uint32_t pixel_local_y = base_pixel_y + pixel_offset_y;
+        const uint32_t pixelLocalX = basePixelX + pixelOffsetX;
+        const uint32_t pixelLocalY = basePixelY + pixelOffsetY;
 
         const tcnn::uvec2 pixel = {
-            original_tile_x * BlockX + pixel_local_x,
-            original_tile_y * BlockY + pixel_local_y
+            originalTileX * blockX + pixelLocalX,
+            originalTileY * blockY + pixelLocalY
         };
 
         // Initialize ray for current pixel
@@ -190,7 +190,7 @@ __global__ void renderBalanced(threedgut::RenderParameters params,
             params, pixel, sensorRayOriginPtr, sensorRayDirectionPtr, sensorToWorldTransform);
 
         // Warp-level parallel rendering using original tile's particle data
-        const tcnn::uvec2 original_tile = {original_tile_x, original_tile_y};
+        const tcnn::uvec2 originalTile = {originalTileX, originalTileY};
 
         TGUTRenderer::evalForwardNoKBufferBalanced(params,
                                             ray,
@@ -200,7 +200,7 @@ __global__ void renderBalanced(threedgut::RenderParameters params,
                                             particlesProjectedConicOpacityPtr,
                                             particlesGlobalDepthPtr,
                                             particlesPrecomputedFeaturesPtr,
-                                            original_tile,
+                                            originalTile,
                                             tileGrid,
                                             laneId,  // warp lane for parallel processing
                                             {parameterMemoryHandles});

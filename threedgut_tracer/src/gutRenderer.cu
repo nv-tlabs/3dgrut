@@ -385,6 +385,13 @@ threedgut::Status threedgut::GUTRenderer::renderForward(const RenderParameters& 
             params,
             (const tcnn::uvec2*)m_forwardContext->sortedTileRangeIndices.data(),
             (const uint32_t*)m_forwardContext->sortedTileParticleIdx.data(),
+            (const tcnn::vec3*)sensorRayOriginCudaPtr,
+            (const tcnn::vec3*)sensorRayDirectionCudaPtr,
+            sensorPoseToMat(sensorPoseInv),
+            worldHitCountCudaPtr,
+            worldHitDistanceCudaPtr,
+            radianceDensityCudaPtr,
+            (const tcnn::vec2*)m_forwardContext->particlesProjectedPosition.data(),
             (const tcnn::vec4*)m_forwardContext->particlesProjectedConicOpacity.data(),
             (const float*)m_forwardContext->particlesGlobalDepth.data(),
             (const float*)m_forwardContext->particlesPrecomputedFeatures.data(),
@@ -408,6 +415,7 @@ threedgut::Status threedgut::GUTRenderer::renderForward(const RenderParameters& 
             (const float*)m_forwardContext->particlesPrecomputedFeatures.data(),
             parameters.m_dptrParametersBuffer);
 #endif
+        CUDA_CHECK_STREAM_RETURN(cudaStream, m_logger);
     }
 
     return Status();

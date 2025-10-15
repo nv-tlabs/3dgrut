@@ -402,15 +402,15 @@ struct GUTKBufferRenderer : Params {
             float newTransmittance = ray.transmittance * batchTransmittance;
 
             // Step 4: Early termination detection - find exact termination point
-            unsigned int early_termination_mask = __ballot_sync(WarpMask, 
+            unsigned int earlyTerminationMask = __ballot_sync(WarpMask, 
                 validHit && (ray.transmittance * localTransmittance) < Particles::MinTransmittanceThreshold);
 
-            bool should_terminate = false;
-            int termination_lane = -1;
+            bool shouldTerminate = false;
+            int terminationLane = -1;
 
-            if (early_termination_mask) {
-                termination_lane = __ffs(early_termination_mask) - 1; // Find first terminating lane
-                should_terminate = true;
+            if (earlyTerminationMask) {
+                terminationLane = __ffs(earlyTerminationMask) - 1; // Find first terminating lane
+                shouldTerminate = true;
                 ray.kill();
             }
 
@@ -420,9 +420,9 @@ struct GUTKBufferRenderer : Params {
             uint32_t accumulatedHitCount = 0;
 
             // Only accumulate contributions before (and including) termination point
-            bool should_contribute = validHit && (!should_terminate || laneId <= termination_lane);
+            bool shouldContribute = validHit && (!shouldTerminate || laneId <= terminationLane);
 
-            if (should_contribute) {
+            if (shouldContribute) {
                 // Use precomputed prefix transmittance, excluding current particle
                 float prefixTransmittance = (laneId > 0) ? 
                     (localTransmittance / (1.0f - hitAlpha)) : 1.0f;
@@ -462,7 +462,7 @@ struct GUTKBufferRenderer : Params {
             ray.transmittance = newTransmittance;
 
             // Break on early termination
-            if (should_terminate) {
+            if (shouldTerminate) {
                 break;
             }
         }
