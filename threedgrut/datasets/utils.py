@@ -479,7 +479,11 @@ def read_colmap_extrinsics_text(path):
     with open(path, "r") as fid:
         # Skip comment lines and get valid lines
         lines = (line.strip() for line in fid)
-        # lines = (line for line in lines if line and not line.startswith("#"))
+        # This update handles cases in images.txt where no 2D points are associated with an image.
+        # In such cases, some entries contain only:
+        # IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, NAME
+        # and do not include the usual POINTS2D[] line (which normally lists (X, Y, POINT3D_ID)).
+        # The following logic checks for missing points line and handles it properly:
         lines = (line for line in lines if line == "" or not line.startswith("#"))
         # Process lines in pairs (image info + points info)
         try:

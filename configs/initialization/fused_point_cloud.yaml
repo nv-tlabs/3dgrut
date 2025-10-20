@@ -1,0 +1,5 @@
+method: fused_point_cloud
+observation_scale_factor: 0.01
+use_observation_points: false
+fused_point_cloud_path: ???  # Path to fused point cloud PLY file
+
