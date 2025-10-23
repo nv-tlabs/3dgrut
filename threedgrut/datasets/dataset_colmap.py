@@ -57,7 +57,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         downsample_factor=1,
         test_split_interval=8,
         ray_jitter=None,
-        customized_mask_dir="mask.png",
+        customized_mask_dir="mask_train.png",
     ):
         self.path = path
         self.device = device
@@ -65,7 +65,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.downsample_factor = downsample_factor
         self.ray_jitter = ray_jitter
         self.test_split_interval = test_split_interval
-        self.use_customized_mask = True
+        self.use_customized_mask = True # modify: Train: True, Test/valid: False
         self.customized_mask_dir = customized_mask_dir
 
 
@@ -113,6 +113,21 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.load_intrinsics_and_extrinsics()
         self.n_frames = len(self.cam_extrinsics)
         self.load_camera_data()
+
+        not_test_set = np.array([
+            ("test" not in os.path.basename(p)) # modify
+            # and
+            # ("camera1"      in os.path.basename(p))
+             for p in self.image_paths])
+        self.cam_extrinsics = [e for e, keep in zip(self.cam_extrinsics, not_test_set) if keep]
+        self.poses = self.poses[not_test_set].astype(np.float32)
+        self.image_paths = self.image_paths[not_test_set]
+        self.camera_centers = self.camera_centers[not_test_set]
+        self.mask_paths = self.mask_paths[not_test_set]
+        
+        # Update frame count after rig filtering
+        self.n_frames = self.poses.shape[0]
+        print(f"After rig1 filtering: {self.n_frames} frames")
         
         # Create boolean mask for filtering
         indices_mask = np.ones(self.n_frames, dtype=bool)
@@ -375,7 +390,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             rays_d_cam = image_points_to_camera_rays(params, image_points)
             rays_o_cam = torch.zeros_like(rays_d_cam)
             
-            self.use_circular_mask = False
+            self.use_circular_mask = False # modify: Train: False, Test/valid: True
             if self.use_circular_mask:
                 rays_d_cam_full = rays_d_cam
                 cx, cy = w / 2.0, h / 2.0
@@ -389,7 +404,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 r = np.sqrt((x_coords - cx) ** 2 + (y_coords - cy) ** 2)
                 
                 # Create circular mask
-                mask = (r < (R))
+                mask = (r < (R-25))
                 mask_flat = mask.flatten()
                 
                 # Apply mask: set rays outside the circle to [0, 0, 1] (forward direction)
@@ -508,8 +523,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             self.image_paths.append(image_path)
 
             # Mask path
-            self.mask_paths.append(os.path.splitext(image_path)[0] + "_mask.jpg")
-
+            self.mask_paths.append(os.path.splitext(image_path.replace('/images/', '/out-ui/masks-20/', 1))[0] + '_mask.png') # modify
+            # self.mask_paths.append(os.path.splitext(image_path)[0] + "_mask.jpg")
         self.camera_centers = np.array(cam_centers)
         _, diagonal = get_center_and_diag(self.camera_centers)
         self.cameras_extent = diagonal * 1.1

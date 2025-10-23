@@ -153,7 +153,7 @@ class Trainer3DGRUT:
         batch, height, width, channels = image_shape
         
         # Create custom mask
-        mask_custom = torch.from_numpy(cv2.imread("mask.png", cv2.IMREAD_GRAYSCALE).astype(bool)).to(device)
+        mask_custom = torch.from_numpy(cv2.imread("mask_train.png", cv2.IMREAD_GRAYSCALE).astype(bool)).to(device)
         mask_custom = (mask_custom).float()
         
         # Expand to match batch and channel dimensions
@@ -442,7 +442,7 @@ class Trainer3DGRUT:
             rgb_gt = rgb_gt * (1-mask)
             rgb_pred = rgb_pred * (1-mask)
             # Save with meaningful paths and step numbering
-            if self.global_step % 5000 == 0:  # Save every 1000 iterations
+            if self.global_step % 2000 == 0:  # Save every 1000 iterations
                 out_dir = self.tracking.output_dir
                 masked_dir = os.path.join(out_dir, "training_images", "masked")
                 os.makedirs(masked_dir, exist_ok=True)
@@ -1255,7 +1255,7 @@ class Trainer3DGRUT:
                 self.log_training_iter(gpu_batch, outputs, batch_metrics, iter)
 
             with torch.cuda.nvtx.range(f"train_{global_step-1}_save_images"):
-                if global_step % 1000 == 0:  # Save every 1000 iterations
+                if global_step % 2000 == 0:  # Save every 1000 iterations
                     self.save_training_images(gpu_batch, outputs, global_step)
                     #self.save_gradient_analysis(gpu_batch, outputs, global_step)
 

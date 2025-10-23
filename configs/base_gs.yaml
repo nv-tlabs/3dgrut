@@ -19,7 +19,7 @@ test_last: true
 validate_first: false
 log_frequency: 1
 compute_extra_metrics: true
-customized_mask_dir: "mask.png"
+customized_mask_dir: "mask_train.png"
 
 enable_frame_timings: false
 

@@ -149,7 +149,7 @@ class Renderer:
         """
         batch, height, width, channels = image_shape
         
-        mask_custom = torch.from_numpy(cv2.imread("mask.png", cv2.IMREAD_GRAYSCALE).astype(bool)).to(device)
+        mask_custom = torch.from_numpy(cv2.imread("mask_test.png", cv2.IMREAD_GRAYSCALE).astype(bool)).to(device)
         mask_custom = (mask_custom).float()
         
         # Expand to match batch and channel dimensions
@@ -176,6 +176,11 @@ class Renderer:
         
         output_path_gt = os.path.join(self.out_dir, f"ours_{int(self.global_step)}", "gt")
         os.makedirs(output_path_gt, exist_ok=True)
+        
+        metrics_dir = os.path.join(self.out_dir, f"ours_{int(self.global_step)}")
+        os.makedirs(metrics_dir, exist_ok=True)
+        metrics_fpath = os.path.join(metrics_dir, "metrics.txt")
+        mf = open(metrics_fpath, "w", encoding="utf-8")
 
         psnr = []
         ssim = []
@@ -211,7 +216,11 @@ class Renderer:
         
                 pred_rgb_metric = pred_rgb_full * customized_mask
                 rgb_gt_metric = rgb_gt_full * customized_mask
-
+            mask = gpu_batch.mask
+            if mask is not None:
+                rgb_gt_metric = rgb_gt_metric * (1-mask)
+                pred_rgb_metric = pred_rgb_metric * (1-mask)
+                
             # The values are already alpha composited with the background
             torchvision.utils.save_image(
                 pred_rgb_full.squeeze(0).permute(2, 0, 1),
@@ -257,7 +266,12 @@ class Renderer:
                     rgb_gt_metric.permute(0, 3, 1, 2),
                 ).item()
             )
-
+            frame_name = f"{iteration:05d}.png"
+            mf.write(
+                    f"Frame {iteration}, PSNR: {psnr_single_img:.4f}, "
+                    f"SSIM: {ssim[-1]:.4f}, LPIPS: {lpips[-1]:.4f}\n"
+                    )
+            mf.flush()
             # Record the time
             inference_time.append(outputs["frame_time_ms"])
 
@@ -270,6 +284,15 @@ class Renderer:
         mean_lpips = np.mean(lpips)
         std_psnr = np.std(psnr)
         mean_inference_time = np.mean(inference_time)
+
+        mf.write("\n# Summary\n")
+        mf.write(f"mean_psnr\t{mean_psnr:.6f}\n")
+        mf.write(f"std_psnr\t{std_psnr:.6f}\n")
+        mf.write(f"mean_ssim\t{mean_ssim:.6f}\n")
+        mf.write(f"mean_lpips\t{mean_lpips:.6f}\n")
+        if self.conf.render.enable_kernel_timings:
+            mf.write(f"mean_inference_time_ms\t{mean_inference_time:.2f}\n")
+        mf.close()
 
         table = dict(
             mean_psnr=mean_psnr,
