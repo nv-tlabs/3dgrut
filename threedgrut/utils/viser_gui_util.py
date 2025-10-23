@@ -284,19 +284,23 @@ class ViserGUI:
             points_plane
         )
 
-    def update_render_view(self, client, force: bool = False):
-        """Update rendered view - rewritten to match polyscope version"""
-        if not self.viz_render_enabled and force:
-            # img = to_np(self.model.features_specular)
-            # client.scene.set_background_image(img)
-            return
-            
+    def update_render_view(self, client, force: bool = False):            
         # Get current render style
         style = self.viz_render_style
         
         # Render current view
         sple_orad, sple_odns, sple_odist, sple_onrm, sple_ohit, points_plane = self.render_from_current_view(client)
         
+
+        """Update rendered view - rewritten to match polyscope version"""
+        if not self.viz_render_enabled and force:
+            # Create a pure white background image
+            # Get the shape from the model's features_specular to maintain dimensions
+            rgb_np = to_np(sple_orad[0])
+            img = np.ones(rgb_np.shape, dtype=np.float32)  # Pure white image
+            client.scene.set_background_image(img)
+            return
+
         # Update viser background image based on style
         if style == "color":
             # Convert RGB to numpy and set as background
