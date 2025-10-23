@@ -106,6 +106,16 @@ class ViserGUI:
                 initial_value=True
             )
             
+            self.adjust_resolution_checkbox = self.server.gui.add_checkbox(
+                "Adjust Browser Size",
+                initial_value=False
+            )
+
+            self.resolution_slider = self.server.gui.add_slider(
+                "Resolution", min=384, max=4096, 
+                step=2, initial_value=1024
+            )
+
             self.subsample_slider = self.server.gui.add_slider(
                 "Subsample",
                 min=1,
@@ -194,8 +204,15 @@ class ViserGUI:
         camera = client.camera
         
         # Get window size and apply subsample
-        window_w = self.render_width // self.viz_render_subsample
-        window_h = self.render_height // self.viz_render_subsample
+        
+        if self.adjust_resolution_checkbox.value:
+            window_w = self.render_width // self.viz_render_subsample
+            window_h = self.render_height // self.viz_render_subsample
+        else:
+            window_w = self.resolution_slider.value
+            window_h = int(self.resolution_slider.value / camera.aspect)
+
+
         
         # Get camera parameters from viser
         view_matrix = self.get_c2w(camera)  # This is W2C (world to camera)
