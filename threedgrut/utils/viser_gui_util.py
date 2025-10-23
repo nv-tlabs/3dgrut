@@ -309,36 +309,37 @@ class ViserGUI:
             client.scene.set_background_image(rgb_np)
         elif style == "density":
             # Convert density to grayscale image
-            density_np = to_np(sple_odns[0])  # Remove batch dimension
-            # Normalize to 0-1 range for visualization
-            density_np = np.clip(density_np, 0, 1)
-            # Convert to RGB by repeating the channel
-            rgb_np = np.stack([density_np, density_np, density_np], axis=-1)
-            client.scene.set_background_image(rgb_np)
+            density_np = to_np(sple_odns)
+            density_255 = 255 * (density_np - density_np.min()) / (density_np.max() - density_np.min() + 1e-8)
+            density_255 = density_255.astype(np.uint8)
+            img = np.repeat(density_255[0], 3, axis=2)
+            client.scene.set_background_image(img)
+
         elif style == "distance":
-            # Convert distance to grayscale image
-            distance_np = to_np(sple_odist[0])  # Remove batch dimension
-            # Apply scale factor like polyscope version
-            distance_np = (distance_np * self.viz_render_style_scale) / np.clip(to_np(sple_odns[0]), 1e-06, None)
-            # Normalize to 0-1 range
-            distance_np = np.clip(distance_np, 0, 1)
-            # Convert to RGB by repeating the channel
-            rgb_np = np.stack([distance_np, distance_np, distance_np], axis=-1)
-            client.scene.set_background_image(rgb_np)
+            distance_np = to_np(sple_odist)
+            distance_255 = 255 * (distance_np - distance_np.min()) / (distance_np.max() - distance_np.min() + 1e-8)
+            distance_255 = distance_255.astype(np.uint8)
+            img = np.repeat(distance_255[0], 3, axis=2)
+            img[:, :, 1:] = 0
+            client.scene.set_background_image(img)
+
+
         elif style == "hits":
             # Convert hits count to grayscale image
-            hits_np = to_np(sple_ohit[0])  # Remove batch dimension
-            # Normalize to 0-1 range
-            hits_np = np.clip(hits_np, 0, 1)
-            # Convert to RGB by repeating the channel
-            rgb_np = np.stack([hits_np, hits_np, hits_np], axis=-1)
-            client.scene.set_background_image(rgb_np)
+            hits_np = to_np(sple_ohit)
+            hits_255 = 255 * (hits_np - hits_np.min()) / (hits_np.max() - hits_np.min() + 1e-8)
+            hits_255 = hits_255.astype(np.uint8)
+            img = np.repeat(hits_255[0], 3, axis=2)
+            img[:, :, 2:] = 0
+            client.scene.set_background_image(img)
         elif style == "normals":
             # Convert normals to RGB image
-            normals_np = to_np(sple_onrm[0])  # Remove batch dimension
-            # Scale from [-1,1] to [0,1] like polyscope version
-            normals_np = 0.5 * (normals_np + 1)
-            client.scene.set_background_image(normals_np)
+            normals_np = to_np(sple_onrm)
+            normals_255 = 255 * (normals_np - normals_np.min()) / (normals_np.max() - normals_np.min() + 1e-8)
+            normals_255 = normals_255.astype(np.uint8)
+            img = np.repeat(normals_255[0], 3, axis=2)
+            # img[:, :, 0] = 0
+            client.scene.set_background_image(img)
 
     def block_in_rendering_loop(self, fps: int = 60):
         """Block in rendering loop"""
