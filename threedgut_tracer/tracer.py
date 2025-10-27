@@ -19,7 +19,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
-import torch.utils.cpp_extension
 from omegaconf import OmegaConf
 
 from threedgrut.datasets.protocols import Batch
@@ -41,8 +40,8 @@ def load_3dgut_plugin(conf):
         except ImportError:
             from .setup_3dgut import setup_3dgut
 
-            setup_3dgut(conf)
-            import lib3dgut_cc as tdgut  # type: ignore
+            tdgut = setup_3dgut(conf)
+
         _3dgut_plugin = tdgut
 
 
