@@ -15,7 +15,6 @@
 
 import logging
 import os
-from enum import IntEnum
 
 import torch
 import torch.utils.cpp_extension
@@ -37,8 +36,7 @@ def load_playground_plugin(conf):
         except ImportError:
             from .setup_playground import setup_playground
 
-            setup_playground(conf)
-            import libplayground_cc as tdgrt  # type: ignore
+            tdgrt = setup_playground(conf)
         _playground_plugin = tdgrt
 
 
@@ -47,9 +45,7 @@ def load_playground_plugin(conf):
 
 
 class Tracer:
-
     def __init__(self, conf):
-
         self.device = "cuda"
         self.conf = conf
         self.num_update_bvh = 0

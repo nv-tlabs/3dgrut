@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import os
-import sys
 from pathlib import Path
 
 from threedgrut.utils import jit
@@ -69,19 +68,20 @@ def setup_playground(conf):
             f"-DGAUSSIAN_PARTICLE_MIN_ALPHA={conf.render.particle_kernel_min_alpha}",
             f"-DGAUSSIAN_PARTICLE_MAX_ALPHA={conf.render.particle_kernel_max_alpha}",
             f"-DGAUSSIAN_PARTICLE_ENABLE_NORMAL={conf.render.enable_normals}",
-            f"-DGAUSSIAN_PARTICLE_SURFEL={conf.render.primitive_type=='trisurfel'}",
-            f"{os.path.join(slang_build_file_dir,'models/gaussianParticles.slang')}",
-            f"{os.path.join(slang_build_file_dir,'models/shRadiativeParticles.slang')}",
+            f"-DGAUSSIAN_PARTICLE_SURFEL={conf.render.primitive_type == 'trisurfel'}",
+            f"{os.path.join(slang_build_file_dir, 'models/gaussianParticles.slang')}",
+            f"{os.path.join(slang_build_file_dir, 'models/shRadiativeParticles.slang')}",
             "-o",
-            f"{os.path.join(slang_build_file_dir,'gaussianParticles.cuh')}",
+            f"{os.path.join(slang_build_file_dir, 'gaussianParticles.cuh')}",
         ],
         env=slang_build_env,
     )
 
     # Compile and load.
     source_paths = [os.path.abspath(os.path.join(os.path.dirname(__file__), fn)) for fn in source_files]
-    jit.load(
+    tdgrt = jit.load(
         name="libplayground_cc",
         sources=source_paths,
         extra_include_paths=include_paths,
     )
+    return tdgrt
