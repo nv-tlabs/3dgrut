@@ -109,17 +109,25 @@ struct Parameters : IDifferentiable {
     particleRayDirection = normalize(grdu);
 }
 
-[BackwardDifferentiable][ForceInline] float canonicalRayMinSquaredDistance(
+[BackwardDifferentiable] [ForceInline] float canonicalRayMinSquaredDistance<let Surfel : bool>(
     float3 canonicalRayOrigin,
-    float3 canonicalRayDirection) {
-    const float3 gcrod = cross(canonicalRayDirection, canonicalRayOrigin);
+    float3 canonicalRayDirection)
+{
+    // NB : function is called only for intersecting rays
+    float3 gcrod;
+    if (Surfel) {
+        // if ray z direction is null, the ray origin is on the plane z = 0
+        gcrod = abs(canonicalRayDirection.z) > 1e-06 ? canonicalRayOrigin + canonicalRayDirection * -canonicalRayOrigin.z / canonicalRayDirection.z : canonicalRayOrigin;
+    } else {
+        gcrod = cross(canonicalRayDirection, canonicalRayOrigin);
+    }
     return dot(gcrod, gcrod);
 }
 
-[BackwardDifferentiable][ForceInline] float canonicalRayMaxKernelResponse<let KernelDegree : int>(
+[BackwardDifferentiable][ForceInline] float canonicalRayMaxKernelResponse<let KernelDegree : int, let Surfel : bool>(
     float3 canonicalRayOrigin,
     float3 canonicalRayDirection) {
-    const float grayDist = canonicalRayMinSquaredDistance(canonicalRayOrigin, canonicalRayDirection);
+    const float grayDist = canonicalRayMinSquaredDistance<Surfel>(canonicalRayOrigin, canonicalRayDirection);
 
     /// generalized gaussian of degree n : scaling is s = -4.5/3^n
     switch (KernelDegree) {
@@ -204,7 +212,7 @@ bool hit(
         canonicalRayOrigin,
         canonicalRayDirection);
 
-    const float maxResponse = canonicalRayMaxKernelResponse<KernelDegree>(
+    const float maxResponse = canonicalRayMaxKernelResponse<KernelDegree, Surfel>(
         canonicalRayOrigin,
         canonicalRayDirection);
 
@@ -473,7 +481,7 @@ bool particleDensityHitCustom(
         canonicalRayOrigin,
         canonicalRayDirection);
 
-    const float maxResponse = gaussianParticle.canonicalRayMaxKernelResponse<gaussianParticle.KernelDegree>(
+    const float maxResponse = gaussianParticle.canonicalRayMaxKernelResponse<gaussianParticle.KernelDegree, gaussianParticle.Surfel>(
         canonicalRayOrigin,
         canonicalRayDirection);
 
@@ -482,7 +490,7 @@ bool particleDensityHitCustom(
 
     return (hitDistance > minHitDistance) &&
            (hitDistance < maxHitDistance) &&
-           (gaussianParticle.canonicalRayMinSquaredDistance(
+           (gaussianParticle.canonicalRayMinSquaredDistance<gaussianParticle.Surfel>(
                 canonicalRayOrigin, canonicalRayDirection) < maxParticleSquaredDistance);
 }
 
@@ -501,7 +509,7 @@ bool particleDensityHitInstance(
     hitDistance = numerator * denominator;
     return (hitDistance > minHitDistance) &&
            (hitDistance < maxHitDistance) &&
-           (gaussianParticle.canonicalRayMinSquaredDistance(
+           (gaussianParticle.canonicalRayMinSquaredDistance<gaussianParticle.Surfel>(
                 canonicalRayOrigin,
                 normalize(canonicalUnormalizedRayDirection)) < maxParticleSquaredDistance);
 }
