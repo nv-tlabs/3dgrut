@@ -65,45 +65,14 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.downsample_factor = downsample_factor
         self.ray_jitter = ray_jitter
         self.test_split_interval = test_split_interval
-        self.use_customized_mask = True # modify: Train: True, Test/valid: False
+        self.use_customized_mask = True
         self.customized_mask_dir = customized_mask_dir
-
 
         # Worker-based GPU cache for multiprocessing compatibility
         self._worker_gpu_cache = {}
 
         # (Re)load intrinsics and extrinsics
         self.reload()
-
-    # def reload(self):
-    #     # GPU cache of processed camera intrinsics - now per camera ID
-    #     self.intrinsics = {}
-
-    #     # Get the scene data
-    #     self.load_intrinsics_and_extrinsics()
-    #     self.n_frames = len(self.cam_extrinsics)
-    #     self.load_camera_data()
-    #     indices = np.arange(self.n_frames)
-
-    #     # If test_split_interval is set, every test_split_interval frame will be excluded from the training set
-    #     # If test_split_interval is non-positive, all images will be used for training and testing
-    #     if self.test_split_interval > 0:
-    #         if self.split == "train":
-    #             indices = np.mod(indices, self.test_split_interval) != 0
-    #         else:
-    #             indices = np.mod(indices, self.test_split_interval) == 0
-
-    #     self.cam_extrinsics = [self.cam_extrinsics[i] for i in np.where(indices)[0]]
-    #     self.poses = self.poses[indices].astype(np.float32)
-    #     self.image_paths = self.image_paths[indices]  # numpy str array of image paths
-    #     self.camera_centers = self.camera_centers[indices]
-    #     self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
-    #     self.mask_paths = self.mask_paths[indices] 
-    #     # Update the number of frames to only include the samples from the split
-    #     self.n_frames = self.poses.shape[0]
-
-    #     # Clear existing worker caches to force recreation with new intrinsics
-    #     self._worker_gpu_cache.clear()
 
     def reload(self):
         # GPU cache of processed camera intrinsics - now per camera ID
@@ -523,8 +492,12 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             self.image_paths.append(image_path)
 
             # Mask path
-            self.mask_paths.append(os.path.splitext(image_path.replace('/images/', '/out-ui/masks-20/', 1))[0] + '_mask.png') # modify
-            # self.mask_paths.append(os.path.splitext(image_path)[0] + "_mask.jpg")
+            images_folder = self.get_images_folder()
+            mask_suffix = "" if self.downsample_factor == 1 else f"_{self.downsample_factor}"
+            mask1_dir = f"/out-ui/masks-1{mask_suffix}/"
+            
+            self.mask_paths.append(os.path.splitext(image_path.replace(f"/{images_folder}/", mask1_dir, 1))[0] + "_mask.png")
+            
         self.camera_centers = np.array(cam_centers)
         _, diagonal = get_center_and_diag(self.camera_centers)
         self.cameras_extent = diagonal * 1.1
