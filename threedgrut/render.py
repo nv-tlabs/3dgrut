@@ -88,6 +88,10 @@ class Renderer:
         global_step = checkpoint["global_step"]
 
         conf = checkpoint["config"]
+        
+        ## to render perspective from 360, change data path here:
+        # conf["path"] = "data/{scene}/undistorted/"
+        
         # # overrides
         # if conf["render"]["method"] == "3dgrt":
         #     conf["render"]["particle_kernel_density_clamping"] = True
