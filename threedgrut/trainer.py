@@ -47,6 +47,7 @@ from threedgrut.utils.logger import logger
 from threedgrut.utils.timer import CudaTimer
 from threedgrut.utils.misc import jet_map, create_summary_writer, check_step_condition
 from threedgrut.optimizers import SelectiveAdam
+from PIL import Image
 
 class Trainer3DGRUT:
     """Trainer for paper: "3D Gaussian Ray Tracing: Fast Tracing of Particle Scenes" """
@@ -435,17 +436,46 @@ class Trainer3DGRUT:
         rgb_gt = gpu_batch.rgb_gt
         rgb_pred = outputs["pred_rgb"]
         mask = gpu_batch.mask
-        if self.use_customized_mask:
-            customized_mask = self.create_customized_mask(rgb_gt.shape, self.customized_mask_dir, self.device)
-            rgb_gt = rgb_gt * customized_mask
-            rgb_pred = rgb_pred * customized_mask
+        dilated_mask = gpu_batch.dilated_mask
         
         # Mask out the invalid pixels if the mask is provided
         if mask is not None:
-            rgb_gt = rgb_gt * (1-mask)
-            rgb_pred = rgb_pred * (1-mask)
+            def rgb_to_xyz_srgb_d65(x):
+                M = torch.tensor([[0.4124564, 0.3575761, 0.1804375],
+                                  [0.2126729, 0.7151522, 0.0721750],
+                                  [0.0193339, 0.1191920, 0.9503041]],
+                                device=x.device, dtype=x.dtype)
+                return torch.tensordot(x, M.t(), dims=1)
+
+            def xyz_to_lab(XYZ):
+                Xn, Yn, Zn = 0.95047, 1.0, 1.08883
+                x = XYZ[...,0]/Xn; y = XYZ[...,1]/Yn; z = XYZ[...,2]/Zn
+                eps, k = 216/24389, 24389/27
+                def f(t): 
+                    return torch.where(t > eps, t.pow(1/3), (k*t + 16)/116)
+                fx, fy, fz = f(x), f(y), f(z)
+                L = 116*fy - 16
+                return L
+
+            pred_L = xyz_to_lab(rgb_to_xyz_srgb_d65(rgb_pred.clamp(0,1)))
+            gt_L   = xyz_to_lab(rgb_to_xyz_srgb_d65(rgb_gt.clamp(0,1)))
+            luma = pred_L[...,None] < gt_L[...,None] # ablation: + 1.0
+  
+            # dilate 
+            dilate = (1 - dilated_mask).bool()
+            
+            # combine
+            combined = (luma | dilate)
+            
+            # distractor 
+            distractor = (1 - mask).bool()
+
+            ready    = distractor & combined # ablation: distractor & luma
+            rgb_gt   = rgb_gt   * ready
+            rgb_pred = rgb_pred * ready
+
             # Save with meaningful paths and step numbering
-            if self.global_step % 2000 == 0:  # Save every 1000 iterations
+            if self.global_step % 5000 == 0:
                 out_dir = self.tracking.output_dir
                 masked_dir = os.path.join(out_dir, "training_images", "masked")
                 os.makedirs(masked_dir, exist_ok=True)
@@ -456,8 +486,29 @@ class Trainer3DGRUT:
                 )
                 torchvision.utils.save_image(
                     rgb_pred[0].permute(2, 0, 1), pred_masked_path
-                )
+                ) 
                 
+                out_dir = os.path.join(self.tracking.output_dir, "trainig_masks")
+                os.makedirs(out_dir, exist_ok=True)
+                
+                dilate_np     = (dilate    .detach().to(torch.uint8) * 255).cpu().numpy().squeeze()
+                luma_np       = (luma      .detach().to(torch.uint8) * 255).cpu().numpy().squeeze()
+                combined_np   = (combined  .detach().to(torch.uint8) * 255).cpu().numpy().squeeze()
+                distractor_np = (distractor.detach().to(torch.uint8) * 255).cpu().numpy().squeeze()
+                final_np      = (ready     .detach().to(torch.uint8) * 255).cpu().numpy().squeeze()
+                
+                Image.fromarray(dilate_np,     mode="L").save(os.path.join(out_dir, f"dilate_{self.global_step}.png"))
+                Image.fromarray(luma_np,       mode="L").save(os.path.join(out_dir, f"luma_{self.global_step}.png"))
+                Image.fromarray(combined_np,   mode="L").save(os.path.join(out_dir, f"combined_{self.global_step}.png"))
+                Image.fromarray(distractor_np, mode="L").save(os.path.join(out_dir, f"distractor_{self.global_step}.png"))
+                Image.fromarray(final_np,      mode="L").save(os.path.join(out_dir, f"final_{self.global_step}.png"))
+
+
+        if self.use_customized_mask:
+            customized_mask = self.create_customized_mask(rgb_gt.shape, self.customized_mask_dir, self.device)
+            rgb_gt = rgb_gt * customized_mask
+            rgb_pred = rgb_pred * customized_mask
+            
         # L1 loss
         loss_l1 = torch.zeros(1, device=self.device)
         lambda_l1 = 0.0
@@ -1258,7 +1309,7 @@ class Trainer3DGRUT:
                 self.log_training_iter(gpu_batch, outputs, batch_metrics, iter)
 
             with torch.cuda.nvtx.range(f"train_{global_step-1}_save_images"):
-                if global_step % 2000 == 0:  # Save every 1000 iterations
+                if global_step % 5000 == 0:
                     self.save_training_images(gpu_batch, outputs, global_step)
                     #self.save_gradient_analysis(gpu_batch, outputs, global_step)
 

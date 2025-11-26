@@ -93,6 +93,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.image_paths = self.image_paths[not_test_set]
         self.camera_centers = self.camera_centers[not_test_set]
         self.mask_paths = self.mask_paths[not_test_set]
+        self.dilated_mask_paths = self.dilated_mask_paths[not_test_set]
         
         # Update frame count after rig filtering
         self.n_frames = self.poses.shape[0]
@@ -156,6 +157,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.camera_centers = self.camera_centers[indices_mask]
         self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
         self.mask_paths = self.mask_paths[indices_mask] 
+        self.dilated_mask_paths = self.dilated_mask_paths[indices_mask]
         
         # Update the number of frames to only include the samples from the split
         self.n_frames = self.poses.shape[0]
@@ -471,7 +473,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.poses = []
         self.image_paths = []
         self.mask_paths = []
-
+        self.dilated_mask_paths = []
+        
         cam_centers = []
         for extr in logger.track(
             self.cam_extrinsics,
@@ -495,8 +498,10 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             images_folder = self.get_images_folder()
             mask_suffix = "" if self.downsample_factor == 1 else f"_{self.downsample_factor}"
             mask1_dir = f"/out-ui/masks-1{mask_suffix}/"
+            mask20_dir = f"/out-ui/masks-20{mask_suffix}/"
             
             self.mask_paths.append(os.path.splitext(image_path.replace(f"/{images_folder}/", mask1_dir, 1))[0] + "_mask.png")
+            self.dilated_mask_paths.append(os.path.splitext(image_path.replace(f"/{images_folder}/", mask20_dir, 1))[0] + "_mask.png")
             
         self.camera_centers = np.array(cam_centers)
         _, diagonal = get_center_and_diag(self.camera_centers)
@@ -505,6 +510,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.poses = np.stack(self.poses)
         self.image_paths = np.stack(self.image_paths, dtype=str)
         self.mask_paths = np.stack(self.mask_paths, dtype=str)
+        self.dilated_mask_paths = np.stack(self.dilated_mask_paths, dtype=str)
 
     def _lazy_worker_intrinsics_cache(self):
         """Create intrinsics cache for a specific worker."""
@@ -604,6 +610,12 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             ).reshape(1, actual_h, actual_w, 1)
             output_dict["mask"] = mask
 
+        if os.path.exists(dilated_mask_path := self.dilated_mask_paths[idx]):
+            dilated_mask = torch.from_numpy(
+                np.array(Image.open(dilated_mask_path).convert("L"))
+            ).reshape(1, actual_h, actual_w, 1)
+            output_dict["dilated_mask"] = dilated_mask       
+
         return output_dict
 
     def get_gpu_batch_with_intrinsics(self, batch):
@@ -633,6 +645,11 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             mask = batch["mask"][0].to(self.device, non_blocking=True) / 255.0
             mask = (mask > 0.5).to(torch.float32)
             sample["mask"] = mask
+        
+        if "dilated_mask" in batch:
+            dilated_mask = batch["dilated_mask"][0].to(self.device, non_blocking=True) / 255.0
+            dilated_mask = (dilated_mask > 0.5).to(torch.float32)
+            sample["dilated_mask"] = dilated_mask
 
         return Batch(**sample)
 

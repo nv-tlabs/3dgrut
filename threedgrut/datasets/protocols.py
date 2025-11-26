@@ -29,6 +29,7 @@ class Batch:
     )  # [B, 4, 4] transformation matrix from the ray space to the world space
     rgb_gt: Optional[torch.Tensor] = None
     mask: Optional[torch.Tensor] = None
+    dilated_mask: Optional[torch.Tensor] = None
     intrinsics: Optional[list] = None
     intrinsics_OpenCVPinholeCameraModelParameters: Optional[dict] = None
     intrinsics_OpenCVFisheyeCameraModelParameters: Optional[dict] = None
@@ -51,6 +52,11 @@ class Batch:
             assert (
                 self.mask.shape[0] == batch_size
             ), "mask must have the same batch size"
+        if self.dilated_mask is not None:
+            assert self.dilated_mask.ndim == 4, "mask must be a 3D tensor [B, H, W, 1]"
+            assert (
+                self.dilated_mask.shape[0] == batch_size
+            ), "dilated mask must have the same batch size"
         if self.intrinsics:
             assert isinstance(self.intrinsics, list), "intrinsics must be a list"
             assert (
