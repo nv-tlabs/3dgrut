@@ -153,10 +153,7 @@ class Renderer:
         """
         batch, height, width, channels = image_shape
         
-        try:
-            mask_custom = torch.from_numpy(cv2.imread("mask_test.png", cv2.IMREAD_GRAYSCALE).astype(bool)).to(device)
-        except:
-            mask_custom = torch.from_numpy(cv2.imread("mask_test_4.png", cv2.IMREAD_GRAYSCALE).astype(bool)).to(device)
+        mask_custom = torch.from_numpy(cv2.imread("mask_test_4.png", cv2.IMREAD_GRAYSCALE).astype(bool)).to(device)
         mask_custom = (mask_custom).float()
         
         # Expand to match batch and channel dimensions

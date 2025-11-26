@@ -395,8 +395,12 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 print("Switch to circular mask for full image rendering.")
                 print("-------------------------------------------------")
                 rays_d_cam_full = rays_d_cam
-               
-                mask_custom = cv2.imread(self.customized_mask_dir, cv2.IMREAD_GRAYSCALE).astype(bool)
+                
+                downsample_suffix = ("" if self.downsample_factor == 1 else f"_{self.downsample_factor}")
+                base, ext = os.path.splitext(self.customized_mask_dir)
+                mask_path = f"{base}{downsample_suffix}{ext}"
+                
+                mask_custom = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE).astype(bool)
                 mask_flat = mask_custom.flatten()
                 
                 # Apply mask: set rays outside the mask to [0, 0, 1] (forward direction)

@@ -154,10 +154,8 @@ class Trainer3DGRUT:
         batch, height, width, channels = image_shape
         
         # Create custom mask
-        try:
-            mask_custom = torch.from_numpy(cv2.imread("mask_train.png", cv2.IMREAD_GRAYSCALE).astype(bool)).to(device)
-        except:
-            mask_custom = torch.from_numpy(cv2.imread("mask_train_4.png", cv2.IMREAD_GRAYSCALE).astype(bool)).to(device)
+
+        mask_custom = torch.from_numpy(cv2.imread("mask_train_4.png", cv2.IMREAD_GRAYSCALE).astype(bool)).to(device)
         mask_custom = (mask_custom).float()
         
         # Expand to match batch and channel dimensions
