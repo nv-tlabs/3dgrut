@@ -103,3 +103,7 @@ threedgrut/datasets/dataset_colmap_nvs.py
 visual_viser_teaser.py
 visual_viser_web.py
 visual_viser_interpolate.py
+
+recordings/
+viser-client/
+visual_viser_embedding.py
