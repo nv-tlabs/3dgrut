@@ -173,6 +173,8 @@ conda install -c conda-forge mesa-libgl-devel-cos7-x86_64 -y
 
 # Initialize git submodules and install Python requirements
 git submodule update --init --recursive
+
+pip install --no-build-isolation git+https://github.com/rahul-goel/fused-ssim@1272e21a282342e89537159e4bad508b19b34157
 pip install -r requirements.txt
 pip install -e .
 
