@@ -1,6 +1,7 @@
 **__pycache__
 .vscode
 .polyscope.ini
+.venv 
 
 external/
 runs/
