@@ -12,7 +12,8 @@ n_iterations: 30000
 with_gui: false
 gui_update_from_device: true
 val_frequency: 5000
-num_workers: 24
+# num_workers: 24
+num_workers: 4
 use_wandb: false
 wandb_project: "3dgrt"
 test_last: true
