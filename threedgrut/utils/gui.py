@@ -105,7 +105,6 @@ class GUI:
         )
         self.ps_point_cloud_buffer = self.ps_point_cloud.get_buffer("points")
 
-        # Only implemented for NeRF and Colmap dataset
         if isinstance(train_dataset, DatasetVisualization):
             train_dataset.create_dataset_camera_visualization()
         if isinstance(val_dataset, DatasetVisualization):

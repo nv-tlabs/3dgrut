@@ -1,0 +1,64 @@
+type: ncore
+
+# Camera and lidar sensors to use
+# Leave empty to auto-detect all available cameras/lidars
+# Or specify explicitly: 
+#   camera_ids: [camera_front_wide_120fov, camera_cross_left_120fov, camera_cross_right_120fov]
+#   lidar_ids: [lidar_gt_top_p128_v4p5]
+camera_ids: []  # Empty = auto-detect all cameras
+lidar_ids: []   # Empty = auto-detect all lidars
+
+# V4 component group names (only used when loading NCore V4 datasets)
+poses_component_group: default
+intrinsics_component_group: default
+masks_component_group: default
+
+# Validation rendering frequency
+val_frequency: 100
+
+# Image downsampling for training
+# downsample: 0.5 means half resolution (1920x1280 -> 960x640)
+downsample: 1.0
+
+# Rolling shutter handling
+# force_global_shutter: true forces global shutter mode (uses mean pose instead of per-pixel interpolation)
+# Set to true for debugging or if rolling shutter artifacts are suspected
+force_global_shutter: false
+
+# Distortion handling
+# force_zero_distortion: true forces all distortion coefficients to zero (pinhole camera model)
+# Set to true if you want to ignore lens distortion from NCore camera calibration
+force_zero_distortion: false
+
+# Image subsampling for validation (must evenly divide all camera resolutions)
+# Note: Set to 1 to use full resolution
+# Additional subsampling beyond downsample is typically not needed
+n_val_image_subsample: 1
+
+# Frame-level train/val split (like COLMAP)
+# Every Nth frame is validation, rest are training
+# This distributes validation frames throughout the trajectory
+val_frame_interval: 8  # Every 8th frame is validation (12.5% val, 87.5% train)
+
+# Training parameters
+train:
+  window_size: 256  # Not used when sample_full_image=true (full images used)
+  seek_offset_sec: 0.0
+  duration_sec: -1  # -1 or 0 = use all available frames; 10.0 = first 10 seconds; None = all frames
+  sample_full_image: true  # Train on full images (downsampled by downsample factor above)
+  n_samples_per_epoch: 1000
+  n_train_sample_timepoints: 1
+  n_train_sample_camera_rays: 4096  # Overridden to w*h when sample_full_image=true
+  
+  ray_jittering:
+    start_iteration: 0
+    apply_every_n_iterations: true
+    type: none
+
+# Validation parameters
+# CRITICAL: Validation uses every Nth frame (distributed throughout trajectory)
+# Training randomly samples from non-validation frames
+val:
+  seek_offset_sec: 0.0
+  duration_sec: -1  # -1 = use all available frames in the dataset
+

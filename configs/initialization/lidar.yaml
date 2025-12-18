@@ -1,0 +1,4 @@
+method: lidar
+observation_scale_factor: 0.01
+num_points: 1_000_000
+
