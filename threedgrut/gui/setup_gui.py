@@ -35,10 +35,11 @@ def setup_gui():
 
     # Compile and load.
     source_paths = [os.path.abspath(os.path.join(ROOT, fn)) for fn in source_files]
-    jit.load(
+    gui_module = jit.load(
         name="lib3dgrut_gui_cc",
         sources=source_paths,
         extra_cflags=cflags,
         extra_cuda_cflags=cuda_cflags,
         extra_include_paths=include_paths,
     )
+    return gui_module

@@ -133,7 +133,7 @@ def setup_3dgut(conf):
 
     # Compile and load.
     source_paths = [os.path.join(os.path.dirname(__file__), fn) for fn in source_files]
-    jit.load(
+    tdgut = jit.load(
         name="lib3dgut_cc",
         sources=source_paths,
         extra_cflags=cflags,
@@ -141,3 +141,4 @@ def setup_3dgut(conf):
         extra_include_paths=include_paths,
         build_directory=build_dir,
     )
+    return tdgut

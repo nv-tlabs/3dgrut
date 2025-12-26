@@ -39,12 +39,11 @@ def load_mcmc_plugin():
     if _mcmc_plugin is None:
         try:
             from . import lib_mcmc_cc as gaussian_mcmc
+            _mcmc_plugin = gaussian_mcmc  # type: ignore
         except ImportError:
             from threedgrut.strategy.src.setup_mcmc import setup_mcmc
 
-            setup_mcmc()
-            import lib_mcmc_cc as gaussian_mcmc
-        _mcmc_plugin = gaussian_mcmc
+            _mcmc_plugin = setup_mcmc()
 
 
 class MCMCStrategy(BaseStrategy):
