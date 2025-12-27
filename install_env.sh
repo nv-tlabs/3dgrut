@@ -174,6 +174,6 @@ conda install -c conda-forge mesa-libgl-devel-cos7-x86_64 -y
 # Initialize git submodules and install Python requirements
 git submodule update --init --recursive
 pip install --no-build-isolation -r requirements.txt
-pip install -e .
+pip install --no-build-isolation -e .
 
 echo "Setup completed successfully!"
