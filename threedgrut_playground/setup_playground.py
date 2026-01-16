@@ -48,10 +48,10 @@ def setup_playground(conf):
     import importlib
     import subprocess
 
-    slang_mod = importlib.import_module("slangtorch")
+    # slang_mod = importlib.import_module("slangtorch")
     slang_build_env = os.environ
     slang_build_env["PATH"] += ";" if os.name == "nt" else ":"
-    slang_build_env["PATH"] += os.path.join(os.path.dirname(slang_mod.__file__), "bin")
+    slang_build_env["PATH"] += "/home/qiwu/Software/slang-2026.1-linux-aarch64/bin"
     slang_build_3dgrt_inc_dir = os.path.join(THREEDGRT_ROOT, "include")
     slang_build_playground_inc_dir = os.path.join(PLAYGROUND_ROOT, "include")
     slang_build_file_dir = os.path.join(THREEDGRT_ROOT, "include/3dgrt/kernels/slang/")

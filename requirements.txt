@@ -10,6 +10,7 @@ polyscope>=2.3.0
 addict
 rich
 slangtorch==1.3.4
+
 # NeRF Dataset requirements
 piexif
 kornia
@@ -18,6 +19,7 @@ einops
 imageio
 msgpack
 dataclasses_json
+
 # JIT compilation
 setuptools <72.1.0
 # Fused-ssim
