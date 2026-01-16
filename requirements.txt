@@ -10,6 +10,7 @@ polyscope>=2.3.0
 addict
 rich
 slangtorch==1.3.4
+
 # NeRF Dataset requirements
 kornia
 opencv-python<4.12.0  # because of our numpy<2.0 requirement
@@ -17,14 +18,17 @@ einops
 imageio
 msgpack
 dataclasses_json
+
 # JIT compilation
 setuptools <72.1.0
-# Fused-ssim
+
+# Fused-SSIM (need to be installed with --no-build-isolation)
 git+https://github.com/rahul-goel/fused-ssim@1272e21a282342e89537159e4bad508b19b34157
+
 # Playground
 tqdm
 libigl
 pygltflib
 # --find-links https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.2_cu118.html
 # kaolin==0.17.0
-usd-core
+# usd-core

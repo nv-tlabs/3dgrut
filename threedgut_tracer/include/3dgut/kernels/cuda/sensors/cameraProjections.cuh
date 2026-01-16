@@ -17,6 +17,10 @@
 
 #include <3dgut/sensors/sensors.h>
 
+#if !defined(__FLT_EPSILON__)
+#define __FLT_EPSILON__ 1.19209290e-07F
+#endif
+
 namespace threedgut {
 
 template <int N>

@@ -152,7 +152,7 @@ Check-LastCommand "Git submodules initialization"
 
 # Install Python dependencies
 Write-Host "Installing Python requirements from requirements.txt..." -ForegroundColor Yellow
-pip install -r requirements.txt
+pip install --no-build-isolation -r requirements.txt
 Check-LastCommand "Requirements installation"
 
 # Install additional dependencies

@@ -38,15 +38,16 @@ def load(
         def find_cl_path():
             import glob
 
-            for edition in ["Enterprise", "Professional", "BuildTools", "Community"]:
-                paths = sorted(
-                    glob.glob(
-                        r"C:\Program Files (x86)\Microsoft Visual Studio\*\%s\VC\Tools\MSVC\*\bin\Hostx64\x64" % edition
-                    ),
-                    reverse=True,
-                )
-                if paths:
-                    return paths[0]
+            for arch in [" (x86)", ""]:
+                for edition in ["Enterprise", "Professional", "BuildTools", "Community"]:
+                    paths = sorted(
+                        glob.glob(
+                            r"C:\Program Files\%s\Microsoft Visual Studio\*\%s\VC\Tools\MSVC\*\bin\Hostx64\x64" % (arch, edition)
+                        ),
+                        reverse=True,
+                    )
+                    if paths:
+                        return paths[0]
 
         # If cl.exe is not on path, try to find it.
         if os.system("where cl.exe >nul 2>nul") != 0:
@@ -75,6 +76,9 @@ def load(
         "--extended-lambda",
         "--expt-relaxed-constexpr",
         "-Xcompiler=-fno-strict-aliasing",
+        "-diag-suppress=1444",
+        "-diag-suppress=3287",
+        # "-Wdeprecated-declarations",
     ]
     if extra_cuda_cflags is not None:
         cuda_cflags += extra_cuda_cflags
@@ -99,10 +103,14 @@ def load(
         ldflags += extra_ldflags
 
     # Include paths.
-    include_paths = [
-        # NOTE: ad-hoc fix for CUDA 12.8.1
-        os.path.join(CUDA_HOME, "targets", "x86_64-linux", "include"),
-    ]
+    include_paths = []
+
+    # Add special CUDA include paths
+    if os.path.isdir(os.path.join(CUDA_HOME, "targets")):
+        for arch in os.listdir(os.path.join(CUDA_HOME, "targets")):
+            if os.path.isdir(p := os.path.join(CUDA_HOME, "targets", arch, "include")):
+                include_paths.append(p)
+
     if extra_include_paths is not None:
         include_paths += extra_include_paths
 
@@ -113,7 +121,7 @@ def load(
         extra_ldflags=ldflags,
         extra_include_paths=include_paths,
         with_cuda=with_cuda,
-        verbose=verbose,
+        verbose=True,
         *args,
         **kwargs,
     )

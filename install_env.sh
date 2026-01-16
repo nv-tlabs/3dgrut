@@ -47,26 +47,31 @@ echo ""
 # (cuda12) $ python -c "import torch; print(torch.version.cuda, torch.cuda.get_arch_list())"
 # 12.8 ['sm_75', 'sm_80', 'sm_86', 'sm_90', 'sm_100', 'sm_120', 'compute_120']
 #
+# (cuda13) $ python -c "import torch; print(torch.version.cuda, torch.cuda.get_arch_list())"
+# 13.0 ['sm_80', 'sm_90', 'sm_100', 'sm_110', 'sm_120', 'compute_120']
+#
 # Check if CUDA_VERSION is supported
 if [ "$CUDA_VERSION" = "11.8.0" ]; then
     export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0";
 elif [ "$CUDA_VERSION" = "12.8.1" ]; then
-    export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0";
+    export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX";
+elif [ "$CUDA_VERSION" = "13.0.0" ]; then
+    export TORCH_CUDA_ARCH_LIST="8.0;8.6;9.0;10.0;12.0+PTX";
 else
     echo "Unsupported CUDA version: $CUDA_VERSION, available options are 11.8.0 and 12.8.1"
     exit 1
 fi
 echo "TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
 
-# Test if we have GCC<=11, and early-out if not
-if [ ! "$WITH_GCC11" = true ]; then
-    # Make sure gcc is at most 11 for nvcc compatibility
-    gcc_version=$(gcc -dumpversion)
-    if [ "$gcc_version" -gt 11 ]; then
-        echo "Default gcc version $gcc_version is higher than 11. See note about installing gcc-11 (you may need 'sudo apt-get install gcc-11 g++-11') and rerun with ./install_env.sh 3dgrut WITH_GCC11"
-        exit 1
-    fi
-fi
+# # Test if we have GCC<=11, and early-out if not
+# if [ ! "$WITH_GCC11" = true ]; then
+#     # Make sure gcc is at most 11 for nvcc compatibility
+#     gcc_version=$(gcc -dumpversion)
+#     if [ "$gcc_version" -gt 11 ]; then
+#         echo "Default gcc version $gcc_version is higher than 11. See note about installing gcc-11 (you may need 'sudo apt-get install gcc-11 g++-11') and rerun with ./install_env.sh 3dgrut WITH_GCC11"
+#         exit 1
+#     fi
+# fi
 
 # If we're going to set gcc11, make sure it is available
 if [ "$WITH_GCC11" = true ]; then
@@ -128,6 +133,7 @@ if [ "$CUDA_VERSION" = "11.8.0" ]; then
     conda install -y cuda-toolkit cmake ninja -c nvidia/label/cuda-11.8.0
     conda install -y pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 "numpy<2.0" "mkl<=2022.1.0" -c pytorch -c nvidia/label/cuda-11.8.0
     pip3 install --find-links https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.2_cu118.html kaolin==0.17.0
+    pip3 install usd-core
 
 # CUDA 12.8 supports compute capability 10.0 and 12.0
 elif [ "$CUDA_VERSION" = "12.8.1" ]; then
@@ -161,6 +167,27 @@ elif [ "$CUDA_VERSION" = "12.8.1" ]; then
     IGNORE_TORCH_VER=1 python setup.py install
     popd
     rm -fr thirdparty/kaolin
+
+    pip install usd-core
+
+# CUDA 13.0 supports compute capability 10.0 and 12.0
+elif [ "$CUDA_VERSION" = "13.0.0" ]; then
+
+    # get the GCC version so we can use it in the install command below
+    # the _PATHs might already be set
+    if [ ! "$WITH_GCC11" = true ]; then
+        GCC_11_PATH=$(which gcc)
+        GXX_11_PATH=$(which g++)
+    fi
+
+    gcc_version=$($GCC_11_PATH -dumpversion | cut -d '.' -f 1)
+
+    echo "Installing CUDA 13.0.0 ..."
+    conda install -y cuda-toolkit cmake ninja -c nvidia/label/cuda-13.0.0
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+    pip3 install --force-reinstall "numpy<2"
+
+    # NOTE(qi): usd-core is not available for GB10 (DGX Spark)
 
 # Unsupported CUDA version
 else

@@ -35,6 +35,7 @@ _3dgut_plugin = None
 def load_3dgut_plugin(conf):
     global _3dgut_plugin
     if _3dgut_plugin is None:
+        import torch
         try:
             from . import lib3dgut_cc as tdgut  # type: ignore
         except ImportError:

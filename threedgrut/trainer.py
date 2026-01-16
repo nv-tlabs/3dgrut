@@ -33,17 +33,16 @@ from threedgrut.datasets.protocols import BoundedMultiViewDataset
 from threedgrut.datasets.utils import DEFAULT_DEVICE, MultiEpochsDataLoader
 from threedgrut.export.ingp_exporter import INGPExporter
 from threedgrut.export.ply_exporter import PLYExporter
-from threedgrut.export.usdz_exporter import USDZExporter
+# from threedgrut.export.usdz_exporter import USDZExporter
 from threedgrut.model.losses import ssim
 from threedgrut.model.model import MixtureOfGaussians
 from threedgrut.optimizers import SelectiveAdam
 from threedgrut.render import Renderer
 from threedgrut.strategy.base import BaseStrategy
-from threedgrut.utils.gui import GUI
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import check_step_condition, create_summary_writer, jet_map
 from threedgrut.utils.timer import CudaTimer
-from threedgrut.utils.viser_gui_util import ViserGUI
+
 
 
 class Trainer3DGRUT:
@@ -299,8 +298,10 @@ class Trainer3DGRUT:
     ):
         gui = None
         if conf.with_gui:
+            from threedgrut.utils.gui import GUI
             gui = GUI(conf, model, train_dataset, val_dataset, scene_bbox)
         elif conf.with_viser_gui:
+            from threedgrut.utils.viser_gui_util import ViserGUI
             gui = ViserGUI(conf, model, train_dataset, val_dataset, scene_bbox)
         self.gui = gui
 
