@@ -55,7 +55,7 @@ colmap_1t.sh
 move_rest.sh
 obj
 overlay.py
-rig.sh
+# rig.sh
 test.py
 sub.py
 psnr.py
