@@ -240,6 +240,19 @@ class Renderer:
                 rgb_gt_full.squeeze(0).permute(2, 0, 1),
                 os.path.join(output_path_gt, "{0:05d}".format(iteration) + ".png"),
             )
+            
+            pred = pred_rgb_full.squeeze(0).permute(2, 0, 1)   # [3, H, W]
+            gt   = rgb_gt_full.squeeze(0).permute(2, 0, 1)     # [3, H, W]
+
+            error_map = torch.abs(pred - gt)                   # [3, H, W]
+            
+            error_dir = os.path.join(output_path_renders, "error_maps")
+            os.makedirs(error_dir, exist_ok=True)
+
+            torchvision.utils.save_image(
+                error_map,
+                os.path.join(error_dir,  "{0:05d}".format(iteration) + ".png"),
+            )
 
             # Compute the loss
             #psnr_single_img = criterions["psnr"](outputs["pred_rgb"], gpu_batch.rgb_gt).item()

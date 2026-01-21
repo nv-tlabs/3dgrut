@@ -50,7 +50,6 @@ sam_masking
 
 yolov8s.pt
 
-colmap.sh
 colmap_1.sh
 colmap_1t.sh
 move_rest.sh
