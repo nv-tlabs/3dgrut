@@ -1,7 +1,6 @@
 **__pycache__
 .vscode
 .polyscope.ini
-run.sh
 *.ply
 external/
 runs/
