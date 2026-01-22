@@ -24,7 +24,7 @@ out_fi_dir   = f"{data_dir}/pre_masking_6/fisheye_syn"
 out_R_table  = f"{data_dir}/pre_masking_6/synth_R_list.csv"
 
 colmap_dir   = f"/home/youlenda/360/omni/3dgrut/data/{project}/{scene}/sparse/0"
-int_rot_dir  = "examples/no_lens_guards/42/out/optimized.txt"
+int_rot_dir  = "optimized.txt"
 radius_r     = 107
 camera_size  = 2880
 

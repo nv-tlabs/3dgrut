@@ -1,0 +1,4 @@
+Camera(camera_id=0, model=OPENCV_FISHEYE, width=2880, height=2880, params=[779.373, 776.955, 1440, 1440, 0.0924958, -0.0449974, 0.017254, -0.00332354] (fx, fy, cx, cy, k1, k2, k3, k4))
+Camera(camera_id=1, model=OPENCV_FISHEYE, width=2880, height=2880, params=[774.971, 775.267, 1440, 1440, 0.0908432, -0.0450016, 0.017596, -0.00323419] (fx, fy, cx, cy, k1, k2, k3, k4))
+array([-0.0371781 , -0.00746628,  0.00398891])
+array([ 0.03659663,  0.00166741, -0.01838055])

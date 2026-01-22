@@ -18,7 +18,7 @@ for i, a in enumerate(sys.argv[1:]):
 
 data_dir    = f"/home/youlenda/360/omni/3dgrut/data/{project}/{scene}"
 colmap_dir  = f"{data_dir}/sparse/0"
-int_rot_dir = "examples/no_lens_guards/42/out/optimized.txt"
+int_rot_dir = "optimized.txt"
 
 omni_dir    = f"{data_dir}/out-{method}/omni_mask"
 front_dir   = f"{data_dir}/out-{method}/front"
