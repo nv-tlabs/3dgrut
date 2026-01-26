@@ -24,7 +24,6 @@ from threedgrut.utils import jit
 # ----------------------------------------------------------------------------
 #
 def setup_3dgut(conf):
-
     build_dir = torch.utils.cpp_extension._get_build_directory("lib3dgut_cc", verbose=True)
 
     include_paths = []
@@ -126,9 +125,9 @@ def setup_3dgut(conf):
             "-Wno-41018",
             "-O2",
             *defines,
-            f"{os.path.join(slang_build_inc_dir,'threedgut.slang')}",
+            f"{os.path.join(slang_build_inc_dir, 'threedgut.slang')}",
             "-o",
-            f"{os.path.join(build_dir,'threedgutSlang.cuh')}",
+            f"{os.path.join(build_dir, 'threedgutSlang.cuh')}",
         ],
         env=slang_build_env,
     )

@@ -19,7 +19,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
-import torch.utils.cpp_extension
 from omegaconf import OmegaConf
 
 from threedgrut.datasets.protocols import Batch
