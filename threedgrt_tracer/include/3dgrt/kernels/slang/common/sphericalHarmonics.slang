@@ -32,7 +32,7 @@ vector<float, Dim> decode<let Dim : int, let MaxNumCoefficients : int>(
                                    -0.4570457994644658, 1.445305721320277, -0.5900435899266435 };
 
     vector<float, Dim> features = C0 * coefficients[0];
-    if (degree > 0)
+    if (MaxNumCoefficients >= 4 && degree > 0)
     {
         const float x = direction.x;
         const float y = direction.y;
@@ -40,7 +40,7 @@ vector<float, Dim> decode<let Dim : int, let MaxNumCoefficients : int>(
         features = features - C1 * y * coefficients[1] + C1 * z * coefficients[2] -
               C1 * x * coefficients[3];
 
-        if (degree > 1)
+        if (MaxNumCoefficients >= 9 && degree > 1)
         {
             const float xx = x * x, yy = y * y, zz = z * z;
             const float xy = x * y, yz = y * z, xz = x * z;
@@ -48,7 +48,7 @@ vector<float, Dim> decode<let Dim : int, let MaxNumCoefficients : int>(
                   C2[2] * (2.0 * zz - xx - yy) * coefficients[6] +
                   C2[3] * xz * coefficients[7] + C2[4] * (xx - yy) * coefficients[8];
 
-            if (degree > 2)
+            if (MaxNumCoefficients >= 16 && degree > 2)
             {
                 features = features + C3[0] * y * (3.0 * xx - yy) * coefficients[9] +
                       C3[1] * xy * z * coefficients[10] +
