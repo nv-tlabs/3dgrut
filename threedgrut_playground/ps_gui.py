@@ -907,7 +907,7 @@ class Playground:
             if not os.path.exists(scene_path):
                 ps.warning(f"No data stored for scene under {scene_path}")
             else:
-                data = torch.load(scene_path)
+                data = torch.load(scene_path, weights_only=False)
                 self.primitives.objects = data["objects"]
                 self.primitives.registered_materials = data.get("materials", dict())
                 self.slice_plane_enabled = data["slice_plane_enabled"]

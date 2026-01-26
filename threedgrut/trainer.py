@@ -20,6 +20,7 @@ from typing import Any, Optional, Union
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.utils.data
 from addict import Dict
 from omegaconf import DictConfig, OmegaConf
@@ -42,7 +43,9 @@ from threedgrut.utils.gui import GUI
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import check_step_condition, create_summary_writer, jet_map
 from threedgrut.utils.timer import CudaTimer
-
+from threedgrut.utils.misc import jet_map, create_summary_writer, check_step_condition
+from threedgrut.utils.render import apply_post_processing
+from threedgrut.optimizers import SelectiveAdam
 
 class Trainer3DGRUT:
     """Trainer for paper: "3D Gaussian Ray Tracing: Fast Tracing of Particle Scenes" """
@@ -73,6 +76,18 @@ class Trainer3DGRUT:
 
     tracking: Dict
     """ Contains all components used to report progress of training """
+
+    post_processing: Optional[nn.Module] = None
+    """ Post-processing module """
+
+    post_processing_optimizers: Optional[list] = None
+    """ Optimizers for post-processing module """
+
+    post_processing_schedulers: Optional[list] = None
+    """ Schedulers for post-processing module optimizers """
+
+    _distillation_start_step: int = -1
+    """ Step at which distillation starts (-1 means disabled) """
 
     @staticmethod
     def create_from_checkpoint(resume: str, conf: DictConfig):
@@ -132,6 +147,7 @@ class Trainer3DGRUT:
         self.init_metrics()
         self.setup_training(conf, self.model, self.train_dataset)
         self.init_experiments_tracking(conf)
+        self.init_post_processing(conf)
         self.init_gui(conf, self.model, self.train_dataset, self.val_dataset, self.scene_bbox)
 
     def init_dataloaders(self, conf: DictConfig):
@@ -216,10 +232,19 @@ class Trainer3DGRUT:
         # Initialize
         if conf.resume:  # Load a checkpoint
             logger.info(f"🤸 Loading a pretrained checkpoint from {conf.resume}!")
-            checkpoint = torch.load(conf.resume)
+            checkpoint = torch.load(conf.resume, weights_only=False)
             model.init_from_checkpoint(checkpoint)
             self.strategy.init_densification_buffer(checkpoint)
             global_step = checkpoint["global_step"]
+
+            # Restore post-processing state
+            if "post_processing" in checkpoint and self.post_processing is not None:
+                self.post_processing.load_state_dict(checkpoint["post_processing"]["module"])
+                for opt, opt_state in zip(self.post_processing_optimizers, checkpoint["post_processing"]["optimizers"]):
+                    opt.load_state_dict(opt_state)
+                for sched, sched_state in zip(self.post_processing_schedulers, checkpoint["post_processing"]["schedulers"]):
+                    sched.load_state_dict(sched_state)
+                logger.info("📷 Post-processing state restored from checkpoint")
         elif conf.import_ingp.enabled:
             ingp_path = (
                 conf.import_ingp.path
@@ -271,7 +296,7 @@ class Trainer3DGRUT:
                         logger.error(e)
                         raise e
                 case "checkpoint":
-                    checkpoint = torch.load(conf.initialization.path)
+                    checkpoint = torch.load(conf.initialization.path, weights_only=False)
                     model.init_from_checkpoint(checkpoint, setup_optimizer=False)
                 case _:
                     raise ValueError(
@@ -322,6 +347,59 @@ class Trainer3DGRUT:
         # Pack all components used to track progress of training
         self.tracking = Dict(writer=writer, run_name=run_name, object_name=object_name, output_dir=out_dir)
 
+    def init_post_processing(self, conf: DictConfig):
+        """Initialize post-processing module based on config."""
+        method = conf.post_processing.method
+
+        if method is None:
+            return
+
+        if method == "ppisp":
+            from ppisp import PPISP, PPISPConfig
+
+            frames_per_camera = self.train_dataset.get_frames_per_camera()
+            num_cameras = len(frames_per_camera)
+            num_frames = sum(frames_per_camera)
+
+            # Distillation mode: controller activates after main training
+            # Total iterations = n_iterations, distillation starts at n_iterations - n_distillation_steps
+            n_distillation_steps = conf.post_processing.get("n_distillation_steps", 5000)
+            if n_distillation_steps > 0:
+                main_training_steps = conf.n_iterations - n_distillation_steps
+                controller_activation_ratio = main_training_steps / conf.n_iterations
+                controller_distillation = True
+                self._distillation_start_step = main_training_steps
+                logger.info(
+                    f"📷 PPISP distillation mode: controller activates at step {main_training_steps}"
+                )
+            else:
+                controller_activation_ratio = 0.8
+                controller_distillation = False
+                self._distillation_start_step = None
+
+            ppisp_config = PPISPConfig(
+                use_controller=True,
+                controller_distillation=controller_distillation,
+                controller_activation_ratio=controller_activation_ratio,
+            )
+
+            self.post_processing = PPISP(
+                num_cameras=num_cameras,
+                num_frames=num_frames,
+                config=ppisp_config,
+            ).to(self.device)
+
+            self.post_processing_optimizers = self.post_processing.create_optimizers()
+            self.post_processing_schedulers = self.post_processing.create_schedulers(
+                self.post_processing_optimizers,
+                max_optimization_iters=conf.n_iterations
+            )
+
+            logger.info(
+                f"📷 {method.upper()} initialized: {num_cameras} cameras, {num_frames} frames"
+            )
+        else:
+            raise ValueError(f"Unknown post-processing method: {method}")
     @torch.cuda.nvtx.range("get_metrics")
     def get_metrics(
         self,
@@ -583,6 +661,9 @@ class Trainer3DGRUT:
             if self.conf.loss.use_scale:
                 scale_loss = np.mean(batch_metrics["losses"]["scale_loss"])
                 writer.add_scalar("loss/scale/train", scale_loss, global_step)
+            if self.post_processing is not None and "post_processing_reg_loss" in batch_metrics["losses"]:
+                post_processing_reg_loss = np.mean(batch_metrics["losses"]["post_processing_reg_loss"])
+                writer.add_scalar("loss/post_processing_reg/train", post_processing_reg_loss, global_step)
             if "psnr" in batch_metrics:
                 writer.add_scalar("psnr/train", batch_metrics["psnr"], self.global_step)
             if "ssim" in batch_metrics:
@@ -653,12 +734,34 @@ class Trainer3DGRUT:
             exporter = USDZExporter()
             exporter.export(self.model, Path(usdz_path), dataset=self.train_dataset, conf=conf)
 
+        # Export post-processing report (PPISP-based)
+        if self.post_processing is not None and conf.post_processing.method == "ppisp":
+            from ppisp.report import export_ppisp_report
+
+            logger.info("📊 Exporting PPISP report...")
+
+            ppisp_report_dir = Path(out_dir) / "ppisp_report"
+            frames_per_camera = self.train_dataset.get_frames_per_camera()
+
+            # Get camera names if available
+            camera_names = None
+            if hasattr(self.train_dataset, "get_camera_names"):
+                camera_names = self.train_dataset.get_camera_names()
+
+            export_ppisp_report(
+                self.post_processing,
+                frames_per_camera=frames_per_camera,
+                output_dir=ppisp_report_dir,
+                camera_names=camera_names,
+            )
+            logger.info(f"📊 PPISP report saved to: {ppisp_report_dir}")
+
+        self.teardown_dataloaders()
+        self.save_checkpoint(last_checkpoint=True)
+
         # Evaluate on test set
         if conf.test_last:
             logger.log_rule("Evaluation on Test Set")
-
-            self.teardown_dataloaders()
-            self.save_checkpoint(last_checkpoint=True)
 
             # Renderer test split
             renderer = Renderer.from_preloaded_model(
@@ -669,6 +772,7 @@ class Trainer3DGRUT:
                 writer=self.tracking.writer,
                 global_step=self.global_step,
                 compute_extra_metrics=conf.compute_extra_metrics,
+                post_processing=self.post_processing,
             )
             renderer.render_all()
 
@@ -686,6 +790,14 @@ class Trainer3DGRUT:
 
         strategy_parameters = self.strategy.get_strategy_parameters()
         parameters = {**parameters, **strategy_parameters}
+
+        # Add post-processing state to checkpoint (module + optimizers + schedulers)
+        if self.post_processing is not None:
+            parameters["post_processing"] = {
+                "module": self.post_processing.state_dict(),
+                "optimizers": [opt.state_dict() for opt in self.post_processing_optimizers],
+                "schedulers": [sched.state_dict() for sched in self.post_processing_schedulers],
+            }
 
         os.makedirs(os.path.join(out_dir, f"ours_{int(global_step)}"), exist_ok=True)
         if not last_checkpoint:
@@ -734,6 +846,13 @@ class Trainer3DGRUT:
             if self.global_step >= conf.n_iterations:
                 return
 
+            # Freeze Gaussians when distillation starts
+            if (
+                self._distillation_start_step >= 0
+                and self.global_step >= self._distillation_start_step
+            ):
+                self.model.freeze_gaussians()
+
             # Access the GPU-cache batch data
             gpu_batch = self.train_dataset.get_gpu_batch_with_intrinsics(batch)
 
@@ -748,9 +867,20 @@ class Trainer3DGRUT:
                 outputs = model(gpu_batch, train=True, frame_id=global_step)
                 profilers["inference"].end()
 
+            # Apply post-processing to rendered output
+            if self.post_processing is not None:
+                with torch.cuda.nvtx.range(f"train_{global_step}_post_processing"):
+                    outputs = apply_post_processing(self.post_processing, outputs, gpu_batch, training=True)
+
             # Compute the losses of a single batch
             with torch.cuda.nvtx.range(f"train_{global_step}_loss"):
                 batch_losses = self.get_losses(gpu_batch, outputs)
+
+                # Add post-processing regularization loss
+                if self.post_processing is not None:
+                    post_processing_reg_loss = self.post_processing.get_regularization_loss()
+                    batch_losses["total_loss"] = batch_losses["total_loss"] + post_processing_reg_loss
+                    batch_losses["post_processing_reg_loss"] = post_processing_reg_loss
 
             # Backward strategy step
             with torch.cuda.nvtx.range(f"train_{global_step}_pre_bwd"):
@@ -792,6 +922,15 @@ class Trainer3DGRUT:
             # Scheduler step
             with torch.cuda.nvtx.range(f"train_{global_step}_scheduler"):
                 model.scheduler_step(global_step)
+
+            # Post-processing optimizer/scheduler step
+            if self.post_processing_optimizers is not None:
+                with torch.cuda.nvtx.range(f"train_{global_step}_post_processing_opt"):
+                    for opt in self.post_processing_optimizers:
+                        opt.step()
+                        opt.zero_grad()
+                    for sched in self.post_processing_schedulers:
+                        sched.step()
 
             # Post backward strategy step
             with torch.cuda.nvtx.range(f"train_{global_step}_post_opt_step"):
@@ -870,7 +1009,11 @@ class Trainer3DGRUT:
             with torch.cuda.nvtx.range(f"train.validation_step_{self.global_step}"):
                 profilers["inference"].start()
                 outputs = self.model(gpu_batch, train=False)
+                # Apply post-processing for validation (novel view mode)
+                if self.post_processing is not None:
+                    outputs = apply_post_processing(self.post_processing, outputs, gpu_batch, training=False)
                 profilers["inference"].end()
+
                 batch_losses = self.get_losses(gpu_batch, outputs)
                 batch_metrics = self.get_metrics(
                     gpu_batch, outputs, batch_losses, profilers, split="validation", iteration=val_iteration

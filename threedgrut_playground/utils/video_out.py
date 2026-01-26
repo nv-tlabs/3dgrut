@@ -93,7 +93,7 @@ class VideoRecorder:
         torch.save(self.trajectory, self.cameras_save_path)
 
     def load_trajectory(self):
-        self.trajectory = torch.load(self.cameras_save_path)
+        self.trajectory = torch.load(self.cameras_save_path, weights_only=False)
 
     def render_dof_trajectory(self):
         out_video = None

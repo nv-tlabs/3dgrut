@@ -169,11 +169,13 @@ else
 fi
 
 # Install OpenGL headers for the playground
-conda install -c conda-forge mesa-libgl-devel-cos7-x86_64 -y 
+# Use --override-channels to avoid conflicts with nvidia channel's cuda-toolkit spec
+conda install -c conda-forge --override-channels mesa-libgl-devel-cos7-x86_64 -y
 
 # Initialize git submodules and install Python requirements
 git submodule update --init --recursive
-pip install -r requirements.txt
-pip install -e .
+# Use --no-build-isolation so packages can access torch during build
+pip install -r requirements.txt --no-build-isolation
+pip install -e . --no-build-isolation
 
 echo "Setup completed successfully!"

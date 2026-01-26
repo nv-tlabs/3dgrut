@@ -11,6 +11,7 @@ addict
 rich
 slangtorch==1.3.4
 # NeRF Dataset requirements
+piexif
 kornia
 opencv-python<4.12.0  # because of our numpy<2.0 requirement
 einops
@@ -28,3 +29,4 @@ pygltflib
 # --find-links https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.2_cu118.html
 # kaolin==0.17.0
 usd-core
+ppisp @ git+https://github.com/nv-tlabs/ppisp@v1.0.0

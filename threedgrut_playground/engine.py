@@ -1181,7 +1181,7 @@ class Engine3DGRUT:
             return conf
 
         if object_path.endswith(".pt"):
-            checkpoint = torch.load(object_path)
+            checkpoint = torch.load(object_path, weights_only=False)
             conf = checkpoint["config"]
             if conf.render["method"] != "3dgrt":
                 conf = load_default_config()
