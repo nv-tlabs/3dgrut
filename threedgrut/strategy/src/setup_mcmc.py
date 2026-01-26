@@ -49,7 +49,7 @@ def setup_mcmc():
 
     # Compile and load
     source_paths = [os.path.join(os.path.dirname(__file__), fn) for fn in source_files]
-    gaussian_mcmc = jit.load(
+    return jit.load(
         name="lib_mcmc_cc",
         sources=source_paths,
         extra_cflags=[],
@@ -57,5 +57,3 @@ def setup_mcmc():
         extra_include_paths=include_paths,
         build_directory=build_dir,
     )
-
-    return gaussian_mcmc

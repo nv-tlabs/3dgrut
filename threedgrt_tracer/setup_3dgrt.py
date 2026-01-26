@@ -21,6 +21,9 @@ from threedgrut.utils import jit
 # ----------------------------------------------------------------------------
 #
 def setup_3dgrt(conf):
+    def to_cpp_bool(value):
+        return "true" if value else "false"
+
     include_paths = []
     include_paths.append(os.path.join(os.path.dirname(__file__), "include"))
     include_paths.append(os.path.join(os.path.dirname(__file__), "dependencies", "optix-dev", "include"))
@@ -63,8 +66,8 @@ def setup_3dgrt(conf):
             f"-DGAUSSIAN_PARTICLE_MIN_KERNEL_DENSITY={conf.render.particle_kernel_min_response}",
             f"-DGAUSSIAN_PARTICLE_MIN_ALPHA={conf.render.particle_kernel_min_alpha}",
             f"-DGAUSSIAN_PARTICLE_MAX_ALPHA={conf.render.particle_kernel_max_alpha}",
-            f"-DGAUSSIAN_PARTICLE_ENABLE_NORMAL={conf.render.enable_normals}",
-            f"-DGAUSSIAN_PARTICLE_SURFEL={conf.render.primitive_type=='trisurfel'}",
+            f"-DGAUSSIAN_PARTICLE_ENABLE_NORMAL={to_cpp_bool(conf.render.enable_normals)}",
+            f"-DGAUSSIAN_PARTICLE_SURFEL={to_cpp_bool(conf.render.primitive_type=='trisurfel')}",
             f"{os.path.join(slang_build_file_dir,'models/gaussianParticles.slang')}",
             f"{os.path.join(slang_build_file_dir,'models/shRadiativeParticles.slang')}",
             "-o",
@@ -75,12 +78,10 @@ def setup_3dgrt(conf):
 
     # Compile and load.
     source_paths = [os.path.join(os.path.dirname(__file__), fn) for fn in source_files]
-    tdgrt = jit.load(
+    return jit.load(
         name="lib3dgrt_cc",
         sources=source_paths,
         extra_cflags=cflags,
         extra_cuda_cflags=cuda_flags,
         extra_include_paths=include_paths,
     )
-
-    return tdgrt

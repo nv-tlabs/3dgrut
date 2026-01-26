@@ -42,7 +42,6 @@ def load_mcmc_plugin():
             _mcmc_plugin = gaussian_mcmc  # type: ignore
         except ImportError:
             from threedgrut.strategy.src.setup_mcmc import setup_mcmc
-
             _mcmc_plugin = setup_mcmc()
 
 
