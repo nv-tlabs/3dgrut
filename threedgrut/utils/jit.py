@@ -15,6 +15,7 @@
 
 import math
 import os
+import sys
 
 import torch
 import torch.utils.cpp_extension
@@ -107,7 +108,7 @@ def load(
         include_paths += extra_include_paths
 
     # Load
-    return torch.utils.cpp_extension.load(
+    module = torch.utils.cpp_extension.load(
         extra_cflags=cflags,
         extra_cuda_cflags=cuda_cflags,
         extra_ldflags=ldflags,
@@ -117,3 +118,13 @@ def load(
         *args,
         **kwargs,
     )
+
+    # Explicitly register module in sys.modules for compatibility with pybind11 3.x
+    # In pybind11 3.0+, exec_module() no longer auto-registers modules in sys.modules,
+    # which breaks subsequent `import module_name` statements.
+    # This is safe for pybind11 2.x as well (no-op since same object is already registered).
+    module_name = kwargs.get("name")
+    if module_name is not None:
+        sys.modules[module_name] = module
+
+    return module
