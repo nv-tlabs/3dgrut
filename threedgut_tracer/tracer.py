@@ -41,7 +41,6 @@ def load_3dgut_plugin(conf):
             from .setup_3dgut import setup_3dgut
 
             tdgut = setup_3dgut(conf)
-
         _3dgut_plugin = tdgut
 
 

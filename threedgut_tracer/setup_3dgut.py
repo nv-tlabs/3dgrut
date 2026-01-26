@@ -51,6 +51,8 @@ def setup_3dgut(conf):
         f"-DGAUSSIAN_PARTICLE_MIN_KERNEL_DENSITY={conf.render.particle_kernel_min_response}",
         f"-DGAUSSIAN_PARTICLE_MIN_ALPHA={conf.render.particle_kernel_min_alpha}",
         f"-DGAUSSIAN_PARTICLE_MAX_ALPHA={conf.render.particle_kernel_max_alpha}",
+        f"-DGAUSSIAN_PARTICLE_ENABLE_NORMAL={to_cpp_bool(conf.render.enable_normals)}",
+        f"-DGAUSSIAN_PARTICLE_SURFEL={to_cpp_bool(conf.render.primitive_type=='trisurfel')}",
         f"-DGAUSSIAN_MIN_TRANSMITTANCE_THRESHOLD={conf.render.min_transmittance}",
         f"-DGAUSSIAN_ENABLE_HIT_COUNT={to_cpp_bool(conf.render.enable_hitcounts)}",
         # Specific to the 3DGUT renderer
@@ -132,7 +134,7 @@ def setup_3dgut(conf):
 
     # Compile and load.
     source_paths = [os.path.join(os.path.dirname(__file__), fn) for fn in source_files]
-    tdgut = jit.load(
+    return jit.load(
         name="lib3dgut_cc",
         sources=source_paths,
         extra_cflags=cflags,
@@ -140,4 +142,3 @@ def setup_3dgut(conf):
         extra_include_paths=include_paths,
         build_directory=build_dir,
     )
-    return tdgut
