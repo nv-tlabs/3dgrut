@@ -434,8 +434,9 @@ class GUI:
                 self.viz_render_subsample = max(self.viz_render_subsample, 1)
 
             _, self.viz_render_train_view = psim.Checkbox("render w/ train=True", self.viz_render_train_view)
+
             psim.TreePop()
-        
+
         if self.live_update:
             self.update_render_view_viz()
 
