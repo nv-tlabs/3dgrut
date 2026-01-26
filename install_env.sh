@@ -175,7 +175,7 @@ conda install -c conda-forge --override-channels mesa-libgl-devel-cos7-x86_64 -y
 # Initialize git submodules and install Python requirements
 git submodule update --init --recursive
 # Use --no-build-isolation so packages can access torch during build
-pip install -r requirements.txt --no-build-isolation
-pip install -e . --no-build-isolation
+pip install --no-build-isolation -r requirements.txt
+pip install --no-build-isolation -e .
 
 echo "Setup completed successfully!"

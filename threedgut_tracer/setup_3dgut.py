@@ -24,7 +24,6 @@ from threedgrut.utils import jit
 # ----------------------------------------------------------------------------
 #
 def setup_3dgut(conf):
-
     build_dir = torch.utils.cpp_extension._get_build_directory("lib3dgut_cc", verbose=True)
 
     include_paths = []
@@ -52,6 +51,8 @@ def setup_3dgut(conf):
         f"-DGAUSSIAN_PARTICLE_MIN_KERNEL_DENSITY={conf.render.particle_kernel_min_response}",
         f"-DGAUSSIAN_PARTICLE_MIN_ALPHA={conf.render.particle_kernel_min_alpha}",
         f"-DGAUSSIAN_PARTICLE_MAX_ALPHA={conf.render.particle_kernel_max_alpha}",
+        f"-DGAUSSIAN_PARTICLE_ENABLE_NORMAL={to_cpp_bool(conf.render.enable_normals)}",
+        f"-DGAUSSIAN_PARTICLE_SURFEL={to_cpp_bool(conf.render.primitive_type=='trisurfel')}",
         f"-DGAUSSIAN_MIN_TRANSMITTANCE_THRESHOLD={conf.render.min_transmittance}",
         f"-DGAUSSIAN_ENABLE_HIT_COUNT={to_cpp_bool(conf.render.enable_hitcounts)}",
         # Specific to the 3DGUT renderer
@@ -124,16 +125,16 @@ def setup_3dgut(conf):
             "-Wno-41018",
             "-O2",
             *defines,
-            f"{os.path.join(slang_build_inc_dir,'threedgut.slang')}",
+            f"{os.path.join(slang_build_inc_dir, 'threedgut.slang')}",
             "-o",
-            f"{os.path.join(build_dir,'threedgutSlang.cuh')}",
+            f"{os.path.join(build_dir, 'threedgutSlang.cuh')}",
         ],
         env=slang_build_env,
     )
 
     # Compile and load.
     source_paths = [os.path.join(os.path.dirname(__file__), fn) for fn in source_files]
-    jit.load(
+    return jit.load(
         name="lib3dgut_cc",
         sources=source_paths,
         extra_cflags=cflags,
