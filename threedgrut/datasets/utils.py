@@ -36,9 +36,7 @@ def focal2fov(focal: float, pixels: int):
     return 2 * math.atan(pixels / (2 * focal))
 
 
-def create_pixel_coords(
-    width: int, height: int, device: torch.device = None
-) -> torch.Tensor:
+def create_pixel_coords(width: int, height: int, device: torch.device = None) -> torch.Tensor:
     """Generate pixel coordinates with +0.5 center offset for post-processing.
 
     Creates a grid of pixel coordinates where each coordinate represents the center

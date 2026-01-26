@@ -42,10 +42,9 @@ from threedgrut.strategy.base import BaseStrategy
 from threedgrut.utils.gui import GUI
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import check_step_condition, create_summary_writer, jet_map
-from threedgrut.utils.timer import CudaTimer
-from threedgrut.utils.misc import jet_map, create_summary_writer, check_step_condition
 from threedgrut.utils.render import apply_post_processing
-from threedgrut.optimizers import SelectiveAdam
+from threedgrut.utils.timer import CudaTimer
+
 
 class Trainer3DGRUT:
     """Trainer for paper: "3D Gaussian Ray Tracing: Fast Tracing of Particle Scenes" """
@@ -242,7 +241,9 @@ class Trainer3DGRUT:
                 self.post_processing.load_state_dict(checkpoint["post_processing"]["module"])
                 for opt, opt_state in zip(self.post_processing_optimizers, checkpoint["post_processing"]["optimizers"]):
                     opt.load_state_dict(opt_state)
-                for sched, sched_state in zip(self.post_processing_schedulers, checkpoint["post_processing"]["schedulers"]):
+                for sched, sched_state in zip(
+                    self.post_processing_schedulers, checkpoint["post_processing"]["schedulers"]
+                ):
                     sched.load_state_dict(sched_state)
                 logger.info("📷 Post-processing state restored from checkpoint")
         elif conf.import_ingp.enabled:
@@ -369,9 +370,7 @@ class Trainer3DGRUT:
                 controller_activation_ratio = main_training_steps / conf.n_iterations
                 controller_distillation = True
                 self._distillation_start_step = main_training_steps
-                logger.info(
-                    f"📷 PPISP distillation mode: controller activates at step {main_training_steps}"
-                )
+                logger.info(f"📷 PPISP distillation mode: controller activates at step {main_training_steps}")
             else:
                 controller_activation_ratio = 0.8
                 controller_distillation = False
@@ -391,15 +390,13 @@ class Trainer3DGRUT:
 
             self.post_processing_optimizers = self.post_processing.create_optimizers()
             self.post_processing_schedulers = self.post_processing.create_schedulers(
-                self.post_processing_optimizers,
-                max_optimization_iters=conf.n_iterations
+                self.post_processing_optimizers, max_optimization_iters=conf.n_iterations
             )
 
-            logger.info(
-                f"📷 {method.upper()} initialized: {num_cameras} cameras, {num_frames} frames"
-            )
+            logger.info(f"📷 {method.upper()} initialized: {num_cameras} cameras, {num_frames} frames")
         else:
             raise ValueError(f"Unknown post-processing method: {method}")
+
     @torch.cuda.nvtx.range("get_metrics")
     def get_metrics(
         self,
@@ -847,10 +844,7 @@ class Trainer3DGRUT:
                 return
 
             # Freeze Gaussians when distillation starts
-            if (
-                self._distillation_start_step >= 0
-                and self.global_step >= self._distillation_start_step
-            ):
+            if self._distillation_start_step >= 0 and self.global_step >= self._distillation_start_step:
                 self.model.freeze_gaussians()
 
             # Access the GPU-cache batch data

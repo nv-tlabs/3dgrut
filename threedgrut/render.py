@@ -34,7 +34,16 @@ from threedgrut.utils.render import apply_post_processing
 
 class Renderer:
     def __init__(
-        self, model, conf, global_step, out_dir, path="", save_gt=True, writer=None, compute_extra_metrics=True, post_processing=None
+        self,
+        model,
+        conf,
+        global_step,
+        out_dir,
+        path="",
+        save_gt=True,
+        writer=None,
+        compute_extra_metrics=True,
+        post_processing=None,
     ) -> None:
 
         if path:  # Replace the path to the test data
@@ -149,7 +158,15 @@ class Renderer:
 
     @classmethod
     def from_preloaded_model(
-        cls, model, out_dir, path="", save_gt=True, writer=None, global_step=None, compute_extra_metrics=False, post_processing=None
+        cls,
+        model,
+        out_dir,
+        path="",
+        save_gt=True,
+        writer=None,
+        global_step=None,
+        compute_extra_metrics=False,
+        post_processing=None,
     ):
         """Loads checkpoint for test path."""
 

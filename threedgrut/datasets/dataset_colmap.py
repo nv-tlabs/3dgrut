@@ -83,9 +83,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         # Build mapping from COLMAP camera_id to 0-based contiguous index
         # This is needed for post-processing which expects 0-based camera indices
         sorted_camera_ids = sorted(self.cam_intrinsics.keys())
-        self._camera_id_to_idx = {
-            cam_id: idx for idx, cam_id in enumerate(sorted_camera_ids)
-        }
+        self._camera_id_to_idx = {cam_id: idx for idx, cam_id in enumerate(sorted_camera_ids)}
 
         self.n_frames = len(self.cam_extrinsics)
         self.load_camera_data()
@@ -444,9 +442,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         # Add EXIF exposure if available for this frame
         if self.exif_exposures is not None and self.exif_exposures[idx] is not None:
-            output_dict["exposure"] = torch.tensor(
-                self.exif_exposures[idx], dtype=torch.float32
-            )
+            output_dict["exposure"] = torch.tensor(self.exif_exposures[idx], dtype=torch.float32)
 
         return output_dict
 
@@ -463,9 +459,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         # Get intrinsics for current worker
         worker_intrinsics = self._lazy_worker_intrinsics_cache()
 
-        camera_params_dict, rays_ori, rays_dir, camera_name, pixel_coords = (
-            worker_intrinsics[intr]
-        )
+        camera_params_dict, rays_ori, rays_dir, camera_name, pixel_coords = worker_intrinsics[intr]
 
         sample = {
             "rgb_gt": data,

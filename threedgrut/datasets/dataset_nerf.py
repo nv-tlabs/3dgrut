@@ -90,9 +90,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             rays_d_cam = directions.reshape((1, self.image_h, self.image_w, 3)).contiguous()
 
             # Generate pixel coordinates with +0.5 center offset for post-processing
-            pixel_coords = create_pixel_coords(
-                self.image_w, self.image_h, device=self.device
-            )
+            pixel_coords = create_pixel_coords(self.image_w, self.image_h, device=self.device)
 
             # Cache for this worker
             self._worker_gpu_cache[worker_id] = (rays_o_cam, rays_d_cam, pixel_coords)

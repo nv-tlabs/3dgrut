@@ -52,15 +52,9 @@ class Batch:
             assert isinstance(self.intrinsics, list), "intrinsics must be a list"
             assert len(self.intrinsics) == 4, "intrinsics must have 4 elements [fx, fy, cx, cy]"
         if self.pixel_coords is not None:
-            assert (
-                self.pixel_coords.ndim == 4
-            ), "pixel_coords must be a 4D tensor [B, H, W, 2]"
-            assert (
-                self.pixel_coords.shape[0] == batch_size
-            ), "pixel_coords must have the same batch size"
-            assert (
-                self.pixel_coords.shape[3] == 2
-            ), "pixel_coords last dimension must be 2 (x, y)"
+            assert self.pixel_coords.ndim == 4, "pixel_coords must be a 4D tensor [B, H, W, 2]"
+            assert self.pixel_coords.shape[0] == batch_size, "pixel_coords must have the same batch size"
+            assert self.pixel_coords.shape[3] == 2, "pixel_coords last dimension must be 2 (x, y)"
 
 
 class BoundedMultiViewDataset(Protocol):
