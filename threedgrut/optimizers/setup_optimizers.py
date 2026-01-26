@@ -24,6 +24,7 @@
 
 
 import os
+
 import torch
 
 
@@ -59,9 +60,7 @@ def setup_lib_optimizers_cc():
     elif os.name == "nt":
         ldflags = ["cuda.lib", "advapi32.lib", "nvrtc.lib"]
 
-    build_dir = torch.utils.cpp_extension._get_build_directory(
-        "lib_optimizers_cc", verbose=True
-    )
+    build_dir = torch.utils.cpp_extension._get_build_directory("lib_optimizers_cc", verbose=True)
 
     return torch.utils.cpp_extension.load(
         name="lib_optimizers_cc",

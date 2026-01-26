@@ -26,6 +26,17 @@ struct GUTParameters {
         static constexpr uint32_t WarpSize       = 32;
         static constexpr uint32_t NumWarps       = BlockSize / WarpSize;
         static constexpr uint32_t WarpMask       = 0xFFFFFFFFU;
+        
+        // Fine-grained load balancing parameters - base dimensions
+        static constexpr uint32_t VirtualTileX           = 2;       // virtual tile width in pixels
+        static constexpr uint32_t VirtualTileY           = 2;       // virtual tile height in pixels
+        // Derived constants from base dimensions
+        static constexpr uint32_t VirtualTileSize        = VirtualTileX * VirtualTileY;  // 4 pixels per virtual tile
+        static constexpr uint32_t VirtualTilesPerTileX   = BlockX / VirtualTileX;       // 8 virtual tiles per row
+        static constexpr uint32_t VirtualTilesPerTileY   = BlockY / VirtualTileY;       // 8 virtual tiles per column
+        static constexpr uint32_t VirtualTilesPerTile    = VirtualTilesPerTileX * VirtualTilesPerTileY;  // 64 total
+        static constexpr uint32_t FineGrainedWarpsPerBlock = VirtualTileSize;           // 4 warps per block (1 per pixel)
+        static constexpr uint32_t FineGrainedThreadsPerBlock = FineGrainedWarpsPerBlock * WarpSize;  // 128 threads
     };
 
     static constexpr uint32_t InvalidParticleIdx = -1U;

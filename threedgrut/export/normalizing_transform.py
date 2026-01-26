@@ -39,9 +39,7 @@ def estimate_normalizing_transform(poses: np.ndarray) -> np.ndarray:
         rotation_matrix = np.eye(3)
     else:
         # Skew-symmetric matrix
-        vx = np.array([[0, -v[2], v[1]],
-                       [v[2], 0, -v[0]],
-                       [-v[1], v[0], 0]])
+        vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
 
         # Rodrigues' rotation formula
         rotation_matrix = np.eye(3) + vx + vx @ vx * ((1 - c) / (s * s))

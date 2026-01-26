@@ -13,13 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import cProfile
 import functools
 import logging
-import cProfile
 import time
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import Final, Self, Type, TypeVar, cast, Optional, Callable
+from typing import Callable, Final, Optional, Self, Type, TypeVar, cast
 
 import torch
 
@@ -38,8 +38,9 @@ class TimingOptions:
             all_results (dict): A dictionary of lists to which the elapsed time will be appended using ``name`` as a key
             func_print_host (Callable): A callback function to print the activity report (``log.info()`` is used by default)
     """
+
     active: bool = True  # global variable that determines whether to enable timing.
-    print_enabled: bool = False 
+    print_enabled: bool = False
     print_details: bool = False
     synchronize: bool = False  # sync cuda
 
@@ -89,14 +90,14 @@ class ScopedTimer:
         assert self.name is not None, "Timer name is required"
 
         self.options.all_results[self.name].append(self.elapsed)
-        
+
         if self.options.print_enabled:
             indent = "  " * ScopedTimer.indent
             if self.extra_msg:
                 self.options.func_print_host(f"{indent}{self.name} took {self.elapsed:.2f} ms {self.extra_msg}")
             else:
                 self.options.func_print_host(f"{indent}{self.name} took {self.elapsed:.2f} ms")
-        
+
         if self.cp is not None and self.options.print_details and self.options.print_enabled:
             self.cp.print_stats(sort="tottime")
 
@@ -174,7 +175,7 @@ class CudaTimer:
             self._start = torch.cuda.Event(enable_timing=True)
             self._recording = False
             self._end = torch.cuda.Event(enable_timing=True)
-        
+
     def start(self):
         if self.enabled:
             assert not self._recording, "CudaTimer has already started."

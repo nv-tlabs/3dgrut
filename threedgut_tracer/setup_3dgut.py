@@ -13,7 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os, math
+import math
+import os
+
 import torch
 
 from threedgrut.utils import jit
@@ -22,7 +24,6 @@ from threedgrut.utils import jit
 # ----------------------------------------------------------------------------
 #
 def setup_3dgut(conf):
-
     build_dir = torch.utils.cpp_extension._get_build_directory("lib3dgut_cc", verbose=True)
 
     include_paths = []
@@ -42,7 +43,7 @@ def setup_3dgut(conf):
     ut_alpha = conf.render.splat.ut_alpha
     ut_beta = conf.render.splat.ut_beta
     ut_kappa = conf.render.splat.ut_kappa
-    ut_delta = math.sqrt(ut_alpha*ut_alpha*(ut_d+ut_kappa))
+    ut_delta = math.sqrt(ut_alpha * ut_alpha * (ut_d + ut_kappa))
 
     defines = [
         f"-DPARTICLE_RADIANCE_NUM_COEFFS={(conf.render.particle_radiance_sph_degree + 1) ** 2}",
@@ -58,6 +59,7 @@ def setup_3dgut(conf):
         f"-DGAUSSIAN_N_ROLLING_SHUTTER_ITERATIONS={conf.render.splat.n_rolling_shutter_iterations}",
         f"-DGAUSSIAN_K_BUFFER_SIZE={conf.render.splat.k_buffer_size}",
         f"-DGAUSSIAN_GLOBAL_Z_ORDER={to_cpp_bool(conf.render.splat.global_z_order)}",
+        f"-DFINE_GRAINED_LOAD_BALANCING={to_cpp_bool(getattr(conf.render.splat, 'fine_grained_load_balancing', False))}",
         # -- Unscented Transform --
         f"-DGAUSSIAN_UT_ALPHA={ut_alpha}",
         f"-DGAUSSIAN_UT_BETA={ut_beta}",
@@ -82,7 +84,8 @@ def setup_3dgut(conf):
         "-U__CUDA_NO_HALF_CONVERSIONS__",
         "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
         "-U__CUDA_NO_HALF2_OPERATORS__",
-        "-use_fast_math", "-O3",
+        "-use_fast_math",
+        "-O3",
         *defines,
     ]
 
@@ -96,7 +99,8 @@ def setup_3dgut(conf):
 
     # Compile slang kernels
     # TODO: do not overwrite files, use config hash to register the needed version
-    import importlib, subprocess
+    import importlib
+    import subprocess
 
     slang_mod = importlib.import_module("slangtorch")
     slang_dir = os.path.dirname(slang_mod.__file__)
@@ -108,16 +112,22 @@ def setup_3dgut(conf):
 
     subprocess.check_call(
         [
-            "slangc", "-target", "cuda",
-            "-I", os.path.join(os.path.dirname(__file__), "include"),
-            "-I", os.path.join(os.path.dirname(__file__), "..", "threedgrt_tracer", "include"),
-            "-line-directive-mode", "none",
-            "-matrix-layout-row-major", # NB : this is required for cuda target
+            "slangc",
+            "-target",
+            "cuda",
+            "-I",
+            os.path.join(os.path.dirname(__file__), "include"),
+            "-I",
+            os.path.join(os.path.dirname(__file__), "..", "threedgrt_tracer", "include"),
+            "-line-directive-mode",
+            "none",
+            "-matrix-layout-row-major",  # NB : this is required for cuda target
             "-Wno-41018",
             "-O2",
             *defines,
-            f"{os.path.join(slang_build_inc_dir,'threedgut.slang')}",
-            "-o", f"{os.path.join(build_dir,'threedgutSlang.cuh')}",
+            f"{os.path.join(slang_build_inc_dir, 'threedgut.slang')}",
+            "-o",
+            f"{os.path.join(build_dir, 'threedgutSlang.cuh')}",
         ],
         env=slang_build_env,
     )

@@ -14,8 +14,8 @@
 # limitations under the License.
 
 import argparse
-import sys
 import logging
+import sys
 from pathlib import Path
 
 from hydra.compose import compose
@@ -26,14 +26,12 @@ from threedgrut.export.usdz_exporter import USDZExporter
 from threedgrut.model.model import MixtureOfGaussians
 
 # Set up logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def load_default_config(
-    config_name: str = 'apps/colmap_3dgut.yaml',
-    config_path: str = '../../../configs'
+    config_name: str = "apps/colmap_3dgut.yaml", config_path: str = "../../../configs"
 ) -> DictConfig:
     """
     Load configuration using Hydra from the specified config file.
@@ -53,8 +51,9 @@ def load_default_config(
 def main():
     parser = argparse.ArgumentParser(description="Convert PLY to USDZ")
     parser.add_argument("input_file", type=str, help="Input PLY file path")
-    parser.add_argument("--output_file", type=str,
-                        help="Output USDZ file path (defaults to input file path with .usdz extension)")
+    parser.add_argument(
+        "--output_file", type=str, help="Output USDZ file path (defaults to input file path with .usdz extension)"
+    )
 
     args = parser.parse_args()
 
@@ -99,6 +98,7 @@ def main():
     except Exception as e:
         logger.error(f"Error processing PLY file: {e}")
         import traceback
+
         logger.error(f"Full traceback: {traceback.format_exc()}")
         sys.exit(1)
 

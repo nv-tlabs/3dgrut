@@ -13,14 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging, math
+import logging
+import math
 from dataclasses import dataclass
 
-import torch
-import torch.utils.cpp_extension
-
 import numpy as np
-
+import torch
 from omegaconf import OmegaConf
 
 from threedgrut.datasets.protocols import Batch

@@ -13,19 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import PIL
-import numpy as np
-import torch
-import igl
-from pathlib import Path
-from pygltflib import GLTF2, OPAQUE, BLEND, MASK
-
 # Silence dependencies that log unrelated warnings
 import logging
 import warnings
+from pathlib import Path
+
+import igl
+import numpy as np
+import PIL
+import torch
+from pygltflib import BLEND, GLTF2, MASK, OPAQUE
+
 with warnings.catch_warnings():
-    logging.getLogger('kaolin.render.mesh.nvdiffrast_context').setLevel(logging.WARNING)
+    logging.getLogger("kaolin.render.mesh.nvdiffrast_context").setLevel(logging.WARNING)
     import kaolin
+
 
 def _to_tensor(mat_data, is_normalize=False, is_pad_to_float4=False, device=None):
     if mat_data is None:
@@ -52,40 +54,37 @@ def _to_tensor(mat_data, is_normalize=False, is_pad_to_float4=False, device=None
 
 @torch.no_grad()
 def load_missing_material_info(path, materials, device):
-    """ Populates materials with additional material fields currently missing from kaolin.
-    """
-    enum2alphamode = {
-        OPAQUE: 0,
-        BLEND: 1,
-        MASK: 2
-    }
+    """Populates materials with additional material fields currently missing from kaolin."""
+    enum2alphamode = {OPAQUE: 0, BLEND: 1, MASK: 2}
 
     scene = GLTF2.load(path)
     scene_mats = {m.name: m for m in scene.materials}
     for mat in materials:
-        missing_mat = scene_mats[mat['material_name']]
-        emissiveFactor = missing_mat.emissiveFactor if missing_mat.emissiveFactor is not None else torch.zeros(3, device=device)
-        emissiveTexture = None # TODO (operel): Support texture load
+        missing_mat = scene_mats[mat["material_name"]]
+        emissiveFactor = (
+            missing_mat.emissiveFactor if missing_mat.emissiveFactor is not None else torch.zeros(3, device=device)
+        )
+        emissiveTexture = None  # TODO (operel): Support texture load
         alphaMode = enum2alphamode[missing_mat.alphaMode]
         alphaCutoff = missing_mat.alphaCutoff
-        mat['emissive_map'] = _to_tensor(emissiveTexture, is_normalize=True, is_pad_to_float4=True)
-        mat['emissive_factor'] = _to_tensor(emissiveFactor, is_normalize=True, device='cpu')
-        mat['alpha_mode'] = alphaMode
-        mat['alpha_cutoff'] = alphaCutoff
+        mat["emissive_map"] = _to_tensor(emissiveTexture, is_normalize=True, is_pad_to_float4=True)
+        mat["emissive_factor"] = _to_tensor(emissiveFactor, is_normalize=True, device="cpu")
+        mat["alpha_mode"] = alphaMode
+        mat["alpha_cutoff"] = alphaCutoff
 
 
 @torch.no_grad()
 def load_materials(mesh, device):
-    """ Loads additional material fields currently missing from kaolin.
-    """
+    """Loads additional material fields currently missing from kaolin."""
     out_mats = []
     materials = mesh.materials
     if materials is None:
         return []
 
     for mat in materials:
-        diffuseFactor = mat.diffuse_color if mat.diffuse_color is not None \
-            else torch.tensor([1.0, 1.0, 1.0, 1.0], device=device)
+        diffuseFactor = (
+            mat.diffuse_color if mat.diffuse_color is not None else torch.tensor([1.0, 1.0, 1.0, 1.0], device=device)
+        )
 
         diffuseTexture = mat.diffuse_texture
         if diffuseTexture is not None:
@@ -96,20 +95,23 @@ def load_materials(mesh, device):
         # Create a 2dim texture
         metallicRoughnessTexture = None
         if mat.metallic_texture is not None and mat.roughness_texture is not None:
-            metallicRoughnessTexture = torch.cat([
-                mat.metallic_texture,
-                mat.roughness_texture,
-            ], dim=2)
+            metallicRoughnessTexture = torch.cat(
+                [
+                    mat.metallic_texture,
+                    mat.roughness_texture,
+                ],
+                dim=2,
+            )
         elif mat.metallic_texture is not None and mat.roughness_texture is None:
-            metallicRoughnessTexture = torch.cat([
-                mat.metallic_texture,
-                torch.zeros_like(mat.metallic_texture)
-            ], dim=2)
-        elif mat.metallic_texture is  None and mat.roughness_texture is not None:
-            metallicRoughnessTexture = torch.cat([
-                torch.zeros_like(mat.roughness_texture),
-                mat.roughness_texture,
-            ], dim=2)
+            metallicRoughnessTexture = torch.cat([mat.metallic_texture, torch.zeros_like(mat.metallic_texture)], dim=2)
+        elif mat.metallic_texture is None and mat.roughness_texture is not None:
+            metallicRoughnessTexture = torch.cat(
+                [
+                    torch.zeros_like(mat.roughness_texture),
+                    mat.roughness_texture,
+                ],
+                dim=2,
+            )
 
         if mat.metallic_value is not None:
             metallicFactor = mat.metallic_value
@@ -135,11 +137,11 @@ def load_materials(mesh, device):
             diffuse_map=_to_tensor(diffuseTexture, is_normalize=True, is_pad_to_float4=True),
             metallic_roughness_map=_to_tensor(metallicRoughnessTexture, is_normalize=False, is_pad_to_float4=True),
             normal_map=_to_tensor(normalTexture, is_normalize=False, is_pad_to_float4=True),
-            diffuse_factor=_to_tensor(diffuseFactor, is_normalize=True, device='cpu', is_pad_to_float4=True),
+            diffuse_factor=_to_tensor(diffuseFactor, is_normalize=True, device="cpu", is_pad_to_float4=True),
             metallic_factor=float(metallicFactor),
             roughness_factor=float(roughnessFactor),
             transmission_factor=float(transmissionFactor),
-            ior=ior
+            ior=ior,
         )
         out_mats.append(loaded_mat)
     return out_mats
@@ -147,15 +149,16 @@ def load_materials(mesh, device):
 
 @torch.no_grad()
 def load_mesh(path: str, device):
-    """ Load mesh from path with kaolin.
+    """Load mesh from path with kaolin.
     Supported formats: .obj, .gltf, .glb
     """
     format = Path(path).suffix
-    if format in ('.obj', '.gltf', '.glb'):
+    if format in (".obj", ".gltf", ".glb"):
         mesh = kaolin.io.import_mesh(path, triangulate=True)
     else:
-        raise ValueError(f'Cannot load mesh asset with unsupported format: {format}. '
-                         f'Supported types: .obj, .glb, .gltf')
+        raise ValueError(
+            f"Cannot load mesh asset with unsupported format: {format}. " f"Supported types: .obj, .glb, .gltf"
+        )
 
     mesh = mesh.float_tensors_to(torch.float32)
 
@@ -163,7 +166,7 @@ def load_mesh(path: str, device):
     mesh.vertices -= mesh.vertices.mean(dim=0)
 
     # Compute vertex normals if needed
-    if not mesh.has_attribute('vertex_normals') or len(mesh.vertex_normals) == 0:
+    if not mesh.has_attribute("vertex_normals") or len(mesh.vertex_normals) == 0:
         vertex_normals = igl.per_vertex_normals(mesh.vertices.numpy(), mesh.faces.numpy())
         mesh.vertex_normals = torch.tensor(vertex_normals, device=device, dtype=torch.float32)
 
@@ -171,17 +174,20 @@ def load_mesh(path: str, device):
     num_faces = len(mesh.faces)
     mesh = mesh.to(device=device)
 
-    mesh.vertex_tangents = mesh.vertex_tangents if mesh.has_attribute('vertex_tangents') else None
+    mesh.vertex_tangents = mesh.vertex_tangents if mesh.has_attribute("vertex_tangents") else None
 
-    mesh.uvs = mesh.uvs if mesh.has_attribute('uvs') else mesh.vertices.new_zeros(num_verts, 2)
+    mesh.uvs = mesh.uvs if mesh.has_attribute("uvs") else mesh.vertices.new_zeros(num_verts, 2)
     # If uvs + face_uvs_idx are available, use to compute face_uvs
-    if not mesh.has_attribute('face_uvs'):
-        if mesh.has_attribute('face_uvs_idx') and len(mesh.uvs) > 0:
+    if not mesh.has_attribute("face_uvs"):
+        if mesh.has_attribute("face_uvs_idx") and len(mesh.uvs) > 0:
             mesh.face_uvs = mesh.uvs[mesh.face_uvs_idx].contiguous()
         else:
             mesh.face_uvs = mesh.vertices.new_zeros(num_faces, 3, 2)
-    mesh.material_assignments = mesh.material_assignments if mesh.has_attribute('material_assignments') else\
-        torch.zeros([num_faces], device=device)
+    mesh.material_assignments = (
+        mesh.material_assignments
+        if mesh.has_attribute("material_assignments")
+        else torch.zeros([num_faces], device=device)
+    )
 
     return mesh
 
@@ -194,7 +200,7 @@ def create_procedural_mesh(vertices, faces, face_uvs, device):
 
 
 def create_quad_mesh(device):
-    """ Creates a procedurally generated quad mesh. """
+    """Creates a procedurally generated quad mesh."""
     MS = 1.0
     MZ = 2.5
     v0 = [-MS, -MS, MZ]
@@ -206,7 +212,7 @@ def create_quad_mesh(device):
     mesh = create_procedural_mesh(
         vertices=torch.tensor([v0, v1, v2, v3]),
         faces=faces,
-        face_uvs=vertex_uvs[faces].contiguous(), # (F, 3, 2)
-        device=device
+        face_uvs=vertex_uvs[faces].contiguous(),  # (F, 3, 2)
+        device=device,
     )
     return mesh

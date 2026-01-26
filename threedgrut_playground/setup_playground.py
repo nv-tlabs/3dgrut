@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys, os
+import os
 from pathlib import Path
 
 from threedgrut.utils import jit
@@ -28,7 +28,7 @@ def setup_playground(conf):
     include_paths = []
 
     PLAYGROUND_ROOT = os.path.dirname(__file__)
-    THREEDGRT_ROOT = os.path.join(str(Path(os.path.dirname(__file__)).parent), 'threedgrt_tracer')
+    THREEDGRT_ROOT = os.path.join(str(Path(os.path.dirname(__file__)).parent), "threedgrt_tracer")
 
     # Make sure we can find the necessary compiler and libary binaries.
     include_paths.append(os.path.join(PLAYGROUND_ROOT, "include"))
@@ -41,11 +41,12 @@ def setup_playground(conf):
         "src/meshBuffers.cu",
         "bindings.cpp",
         "../threedgrt_tracer/src/optixTracer.cpp",
-        "../threedgrt_tracer/src/particlePrimitives.cu"
+        "../threedgrt_tracer/src/particlePrimitives.cu",
     ]
 
     # Compile slang kernels
-    import importlib, subprocess
+    import importlib
+    import subprocess
 
     slang_mod = importlib.import_module("slangtorch")
     slang_build_env = os.environ
@@ -70,11 +71,11 @@ def setup_playground(conf):
             f"-DGAUSSIAN_PARTICLE_MIN_ALPHA={conf.render.particle_kernel_min_alpha}",
             f"-DGAUSSIAN_PARTICLE_MAX_ALPHA={conf.render.particle_kernel_max_alpha}",
             f"-DGAUSSIAN_PARTICLE_ENABLE_NORMAL={to_cpp_bool(conf.render.enable_normals)}",
-            f"-DGAUSSIAN_PARTICLE_SURFEL={to_cpp_bool(conf.render.primitive_type=='trisurfel')}",
-            f"{os.path.join(slang_build_file_dir,'models/gaussianParticles.slang')}",
-            f"{os.path.join(slang_build_file_dir,'models/shRadiativeParticles.slang')}",
+            f"-DGAUSSIAN_PARTICLE_SURFEL={to_cpp_bool(conf.render.primitive_type == 'trisurfel')}",
+            f"{os.path.join(slang_build_file_dir, 'models/gaussianParticles.slang')}",
+            f"{os.path.join(slang_build_file_dir, 'models/shRadiativeParticles.slang')}",
             "-o",
-            f"{os.path.join(slang_build_file_dir,'gaussianParticles.cuh')}",
+            f"{os.path.join(slang_build_file_dir, 'gaussianParticles.cuh')}",
         ],
         env=slang_build_env,
     )

@@ -14,17 +14,18 @@
 # limitations under the License.
 
 import torch
+
 from threedgrut.model.model import MixtureOfGaussians
 
 
 def join_gaussians(*gaussians):
-    """ Concatenates multiple MixtureOfGaussians models into a single new MixtureOfGaussians object.
+    """Concatenates multiple MixtureOfGaussians models into a single new MixtureOfGaussians object.
     For simplicity, non-concatenable attributes will be picked from the first MixtureOfGaussians arg,
     i.e.: max_sh_degree, n_active_features and scene_extent.
     """
     main_gaussian = gaussians[0]
     composition = MixtureOfGaussians(conf=main_gaussian.conf, scene_extent=main_gaussian.scene_extent)
-    fields = ['positions', 'rotation', 'scale', 'density', 'features_albedo', 'features_specular']
+    fields = ["positions", "rotation", "scale", "density", "features_albedo", "features_specular"]
     concatenated_fields = {}
 
     for field in fields:
