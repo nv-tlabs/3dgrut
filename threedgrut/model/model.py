@@ -183,7 +183,9 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         # Check if we would like to do progressive training
         self.feature_type = self.conf.model.progressive_training.feature_type
         self.n_active_features = min(self.conf.model.progressive_training.init_n_features, sh_degree)
-        self.max_n_features = sh_degree  # For SH, this is the SH degree (clamped if > render.particle_radiance_sph_degree)
+        self.max_n_features = (
+            sh_degree  # For SH, this is the SH degree (clamped if > render.particle_radiance_sph_degree)
+        )
         self.progressive_training = False
         if self.n_active_features < self.max_n_features:
             self.feature_dim_increase_interval = self.conf.model.progressive_training.increase_frequency
