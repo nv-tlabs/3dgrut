@@ -15,7 +15,6 @@
 
 import logging
 import os
-from enum import IntEnum
 
 import torch
 import torch.utils.cpp_extension
@@ -46,9 +45,7 @@ def load_playground_plugin(conf):
 
 
 class Tracer:
-
     def __init__(self, conf):
-
         self.device = "cuda"
         self.conf = conf
         self.num_update_bvh = 0

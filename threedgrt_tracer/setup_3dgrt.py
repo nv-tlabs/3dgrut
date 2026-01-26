@@ -71,7 +71,7 @@ def setup_3dgrt(conf):
             f"{os.path.join(slang_build_file_dir,'models/gaussianParticles.slang')}",
             f"{os.path.join(slang_build_file_dir,'models/shRadiativeParticles.slang')}",
             "-o",
-            f"{os.path.join(slang_build_file_dir,'gaussianParticles.cuh')}",
+            f"{os.path.join(slang_build_file_dir, 'gaussianParticles.cuh')}",
         ],
         env=slang_build_env,
     )
