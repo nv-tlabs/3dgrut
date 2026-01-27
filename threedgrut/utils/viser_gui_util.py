@@ -14,18 +14,18 @@
 # limitations under the License.
 
 import time
+from typing import Any, Dict, Optional, Tuple
+
 import numpy as np
 import torch
 import viser
 import viser.transforms as tf
-from typing import Optional, Tuple, Dict, Any
 
 from threedgrut.datasets.protocols import Batch, DatasetVisualization
-from threedgrut.datasets.utils import fov2focal, DEFAULT_DEVICE
+from threedgrut.datasets.utils import DEFAULT_DEVICE, fov2focal
 from threedgrut.utils.logger import logger
-from threedgrut.utils.timer import CudaTimer
 from threedgrut.utils.misc import to_np
-
+from threedgrut.utils.timer import CudaTimer
 
 
 class ViserGUI:
@@ -35,10 +35,10 @@ class ViserGUI:
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
         self.scene_bbox = scene_bbox
-        
+
         # Initialize Viser server
         self.server = viser.ViserServer(port=8080)
-        
+
         # GUI state
         self.viz_do_train = False
         self.viz_final = True
@@ -60,7 +60,7 @@ class ViserGUI:
 
         # Initialize UI components
         self._init_ui()
-        
+
         # Initialize scene visualization
         self.point_cloud = None
         self.init_point_cloud()
@@ -88,7 +88,6 @@ class ViserGUI:
         @self.show_point_cloud_checkbox.on_update
         def _(_):
             self.show_point_cloud = self.show_point_cloud_checkbox.value
-                
 
     def _init_ui(self):
         """Initialize UI components"""
@@ -96,72 +95,43 @@ class ViserGUI:
         with self.server.gui.add_folder("Controls"):
             # Render controls
             self.render_style_dropdown = self.server.gui.add_dropdown(
-                "Render Style",
-                options=self.viz_render_styles,
-                initial_value=self.viz_render_styles[0]
+                "Render Style", options=self.viz_render_styles, initial_value=self.viz_render_styles[0]
             )
-            
-            self.show_render_checkbox = self.server.gui.add_checkbox(
-                "Show Render",
-                initial_value=True
-            )
-            
-            self.adjust_resolution_checkbox = self.server.gui.add_checkbox(
-                "Adjust Browser Size",
-                initial_value=False
-            )
+
+            self.show_render_checkbox = self.server.gui.add_checkbox("Show Render", initial_value=True)
+
+            self.adjust_resolution_checkbox = self.server.gui.add_checkbox("Adjust Browser Size", initial_value=False)
 
             self.resolution_slider = self.server.gui.add_slider(
-                "Resolution", min=384, max=4096, 
-                step=2, initial_value=1024
+                "Resolution", min=384, max=4096, step=2, initial_value=1024
             )
 
-            self.subsample_slider = self.server.gui.add_slider(
-                "Subsample",
-                min=1,
-                max=8,
-                step=1,
-                initial_value=1
-            )
-            
+            self.subsample_slider = self.server.gui.add_slider("Subsample", min=1, max=8, step=1, initial_value=1)
+
             # Training controls
-            self.do_train_checkbox = self.server.gui.add_checkbox(
-                "Do Training",
-                initial_value=False
-            )
-            
-            self.live_update_checkbox = self.server.gui.add_checkbox(
-                "Live Update",
-                initial_value=False
-            )
+            self.do_train_checkbox = self.server.gui.add_checkbox("Do Training", initial_value=False)
 
-            self.terminate_gui_checkbox = self.server.gui.add_checkbox(
-                "Terminate GUI",
-                initial_value=False
-            )
+            self.live_update_checkbox = self.server.gui.add_checkbox("Live Update", initial_value=False)
 
-            self.show_point_cloud_checkbox = self.server.gui.add_checkbox(
-                "Show Point Cloud",
-                initial_value=False
-            )
+            self.terminate_gui_checkbox = self.server.gui.add_checkbox("Terminate GUI", initial_value=False)
+
+            self.show_point_cloud_checkbox = self.server.gui.add_checkbox("Show Point Cloud", initial_value=False)
 
             # Camera controls
             self.camera_type_dropdown = self.server.gui.add_dropdown(
-                "Camera Type",
-                options=["Perspective", "Fisheye"],
-                initial_value="Perspective"
+                "Camera Type", options=["Perspective", "Fisheye"], initial_value="Perspective"
             )
-            
+
             # Export controls
             self.export_button = self.server.gui.add_button("Export Model")
-            
+
     def init_point_cloud(self):
         # Add point cloud for gaussian centers
         self.point_cloud = self.server.scene.add_point_cloud(
             "3dgs object points",
             points=to_np(self.model.positions),
-            colors = to_np(self.model.features_albedo),
-            point_size=0.001    
+            colors=to_np(self.model.features_albedo),
+            point_size=0.001,
         )
 
     def update_point_cloud(self):
@@ -180,8 +150,10 @@ class ViserGUI:
             self.point_cloud = None
 
     def get_c2w(self, camera):
-        from threedgrut.utils.misc import quaternion_to_so3
         import numpy as np
+
+        from threedgrut.utils.misc import quaternion_to_so3
+
         c2w = np.eye(4, dtype=np.float32)
         # camera.wxyz: (4,) numpy, quaternion (w, x, y, z)
         # quaternion_to_so3 expects (N,4) torch, so convert
@@ -197,14 +169,16 @@ class ViserGUI:
         w2c = np.linalg.inv(c2w)
         return w2c
 
-    def render_from_current_view(self, client) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def render_from_current_view(
+        self, client
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Render from current camera view - rewritten to match polyscope version"""
         # Get current camera parameters from viser
         # for client in self.server.get_clients().values():
         camera = client.camera
-        
+
         # Get window size and apply subsample
-        
+
         if self.adjust_resolution_checkbox.value:
             window_w = self.render_width // self.viz_render_subsample
             window_h = self.render_height // self.viz_render_subsample
@@ -212,21 +186,19 @@ class ViserGUI:
             window_w = self.resolution_slider.value
             window_h = int(self.resolution_slider.value / camera.aspect)
 
-
-        
         # Get camera parameters from viser
         view_matrix = self.get_c2w(camera)  # This is W2C (world to camera)
-        
+
         # NOTE(qi): this looks incorrect to me. view_matrix should be C2W already?
         C2W = view_matrix
         # # Convert view matrix to camera-to-world (C2W)
         # C2W = np.linalg.inv(view_matrix)
         # C2W[:, 1:3] *= -1  # [right up back] to [right down front] - same as polyscope
-        
+
         # Get FOV and calculate focal length
         fov_vertical_deg = camera.fov / np.pi * 180.0
         FOCAL = fov2focal(np.deg2rad(fov_vertical_deg), window_h)
-        
+
         # Generate ray directions similar to polyscope version
         interp_x, interp_y = torch.meshgrid(
             torch.linspace(0.0, window_w - 1, window_w, device=DEFAULT_DEVICE, dtype=torch.float32),
@@ -235,11 +207,13 @@ class ViserGUI:
         )
         u = interp_x
         v = interp_y
-        
+
         xs = ((u + 0.5) - 0.5 * window_w) / FOCAL
         ys = ((v + 0.5) - 0.5 * window_h) / FOCAL
-        rays_dir = torch.nn.functional.normalize(torch.stack((xs, ys, torch.ones_like(xs)), axis=-1), dim=-1).unsqueeze(0)
-        
+        rays_dir = torch.nn.functional.normalize(torch.stack((xs, ys, torch.ones_like(xs)), axis=-1), dim=-1).unsqueeze(
+            0
+        )
+
         # Create Batch object similar to polyscope version
         inputs = Batch(
             intrinsics=[FOCAL, FOCAL, window_w / 2, window_h / 2],
@@ -247,7 +221,7 @@ class ViserGUI:
             rays_ori=torch.zeros((1, window_h, window_w, 3), device=DEFAULT_DEVICE, dtype=torch.float32),
             rays_dir=rays_dir.reshape(1, window_h, window_w, 3),
         )
-        
+
         # Render using model(inputs) instead of model.render()
         with torch.no_grad():
             self.render_timer.start()
@@ -255,17 +229,17 @@ class ViserGUI:
             self.render_timer.end()
             self.render_width = window_w
             self.render_height = window_h
-        
 
-
-        points = to_np(self.model.positions) 
+        points = to_np(self.model.positions)
         points_h = np.concatenate([points, np.ones((points.shape[0], 1))], axis=1)  # (N,4)
         points_cam = (view_matrix @ points_h.T).T  # (N,4)
 
         X, Y, Z, _ = points_cam.T
 
-        mask = Z > 0 
-        X = X[mask]; Y = Y[mask]; Z = Z[mask]
+        mask = Z > 0
+        X = X[mask]
+        Y = Y[mask]
+        Z = Z[mask]
 
         fx, fy = FOCAL, FOCAL
         cx, cy = window_w / 2, window_h / 2
@@ -279,20 +253,19 @@ class ViserGUI:
         # Return the same outputs as polyscope version
         return (
             outputs["pred_rgb"],
-            outputs["pred_opacity"], 
+            outputs["pred_opacity"],
             outputs["pred_dist"],
             outputs["pred_normals"],
             outputs["hits_count"] / self.conf.writer.max_num_hits,
-            points_plane
+            points_plane,
         )
 
-    def update_render_view(self, client, force: bool = False):            
+    def update_render_view(self, client, force: bool = False):
         # Get current render style
         style = self.viz_render_style
-        
+
         # Render current view
         sple_orad, sple_odns, sple_odist, sple_onrm, sple_ohit, points_plane = self.render_from_current_view(client)
-        
 
         """Update rendered view - rewritten to match polyscope version"""
         if not self.viz_render_enabled and force:
@@ -324,7 +297,6 @@ class ViserGUI:
             img = np.repeat(distance_255[0], 3, axis=2)
             img[:, :, 1:] = 0
             client.scene.set_background_image(img)
-
 
         elif style == "hits":
             # Convert hits count to grayscale image

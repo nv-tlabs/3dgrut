@@ -207,22 +207,32 @@ Evaluate Checkpoint with Splatting / OptiX Tracer / Torch
 python render.py --checkpoint runs/lego/ckpt_last.pt --out-dir outputs/eval
 ```
 
-
 ### To visualize training progress interactively
 ```bash
 python train.py --config-name apps/nerf_synthetic_3dgut.yaml path=data/nerf_synthetic/lego with_gui=True
 ```
+> [!NOTE]
+> Remember to set DISPLAY environment variable if you are running on a remote server from command line.
+
+Or using the viser GUI contributed by the community (by @tangkangqi):
+```bash
+python train.py --config-name apps/nerf_synthetic_3dgut.yaml path=data/nerf_synthetic/lego with_viser_gui=True
+```
+> [!NOTE]
+> Remember to install viser first via `pip install viser` and forward the port 8080 to your local machine if you are running on a remote server.
+
 
 ### To visualize a pre-trained checkpoint
 ```bash
 python train.py --config-name apps/nerf_synthetic_3dgut.yaml path=data/nerf_synthetic/lego with_gui=True test_last=False export_ingp.enabled=False resume=runs/lego/ckpt_last.pt
 ```
-> [!NOTE]
-> Remember to set DISPLAY environment variable if you are running on a remote server from command line.
 
 On start up, you might see a black screen, but you can use the GUI to navigate to correct camera views:
 <img src="assets/train_gui_initial.jpg" height="400"/>
 <img src="assets/render_lego.jpg" height="400"/>
+
+Similarly, you can also use the viser GUI by setting `with_viser_gui=True` instead of `with_gui=True`.
+
 
 ## 📋 4. Evaluations
 
