@@ -17,7 +17,7 @@ import os
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional, Union
-
+import time
 import numpy as np
 import torch
 import torch.utils.data
@@ -39,6 +39,7 @@ from threedgrut.optimizers import SelectiveAdam
 from threedgrut.render import Renderer
 from threedgrut.strategy.base import BaseStrategy
 from threedgrut.utils.gui import GUI
+from threedgrut.utils.viser_gui_util import ViserGUI
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import check_step_condition, create_summary_writer, jet_map
 from threedgrut.utils.timer import CudaTimer
@@ -298,6 +299,8 @@ class Trainer3DGRUT:
         gui = None
         if conf.with_gui:
             gui = GUI(conf, model, train_dataset, val_dataset, scene_bbox)
+        elif conf.with_viser_gui:
+            gui = ViserGUI(conf, model, train_dataset, val_dataset, scene_bbox)
         self.gui = gui
 
     def init_metrics(self):
@@ -715,6 +718,18 @@ class Trainer3DGRUT:
                     "Terminating training from GUI window is not supported. Please terminate it from the terminal."
                 )
 
+    def render_gui_viser(self, scene_updated):
+        gui = self.gui
+        if gui is not None:
+            if gui.live_update:
+                # update render view
+                if scene_updated or self.model.positions.requires_grad:
+                    gui.update_point_cloud()
+                for client in gui.server.get_clients().values():
+                    gui.update_render_view(client, force=True)
+                while not gui.viz_do_train:
+                    time.sleep(0.0001)
+
     @torch.cuda.nvtx.range(f"run_train_pass")
     def run_train_pass(self, conf: DictConfig):
         """Runs a single train epoch over the dataset."""
@@ -842,7 +857,11 @@ class Trainer3DGRUT:
                     self.save_checkpoint()
 
             with torch.cuda.nvtx.range(f"train_{global_step-1}_update_gui"):
-                self.render_gui(scene_updated)  # Updating the GUI
+                # self.render_gui(scene_updated)  # Updating the GUI
+                if self.conf.with_viser_gui:
+                    self.render_gui_viser(scene_updated)
+                elif self.conf.with_gui:
+                    self.render_gui(scene_updated)
 
         self.log_training_pass(metrics)
 
