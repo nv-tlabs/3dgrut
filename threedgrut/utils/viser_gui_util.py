@@ -217,9 +217,11 @@ class ViserGUI:
         # Get camera parameters from viser
         view_matrix = self.get_c2w(camera)  # This is W2C (world to camera)
         
-        # Convert view matrix to camera-to-world (C2W)
-        C2W = np.linalg.inv(view_matrix)
-        C2W[:, 1:3] *= -1  # [right up back] to [right down front] - same as polyscope
+        # NOTE(qi): this looks incorrect to me. view_matrix should be C2W already?
+        C2W = view_matrix
+        # # Convert view matrix to camera-to-world (C2W)
+        # C2W = np.linalg.inv(view_matrix)
+        # C2W[:, 1:3] *= -1  # [right up back] to [right down front] - same as polyscope
         
         # Get FOV and calculate focal length
         fov_vertical_deg = camera.fov / np.pi * 180.0
