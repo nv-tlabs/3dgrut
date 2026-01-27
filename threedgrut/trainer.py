@@ -14,10 +14,11 @@
 # limitations under the License.
 
 import os
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional, Union
-import time
+
 import numpy as np
 import torch
 import torch.utils.data
@@ -39,10 +40,10 @@ from threedgrut.optimizers import SelectiveAdam
 from threedgrut.render import Renderer
 from threedgrut.strategy.base import BaseStrategy
 from threedgrut.utils.gui import GUI
-from threedgrut.utils.viser_gui_util import ViserGUI
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import check_step_condition, create_summary_writer, jet_map
 from threedgrut.utils.timer import CudaTimer
+from threedgrut.utils.viser_gui_util import ViserGUI
 
 
 class Trainer3DGRUT:

@@ -6,3 +6,4 @@ polyscope>=2.3.0
 -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.2_cu118.html
 kaolin==0.17.0
 opencv-python
+viser==1.0.0
