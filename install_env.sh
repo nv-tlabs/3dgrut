@@ -49,9 +49,9 @@ echo ""
 #
 # Check if CUDA_VERSION is supported
 if [ "$CUDA_VERSION" = "11.8.0" ]; then
-    export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0";
+    export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0+PTX";
 elif [ "$CUDA_VERSION" = "12.8.1" ]; then
-    export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0";
+    export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX";
 else
     echo "Unsupported CUDA version: $CUDA_VERSION, available options are 11.8.0 and 12.8.1"
     exit 1
