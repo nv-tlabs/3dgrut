@@ -200,9 +200,31 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         else:
             raise ValueError(f"Unknown rendering method: {conf.render.method}")
 
+        # State of gradients of Gaussian parameters
+        self._gaussians_frozen = False
+
     @torch.no_grad()
     def build_acc(self, rebuild=True):
         self.renderer.build_acc(self, rebuild)
+
+    def freeze_gaussians(self) -> None:
+        """Freeze all Gaussian parameters for PPISP controller distillation.
+
+        This prevents Gaussians from being updated by any loss (including regularization)
+        while the controller learns to predict per-frame corrections.
+        """
+        if self._gaussians_frozen:
+            return
+
+        self.positions.requires_grad = False
+        self.rotation.requires_grad = False
+        self.scale.requires_grad = False
+        self.density.requires_grad = False
+        self.features_albedo.requires_grad = False
+        self.features_specular.requires_grad = False
+
+        self._gaussians_frozen = True
+        logger.info("❄️ [Distillation] Gaussian parameters frozen")
 
     def validate_fields(self):
         num_gaussians = self.num_gaussians

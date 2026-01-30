@@ -36,6 +36,28 @@ def focal2fov(focal: float, pixels: int):
     return 2 * math.atan(pixels / (2 * focal))
 
 
+def create_pixel_coords(width: int, height: int, device: torch.device = None) -> torch.Tensor:
+    """Generate pixel coordinates with +0.5 center offset for post-processing.
+
+    Creates a grid of pixel coordinates where each coordinate represents the center
+    of the pixel (hence the +0.5 offset).
+
+    Args:
+        width: Image width in pixels.
+        height: Image height in pixels.
+        device: Target device for the tensor. Defaults to None (CPU).
+
+    Returns:
+        Pixel coordinates tensor of shape [1, H, W, 2] containing (x, y) coordinates.
+    """
+    pixel_y, pixel_x = torch.meshgrid(
+        torch.arange(height, dtype=torch.float32, device=device) + 0.5,
+        torch.arange(width, dtype=torch.float32, device=device) + 0.5,
+        indexing="ij",
+    )
+    return torch.stack([pixel_x, pixel_y], dim=-1).unsqueeze(0)  # [1, H, W, 2]
+
+
 def pinhole_camera_rays(x, y, f_x, f_y, w, h, ray_jitter=None):
     """
     return:

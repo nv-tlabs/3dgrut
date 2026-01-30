@@ -49,9 +49,9 @@ echo ""
 #
 # Check if CUDA_VERSION is supported
 if [ "$CUDA_VERSION" = "11.8.0" ]; then
-    export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0";
+    export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0+PTX";
 elif [ "$CUDA_VERSION" = "12.8.1" ]; then
-    export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0";
+    export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX";
 else
     echo "Unsupported CUDA version: $CUDA_VERSION, available options are 11.8.0 and 12.8.1"
     exit 1
@@ -169,10 +169,12 @@ else
 fi
 
 # Install OpenGL headers for the playground
-conda install -c conda-forge mesa-libgl-devel-cos7-x86_64 -y 
+# Use --override-channels to avoid conflicts with nvidia channel's cuda-toolkit spec
+conda install -c conda-forge --override-channels mesa-libgl-devel-cos7-x86_64 -y
 
 # Initialize git submodules and install Python requirements
 git submodule update --init --recursive
+# Use --no-build-isolation so packages can access torch during build
 pip install --no-build-isolation -r requirements.txt
 pip install --no-build-isolation -e .
 
