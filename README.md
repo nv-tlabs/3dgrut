@@ -26,6 +26,7 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 
 
 ## 🔥 News
+- ✅[2026/01] Physically-Plausible ISP support.
 - ✅[2025/08] Support for the 3DGRT and 3DGS/3DGRT pipelines is now available with Vulkan API as part of the [Vulkan Gaussian Splatting Project](https://github.com/nvpro-samples/vk_gaussian_splatting). 3DGUT will also be available soon.
 - ✅[2025/07] Support for datasets with multiple sensors (only for COLMAP-style datasets).
 - ✅[2025/07] Support for Windows has been added.

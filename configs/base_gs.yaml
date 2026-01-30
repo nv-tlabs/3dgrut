@@ -125,6 +125,14 @@ loss:
   use_scale: false
   lambda_scale: 0.0
 
+# Post-processing configuration
+post_processing:
+  method: null # Possible values: null, "ppisp"
+  # Number of extra distillation steps after main training (only for "ppisp").
+  # When > 0, enables distillation mode: Gaussians and PPISP params are frozen,
+  # only the controller is trained for these additional steps.
+  n_distillation_steps: 5000
+
 hydra:
   output_subdir: null
   job:
