@@ -28,7 +28,12 @@ from torch.utils.data import Dataset
 from threedgrut.utils.logger import logger
 
 from .protocols import Batch, BoundedMultiViewDataset, DatasetVisualization
-from .utils import create_camera_visualization, get_center_and_diag, get_worker_id
+from .utils import (
+    create_camera_visualization,
+    create_pixel_coords,
+    get_center_and_diag,
+    get_worker_id,
+)
 
 
 class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
@@ -64,7 +69,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self._worker_gpu_cache.clear()
 
     def _lazy_worker_ray_tensors_cache(self):
-        """Create GPU-cached ray directions for current worker."""
+        """Create GPU-cached ray directions and pixel coordinates for current worker."""
         worker_id = get_worker_id()
 
         # Check if this worker already has cached tensors
@@ -83,8 +88,12 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 device=self.device,
             )
             rays_d_cam = directions.reshape((1, self.image_h, self.image_w, 3)).contiguous()
+
+            # Generate pixel coordinates with +0.5 center offset for post-processing
+            pixel_coords = create_pixel_coords(self.image_w, self.image_h, device=self.device)
+
             # Cache for this worker
-            self._worker_gpu_cache[worker_id] = (rays_o_cam, rays_d_cam)
+            self._worker_gpu_cache[worker_id] = (rays_o_cam, rays_d_cam, pixel_coords)
 
         return self._worker_gpu_cache[worker_id]
 
@@ -199,6 +208,24 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         """
         return self.poses
 
+    def get_camera_idx(self, frame_idx: int) -> int:
+        """Return 0-based camera index for a given frame index.
+
+        NeRF synthetic datasets use a single camera, so all frames
+        are from camera 0.
+        """
+        return 0
+
+    def get_frames_per_camera(self) -> list[int]:
+        """Return list of frame counts per camera.
+
+        NeRF synthetic datasets use a single camera, so all frames
+        are attributed to camera 0. Derived values:
+        - num_cameras = len(frames_per_camera) = 1
+        - num_frames = sum(frames_per_camera) = len(self)
+        """
+        return [len(self)]
+
     def __len__(self):
         return len(self.poses)
 
@@ -214,6 +241,8 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         output_dict = {
             "data": torch.tensor(img).reshape(out_shape),
             "pose": torch.tensor(self.poses[idx]).unsqueeze(0),
+            "camera_idx": self.get_camera_idx(idx),
+            "frame_idx": idx,
         }
 
         if os.path.exists(mask_path := self.mask_paths[idx]):
@@ -230,8 +259,8 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         assert data.dtype == torch.float32
         assert pose.dtype == torch.float32
 
-        # Get ray tensors for current worker (creates them if needed)
-        rays_o_cam, rays_d_cam = self._lazy_worker_ray_tensors_cache()
+        # Get ray tensors and pixel coords for current worker (creates them if needed)
+        rays_o_cam, rays_d_cam, pixel_coords = self._lazy_worker_ray_tensors_cache()
 
         sample = {
             "rgb_gt": data,
@@ -239,6 +268,9 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             "rays_dir": rays_d_cam,
             "T_to_world": pose,
             "intrinsics": self.intrinsics,
+            "camera_idx": batch["camera_idx"][0].item(),
+            "frame_idx": batch["frame_idx"][0].item(),
+            "pixel_coords": pixel_coords,
         }
 
         if "mask" in batch:
