@@ -49,10 +49,18 @@ def load_default_config(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert PLY to USDZ")
+    parser = argparse.ArgumentParser(description="Convert PLY to USDZ or USD folder")
     parser.add_argument("input_file", type=str, help="Input PLY file path")
     parser.add_argument(
-        "--output_file", type=str, help="Output USDZ file path (defaults to input file path with .usdz extension)"
+        "--output_file",
+        type=str,
+        help="Output USDZ file path or folder path (defaults to input file path with .usdz extension)",
+    )
+    parser.add_argument(
+        "--folder",
+        action="store_true",
+        help="Export to a folder containing USD files instead of a USDZ archive. "
+        "This is useful for large models that may fail to load in Omniverse Kit when packaged as USDZ."
     )
 
     args = parser.parse_args()
@@ -73,9 +81,13 @@ def main():
         output_path = Path(args.output_file)
         output_path.parent.mkdir(parents=True, exist_ok=True)
     else:
-        output_path = input_path.with_suffix(".usdz")
+        if args.folder:
+            output_path = input_path
+        else:
+            output_path = input_path.with_suffix(".usdz")
 
-    logger.info(f"Converting {input_path} to {output_path}")
+    output_type = "folder" if args.folder else "USDZ"
+    logger.info(f"Converting {input_path} to {output_type}: {output_path}")
 
     try:
         # 1. Create model with default config
@@ -90,9 +102,9 @@ def main():
         # 3. Create USDZExporter
         exporter = USDZExporter()
 
-        # 4. Export to USDZ
+        # 4. Export to USDZ or folder
         logger.info(f"Exporting with USDZExporter: {output_path}")
-        exporter.export(model, output_path, dataset=None, conf=conf)
+        exporter.export(model, output_path, dataset=None, conf=conf, as_folder=args.folder)
 
         logger.info(f"Successfully exported to {output_path}")
     except Exception as e:
