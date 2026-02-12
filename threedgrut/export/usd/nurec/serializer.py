@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,57 +13,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""NuRec USD serialization utilities."""
+
 import logging
 import os
 import tempfile
-import zipfile
-from dataclasses import dataclass
 from pathlib import Path
+import zipfile
 
 import numpy as np
-from pxr import Gf, Sdf, Usd, UsdGeom, UsdUtils, UsdVol, Vt
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdUtils, UsdVol
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+from threedgrut.export.usd.nurec.templates import NamedSerialized
+from threedgrut.export.usd.stage_utils import NamedUSDStage, initialize_usd_stage as _initialize_usd_stage
+
 logger = logging.getLogger(__name__)
 
-
-@dataclass(kw_only=True)
-class NamedUSDStage:
-    filename: str
-    stage: Usd.Stage
-
-    def save(self, out_dir: Path):
-        out_dir.mkdir(parents=True, exist_ok=True)
-        self.stage.Export(str(out_dir / self.filename))
-
-    def save_to_zip(self, zip_file: zipfile.ZipFile):
-        with tempfile.NamedTemporaryFile(mode="wb", suffix=self.filename, delete=False) as temp_file:
-            temp_file_path = temp_file.name
-        self.stage.GetRootLayer().Export(temp_file_path)
-        with open(temp_file_path, "rb") as file:
-            usd_data = file.read()
-        zip_file.writestr(self.filename, usd_data)
-        os.unlink(temp_file_path)
+# NuRec uses Z-up axis (Omniverse convention)
+NUREC_UP_AXIS = "Z"
 
 
-def initialize_usd_stage():
+def initialize_usd_stage() -> Usd.Stage:
     """
-    Initialize a new USD stage with standard settings.
+    Initialize a new USD stage with NuRec/Omniverse settings (Z-up).
 
     Returns:
-        Usd.Stage: A new USD stage with standard settings
+        Usd.Stage: A new USD stage with Z-up axis
     """
-    stage = Usd.Stage.CreateInMemory()
-    stage.SetMetadata("metersPerUnit", 1)
-    stage.SetMetadata("upAxis", "Z")
-
-    # Define xform containing everything.
-    world_path = "/World"
-    UsdGeom.Xform.Define(stage, world_path)
-    stage.SetMetadata("defaultPrim", world_path[1:])
-
-    return stage
+    return _initialize_usd_stage(up_axis=NUREC_UP_AXIS)
 
 
 def serialize_usd_stage_to_bytes(stage: Usd.Stage) -> bytes:
@@ -89,7 +66,7 @@ def serialize_usd_stage_to_bytes(stage: Usd.Stage) -> bytes:
 
 
 def serialize_nurec_usd(
-    model_file, positions: np.ndarray, normalizing_transform: np.ndarray = np.eye(4)
+    model_file: NamedSerialized, positions: np.ndarray, normalizing_transform: np.ndarray = np.eye(4)
 ) -> NamedUSDStage:
     """
     Create a USD file for the 3DGS model.
@@ -257,7 +234,7 @@ def serialize_usd_default_layer(gauss_stage: NamedUSDStage) -> NamedUSDStage:
     return NamedUSDStage(filename="default.usda", stage=stage)
 
 
-def write_to_usdz(file_path: Path, model_file, gauss_usd: NamedUSDStage, default_usd: NamedUSDStage) -> None:
+def write_to_usdz(file_path: Path, model_file: NamedSerialized, gauss_usd: NamedUSDStage, default_usd: NamedUSDStage) -> None:
     """
     Write the USDZ file containing the model data and USD stages.
 
