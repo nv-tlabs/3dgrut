@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -62,7 +62,7 @@ class ExportableModel(abc.ABC):
 class ModelExporter(abc.ABC):
     """Abstract base class for model exporters.
 
-    This class defines the interface that specific exporters (PLY, INGP, USDZ, etc.)
+    This class defines the interface that specific exporters (PLY, USD, etc.)
     must implement to export models to their respective formats.
     """
 

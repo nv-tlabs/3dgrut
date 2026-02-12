@@ -1,0 +1,383 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""
+USD Exporter for 3DGRUT Gaussian Splatting models.
+
+Main exporter using the ParticleField3DGaussianSplat schema (OpenUSD standard).
+Produces USDZ files by default for maximum compatibility.
+"""
+
+import logging
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+import torch
+
+from threedgrut.export.base import ExportableModel, ModelExporter
+from threedgrut.export.accessor import GaussianExportAccessor
+from threedgrut.export.transforms import estimate_normalizing_transform
+from threedgrut.export.usd.stage_utils import (
+    NamedSerialized,
+    NamedUSDStage,
+    create_gaussian_model_root,
+    initialize_usd_stage,
+    write_to_usdz,
+)
+from threedgrut.export.usd.writers.base import create_gaussian_writer
+from threedgrut.export.usd.writers.camera import export_cameras_to_usd
+from threedgrut.export.usd.writers.background import export_background_to_usd
+from threedgrut.datasets.camera_models import (
+    OpenCVPinholeCameraModelParameters,
+    OpenCVFisheyeCameraModelParameters,
+    ShutterType,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _extract_camera_params_from_dataset(dataset) -> Optional[List]:
+    """
+    Extract per-frame camera parameters from a dataset.
+    
+    Handles different dataset types:
+    - ColmapDataset: intrinsics dict keyed by camera_id, use get_intrinsics_idx() per frame
+    - NeRFDataset: single intrinsics list [fx, fy, cx, cy] for all frames
+    
+    Returns:
+        List of CameraModelParameters (one per frame), or None if extraction fails
+    """
+    num_frames = len(dataset)
+    camera_params = []
+    
+    # Check if dataset has ColmapDataset-style intrinsics (dict with camera params)
+    if hasattr(dataset, 'intrinsics') and isinstance(dataset.intrinsics, dict):
+        # ColmapDataset: intrinsics is dict[camera_id] = (params_dict, rays_o, rays_d, camera_name)
+        for frame_idx in range(num_frames):
+            try:
+                # Get camera ID for this frame
+                camera_id = dataset.get_intrinsics_idx(frame_idx)
+                params_tuple = dataset.intrinsics.get(camera_id)
+                
+                if params_tuple is None:
+                    logger.warning(f"No intrinsics found for frame {frame_idx}, camera_id {camera_id}")
+                    camera_params.append(None)
+                    continue
+                
+                params_dict, _, _, camera_name = params_tuple
+                
+                # Reconstruct CameraModelParameters from dict
+                if camera_name == "OpenCVPinholeCameraModelParameters":
+                    params = OpenCVPinholeCameraModelParameters(
+                        resolution=np.array(params_dict["resolution"], dtype=np.int64),
+                        shutter_type=ShutterType(params_dict["shutter_type"]),
+                        principal_point=np.array(params_dict["principal_point"], dtype=np.float32),
+                        focal_length=np.array(params_dict["focal_length"], dtype=np.float32),
+                        radial_coeffs=np.array(params_dict["radial_coeffs"], dtype=np.float32),
+                        tangential_coeffs=np.array(params_dict["tangential_coeffs"], dtype=np.float32),
+                        thin_prism_coeffs=np.array(params_dict["thin_prism_coeffs"], dtype=np.float32),
+                    )
+                elif camera_name == "OpenCVFisheyeCameraModelParameters":
+                    params = OpenCVFisheyeCameraModelParameters(
+                        resolution=np.array(params_dict["resolution"], dtype=np.int64),
+                        shutter_type=ShutterType(params_dict["shutter_type"]),
+                        principal_point=np.array(params_dict["principal_point"], dtype=np.float32),
+                        focal_length=np.array(params_dict["focal_length"], dtype=np.float32),
+                        radial_coeffs=np.array(params_dict["radial_coeffs"], dtype=np.float32),
+                        max_angle=float(params_dict["max_angle"]),
+                    )
+                else:
+                    logger.warning(f"Unknown camera model type: {camera_name}")
+                    camera_params.append(None)
+                    continue
+                
+                camera_params.append(params)
+                
+            except Exception as e:
+                logger.warning(f"Failed to extract camera params for frame {frame_idx}: {e}")
+                camera_params.append(None)
+        
+        return camera_params
+    
+    # Check for NeRFDataset-style intrinsics (simple list [fx, fy, cx, cy])
+    elif hasattr(dataset, 'intrinsics') and isinstance(dataset.intrinsics, list):
+        # NeRFDataset: single intrinsics for all frames
+        intrinsics_list = dataset.intrinsics
+        if len(intrinsics_list) != 4:
+            logger.warning(f"Expected intrinsics list [fx, fy, cx, cy], got {len(intrinsics_list)} elements")
+            return None
+        
+        fx, fy, cx, cy = intrinsics_list
+        
+        # Get resolution from dataset (NeRFDataset stores image_w, image_h)
+        if hasattr(dataset, 'image_w') and hasattr(dataset, 'image_h'):
+            width, height = dataset.image_w, dataset.image_h
+        else:
+            # Try to infer from K matrix
+            if hasattr(dataset, 'K'):
+                # K is 3x3, principal point should be roughly at center
+                width = int(cx * 2)
+                height = int(cy * 2)
+            else:
+                logger.warning("Cannot determine image resolution for NeRF dataset")
+                return None
+        
+        # Create a single OpenCVPinhole params (no distortion for NeRF synthetic)
+        params = OpenCVPinholeCameraModelParameters(
+            resolution=np.array([width, height], dtype=np.int64),
+            shutter_type=ShutterType.GLOBAL,
+            principal_point=np.array([cx, cy], dtype=np.float32),
+            focal_length=np.array([fx, fy], dtype=np.float32),
+            radial_coeffs=np.zeros(6, dtype=np.float32),
+            tangential_coeffs=np.zeros(2, dtype=np.float32),
+            thin_prism_coeffs=np.zeros(4, dtype=np.float32),
+        )
+        
+        # Same params for all frames
+        return [params] * num_frames
+    
+    return None
+
+
+class USDExporter(ModelExporter):
+    """
+    Exporter for OpenUSD format using ParticleField3DGaussianSplat schema.
+
+    This is the default USD exporter for 3DGRUT. It produces USDZ files
+    containing Gaussian splatting data in the standard OpenUSD format.
+
+    Features:
+    - ParticleField3DGaussianSplat schema (standard OpenUSD)
+    - Optional camera export with full intrinsics
+    - Background/environment export as DomeLight
+    - USDZ packaging (default output)
+
+    For Omniverse/NuRec compatibility, use NuRecExporter instead.
+    """
+
+    def __init__(
+        self,
+        half_precision: bool = False,
+        export_cameras: bool = True,
+        export_background: bool = True,
+        apply_normalizing_transform: bool = True,
+        sorting_mode_hint: str = "cameraDistance",
+    ):
+        """
+        Initialize the USD exporter.
+
+        Args:
+            half_precision: Use half-precision floats (smaller files)
+            export_cameras: Include camera poses in export
+            export_background: Include background/environment in export
+            apply_normalizing_transform: Apply transform to normalize scene orientation
+            sorting_mode_hint: Sorting hint for rendering ("cameraDistance", "zAxis", etc.)
+        """
+        self.half_precision = half_precision
+        self.export_cameras = export_cameras
+        self.export_background = export_background
+        self.apply_normalizing_transform = apply_normalizing_transform
+        self.sorting_mode_hint = sorting_mode_hint
+
+    def _create_default_stage(self, referenced_stages: List[NamedUSDStage]) -> NamedUSDStage:
+        """
+        Create a default.usda that references the data stages.
+
+        Args:
+            referenced_stages: List of stages to reference (e.g., gaussians.usdc)
+
+        Returns:
+            NamedUSDStage for default.usda
+        """
+        stage = initialize_usd_stage(up_axis="Y")
+
+        for ref_stage in referenced_stages:
+            # Create a reference prim for each stage
+            filename_stem = Path(ref_stage.filename).stem
+            prim_path = f"/World/{filename_stem}"
+            prim = stage.OverridePrim(prim_path)
+            # Reference the file (relative path within USDZ)
+            prim.GetReferences().AddReference(f"./{ref_stage.filename}")
+
+        return NamedUSDStage(filename="default.usda", stage=stage)
+
+    @torch.no_grad()
+    def export(
+        self,
+        model: ExportableModel,
+        output_path: Path,
+        dataset=None,
+        conf: Dict[str, Any] = None,
+        background=None,
+        **kwargs,
+    ) -> None:
+        """
+        Export the model to a USDZ file.
+
+        Args:
+            model: The model to export (must implement ExportableModel)
+            output_path: Path where the USDZ file will be saved
+            dataset: Optional dataset for camera poses
+            conf: Configuration parameters
+            background: Optional background model for environment export
+            **kwargs: Additional parameters
+        """
+        output_path = Path(output_path)
+        logger.info(f"Exporting USD file to {output_path}...")
+
+        # Get model data via accessor
+        # LightField expects post-activation values (opacity in [0,1], actual scales)
+        accessor = GaussianExportAccessor(model, conf)
+        attrs = accessor.get_attributes(preactivation=False)
+        caps = accessor.get_capabilities()
+        
+        logger.info(f"Schema: LightField (post-activation)")
+
+        logger.info(f"Exporting {attrs.num_gaussians} Gaussians, SH degree {caps.sh_degree}")
+
+        # Compute normalizing transform if enabled
+        normalizing_transform = np.eye(4)
+        if self.apply_normalizing_transform and dataset is not None:
+            try:
+                poses = dataset.get_poses()
+                normalizing_transform = estimate_normalizing_transform(poses)
+                logger.info("Computed normalizing transform from camera poses")
+            except (AttributeError, ValueError) as e:
+                logger.warning(f"Failed to compute normalizing transform: {e}")
+
+        # Create main USD stage
+        stage = initialize_usd_stage(up_axis="Y")
+
+        # Create Gaussian content root with optional normalizing transform
+        gaussians_root = create_gaussian_model_root(
+            stage,
+            flip_x_axis=False,
+            flip_y_axis=False,
+            flip_z_axis=False,
+            root_path="/World/Gaussians",
+            normalizing_transform=normalizing_transform if self.apply_normalizing_transform else None,
+        )
+
+        # Create Gaussian writer (LightField schema)
+        writer = create_gaussian_writer(
+            stage=stage,
+            capabilities=caps,
+            content_root_path=gaussians_root,
+            half_precision=self.half_precision,
+            sorting_mode_hint=self.sorting_mode_hint,
+        )
+
+        # Write Gaussians
+        writer.create_prim(attrs.num_gaussians)
+        writer.write_attributes(attrs)
+        writer.finalize(attrs.positions)
+
+        # Collect stages and files for USDZ
+        stages: List[NamedUSDStage] = []
+        files: List[NamedSerialized] = []
+
+        # Export cameras if requested and dataset available
+        if self.export_cameras and dataset is not None:
+            try:
+                poses = dataset.get_poses()
+
+                # When we apply normalizing transform to the Gaussian root, cameras must be in the
+                # same coordinate system: apply normalizing transform to each c2w (world → normalized).
+                if self.apply_normalizing_transform:
+                    poses = np.einsum("ij,njk->nik", normalizing_transform, poses)
+
+                # Extract per-frame camera parameters from dataset
+                camera_params = _extract_camera_params_from_dataset(dataset)
+                
+                if camera_params is not None:
+                    logger.info(f"Extracted camera params for {len(camera_params)} frames")
+                else:
+                    logger.warning("Could not extract camera intrinsics from dataset, using default")
+
+                export_cameras_to_usd(
+                    stage=stage,
+                    poses=poses,
+                    camera_params=camera_params,
+                    root_path="/World/Cameras",
+                    visible=False,
+                )
+                logger.info(f"Exported {len(poses)} cameras")
+            except (AttributeError, KeyError, ValueError) as e:
+                logger.warning(f"Failed to export cameras: {e}")
+
+        # Export background if requested
+        envmap_bytes = None
+        if self.export_background and background is not None:
+            try:
+                _, envmap_bytes = export_background_to_usd(
+                    stage=stage,
+                    background=background,
+                    conf=conf,
+                    root_path="/World/Environment",
+                    envmap_filename="envmap.png",
+                )
+                if envmap_bytes is not None:
+                    files.append(NamedSerialized(filename="envmap.png", serialized=envmap_bytes))
+                    logger.info("Exported background as DomeLight")
+            except (AttributeError, ValueError, ImportError) as e:
+                logger.warning(f"Failed to export background: {e}")
+
+        # Determine output format
+        suffix = output_path.suffix.lower()
+        if suffix == ".usdz":
+            # Package as USDZ with composition:
+            # - default.usda (text) references gaussians.usdc (binary)
+            gaussians_stage = NamedUSDStage(filename="gaussians.usdc", stage=stage)
+            default_stage = self._create_default_stage([gaussians_stage])
+            # default.usda must be first in USDZ
+            write_to_usdz(output_path, [default_stage, gaussians_stage], files if files else None)
+        elif suffix in [".usda", ".usd", ".usdc"]:
+            # Export as plain USD (format determined by extension)
+            stage.Export(str(output_path))
+            # Also export envmap if present
+            if envmap_bytes is not None:
+                envmap_path = output_path.parent / "envmap.png"
+                with open(envmap_path, "wb") as f:
+                    f.write(envmap_bytes)
+        else:
+            # Default to USDZ
+            usdz_path = output_path.with_suffix(".usdz")
+            gaussians_stage = NamedUSDStage(filename="gaussians.usdc", stage=stage)
+            default_stage = self._create_default_stage([gaussians_stage])
+            write_to_usdz(usdz_path, [default_stage, gaussians_stage], files if files else None)
+
+        logger.info(f"USD export complete: {output_path}")
+
+    @classmethod
+    def from_config(cls, conf) -> "USDExporter":
+        """
+        Create USDExporter from configuration.
+
+        Args:
+            conf: Configuration object with export_usd section
+
+        Returns:
+            Configured USDExporter instance
+        """
+        export_conf = getattr(conf, 'export_usd', None) or conf
+
+        return cls(
+            half_precision=getattr(export_conf, 'half_precision', False),
+            export_cameras=getattr(export_conf, 'export_cameras', True),
+            export_background=getattr(export_conf, 'export_background', True),
+            apply_normalizing_transform=getattr(export_conf, 'apply_normalizing_transform', True),
+            sorting_mode_hint=getattr(export_conf, 'sorting_mode_hint', 'cameraDistance'),
+        )

@@ -32,9 +32,7 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 import threedgrut.datasets as datasets
 from threedgrut.datasets.protocols import BoundedMultiViewDataset
 from threedgrut.datasets.utils import DEFAULT_DEVICE, MultiEpochsDataLoader
-from threedgrut.export.ingp_exporter import INGPExporter
-from threedgrut.export.ply_exporter import PLYExporter
-from threedgrut.export.usdz_exporter import USDZExporter
+from threedgrut.export import PLYExporter, USDExporter, NuRecExporter
 from threedgrut.model.losses import ssim
 from threedgrut.model.model import MixtureOfGaussians
 from threedgrut.optimizers import SelectiveAdam
@@ -95,17 +93,6 @@ class Trainer3DGRUT:
         """Create a new trainer from a checkpoint file"""
 
         conf.resume = resume
-        conf.import_ingp.enabled = False
-        conf.import_ply.enabled = False
-        return Trainer3DGRUT(conf)
-
-    @staticmethod
-    def create_from_ingp(ply_path: str, conf: DictConfig):
-        """Create a new trainer from an INGP file"""
-
-        conf.resume = ""
-        conf.import_ingp.enabled = True
-        conf.import_ingp.path = ply_path
         conf.import_ply.enabled = False
         return Trainer3DGRUT(conf)
 
@@ -114,7 +101,6 @@ class Trainer3DGRUT:
         """Create a new trainer from a PLY file"""
 
         conf.resume = ""
-        conf.import_ingp.enabled = False
         conf.import_ply.enabled = True
         conf.import_ply.path = ply_path
         return Trainer3DGRUT(conf)
@@ -248,17 +234,6 @@ class Trainer3DGRUT:
                 ):
                     sched.load_state_dict(sched_state)
                 logger.info("📷 Post-processing state restored from checkpoint")
-        elif conf.import_ingp.enabled:
-            ingp_path = (
-                conf.import_ingp.path
-                if conf.import_ingp.path
-                else f"{conf.out_dir}/{conf.experiment_name}/export_last.inpg"
-            )
-            logger.info(f"Loading a pretrained ingp model from {ingp_path}!")
-            model.init_from_ingp(ingp_path)
-            self.strategy.init_densification_buffer()
-            model.build_acc()
-            global_step = conf.import_ingp.init_global_step
         elif conf.import_ply.enabled:
             ply_path = (
                 conf.import_ply.path
@@ -714,26 +689,38 @@ class Trainer3DGRUT:
         conf = self.conf
         out_dir = self.tracking.output_dir
 
-        # Export the mixture-of-3d-gaussians in mogt file
+        # Export the mixture-of-3d-gaussians
         logger.log_rule("Exporting Models")
-        if conf.export_ingp.enabled:
-            ingp_path = conf.export_ingp.path if conf.export_ingp.path else os.path.join(out_dir, "export_last.ingp")
-            exporter = INGPExporter()
-            exporter.export(
-                self.model,
-                Path(ingp_path),
-                dataset=self.train_dataset,
-                conf=conf,
-                force_half=conf.export_ingp.force_half,
-            )
         if conf.export_ply.enabled:
             ply_path = conf.export_ply.path if conf.export_ply.path else os.path.join(out_dir, "export_last.ply")
             exporter = PLYExporter()
             exporter.export(self.model, Path(ply_path), dataset=self.train_dataset, conf=conf)
-        if conf.export_usdz.enabled:
-            usdz_path = conf.export_usdz.path if conf.export_usdz.path else os.path.join(out_dir, "export_last.usdz")
-            exporter = USDZExporter()
-            exporter.export(self.model, Path(usdz_path), dataset=self.train_dataset, conf=conf)
+        if conf.export_usd.enabled:
+            # Determine format for filename suffix
+            usdz_format = getattr(conf.export_usd, 'format', 'nurec')
+            if usdz_format == 'standard':
+                format_suffix = "lightfield"
+                exporter = USDExporter.from_config(conf)
+            else:
+                format_suffix = "nurec"
+                exporter = NuRecExporter()
+
+            # Handle path: if not set or relative, put in output directory
+            if conf.export_usd.path:
+                usdz_path = conf.export_usd.path
+                if not os.path.isabs(usdz_path):
+                    usdz_path = os.path.join(out_dir, usdz_path)
+            else:
+                # Default filename includes format suffix
+                usdz_path = os.path.join(out_dir, f"export_last_{format_suffix}.usdz")
+
+            exporter.export(
+                self.model,
+                Path(usdz_path),
+                dataset=self.train_dataset,
+                conf=conf,
+                background=getattr(self, 'background', None),
+            )
 
         # Export post-processing report (PPISP-based)
         if self.post_processing is not None and conf.post_processing.method == "ppisp":

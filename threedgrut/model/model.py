@@ -29,8 +29,7 @@ import threedgut_tracer
 from threedgrut.datasets.protocols import Batch
 from threedgrut.datasets.utils import read_colmap_points3D_text, read_next_bytes
 from threedgrut.export.base import ExportableModel
-from threedgrut.export.ingp_exporter import INGPExporter
-from threedgrut.export.ply_exporter import PLYExporter
+from threedgrut.export import PLYExporter
 from threedgrut.model.geometry import k_nearest_neighbors, nearest_neighbor_dist_cpuKD
 from threedgrut.optimizers import SelectiveAdam
 from threedgrut.utils.logger import logger
@@ -682,60 +681,6 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
             T_to_world = torch.eye(4, dtype=rays_o.dtype, device=rays_o.device)[None]
         inputs = Batch(T_to_world=T_to_world, rays_ori=rays_o, rays_dir=rays_d)
         return self.renderer.render(self, inputs)
-
-    @torch.no_grad()
-    def export_ingp(self, mogt_path: str, force_half: bool):
-        exporter = INGPExporter()
-        exporter.export(self, Path(mogt_path), force_half=force_half)
-
-    @torch.no_grad()
-    def init_from_ingp(self, ingp_path, init_model=True):
-        with gzip.open(ingp_path, "rb") as f:
-            mogt_config = msgpack.unpackb(f.read())
-        mog_num = mogt_config["mog_num"]
-        self.n_active_features = self.max_n_features = mogt_config["mog_sph_degree"]
-        import_dtype = np.float16 if mogt_config["precision"] == "half" else np.float32
-        positions = (
-            torch.from_numpy(np.frombuffer(mogt_config["mog_positions"], dtype=import_dtype))
-            .to(device=self.device)
-            .reshape(mog_num, 3)
-        )
-        scales = (
-            torch.from_numpy(np.frombuffer(mogt_config["mog_scales"], dtype=import_dtype))
-            .to(device=self.device)
-            .reshape(mog_num, 3)
-        )
-        densities = (
-            torch.from_numpy(np.frombuffer(mogt_config["mog_densities"], dtype=import_dtype))
-            .to(device=self.device)
-            .reshape(mog_num, 1)
-        )
-        rotations = (
-            torch.from_numpy(np.frombuffer(mogt_config["mog_rotations"], dtype=import_dtype))
-            .to(device=self.device)
-            .reshape(mog_num, 4)
-        )
-        n_features = sh_degree_to_specular_dim(self.max_n_features)
-        features = (
-            torch.from_numpy(np.frombuffer(mogt_config["mog_features"], dtype=import_dtype))
-            .to(device=self.device)
-            .reshape(mog_num, n_features + 3)
-        )
-        features_albedo, features_specular = torch.split(features, [3, n_features], dim=1)
-
-        self.positions = torch.nn.Parameter(positions)
-        self.rotation = torch.nn.Parameter(rotations)
-        self.scale = torch.nn.Parameter(self.scale_activation_inv(scales))
-        self.density = torch.nn.Parameter(self.density_activation_inv(densities))
-        self.features_albedo = torch.nn.Parameter(features_albedo)
-        self.features_specular = torch.nn.Parameter(features_specular)
-
-        self.n_active_features = self.max_n_features
-
-        if init_model:
-            self.set_optimizable_parameters()
-            self.setup_optimizer()
-            self.validate_fields()
 
     @torch.no_grad()
     def export_ply(self, mogt_path: str):

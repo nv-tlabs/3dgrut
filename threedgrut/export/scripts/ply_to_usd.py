@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,7 +22,7 @@ from hydra.compose import compose
 from hydra.initialize import initialize
 from omegaconf import DictConfig
 
-from threedgrut.export.usdz_exporter import USDZExporter
+from threedgrut.export import NuRecExporter
 from threedgrut.model.model import MixtureOfGaussians
 
 # Set up logging
@@ -87,11 +87,11 @@ def main():
         logger.info(f"Loading PLY with init_from_ply: {input_path}")
         model.init_from_ply(str(input_path), init_model=False)
 
-        # 3. Create USDZExporter
-        exporter = USDZExporter()
+        # 3. Create NuRecExporter
+        exporter = NuRecExporter()
 
         # 4. Export to USDZ
-        logger.info(f"Exporting with USDZExporter: {output_path}")
+        logger.info(f"Exporting with NuRecExporter: {output_path}")
         exporter.export(model, output_path, dataset=None, conf=conf)
 
         logger.info(f"Successfully exported to {output_path}")
