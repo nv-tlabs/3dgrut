@@ -65,6 +65,43 @@ For projects that require a fast, modular, and production-ready Gaussian Splatti
 - For good performance with 3DGRT, we recommend using an NVIDIA GPU with Ray Tracing (RT) cores.
 - Currently, only Linux environments are supported by the included install script (Windows support coming soon!)
 
+### Option A: Using uv (Recommended)
+
+[uv](https://docs.astral.sh/uv/) provides faster installation and better dependency resolution. The CUDA toolkit is automatically downloaded and installed locally inside the virtual environment — no system-wide CUDA installation is required.
+
+**Prerequisites:**
+1. **GCC <= 11** for CUDA 11.8, or **GCC <= 13** for CUDA 12.x (install if needed: `sudo apt-get install gcc-11 g++-11`)
+2. **uv** installed: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+3. **OpenGL headers** for playground: `sudo apt-get install libgl1-mesa-dev`
+4. **wget** for downloading CUDA toolkit
+
+**Installation:**
+```bash
+git clone --recursive https://github.com/nv-tlabs/3dgrut.git
+cd 3dgrut
+
+# Default: CUDA 12.8 (for modern GPUs including Blackwell/RTX 50 series)
+chmod +x install_env_uv.sh
+./install_env_uv.sh
+
+# Other supported CUDA versions:
+# CUDA_VERSION=11.8 ./install_env_uv.sh  # For older GPUs
+# CUDA_VERSION=12.4 ./install_env_uv.sh
+# CUDA_VERSION=12.6 ./install_env_uv.sh
+
+# Activate the environment
+source activate_env.sh
+```
+
+> [!NOTE]
+> If a system CUDA toolkit is detected with a matching major version, it will be used automatically (no download needed). Otherwise, the CUDA toolkit (~4GB) is downloaded and installed locally to `.venv/cuda-{version}/`. To force a local install even with system CUDA available: `FORCE_LOCAL_CUDA=1 ./install_env_uv.sh`
+
+### Option B: Using conda (Alternative)
+
+<details>
+<summary>Click to expand conda installation instructions</summary>
+</br>
+
 <details>
 <summary> NOTE: gcc versions >11 (expand for details)</summary>
 </br>
@@ -113,6 +150,8 @@ conda activate 3dgrut
 ```
 
 On Windows, you can use the `install_env.ps1` script to install the environment.
+
+</details>
 
 ### Running with Docker
 
