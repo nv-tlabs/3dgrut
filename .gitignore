@@ -105,3 +105,8 @@ visual_viser_interpolate.py
 recordings/
 viser-client/
 visual_viser_embedding.py
+
+mask_train-ricoh360.png
+mask_train_2.png
+
+threedgrut/datasets/dataset_colmap_interpolate_fixed_center.py

@@ -9,25 +9,24 @@ DATAPATH="${DATAROOT}/${SCENE}"
 
 ## omni → 16 prespectives
 conda activate 3dgrut_pycolmap
-cd colmap
-python python/examples/16/pano_camera.py \
+cd preprocessing
+python perspective-16/pano_camera.py \
     --input_image_path ${DATAPATH}/omni \
     --output_path      ${DATAPATH}/pre_masking/images
 
 ## mask perspectives
 conda activate sam
-python python/examples/16/mask_frames.py \
+CUDA_VISIBLE_DEVICES=2  python perspective-16/mask_frames.py \
     ${DATAPATH}/pre_masking/images \
     ${DATAPATH}/pre_masking/masks
 
 ## prespective → omni
 conda activate 3dgrut_pycolmap
-python python/examples/16/pano_masks_reverse.py \
+python perspective-16/pano_masks_reverse.py \
     --input_path ${DATAPATH}/pre_masking/masks \
     --output_path ${DATAPATH}/pre_masking/reconstructed_masks
 
 ## omni → synthetic fisheye
-cd ..
 python step1-o2s.py --scene "${SCENE}" --project "${PROJECT}"
 
 ## mask synthetic fisheye

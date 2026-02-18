@@ -18,10 +18,10 @@ for i, a in enumerate(sys.argv[1:]):
         
 data_dir     = f"/home/youlenda/360/omni/3dgrut/data/{project}/{scene}"
 omni_dir     = f"{data_dir}/omni"
-centers_dir  = f"{data_dir}/pre_masking_6/reconstructed_masks/centers/"
-out_fi_dir   = f"{data_dir}/pre_masking_6/fisheye_syn"
+centers_dir  = f"{data_dir}/pre_masking/reconstructed_masks/centers/"
+out_fi_dir   = f"{data_dir}/pre_masking/fisheye_syn"
 # out_fi_dir   = f"fisheye_syn"
-out_R_table  = f"{data_dir}/pre_masking_6/synth_R_list.csv"
+out_R_table  = f"{data_dir}/pre_masking/synth_R_list.csv"
 
 colmap_dir   = f"/home/youlenda/360/omni/3dgrut/data/{project}/{scene}/sparse/0"
 int_rot_dir  = "optimized.txt"
@@ -41,7 +41,7 @@ rec = pycolmap.Reconstruction()
 try:
     rec.read(colmap_dir)
 except:
-    rec.read(f"/home/youlenda/360/omni/3dgrut/data/party_room/sparse/0")
+    rec.read(f"/home/youlenda/360/omni/3dgrut/data/fullcircle/party_room/sparse/0")
 
 camera_r = pycolmap.Camera(camera_id=1, model=pycolmap.CameraModelId.OPENCV_FISHEYE,
                            width=2880, height=2880, params=params_r)
@@ -86,7 +86,7 @@ for img_path in img_paths:
     stem = os.path.splitext(os.path.basename(img_path))[0]
     img_omni = cv2.imread(img_path)
     
-    centers_csv = os.path.join(centers_dir, f"{stem}.csv")
+    centers_csv = os.path.join(centers_dir, f"{stem}.csv") # pillar:96,cat:232,poster:20,garden:98,park: 313*,chair:78,flower:92,farm:102*,brick102,bridge100,
     
     rows = []
     with open(centers_csv, "r") as f:
@@ -96,6 +96,48 @@ for img_path in img_paths:
             w = float(row.get("area_px") or row.get("weight", 1.0))
             x_px = u * W_eq; y_px = v * H_eq
             rows.append((x_px, y_px, w))
+            
+        if len(rows) == 0:
+            i = img_paths.index(img_path)
+
+            def load_rows(csv_path):
+                tmp = []
+                with open(csv_path, "r", newline="") as f2:
+                    rdict2 = csv.DictReader(f2)
+                    for row in rdict2:
+                        u = float(row["u"]); v = float(row["v"])
+                        w = float(row.get("area_px") or row.get("weight", 1.0))
+                        x_px = u * W_eq; y_px = v * H_eq
+                        tmp.append((x_px, y_px, w))
+                return tmp
+
+            found = False
+            max_d = max(i, len(img_paths) - 1 - i)
+            for d in range(1, max_d + 1):
+                # check BEFORE first (tie-breaker), then AFTER
+                for j in (i - d, i + d):
+                    if j < 0 or j >= len(img_paths):
+                        continue
+
+                    near_stem = os.path.splitext(os.path.basename(img_paths[j]))[0]
+                    near_csv = os.path.join(centers_dir, f"{near_stem}.csv")
+
+                    try:
+                        tmp = load_rows(near_csv)
+                        if len(tmp) > 0:
+                            rows = tmp
+                            print(f"[reuse] {stem} uses centers from {near_stem} (distance {d})")
+                            found = True
+                            break
+                    except FileNotFoundError:
+                        continue
+
+                if found:
+                    break
+
+            if not found:
+                print(f"[skip] {stem} | no valid centers CSV found before/after")
+                continue
 
     uv_pix  = np.array([[x, y] for x, y, _ in rows], dtype=np.float64)
     weights = np.array([w for _, _, w in rows], dtype=np.float64)

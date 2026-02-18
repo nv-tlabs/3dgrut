@@ -17,7 +17,7 @@ for i, a in enumerate(sys.argv[1:]):
         
 data_dir     = f"/home/youlenda/360/omni/3dgrut/data/{project}/{scene}"
 fisheye_dir  = f"{data_dir}/out-{method}/fisheye_sy_mask"
-R_table_path = f"{data_dir}/pre_masking_6/synth_R_list.csv"
+R_table_path = f"{data_dir}/pre_masking/synth_R_list.csv"
 out_eq_dir   = f"{data_dir}/out-{method}/omni_mask"
 # out_ov_dir   = f"{data_dir}/out-dino/omni_mask_overlay"
 # ref_dir      = f"{data_dir}/omni"
@@ -40,7 +40,7 @@ rec = pycolmap.Reconstruction()
 try:
     rec.read(colmap_dir)
 except:
-    rec.read(f"/home/youlenda/360/omni/3dgrut/data/party_room/sparse/0")
+    rec.read(f"/home/youlenda/360/omni/3dgrut/data/fullcircle/party_room/sparse/0")
 
 camera_r = pycolmap.Camera(
     camera_id=1,

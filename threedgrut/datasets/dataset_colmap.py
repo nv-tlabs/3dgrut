@@ -88,6 +88,13 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             # and
             # ("camera1"      in os.path.basename(p))
              for p in self.image_paths])
+        
+        # ricoh360
+        # test_txt = os.path.join(self.image_paths[0].split("images")[0], "test.txt")
+        # with open(test_txt) as f:
+        #     test_ids = set(line.strip() for line in f)
+        # not_test_set = np.array([os.path.splitext(os.path.basename(p))[0] in test_ids for p in self.image_paths])
+        
         self.cam_extrinsics = [e for e, keep in zip(self.cam_extrinsics, not_test_set) if keep]
         self.poses = self.poses[not_test_set].astype(np.float32)
         self.image_paths = self.image_paths[not_test_set]

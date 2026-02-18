@@ -45,7 +45,7 @@ rec = pycolmap.Reconstruction()
 try:
     rec.read(colmap_dir)
 except:
-    rec.read(f"/home/youlenda/360/omni/3dgrut/data/party_room/sparse/0")
+    rec.read(f"/home/youlenda/360/omni/3dgrut/data/fullcircle/party_room/sparse/0")
 
 camera_f = pycolmap.Camera(camera_id=0, model=pycolmap.CameraModelId.OPENCV_FISHEYE, width=width, height=height, params=params_f)
 camera_r = pycolmap.Camera(camera_id=1, model=pycolmap.CameraModelId.OPENCV_FISHEYE, width=width, height=height, params=params_r)
