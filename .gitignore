@@ -1,6 +1,8 @@
 **__pycache__
 .vscode
+CLAUDE.md
 .polyscope.ini
+.venv/
 
 external/
 runs/
