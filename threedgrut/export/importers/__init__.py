@@ -21,11 +21,13 @@ GaussianAttributes representation for transcoding.
 """
 
 from threedgrut.export.importers.base import FormatImporter
+from threedgrut.export.importers.nurec_usd import NuRecUSDImporter
 from threedgrut.export.importers.ply import PLYImporter
 from threedgrut.export.importers.usd import USDImporter
 
 __all__ = [
     "FormatImporter",
+    "NuRecUSDImporter",
     "PLYImporter",
     "USDImporter",
 ]

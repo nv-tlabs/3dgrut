@@ -111,6 +111,7 @@ def create_gaussian_model_root(
     flip_z_axis: bool = False,
     root_path: str = "/World/Gaussians",
     normalizing_transform: np.ndarray = None,
+    coordinate_transform: np.ndarray = None,
 ) -> str:
     """
     Create the root Xform for Gaussian content with optional coordinate transforms.
@@ -122,6 +123,7 @@ def create_gaussian_model_root(
         flip_z_axis: Negate Z coordinates
         root_path: USD path for the root prim
         normalizing_transform: Optional 4x4 normalizing transform matrix
+        coordinate_transform: Optional 4x4 (e.g. 3DGRUT-to-USDZ). Applied after normalizing and scale.
 
     Returns:
         The root path string
@@ -136,8 +138,9 @@ def create_gaussian_model_root(
     # Compute combined transform
     has_scale = scale_x != 1.0 or scale_y != 1.0 or scale_z != 1.0
     has_normalizing = normalizing_transform is not None
+    has_coordinate = coordinate_transform is not None
 
-    if has_scale or has_normalizing:
+    if has_scale or has_normalizing or has_coordinate:
         transform_op = root_xform.AddTransformOp()
 
         # Start with identity
@@ -151,6 +154,10 @@ def create_gaussian_model_root(
         if has_scale:
             scale_mat = Gf.Matrix4d().SetScale(Gf.Vec3d(scale_x, scale_y, scale_z))
             combined = combined * scale_mat
+
+        # Then apply optional 3DGRUT-to-USDZ coordinate transform
+        if has_coordinate:
+            combined = column_vector_4x4_to_usd_matrix(coordinate_transform) * combined
 
         transform_op.Set(combined)
 

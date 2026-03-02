@@ -194,7 +194,7 @@ def fill_3dgut_template(
                         "rect_bounding": rect_bounding,
                         "tight_opacity_bounding": tight_opacity_bounding,
                         "tile_based": tile_based_culling,
-                        "near_clip_distance": 0.2,
+                        "near_clip_distance": 1e-8,
                         "far_clip_distance": 3.402823466e38,
                     },
                     "render": {"mode": "kbuffer", "k_buffer_size": k_buffer_size},

@@ -170,8 +170,15 @@ class NuRecExporter(ModelExporter):
 
         model_file = NamedSerialized(filename=output_path.stem + ".nurec", serialized=buffer.getvalue())
 
+        apply_coordinate_transform = kwargs.get("apply_coordinate_transform", False)
+
         # Create USD representations
-        gauss_usd = serialize_nurec_usd(model_file, attrs.positions, normalizing_transform)
+        gauss_usd = serialize_nurec_usd(
+            model_file,
+            attrs.positions,
+            normalizing_transform,
+            apply_coordinate_transform=apply_coordinate_transform,
+        )
         default_usd = serialize_usd_default_layer(gauss_usd)
 
         # Write the final USDZ file
