@@ -29,5 +29,5 @@ libigl
 pygltflib
 # --find-links https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.2_cu118.html
 # kaolin==0.17.0
-usd-core
+usd-core>=26.3
 ppisp @ git+https://github.com/nv-tlabs/ppisp@v1.0.1

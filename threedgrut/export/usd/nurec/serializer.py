@@ -24,6 +24,7 @@ import zipfile
 import numpy as np
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdUtils, UsdVol
 
+from threedgrut.export.transforms import get_3dgrut_to_usdz_coordinate_transform
 from threedgrut.export.usd.nurec.templates import NamedSerialized
 from threedgrut.export.usd.stage_utils import NamedUSDStage, initialize_usd_stage as _initialize_usd_stage
 
@@ -66,7 +67,10 @@ def serialize_usd_stage_to_bytes(stage: Usd.Stage) -> bytes:
 
 
 def serialize_nurec_usd(
-    model_file: NamedSerialized, positions: np.ndarray, normalizing_transform: np.ndarray = np.eye(4)
+    model_file: NamedSerialized,
+    positions: np.ndarray,
+    normalizing_transform: np.ndarray = np.eye(4),
+    apply_coordinate_transform: bool = False,
 ) -> NamedUSDStage:
     """
     Create a USD file for the 3DGS model.
@@ -75,6 +79,7 @@ def serialize_nurec_usd(
         model_file: NamedSerialized object containing the compressed msgpack data
         positions: Positions extracted from PLY file for AABB calculation
         normalizing_transform: 4x4 transformation matrix to normalize the scene (defaults to identity)
+        apply_coordinate_transform: If True, apply 3DGRUT-to-USDZ coordinate transform (Omniverse convention)
 
     Returns:
         NamedUSDStage object containing the USD stage
@@ -115,14 +120,13 @@ def serialize_nurec_usd(
     gauss_volume = UsdVol.Volume.Define(stage, gauss_path)
     gauss_prim = gauss_volume.GetPrim()
 
-    # Apply normalizing transform (identity by default)
-    # Default conversion matrix from 3DGRUT to USDZ
-    default_conv_tf = np.array(
-        [[-1.0, 0.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
-    )
-
+    # Apply normalizing transform (identity by default). Optionally apply 3DGRUT-to-USDZ coordinate transform.
     normalizing_inverse = np.linalg.inv(normalizing_transform)
-    corrected_matrix = normalizing_inverse @ default_conv_tf
+    if apply_coordinate_transform:
+        coord_tf = get_3dgrut_to_usdz_coordinate_transform()
+        corrected_matrix = normalizing_inverse @ coord_tf
+    else:
+        corrected_matrix = normalizing_inverse
 
     # Apply transform directly to the gauss volume
     matrix_op = gauss_volume.AddTransformOp()

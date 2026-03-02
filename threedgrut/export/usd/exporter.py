@@ -29,7 +29,10 @@ import torch
 
 from threedgrut.export.base import ExportableModel, ModelExporter
 from threedgrut.export.accessor import GaussianExportAccessor
-from threedgrut.export.transforms import estimate_normalizing_transform
+from threedgrut.export.transforms import (
+    estimate_normalizing_transform,
+    get_3dgrut_to_usdz_coordinate_transform,
+)
 from threedgrut.export.usd.stage_utils import (
     NamedSerialized,
     NamedUSDStage,
@@ -171,6 +174,8 @@ class USDExporter(ModelExporter):
     def __init__(
         self,
         half_precision: bool = False,
+        half_geometry: bool = False,
+        half_features: bool = False,
         export_cameras: bool = True,
         export_background: bool = True,
         apply_normalizing_transform: bool = True,
@@ -180,13 +185,19 @@ class USDExporter(ModelExporter):
         Initialize the USD exporter.
 
         Args:
-            half_precision: Use half-precision floats (smaller files)
+            half_precision: If True, use half for both geometry and features (backward compat).
+            half_geometry: Use half precision for positions, orientations, scales (LightField).
+            half_features: Use half precision for opacities and SH coefficients (LightField).
             export_cameras: Include camera poses in export
             export_background: Include background/environment in export
             apply_normalizing_transform: Apply transform to normalize scene orientation
-            sorting_mode_hint: Sorting hint for rendering ("cameraDistance", "zAxis", etc.)
+            sorting_mode_hint: Sorting hint for rendering ("cameraDistance", "zDepth" per UsdVol schema)
         """
-        self.half_precision = half_precision
+        if half_precision:
+            half_geometry = True
+            half_features = True
+        self.half_geometry = half_geometry
+        self.half_features = half_features
         self.export_cameras = export_cameras
         self.export_background = export_background
         self.apply_normalizing_transform = apply_normalizing_transform
@@ -261,7 +272,12 @@ class USDExporter(ModelExporter):
         # Create main USD stage
         stage = initialize_usd_stage(up_axis="Y")
 
-        # Create Gaussian content root with optional normalizing transform
+        apply_coordinate_transform = kwargs.get("apply_coordinate_transform", False)
+        coordinate_transform = (
+            get_3dgrut_to_usdz_coordinate_transform() if apply_coordinate_transform else None
+        )
+
+        # Create Gaussian content root with optional normalizing and coordinate transform
         gaussians_root = create_gaussian_model_root(
             stage,
             flip_x_axis=False,
@@ -269,6 +285,7 @@ class USDExporter(ModelExporter):
             flip_z_axis=False,
             root_path="/World/Gaussians",
             normalizing_transform=normalizing_transform if self.apply_normalizing_transform else None,
+            coordinate_transform=coordinate_transform,
         )
 
         # Create Gaussian writer (LightField schema)
@@ -276,7 +293,8 @@ class USDExporter(ModelExporter):
             stage=stage,
             capabilities=caps,
             content_root_path=gaussians_root,
-            half_precision=self.half_precision,
+            half_geometry=self.half_geometry,
+            half_features=self.half_features,
             sorting_mode_hint=self.sorting_mode_hint,
         )
 
@@ -373,9 +391,15 @@ class USDExporter(ModelExporter):
             Configured USDExporter instance
         """
         export_conf = getattr(conf, 'export_usd', None) or conf
-
+        half_precision = getattr(export_conf, 'half_precision', False)
+        half_geometry = getattr(export_conf, 'half_geometry', False)
+        half_features = getattr(export_conf, 'half_features', False)
+        if half_precision:
+            half_geometry = True
+            half_features = True
         return cls(
-            half_precision=getattr(export_conf, 'half_precision', False),
+            half_geometry=half_geometry,
+            half_features=half_features,
             export_cameras=getattr(export_conf, 'export_cameras', True),
             export_background=getattr(export_conf, 'export_background', True),
             apply_normalizing_transform=getattr(export_conf, 'apply_normalizing_transform', True),
