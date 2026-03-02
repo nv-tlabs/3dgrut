@@ -111,7 +111,8 @@ def create_gaussian_writer(
     stage: Usd.Stage,
     capabilities: ModelCapabilities,
     content_root_path: str = "/World/Gaussians",
-    half_precision: bool = False,
+    half_geometry: bool = False,
+    half_features: bool = False,
     sorting_mode_hint: str = "cameraDistance",
 ) -> GaussianUSDWriter:
     """Factory function to create USD Gaussian writer.
@@ -120,7 +121,8 @@ def create_gaussian_writer(
         stage: USD stage to write to
         capabilities: Model capabilities descriptor
         content_root_path: Root path for content
-        half_precision: Use half-precision (float16) for LightField schema
+        half_geometry: Use half precision for positions, orientations, scales (LightField)
+        half_features: Use half precision for opacities and SH coefficients (LightField)
         sorting_mode_hint: Sorting mode hint for LightField schema
 
     Returns:
@@ -132,6 +134,7 @@ def create_gaussian_writer(
         stage=stage,
         capabilities=capabilities,
         content_root_path=content_root_path,
-        half_precision=half_precision,
+        half_geometry=half_geometry,
+        half_features=half_features,
         sorting_mode_hint=sorting_mode_hint,
     )

@@ -94,6 +94,26 @@ def get_3dgrut_to_usd_transform() -> np.ndarray:
     ])
 
 
+def get_3dgrut_to_usdz_coordinate_transform() -> np.ndarray:
+    """Get the 3DGRUT-to-USDZ (Omniverse) coordinate transform.
+
+    Same matrix used by NuRec when apply_coordinate_transform is True.
+    Use for both Lightfield and NuRec when aligning with Omniverse convention.
+
+    Returns:
+        4x4 transformation matrix (column-vector convention)
+    """
+    return np.array(
+        [
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0, 0.0],
+            [0.0, -1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+
+
 def column_vector_4x4_to_usd_matrix(matrix: np.ndarray) -> Gf.Matrix4d:
     """Build USD Gf.Matrix4d from a column-vector 4x4 (p' = M @ p).
 

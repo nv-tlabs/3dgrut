@@ -19,21 +19,29 @@ Transcode script for converting between Gaussian splatting export formats.
 Supports conversions between:
 - PLY (pre-activation)
 - USD LightField (post-activation)
-- NuRec USDZ (Omniverse format)
+- NuRec USD/USDZ (Omniverse format; UsdVol::Volume + .nurec payload)
 
 Usage:
     python -m threedgrut.export.scripts.transcode input.ply -o output.usdz --format lightfield
     python -m threedgrut.export.scripts.transcode input.usdz -o output.ply
+    python -m threedgrut.export.scripts.transcode nurec.usd -o lightfield.usdz --format lightfield
 """
 
 import argparse
 import logging
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Optional, Tuple
 
 from threedgrut.export.adapter import AttributesExportAdapter
-from threedgrut.export.importers import PLYImporter, USDImporter, FormatImporter
+from threedgrut.export.importers import (
+    FormatImporter,
+    NuRecUSDImporter,
+    PLYImporter,
+    USDImporter,
+)
 from threedgrut.export.formats import PLYExporter
 from threedgrut.export.usd.exporter import USDExporter
 from threedgrut.export.usd.nurec.exporter import NuRecExporter
@@ -51,20 +59,55 @@ OUTPUT_FORMATS = {
 }
 
 
+def _is_nurec_stage(stage_path: Path) -> bool:
+    """Return True if the USD stage contains a NuRec Volume prim."""
+    from pxr import Usd
+
+    stage = Usd.Stage.Open(str(stage_path))
+    if not stage:
+        return False
+    for prim in stage.Traverse():
+        if prim.GetTypeName() != "Volume":
+            continue
+        attr = prim.GetAttribute("omni:nurec:isNuRecVolume")
+        if attr.IsValid() and attr.Get():
+            return True
+    return False
+
+
 def detect_input_format(path: Path) -> str:
-    """Detect input format from file extension.
+    """Detect input format from file extension and, for USD, from stage content.
 
     Args:
         path: Input file path
 
     Returns:
-        Format string: 'ply' or 'usd'
+        Format string: 'ply', 'nurec', or 'lightfield'
     """
     suffix = path.suffix.lower()
     if suffix == ".ply":
         return "ply"
     elif suffix in [".usd", ".usda", ".usdc", ".usdz"]:
-        return "usd"
+        # Refine to NuRec vs Lightfield by inspecting the stage
+        if suffix == ".usdz":
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmpdir_path = Path(tmpdir)
+                with zipfile.ZipFile(path, "r") as zf:
+                    zf.extractall(tmpdir_path)
+                usd_files = list(tmpdir_path.glob("*.usd*"))
+                root_file = None
+                for f in usd_files:
+                    if f.stem == "default":
+                        root_file = f
+                        break
+                if root_file is None and usd_files:
+                    root_file = usd_files[0]
+                if root_file is not None and _is_nurec_stage(root_file):
+                    return "nurec"
+        else:
+            if _is_nurec_stage(path):
+                return "nurec"
+        return "lightfield"
     else:
         raise ValueError(f"Unknown input format for extension: {suffix}")
 
@@ -73,7 +116,7 @@ def get_importer(format_name: str, max_sh_degree: int = 3) -> FormatImporter:
     """Get importer for the specified format.
 
     Args:
-        format_name: Format name ('ply', 'usd')
+        format_name: Format name ('ply', 'lightfield', 'nurec')
         max_sh_degree: Maximum SH degree for PLY importer
 
     Returns:
@@ -81,30 +124,46 @@ def get_importer(format_name: str, max_sh_degree: int = 3) -> FormatImporter:
     """
     if format_name == "ply":
         return PLYImporter(max_sh_degree=max_sh_degree)
-    elif format_name == "usd":
+    elif format_name == "lightfield":
         return USDImporter()
+    elif format_name == "nurec":
+        return NuRecUSDImporter()
     else:
         raise ValueError(f"Unknown input format: {format_name}")
 
 
-def get_exporter(format_name: str, half_precision: bool = False) -> Tuple[ModelExporter, bool]:
+def get_exporter(
+    format_name: str,
+    half_precision: bool = False,
+    half_geometry: bool = False,
+    half_features: bool = False,
+    render_order_hint: Optional[str] = None,
+) -> Tuple[ModelExporter, bool]:
     """Get exporter for the specified format.
 
     Args:
         format_name: Format name ('ply', 'lightfield', 'nurec')
-        half_precision: Use half precision for supported formats
+        half_precision: If True, use half for both geometry and features (LightField). Backward compat.
+        half_geometry: Use half precision for positions, orientations, scales (LightField only).
+        half_features: Use half precision for opacities and SH coefficients (LightField only).
+        render_order_hint: If set, force sortingModeHint for lightfield. Ignored for other formats.
 
     Returns:
         Tuple of (ModelExporter instance, expects_preactivation)
     """
+    if half_precision:
+        half_geometry = True
+        half_features = True
     if format_name == "ply":
         return PLYExporter(), True
     elif format_name == "lightfield":
         return USDExporter(
-            half_precision=half_precision,
+            half_geometry=half_geometry,
+            half_features=half_features,
             export_cameras=False,
             export_background=False,
             apply_normalizing_transform=False,
+            sorting_mode_hint=render_order_hint if render_order_hint is not None else "cameraDistance",
         ), False
     elif format_name == "nurec":
         return NuRecExporter(), True
@@ -135,6 +194,10 @@ def transcode(
     output_format: str,
     max_sh_degree: int = 3,
     half_precision: bool = False,
+    half_geometry: bool = False,
+    half_features: bool = False,
+    apply_coordinate_transform: bool = False,
+    render_order_hint: Optional[str] = None,
 ) -> None:
     """Transcode between Gaussian splatting formats.
 
@@ -143,8 +206,17 @@ def transcode(
         output_path: Path for output file
         output_format: Target format name
         max_sh_degree: Maximum SH degree for PLY import
-        half_precision: Use half precision for USD exports
+        half_precision: If True, use half for both geometry and features (LightField). Backward compat.
+        half_geometry: Use half for positions, orientations, scales (LightField only).
+        half_features: Use half for opacities and SH coefficients (LightField only).
+        apply_coordinate_transform: Apply 3DGRUT-to-USDZ transform (for both lightfield and nurec)
+        render_order_hint: If set, force sortingModeHint for lightfield only; ignored for other formats (warning logged).
     """
+    if render_order_hint is not None and output_format != "lightfield":
+        logger.warning(
+            "--render-order-hint is only applied for lightfield format; ignoring for format '%s'",
+            output_format,
+        )
     # Detect input format
     input_format = detect_input_format(input_path)
     logger.info(f"Input format: {input_format}")
@@ -158,7 +230,13 @@ def transcode(
     logger.info(f"Loaded {attrs.num_gaussians} Gaussians (preactivation={source_is_preactivation})")
 
     # Get exporter
-    exporter, target_expects_preactivation = get_exporter(output_format, half_precision)
+    exporter, target_expects_preactivation = get_exporter(
+        output_format,
+        half_precision=half_precision,
+        half_geometry=half_geometry,
+        half_features=half_features,
+        render_order_hint=render_order_hint if output_format == "lightfield" else None,
+    )
 
     # Create adapter with correct activation state
     # The adapter needs to know the source data state
@@ -177,7 +255,7 @@ def transcode(
 
     # Export
     logger.info(f"Exporting to {output_path}...")
-    exporter.export(adapter, output_path)
+    exporter.export(adapter, output_path, apply_coordinate_transform=apply_coordinate_transform)
 
     logger.info(f"Transcode complete: {input_path} -> {output_path}")
 
@@ -188,12 +266,15 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Supported formats:
-  Input:  ply, usd/usda/usdc/usdz
+  Input:  ply, usd/usda/usdc/usdz (auto-detected: LightField vs NuRec)
   Output: ply, lightfield, nurec
 
 Examples:
   # Convert PLY to USD LightField
   python -m threedgrut.export.scripts.transcode model.ply -o model.usdz --format lightfield
+
+  # Convert NuRec USD to LightField
+  python -m threedgrut.export.scripts.transcode nurec.usd -o lightfield.usdz --format lightfield
 
   # Convert USD to PLY
   python -m threedgrut.export.scripts.transcode model.usdz -o model.ply
@@ -231,7 +312,29 @@ Examples:
     parser.add_argument(
         "--half",
         action="store_true",
-        help="Use half-precision (float16) for supported formats",
+        help="Use half precision for both geometry and features (LightField). Same as --half-geometry --half-features.",
+    )
+    parser.add_argument(
+        "--half-geometry",
+        action="store_true",
+        help="Use half precision for positions, orientations, scales (LightField only).",
+    )
+    parser.add_argument(
+        "--half-features",
+        action="store_true",
+        help="Use half precision for opacities and SH coefficients (LightField only).",
+    )
+    parser.add_argument(
+        "--apply-coordinate-transform",
+        action="store_true",
+        help="Apply 3DGRUT-to-USDZ coordinate transform (Omniverse convention). Use for both lightfield and nurec.",
+    )
+    parser.add_argument(
+        "--render-order-hint",
+        type=str,
+        default=None,
+        metavar="MODE",
+        help="Force sortingModeHint for lightfield export (e.g. cameraDistance, zDepth). Ignored with --format ply/nurec (warning only).",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -279,6 +382,10 @@ def main():
             output_format=output_format,
             max_sh_degree=args.max_sh_degree,
             half_precision=args.half,
+            half_geometry=args.half_geometry,
+            half_features=args.half_features,
+            apply_coordinate_transform=args.apply_coordinate_transform,
+            render_order_hint=args.render_order_hint,
         )
     except Exception as e:
         logger.error(f"Transcode failed: {e}")

@@ -88,7 +88,17 @@ Examples:
     parser.add_argument(
         "--half",
         action="store_true",
-        help="Use half-precision floats for smaller file size",
+        help="Use half precision for both geometry and features (same as --half-geometry --half-features).",
+    )
+    parser.add_argument(
+        "--half-geometry",
+        action="store_true",
+        help="Use half precision for positions, orientations, scales (LightField).",
+    )
+    parser.add_argument(
+        "--half-features",
+        action="store_true",
+        help="Use half precision for opacities and SH coefficients (LightField).",
     )
     parser.add_argument(
         "--no-cameras",
@@ -212,8 +222,11 @@ def main():
         exporter = NuRecExporter()
         logger.info("Using NuRec format (Omniverse compatible)")
     else:
+        half_geometry = args.half_geometry or args.half
+        half_features = args.half_features or args.half
         exporter = USDExporter(
-            half_precision=args.half,
+            half_geometry=half_geometry,
+            half_features=half_features,
             export_cameras=not args.no_cameras,
             export_background=not args.no_background,
             apply_normalizing_transform=not args.no_transform,
