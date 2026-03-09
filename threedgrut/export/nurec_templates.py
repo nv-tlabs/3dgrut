@@ -15,6 +15,7 @@
 
 import zipfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Union
 
 import numpy as np
@@ -37,6 +38,19 @@ class NamedSerialized:
             zip_file: Zip file to save the data to
         """
         zip_file.writestr(self.filename, self.serialized)
+
+    def save_to_folder(self, out_dir: Path):
+        """
+        Save the serialized data to a directory.
+
+        Args:
+            out_dir: Directory to save the data to
+        """
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / self.filename
+        mode = "wb" if isinstance(self.serialized, bytes) else "w"
+        with open(out_path, mode) as f:
+            f.write(self.serialized)
 
 
 def _fill_state_dict_tensors(

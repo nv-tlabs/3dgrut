@@ -37,6 +37,10 @@ class NamedUSDStage:
         out_dir.mkdir(parents=True, exist_ok=True)
         self.stage.Export(str(out_dir / self.filename))
 
+    def save_to_folder(self, out_dir: Path):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        self.stage.GetRootLayer().Export(str(out_dir / self.filename))
+
     def save_to_zip(self, zip_file: zipfile.ZipFile):
         with tempfile.NamedTemporaryFile(mode="wb", suffix=self.filename, delete=False) as temp_file:
             temp_file_path = temp_file.name
@@ -279,3 +283,29 @@ def write_to_usdz(file_path: Path, model_file, gauss_usd: NamedUSDStage, default
         gauss_usd.save_to_zip(zip_file)
 
     logger.info(f"USDZ file created successfully at {file_path}")
+
+
+def write_to_folder(folder_path: Path, model_file, gauss_usd: NamedUSDStage, default_usd: NamedUSDStage) -> None:
+    """
+    Write the USD files and model data to a folder.
+
+    This is an alternative to write_to_usdz for large models that may fail to load
+    when packaged in a USDZ archive.
+
+    Args:
+        folder_path: Path to the folder to write files to
+        model_file: The compressed model data
+        gauss_usd: The gauss USD stage
+        default_usd: The default USD stage
+    """
+    # Create the output folder
+    folder_path.mkdir(parents=True, exist_ok=True)
+
+    # Save the USD stages
+    default_usd.save_to_folder(folder_path)
+    gauss_usd.save_to_folder(folder_path)
+
+    # Save the model file
+    model_file.save_to_folder(folder_path)
+
+    logger.info(f"USD files created successfully in folder {folder_path}")

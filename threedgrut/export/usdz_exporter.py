@@ -28,6 +28,7 @@ from threedgrut.export.nurec_templates import NamedSerialized, fill_3dgut_templa
 from threedgrut.export.usd_util import (
     serialize_nurec_usd,
     serialize_usd_default_layer,
+    write_to_folder,
     write_to_usdz,
 )
 from threedgrut.utils.logger import logger
@@ -42,18 +43,28 @@ class USDZExporter(ModelExporter):
 
     @torch.no_grad()
     def export(
-        self, model: ExportableModel, output_path: Path, dataset=None, conf: Dict[str, Any] = None, **kwargs
+        self,
+        model: ExportableModel,
+        output_path: Path,
+        dataset=None,
+        conf: Dict[str, Any] = None,
+        as_folder: bool = False,
+        **kwargs,
     ) -> None:
-        """Export the model to a USDZ file.
+        """Export the model to a USDZ file or folder.
 
         Args:
             model: The model to export (must implement ExportableModel)
-            output_path: Path where the USDZ file will be saved
+            output_path: Path where the USDZ file or folder will be saved
             dataset: Optional dataset to get camera poses for upright transform
             conf: Configuration parameters for the renderer
+            as_folder: If True, export to a folder instead of a USDZ archive.
+                This is useful for large models that may fail to load in Omniverse Kit
+                when packaged as USDZ.
             **kwargs: Additional parameters for export
         """
-        logger.info(f"exporting usdz file to {output_path}...")
+        output_type = "folder" if as_folder else "usdz file"
+        logger.info(f"exporting {output_type} to {output_path}...")
 
         if not conf.render.method in ["3dgut", "3dgrt"]:
             raise ValueError(f"Not supported for USDZ export: {conf.render.method}")
@@ -133,5 +144,8 @@ class USDZExporter(ModelExporter):
         gauss_usd = serialize_nurec_usd(model_file, positions, normalizing_transform)
         default_usd = serialize_usd_default_layer(gauss_usd)
 
-        # Write the final USDZ file
-        write_to_usdz(output_path, model_file, gauss_usd, default_usd)
+        # Write the final USDZ file or folder
+        if as_folder:
+            write_to_folder(output_path, model_file, gauss_usd, default_usd)
+        else:
+            write_to_usdz(output_path, model_file, gauss_usd, default_usd)
