@@ -200,7 +200,21 @@ If you have existing Gaussian data in PLY format, for example, from 3DGS, you ca
 python -m threedgrut.export.scripts.ply_to_usd path/to/your/model.ply --output_file path/to/output.usdz
 ```
 
-This is useful for converting 3DGS models from other sources to the USDZ format.
+This is useful for converting 3DGS models from other sources to the USDZ format. Note that the resulting USDZ does not include a mesh. If you need a mesh inside the USDZ (e.g. for collision geometry), follow the next step.
+
+#### Adding a Mesh to a USDZ File
+
+You can add a mesh (PLY or USD) into an existing USDZ file using the `add_mesh_to_usdz.py` script. This is useful for producing USDZ assets with physics properties such as collision geometry.
+
+
+```bash
+python -m threedgrut.export.scripts.add_mesh_to_usdz --input_usdz path/to/input.usdz --output_usdz path/to/output.usdz --mesh_ply path/to/mesh.ply --set_collision
+```
+
+Optional flags:
+- `--set_collision` — enable collision on mesh prims.
+- `--set_invisible` — make mesh prims invisible.
+- `--referencing_usd` — specify which USD file in the package to modify (default: auto-detect the one with a Volume prim).
 
 ## 🎥 3. Rendering from Checkpoints
 Evaluate Checkpoint with Splatting / OptiX Tracer / Torch
