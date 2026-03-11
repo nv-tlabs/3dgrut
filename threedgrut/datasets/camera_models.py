@@ -217,3 +217,96 @@ def pixels_to_image_points(pixel_idxs) -> torch.Tensor:
     assert not pixel_idxs.is_floating_point(), "[CameraModel]: Pixel indices must be integers"
     # Compute the image point coordinates representing the center of each pixel (shift from top left corner to the center)
     return pixel_idxs.to(torch.float32) + 0.5
+
+
+def opencv_pinhole_image_points_to_camera_rays(
+    camera_model_parameters: OpenCVPinholeCameraModelParameters,
+    image_points: torch.Tensor,
+    newton_iterations: int = 10,
+    min_2d_norm: float = 1e-6,
+    device: str = "cpu",
+) -> torch.Tensor:
+    """
+    Computes camera rays from image points by performing iterative undistortion
+    of the OpenCV pinhole distortion model.
+
+    The OpenCV distortion model is:
+        x_distorted = x' * radial + tangential_x
+        y_distorted = y' * radial + tangential_y
+
+    where:
+        radial = (1 + k1*r² + k2*r⁴ + k3*r⁶) / (1 + k4*r² + k5*r⁴ + k6*r⁶)
+        r² = x'² + y'²
+
+    Args:
+        camera_model_parameters: OpenCVPinholeCameraModelParameters with distortion coefficients
+        image_points: (N, 2) tensor of image point coordinates
+        newton_iterations: Number of Newton-Raphson iterations for undistortion
+        min_2d_norm: Minimum norm threshold to avoid division by zero
+        device: Device to perform computation on
+
+    Returns:
+        cam_rays: (N, 3) tensor of normalized ray directions in camera coordinates
+    """
+    dtype = torch.float32
+
+    principal_point = torch.tensor(camera_model_parameters.principal_point, dtype=dtype, device=device)
+    focal_length = torch.tensor(camera_model_parameters.focal_length, dtype=dtype, device=device)
+    k1, k2, k3, k4, k5, k6 = camera_model_parameters.radial_coeffs
+    p1, p2 = camera_model_parameters.tangential_coeffs
+
+    # Convert to torch tensors
+    k1 = torch.tensor(k1, dtype=dtype, device=device)
+    k2 = torch.tensor(k2, dtype=dtype, device=device)
+    k3 = torch.tensor(k3, dtype=dtype, device=device)
+    k4 = torch.tensor(k4, dtype=dtype, device=device)
+    k5 = torch.tensor(k5, dtype=dtype, device=device)
+    k6 = torch.tensor(k6, dtype=dtype, device=device)
+    p1 = torch.tensor(p1, dtype=dtype, device=device)
+    p2 = torch.tensor(p2, dtype=dtype, device=device)
+
+    # Normalize image points to get distorted normalized coordinates
+    image_points = image_points.to(dtype).to(device)
+    x_distorted = (image_points[:, 0] - principal_point[0]) / focal_length[0]
+    y_distorted = (image_points[:, 1] - principal_point[1]) / focal_length[1]
+
+    # Initial guess: distorted coordinates
+    x_undist = x_distorted.clone()
+    y_undist = y_distorted.clone()
+
+    # Newton-Raphson iteration to find undistorted coordinates
+    for _ in range(newton_iterations):
+        r2 = x_undist * x_undist + y_undist * y_undist
+        r4 = r2 * r2
+        r6 = r4 * r2
+
+        # Radial distortion factor
+        radial_num = 1.0 + k1 * r2 + k2 * r4 + k3 * r6
+        radial_denom = 1.0 + k4 * r2 + k5 * r4 + k6 * r6
+        radial = radial_num / radial_denom
+
+        # Tangential distortion
+        xy = x_undist * y_undist
+        tangential_x = 2.0 * p1 * xy + p2 * (r2 + 2.0 * x_undist * x_undist)
+        tangential_y = p1 * (r2 + 2.0 * y_undist * y_undist) + 2.0 * p2 * xy
+
+        # Predicted distorted coordinates
+        x_pred = x_undist * radial + tangential_x
+        y_pred = y_undist * radial + tangential_y
+
+        # Error
+        error_x = x_pred - x_distorted
+        error_y = y_pred - y_distorted
+
+        # Update (simplified Newton step - approximate Jacobian as radial factor)
+        # For small distortions, the Jacobian is approximately diagonal with radial on diagonal
+        x_undist = x_undist - error_x / (radial + 1e-8)
+        y_undist = y_undist - error_y / (radial + 1e-8)
+
+    # Construct ray directions (pinhole model: rays pass through origin)
+    cam_rays = torch.stack([x_undist, y_undist, torch.ones_like(x_undist)], dim=-1)
+
+    # Normalize ray directions
+    cam_rays = torch.nn.functional.normalize(cam_rays, dim=-1)
+
+    return cam_rays

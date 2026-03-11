@@ -1,0 +1,2 @@
+type: nerfstudio
+test_split_interval: 8
