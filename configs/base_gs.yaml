@@ -29,15 +29,6 @@ writer:
   max_num_hits: 128
   log_image_views: ${int_list:[ 0, 13, 27, 43, 78 ]}
 
-export_ingp:
-  enabled: true
-  force_half: false
-  path: ""
-import_ingp:
-  enabled: false
-  path: ""
-  init_global_step: 0
-
 export_ply:
   enabled: false
   path: ""
@@ -46,10 +37,15 @@ import_ply:
   path: ""
   init_global_step: 0
   
-export_usdz:
+export_usd:
   enabled: false
   path: ""
   apply_normalizing_transform: true
+  format: standard  # "nurec" for Omniverse, "standard" for ParticleField3DGaussianSplat
+  half_precision: false
+  export_cameras: true
+  export_background: true
+  sorting_mode_hint: cameraDistance
 
 model:
   density_activation: sigmoid

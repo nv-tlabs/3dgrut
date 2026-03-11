@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,30 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import zipfile
-from dataclasses import dataclass
-from typing import Any, Dict, Union
+"""NuRec template generation for Omniverse-compatible USD export."""
+
+from typing import Any, Dict
 
 import numpy as np
 
-
-@dataclass(kw_only=True)
-class NamedSerialized:
-    """
-    Class to store serialized data with a filename.
-    """
-
-    filename: str
-    serialized: Union[str, bytes]
-
-    def save_to_zip(self, zip_file: zipfile.ZipFile):
-        """
-        Save the serialized data to a zip file.
-
-        Args:
-            zip_file: Zip file to save the data to
-        """
-        zip_file.writestr(self.filename, self.serialized)
+# Import NamedSerialized from the canonical location
+from threedgrut.export.usd.stage_utils import NamedSerialized
 
 
 def _fill_state_dict_tensors(
@@ -180,7 +164,7 @@ def fill_3dgut_template(
                         "rotation_activation": rotation_activation,
                         "precision": 16,
                         "particle": {
-                            "density_kernel_planar": False,  # TODO: Does this have an equivalent in 3DGRUT?
+                            "density_kernel_planar": False,
                             "density_kernel_degree": density_kernel_degree,
                             "density_kernel_density_clamping": density_kernel_density_clamping,
                             "density_kernel_min_response": density_kernel_min_response,
@@ -198,7 +182,7 @@ def fill_3dgut_template(
                     "global_z_order": global_z_order,
                     "projection": {
                         "n_rolling_shutter_iterations": n_rolling_shutter_iterations,
-                        "ut_dim": 3,  # TODO: Does this have an equivalent in 3DGRUT?
+                        "ut_dim": 3,
                         "ut_alpha": ut_alpha,
                         "ut_beta": ut_beta,
                         "ut_kappa": ut_kappa,
@@ -210,8 +194,7 @@ def fill_3dgut_template(
                         "rect_bounding": rect_bounding,
                         "tight_opacity_bounding": tight_opacity_bounding,
                         "tile_based": tile_based_culling,
-                        "near_clip_distance": 0.2,  # TODO: Does this have an equivalent in 3DGRUT?
-                        # TODO: Does this have an equivalent in 3DGRUT?
+                        "near_clip_distance": 1e-8,
                         "far_clip_distance": 3.402823466e38,
                     },
                     "render": {"mode": "kbuffer", "k_buffer_size": k_buffer_size},
