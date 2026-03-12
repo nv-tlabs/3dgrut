@@ -61,6 +61,38 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 - For good performance with 3DGRT, we recommend using an NVIDIA GPU with Ray Tracing (RT) cores.
 - Currently, only Linux environments are supported by the included install script (Windows support coming soon!)
 
+### Option A: Using uv (Recommended)
+
+[uv](https://docs.astral.sh/uv/) provides faster installation and better dependency resolution.
+
+**Prerequisites:**
+1. **CUDA Toolkit** installed system-wide (nvcc available in PATH)
+2. **GCC <= 11** (install if needed: `sudo apt-get install gcc-11 g++-11`)
+3. **uv** installed: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+4. **OpenGL headers** for playground: `sudo apt-get install libgl1-mesa-dev`
+
+**Installation:**
+```bash
+git clone --recursive https://github.com/nv-tlabs/3dgrut.git
+cd 3dgrut
+
+# Default: CUDA 12.8 (for modern GPUs including Blackwell/RTX 50 series)
+chmod +x install_env_uv.sh
+./install_env_uv.sh
+
+# For older GPUs with CUDA 11.8:
+# CUDA_VERSION=11.8 ./install_env_uv.sh
+
+# Activate the environment
+source activate_env.sh
+```
+
+### Option B: Using conda (Alternative)
+
+<details>
+<summary>Click to expand conda installation instructions</summary>
+</br>
+
 <details>
 <summary> NOTE: gcc versions >11 (expand for details)</summary>
 </br>
@@ -109,6 +141,8 @@ conda activate 3dgrut
 ```
 
 On Windows, you can use the `install_env.ps1` script to install the environment.
+
+</details>
 
 ### Running with Docker
 
