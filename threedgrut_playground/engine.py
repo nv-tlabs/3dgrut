@@ -278,7 +278,7 @@ class Primitives:
     ```
     """
 
-    SUPPORTED_MESH_EXTENSIONS = [".obj", ".glb", ".gltf"]  # Supported mesh file formats
+    SUPPORTED_MESH_EXTENSIONS = [".obj", ".glb", ".gltf", ".usd"]  # Supported mesh file formats
     DEFAULT_REFRACTIVE_INDEX = 1.33  # Default IOR for transparent materials
     PROCEDURAL_SHAPES: Dict[str, Callable[[torch.device], kaolin.rep.SurfaceMesh]] = dict(
         Quad=create_quad_mesh

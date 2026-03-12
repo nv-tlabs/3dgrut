@@ -155,6 +155,8 @@ def load_mesh(path: str, device):
     format = Path(path).suffix
     if format in (".obj", ".gltf", ".glb"):
         mesh = kaolin.io.import_mesh(path, triangulate=True)
+    elif format in (".usd"):
+        mesh = kaolin.io.usd.import_mesh(path, scene_path="/World/Meshes/mesh_0", with_materials=False, with_normals=True)
     else:
         raise ValueError(
             f"Cannot load mesh asset with unsupported format: {format}. " f"Supported types: .obj, .glb, .gltf"
