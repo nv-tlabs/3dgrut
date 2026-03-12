@@ -43,3 +43,13 @@ for CAM in front rear; do
   python step4-dilate.py --scene "${SCENE}" --method "${METHOD}" --camera "${CAM}" --iter 1  --project "${PROJECT}"
   python step4-dilate.py --scene "${SCENE}" --method "${METHOD}" --camera "${CAM}" --iter 20 --project "${PROJECT}"
 done
+
+# cd ..
+# mkdir -p data/fullcircle/${SCENE}/out-${METHOD}/masks-1_4/camera1
+# mkdir -p data/fullcircle/${SCENE}/out-${METHOD}/masks-1_4/camera2
+# mkdir -p data/fullcircle/${SCENE}/out-${METHOD}/masks-20_4/camera1
+# mkdir -p data/fullcircle/${SCENE}/out-${METHOD}/masks-20_4/camera2
+# mogrify -path data/fullcircle/${SCENE}/out-${METHOD}/masks-1_4/camera1 -resize 25% data/fullcircle/${SCENE}/out-${METHOD}/masks-1/camera1/*
+# mogrify -path data/fullcircle/${SCENE}/out-${METHOD}/masks-1_4/camera2 -resize 25% data/fullcircle/${SCENE}/out-${METHOD}/masks-1/camera2/*
+# mogrify -path data/fullcircle/${SCENE}/out-${METHOD}/masks-20_4/camera1 -resize 25% data/fullcircle/${SCENE}/out-${METHOD}/masks-20/camera1/*
+# mogrify -path data/fullcircle/${SCENE}/out-${METHOD}/masks-20_4/camera2 -resize 25% data/fullcircle/${SCENE}/out-${METHOD}/masks-20/camera2/*
