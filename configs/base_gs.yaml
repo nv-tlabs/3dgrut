@@ -41,7 +41,7 @@ export_usd:
   enabled: false
   path: ""
   apply_normalizing_transform: true
-  format: standard  # "nurec" for Omniverse, "standard" for ParticleField3DGaussianSplat
+  format: standard  # "nurec" for Omniverse USDVol internal format, "standard" for USDVol ParticleField3DGaussianSplat
   half_precision: false
   export_cameras: true
   export_background: true

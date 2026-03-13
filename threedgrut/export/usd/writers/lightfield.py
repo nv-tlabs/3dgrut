@@ -24,19 +24,13 @@ import logging
 from typing import Optional
 
 import numpy as np
-from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade, UsdVol, Vt
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdVol, Vt
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
 from threedgrut.export.usd.writers.base import GaussianUSDWriter
 
 logger = logging.getLogger(__name__)
 
-# Material constants for ParticleField
-USD_LOOKS_PATH = "/World/Looks"
-USD_PARTICLEFIELD_MATERIAL_PATH = USD_LOOKS_PATH + "/ParticleFieldEmissive"
-USD_PARTICLEFIELD_SHADER_PATH = USD_PARTICLEFIELD_MATERIAL_PATH + "/Shader"
-PARTICLEFIELD_MATERIAL_MDL_FILE = "ParticleFieldEmissive.mdl"
-PARTICLEFIELD_MATERIAL_NAME = "ParticleFieldEmissive"
 
 
 class GaussianLightFieldWriter(GaussianUSDWriter):
@@ -90,9 +84,6 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
             self._schema = UsdVol.ParticleField3DGaussianSplat(self.prim)
             logger.info(f"Created ParticleField3DGaussianSplat at {prim_path}")
 
-        # Create and bind material
-        self._create_and_bind_material()
-
         # Create attributes
         self._create_attributes()
 
@@ -113,45 +104,6 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
         ):
             self.prim.ApplyAPI(api_schema)
 
-    def _create_and_bind_material(self) -> None:
-        """Create and bind ParticleFieldEmissive material."""
-        material_prim = self._create_particlefield_material()
-        material = UsdShade.Material(material_prim)
-        binding_api = UsdShade.MaterialBindingAPI(self.prim)
-        binding_api.Bind(material, bindingStrength=UsdShade.Tokens.weakerThanDescendants)
-
-    def _create_particlefield_material(self) -> Usd.Prim:
-        """Create ParticleFieldEmissive material for LightField schema."""
-        looks_prim = self.stage.GetPrimAtPath(USD_LOOKS_PATH)
-        if not looks_prim.IsValid():
-            self.stage.DefinePrim(USD_LOOKS_PATH, "Scope")
-
-        material_prim = self.stage.DefinePrim(USD_PARTICLEFIELD_MATERIAL_PATH, "Material")
-        shader_prim = self.stage.DefinePrim(USD_PARTICLEFIELD_SHADER_PATH, "Shader")
-
-        shader_prim.CreateAttribute(
-            "info:implementationSource", Sdf.ValueTypeNames.Token, custom=False, variability=Sdf.VariabilityUniform
-        ).Set("sourceAsset")
-        shader_prim.CreateAttribute(
-            "info:mdl:sourceAsset", Sdf.ValueTypeNames.Asset, custom=False, variability=Sdf.VariabilityUniform
-        ).Set(Sdf.AssetPath(PARTICLEFIELD_MATERIAL_MDL_FILE))
-        shader_prim.CreateAttribute(
-            "info:mdl:sourceAsset:subIdentifier",
-            Sdf.ValueTypeNames.Token,
-            custom=False,
-            variability=Sdf.VariabilityUniform,
-        ).Set(PARTICLEFIELD_MATERIAL_NAME)
-
-        outputs_out = shader_prim.CreateAttribute("outputs:out", Sdf.ValueTypeNames.Token)
-        outputs_out.SetMetadata("renderType", "material")
-
-        material = UsdShade.Material(material_prim)
-        shader = UsdShade.Shader(shader_prim)
-        for output_name in ["mdl:displacement", "mdl:surface", "mdl:volume"]:
-            output = material.CreateOutput(output_name, Sdf.ValueTypeNames.Token)
-            output.ConnectToSource(shader.GetOutput("out"))
-
-        return material_prim
 
     def _create_attributes(self) -> None:
         """Create particle field attributes via UsdVol schema API.
