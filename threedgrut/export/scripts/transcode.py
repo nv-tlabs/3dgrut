@@ -138,6 +138,7 @@ def get_exporter(
     half_geometry: bool = False,
     half_features: bool = False,
     render_order_hint: Optional[str] = None,
+    linear_srgb: bool = False,
 ) -> Tuple[ModelExporter, bool]:
     """Get exporter for the specified format.
 
@@ -147,6 +148,7 @@ def get_exporter(
         half_geometry: Use half precision for positions, orientations, scales (LightField only).
         half_features: Use half precision for opacities and SH coefficients (LightField only).
         render_order_hint: If set, force sortingModeHint for lightfield. Ignored for other formats.
+        linear_srgb: If True, set prim color space to lin_rec709_scene (lightfield only).
 
     Returns:
         Tuple of (ModelExporter instance, expects_preactivation)
@@ -164,6 +166,7 @@ def get_exporter(
             export_background=False,
             apply_normalizing_transform=False,
             sorting_mode_hint=render_order_hint if render_order_hint is not None else "cameraDistance",
+            linear_srgb=linear_srgb,
         ), False
     elif format_name == "nurec":
         return NuRecExporter(), True
@@ -198,6 +201,7 @@ def transcode(
     half_features: bool = False,
     apply_coordinate_transform: bool = False,
     render_order_hint: Optional[str] = None,
+    linear_srgb: bool = False,
 ) -> None:
     """Transcode between Gaussian splatting formats.
 
@@ -211,6 +215,7 @@ def transcode(
         half_features: Use half for opacities and SH coefficients (LightField only).
         apply_coordinate_transform: Apply 3DGRUT-to-USDZ transform (for both lightfield and nurec)
         render_order_hint: If set, force sortingModeHint for lightfield only; ignored for other formats (warning logged).
+        linear_srgb: If True, set prim color space to lin_rec709_scene (lightfield only).
     """
     if render_order_hint is not None and output_format != "lightfield":
         logger.warning(
@@ -236,6 +241,7 @@ def transcode(
         half_geometry=half_geometry,
         half_features=half_features,
         render_order_hint=render_order_hint if output_format == "lightfield" else None,
+        linear_srgb=linear_srgb if output_format == "lightfield" else False,
     )
 
     # Create adapter with correct activation state
@@ -337,6 +343,11 @@ Examples:
         help="Force sortingModeHint for lightfield export (e.g. cameraDistance, zDepth). Ignored with --format ply/nurec (warning only).",
     )
     parser.add_argument(
+        "--linear-srgb",
+        action="store_true",
+        help="Set prim color space to lin_rec709_scene (lightfield only). Default is srgb_rec709_display.",
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Enable verbose logging",
@@ -386,6 +397,7 @@ def main():
             half_features=args.half_features,
             apply_coordinate_transform=args.apply_coordinate_transform,
             render_order_hint=args.render_order_hint,
+            linear_srgb=args.linear_srgb,
         )
     except Exception as e:
         logger.error(f"Transcode failed: {e}")
