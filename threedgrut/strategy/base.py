@@ -24,6 +24,15 @@ class BaseStrategy:
     def __init__(self, config, model: MixtureOfGaussians) -> None:
         self.conf = config
         self.model = model
+        self._suspended = False
+
+    def suspend(self) -> None:
+        """Suspend the strategy, causing all training callbacks to no-op.
+
+        Used during PPISP controller distillation to prevent densification, pruning, and other
+        parameter mutations while Gaussian parameters are frozen.
+        """
+        self._suspended = True
 
     def init_densification_buffer(self, checkpoint: Optional[dict] = None):
         """Callback function to initialize the densification buffers."""
@@ -31,14 +40,29 @@ class BaseStrategy:
 
     def pre_backward(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
         """Callback function to be executed before the `loss.backward()` call."""
+        if self._suspended:
+            return False
+        return self._pre_backward(step, scene_extent, train_dataset, batch, writer)
+
+    def _pre_backward(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
         return False
 
     def post_backward(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
         """Callback function to be executed after the `loss.backward()` call."""
+        if self._suspended:
+            return False
+        return self._post_backward(step, scene_extent, train_dataset, batch, writer)
+
+    def _post_backward(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
         return False
 
     def post_optimizer_step(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
         """Callback function to be executed after the optimizer step."""
+        if self._suspended:
+            return False
+        return self._post_optimizer_step(step, scene_extent, train_dataset, batch, writer)
+
+    def _post_optimizer_step(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
         return False
 
     def update_gradient_buffer(self, sensor_position: torch.Tensor) -> None:
