@@ -42,7 +42,6 @@ from threedgrut.datasets.ncoreUtils import (
     Labels,
     RaysCamMeta,
     Batch as NCoreBatch,
-    FrameConversion,
 )
 from threedgrut.datasets.utils import PointCloud, get_center_and_diag
 
@@ -94,9 +93,6 @@ class NCoreDataset(torch.utils.data.Dataset):
         # Sensors
         camera_ids=["camera_front_wide_120fov", "camera_cross_left_120fov", "camera_cross_right_120fov"],
         lidar_ids=["lidar_gt_top_p128_v4p5"],
-        # Scale
-        aabb_scale: Optional[float] = None,
-        max_dist_m: float = 150.0,
         # Misc
         downsample: float = 1.0,  # Training image downsample factor (0.5 = half resolution)
         sample_full_image: bool = True,
@@ -152,10 +148,6 @@ class NCoreDataset(torch.utils.data.Dataset):
         self.camera_ids: list[str] = camera_ids if camera_ids else []
         self.lidar_ids: list[str] = lidar_ids if lidar_ids else []
         self._auto_detect_sensors = (not camera_ids) or (not lidar_ids)  # Flag for auto-detection
-
-        # if aabb_scale is None, the scene will be kept true to scale
-        self.aabb_scale: Optional[float] = aabb_scale
-        self.max_dist_m: float = max_dist_m
 
         self.open_consolidated: bool = open_consolidated
 
@@ -464,7 +456,7 @@ class NCoreDataset(torch.utils.data.Dataset):
             self.camera_linear_start_frame_indices[camera_id] = cumulative_offset
             cumulative_offset += frames_per_camera_dict[camera_id]
 
-        # Compute world-to-colmap transformation from pose graph
+        # Compute world-to-world_global transformation from pose graph
         world_world_global_edge = sequence_loader.pose_graph.get_edge("world", "world_global")
         assert world_world_global_edge is not None, (
             "World-to-world_global poses are required to determine scene extent"
@@ -472,47 +464,7 @@ class NCoreDataset(torch.utils.data.Dataset):
         T_world_base = world_world_global_edge.T_source_target
         self.T_world_common_world_base: npt.NDArray[np.float64] = T_world_base
         T_world_base_world_common = np.linalg.inv(T_world_base).astype(np.float32)
-        self.T_world_to_colmap_world: np.ndarray = T_world_base_world_common
-
-        # Collect camera→world positions to determine scene extent and normalization
-        world_positions_list: list[np.ndarray] = []
-        for camera_id in self.camera_ids:
-            camera_sensor = self.sequence_camera_sensors[sequence_id][camera_id]
-            camera_frame_range = self.camera_frame_ranges[camera_id]
-            if len(camera_frame_range) == 0:
-                continue
-            T_cam_world = camera_sensor.get_frames_T_source_target(
-                source_node=camera_id,
-                target_node="world",
-                frame_indices=np.arange(camera_frame_range.start, camera_frame_range.stop),
-                frame_timepoint=ncore.data.FrameTimepoint.START,
-            )  # [N, 4, 4]
-            cam_positions_local = T_cam_world[:, :3, 3]
-            world_positions_list.append(
-                (self.T_world_to_colmap_world[:3, :3] @ cam_positions_local.T + self.T_world_to_colmap_world[:3, 3:4]).T
-            )
-
-        world_positions = np.vstack(world_positions_list)
-
-        # compute average position and extent (largest axis of the scene's AABB relative to the world frame)
-        # to put the scene's center at the origin of the rescaled domain
-        mean_world_position_m = world_positions.mean(axis=0).astype(np.float32)
-
-        # make sure that the max distance at the boundary is included when scaling the scene extent to the target AABB scale
-        world_diag_extent_m = np.max(world_positions, axis=0) - np.min(world_positions, axis=0)
-        world_max_extent_m = np.max(world_diag_extent_m)
-        world_to_colmap_scale = (
-            1.0 / ((world_max_extent_m / 2 + self.max_dist_m) / (self.aabb_scale / 2)) if self.aabb_scale else 1.0
-        )
-
-        self.scene_extent_m = np.linalg.norm(world_diag_extent_m)
-
-        # Setup NCore world -> colmap transformation
-        self.world_to_colmap = FrameConversion.from_origin_scale_axis(
-            target_origin=mean_world_position_m,
-            target_scale=world_to_colmap_scale,
-            target_axis=[0, 1, 2],  # xyz[world] -> xyz[colmap]
-        )
+        self.T_world_to_world_global: np.ndarray = T_world_base_world_common
 
         # Compute per-frame valid pixels from static ego-car masks
         for camera_id, camera_frame_range in self.camera_frame_ranges.items():
@@ -557,7 +509,7 @@ class NCoreDataset(torch.utils.data.Dataset):
         )
 
     def get_observer_points(self, camera_id=None):
-        """ Return camera centers in colmap space """
+        """ Return camera centers in world-global space """
         # make sure we are initialized
         self._init_worker()
 
@@ -570,16 +522,16 @@ class NCoreDataset(torch.utils.data.Dataset):
 
         camera_centers = []
         for camera_frame_index in self.time_range_us.cover_range(camera_sensor.get_frames_timestamps_us()):
-            T_sensor_colmap = self._ncore_world_to_colmap_poses(
+            T_sensor_world_global = self._transform_poses_to_world_global(
                 camera_sensor.get_frames_T_source_target(
                     source_node=camera_sensor.sensor_id,
                     target_node="world",
                     frame_indices=np.array(camera_frame_index),
                     frame_timepoint=ncore.data.FrameTimepoint.START,
                 ),
-                self.T_world_to_colmap_world,
+                self.T_world_to_world_global,
             )
-            camera_centers.append(T_sensor_colmap[:3, 3])
+            camera_centers.append(T_sensor_world_global[:3, 3])
 
         return np.array(camera_centers)
 
@@ -616,40 +568,40 @@ class NCoreDataset(torch.utils.data.Dataset):
         # Validation: count validation frames across all cameras
         return sum(len(self.camera_val_frame_indices[camera_id]) for camera_id in self.camera_ids)
 
-    def _ncore_world_to_colmap_poses(
+    def _transform_poses_to_world_global(
         self,
         T_poses_world: np.ndarray,
-        T_world_to_colmap_world: np.ndarray,
+        T_world_to_world_global: np.ndarray,
     ) -> np.ndarray:
         """
         Transform input poses 'T_poses_world' in NCore world frame (metric units) to
-        poses in colmap frame, applying world transformation
-        (given by 'T_world_to_colmap_world' (4,4)), frame axis conventions, scene rescaling, and origin offsets.
+        poses in world-global frame by applying the world-to-world_global coordinate system
+        transformation (given by 'T_world_to_world_global' (4,4)).
 
         Supports both singular (4,4) and batched (N,4,4) input poses.
         """
 
-        T_poses_common = T_world_to_colmap_world @ T_poses_world.reshape((-1, 4, 4))  # (N,4,4)
+        T_poses_world_global = T_world_to_world_global @ T_poses_world.reshape((-1, 4, 4))  # (N,4,4)
 
-        return self.world_to_colmap.transform_poses(T_poses_common)
+        return T_poses_world_global.squeeze()
 
-    def _get_colmap_start_end_poses(
+    def _get_start_end_poses_world_global(
         self,
         camera_sensor: ncore.sensors.CameraSensor,
         camera_frame_index: int,
     ) -> np.ndarray:
-        """Get start/end poses in colmap frame for a given camera frame.
+        """Get start/end poses in world-global frame for a given camera frame.
 
         Returns (2, 4, 4) array with [start_pose, end_pose].
         """
-        return self._ncore_world_to_colmap_poses(
+        return self._transform_poses_to_world_global(
             camera_sensor.get_frames_T_source_target(
                 source_node=camera_sensor.sensor_id,
                 target_node="world",
                 frame_indices=np.array(camera_frame_index),
                 frame_timepoint=None,  # both start and end -> (2,4,4)
             ),
-            self.T_world_to_colmap_world,
+            self.T_world_to_world_global,
         )
 
     def _generate_rays_with_shutter_handling(
@@ -657,7 +609,7 @@ class NCoreDataset(torch.utils.data.Dataset):
         camera_model: ncore.sensors.CameraModel,
         pixel_samples: np.ndarray,
         ray_samples: np.ndarray,
-        T_sensor_startend_colmap: np.ndarray,
+        T_sensor_startend: np.ndarray,
     ) -> tuple[Any, np.ndarray, np.ndarray, bool]:
         """Generate world rays with proper global/rolling shutter handling.
 
@@ -670,27 +622,27 @@ class NCoreDataset(torch.utils.data.Dataset):
         if self.force_global_shutter:
             world_rays_return = camera_model.pixels_to_world_rays_mean_pose(
                 pixel_samples,
-                T_sensor_startend_colmap[0],
-                T_sensor_startend_colmap[1],
+                T_sensor_startend[0],
+                T_sensor_startend[1],
                 camera_rays=ray_samples,
             )
             T_mean = self._interpolate_pose_slerp(
-                T_sensor_startend_colmap[0],
-                T_sensor_startend_colmap[1],
+                T_sensor_startend[0],
+                T_sensor_startend[1],
                 alpha=0.5,
             )
             return world_rays_return, T_mean, T_mean, False
         else:
             world_rays_return = camera_model.pixels_to_world_rays_shutter_pose(
                 pixel_samples,
-                T_sensor_startend_colmap[0],
-                T_sensor_startend_colmap[1],
+                T_sensor_startend[0],
+                T_sensor_startend[1],
                 camera_rays=ray_samples,
             )
             return (
                 world_rays_return,
-                T_sensor_startend_colmap[0],
-                T_sensor_startend_colmap[1],
+                T_sensor_startend[0],
+                T_sensor_startend[1],
                 True,
             )
 
@@ -705,7 +657,7 @@ class NCoreDataset(torch.utils.data.Dataset):
         return RaysCamMeta(
             flags=torch.full(
                 (n_rays,),
-                (RayFlags.CAMERA_SENSOR | RayFlags.COLMAP_SPACE | RayFlags.RGB_LABEL).value,
+                (RayFlags.CAMERA_SENSOR | RayFlags.WORLD_SPACE | RayFlags.RGB_LABEL).value,
                 dtype=torch.int32,
                 device="cpu",
             ),
@@ -789,11 +741,9 @@ class NCoreDataset(torch.utils.data.Dataset):
                 
                 # Apply downsampling for training
                 if self.downsample < 1.0:
-                    # Image from sensor is original resolution
-                    h_orig, w_orig = frame_image_array.shape[:2]
                     # Downsample the image to match camera_model resolution
                     frame_image_array = cv2.resize(
-                        frame_image_array, (w, h), interpolation=cv2.INTER_LINEAR
+                        frame_image_array, (w, h), interpolation=cv2.INTER_AREA
                     )
                 
                 # Sample ALL pixels from the image (full image training)
@@ -820,13 +770,13 @@ class NCoreDataset(torch.utils.data.Dataset):
                 ray_samples = camera_all_rays[pixel_samples[:, 1], pixel_samples[:, 0]]
                 rgbs.append(frame_image_array[pixel_samples[:, 1], pixel_samples[:, 0]].astype(np.float32) / 255.0)
 
-                # Create world rays in colmap domain
-                T_sensor_startend_colmap = self._get_colmap_start_end_poses(camera_sensor, camera_frame_index)
+                # Create world rays in world-global frame
+                T_sensor_startend = self._get_start_end_poses_world_global(camera_sensor, camera_frame_index)
 
                 # Generate rays with proper shutter handling
                 world_rays_return, T_camera_to_world, T_camera_to_world_end, rays_in_world_space = (
                     self._generate_rays_with_shutter_handling(
-                        camera_model, pixel_samples, ray_samples, T_sensor_startend_colmap,
+                        camera_model, pixel_samples, ray_samples, T_sensor_startend,
                     )
                 )
 
@@ -905,7 +855,7 @@ class NCoreDataset(torch.utils.data.Dataset):
 
                 if self.downsample < 1.0:
                     frame_image_array = cv2.resize(
-                        frame_image_array, (w, h), interpolation=cv2.INTER_LINEAR
+                        frame_image_array, (w, h), interpolation=cv2.INTER_AREA
                     )
 
                 # sample image colors at pixel centers
@@ -928,13 +878,13 @@ class NCoreDataset(torch.utils.data.Dataset):
 
                 valid = frame_valid_pixel_mask[camera_pixels_subsampled[:, 1], camera_pixels_subsampled[:, 0]]
 
-                # Create world rays in colmap domain
-                T_sensor_startend_colmap = self._get_colmap_start_end_poses(camera_sensor, camera_frame_index)
+                # Create world rays in world-global frame
+                T_sensor_startend = self._get_start_end_poses_world_global(camera_sensor, camera_frame_index)
 
                 # Generate rays with proper shutter handling
                 world_rays_return, T_camera_to_world, T_camera_to_world_end, rays_in_world_space = (
                     self._generate_rays_with_shutter_handling(
-                        camera_model, camera_pixels_subsampled, camera_rays_subsampled, T_sensor_startend_colmap,
+                        camera_model, camera_pixels_subsampled, camera_rays_subsampled, T_sensor_startend,
                     )
                 )
 
@@ -1008,7 +958,7 @@ class NCoreDataset(torch.utils.data.Dataset):
         non_dynamic_points_only: bool = True,
         step_frame: int = 1,
     ) -> Generator[PointCloud, None, None]:
-        """Returns a generator for all point-clouds available for point-cloud sensor (lidar / camera), transformed into colmap frame.
+        """Returns a generator for all point-clouds available for point-cloud sensor (lidar / camera), transformed into world-global frame.
 
         Point-cloud sensor are specified by either logical or unique sensor IDs.
 
@@ -1064,19 +1014,19 @@ class NCoreDataset(torch.utils.data.Dataset):
                 xyz_s = xyz_s[point_filter]
                 xyz_e = xyz_e[point_filter]
 
-                # transform points from sensor to colmap frame, rescaling from meter to colmap scale
-                T_sensor_colmap = self._ncore_world_to_colmap_poses(
+                # transform points from sensor to world-global frame
+                T_sensor_world_global = self._transform_poses_to_world_global(
                     lidar_sensor.get_frames_T_sensor_target("world", lidar_frame_index),
-                    self.T_world_to_colmap_world,
+                    self.T_world_to_world_global,
                 )
 
                 xyz_s = (
-                    (self.world_to_colmap.target_scale * T_sensor_colmap[:3, :3]) @ xyz_s.transpose()
-                    + T_sensor_colmap[:3, 3:4]
+                    T_sensor_world_global[:3, :3] @ xyz_s.transpose()
+                    + T_sensor_world_global[:3, 3:4]
                 ).transpose()
                 xyz_e = (
-                    (self.world_to_colmap.target_scale * T_sensor_colmap[:3, :3]) @ xyz_e.transpose()
-                    + T_sensor_colmap[:3, 3:4]
+                    T_sensor_world_global[:3, :3] @ xyz_e.transpose()
+                    + T_sensor_world_global[:3, 3:4]
                 ).transpose()
 
                 yield PointCloud(

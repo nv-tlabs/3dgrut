@@ -43,7 +43,7 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
     Key adaptations:
     - Converts NCore's rays_cam to threedgrut's rays_ori/rays_dir
     - Implements required protocol methods (get_frames_per_camera, get_gpu_batch_with_intrinsics)
-    - Handles coordinate space transformations (NCore uses COLMAP_SPACE)
+    - Handles coordinate space transformations (NCore uses WORLD_SPACE)
     """
     
     def __init__(self, *args, device="cuda", **kwargs):
@@ -187,21 +187,21 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
                     else:
                         T_sensor_to_world = T_sensor_to_world_flat
 
-                    # Convert NCore pose to COLMAP space
-                    T_sensor_to_world_colmap_batch = self._ncore_world_to_colmap_poses(
+                    # Convert NCore pose to world-global space
+                    T_sensor_to_world_global_batch = self._transform_poses_to_world_global(
                         T_sensor_to_world[None, :, :],
-                        self.T_world_to_colmap_world
+                        self.T_world_to_world_global
                     )
                     # Ensure we have a 4x4 matrix
-                    if T_sensor_to_world_colmap_batch.ndim == 3:
-                        T_sensor_to_world_colmap = T_sensor_to_world_colmap_batch[0]
-                    elif T_sensor_to_world_colmap_batch.ndim == 2:
-                        T_sensor_to_world_colmap = T_sensor_to_world_colmap_batch.reshape(4, 4)
+                    if T_sensor_to_world_global_batch.ndim == 3:
+                        T_sensor_to_world_global = T_sensor_to_world_global_batch[0]
+                    elif T_sensor_to_world_global_batch.ndim == 2:
+                        T_sensor_to_world_global = T_sensor_to_world_global_batch.reshape(4, 4)
                     else:
-                        T_sensor_to_world_colmap = T_sensor_to_world_colmap_batch
+                        T_sensor_to_world_global = T_sensor_to_world_global_batch
 
                     # Get world-to-camera (extrinsics for polyscope)
-                    T_world_to_sensor = np.linalg.inv(T_sensor_to_world_colmap)
+                    T_world_to_sensor = np.linalg.inv(T_sensor_to_world_global)
 
                     # Polyscope camera convention flip (Y and Z axes)
                     camera_convention_rot = np.array([
@@ -213,18 +213,14 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
                     T_world_to_sensor = camera_convention_rot @ T_world_to_sensor
 
                     # Get image (subsampled for visualization)
-                    try:
-                        frame_image = camera_sensor.get_frame_image_array(frame_idx)
-                        if self.n_val_image_subsample > 1:
-                            frame_image = cv2.resize(
-                                frame_image,
-                                (w_viz, h_viz),
-                                interpolation=cv2.INTER_LINEAR
-                            )
-                        rgb_img = frame_image.astype(np.float32) / 255.0
-                    except:
-                        # If image loading fails, create a placeholder
-                        rgb_img = np.zeros((h_viz, w_viz, 3), dtype=np.float32)
+                    frame_image = camera_sensor.get_frame_image_array(frame_idx)
+                    if self.n_val_image_subsample > 1:
+                        frame_image = cv2.resize(
+                            frame_image,
+                            (w_viz, h_viz),
+                            interpolation=cv2.INTER_AREA
+                        )
+                    rgb_img = frame_image.astype(np.float32) / 255.0
 
                     cam_list.append({
                         "ext_mat": T_world_to_sensor,
@@ -247,7 +243,7 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
         Convert NCore batch format (dict from DataLoader) to threedgrut Batch format.
         
         Input batch (dict from DataLoader collation):
-        - rays_cam: (B, N, 6) [origin_x, origin_y, origin_z, dir_x, dir_y, dir_z] in COLMAP space
+        - rays_cam: (B, N, 6) [origin_x, origin_y, origin_z, dir_x, dir_y, dir_z] in world-global space
         - rgb: Optional (B, N, 3) RGB values
         - idx: batch index
         
@@ -259,7 +255,7 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
         - rgb_gt: (B, H, W, 3) ground truth RGB
         """
         # Extract rays from NCore format (already collated by DataLoader)
-        # NCore stores rays in COLMAP space (world space)
+        # NCore stores rays in world-global space
         if "rays_cam" in batch:
             rays_cam = batch["rays_cam"]  # (B, N, 6) after collation
             
@@ -273,8 +269,8 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
                 rays_cam = rays_cam.unsqueeze(0)
             
             # Split into origins and directions: (B, N, 6) -> (B, N, 3) each
-            rays_ori_world = rays_cam[:, :, :3]  # (B, N, 3) in COLMAP/world space
-            rays_dir_world = rays_cam[:, :, 3:6]  # (B, N, 3) in COLMAP/world space
+            rays_ori_world = rays_cam[:, :, :3]  # (B, N, 3) in world-global space
+            rays_dir_world = rays_cam[:, :, 3:6]  # (B, N, 3) in world-global space
             batch_size = rays_ori_world.shape[0]
             
             # Extract camera-to-world transformations (START and END for rolling shutter)

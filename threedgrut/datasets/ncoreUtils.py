@@ -32,7 +32,7 @@ class RayFlags(IntFlag):
     """Bitmask flags of per-ray properties (note: limited to 32 variants)"""
 
     # the ray's coordinates frame [mutually exclusive]
-    COLMAP_SPACE = auto()  # set if the ray's 6d coords are relative to the metric COLMAP space
+    WORLD_SPACE = auto()  # set if the ray's 6d coords are relative to the metric world-global space
 
     # the ray's sensor [mutually exclusive]
     CAMERA_SENSOR = auto()  # set if the ray originates from a camera sensor
@@ -209,7 +209,7 @@ class Batch:
         - worker_id: ID of the worker that generated this batch (None if batch is not generated in a multi-worker env) [int]
         - h: height of the image - used in validation and test mode [int]
         - w: width of the image - used in validation and test mode [int]
-        - T_camera_to_world: camera-to-world transformation matrix (4, 4) in COLMAP space [float]
+        - T_camera_to_world: camera-to-world transformation matrix (4, 4) in world-global space [float]
     """
 
     rays_cam: torch.Tensor
@@ -217,7 +217,7 @@ class Batch:
     idx: list[int]
     labels: Labels
     worker_id: Union[list[int], int, None] = None
-    T_camera_to_world: Optional[torch.Tensor] = None  # (4, 4) camera-to-world in COLMAP space (START pose)
+    T_camera_to_world: Optional[torch.Tensor] = None  # (4, 4) camera-to-world in world-global space (START pose)
     T_camera_to_world_end: Optional[torch.Tensor] = None  # (4, 4) camera-to-world END pose for rolling shutter
     rays_in_world_space: bool = False  # True if rays are already in world space (no transform needed)
     h: Union[list[int], int, None] = None
