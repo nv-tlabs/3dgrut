@@ -25,11 +25,6 @@ downsample: 1.0
 # Set to true for debugging or if rolling shutter artifacts are suspected
 force_global_shutter: false
 
-# Distortion handling
-# force_zero_distortion: true forces all distortion coefficients to zero (pinhole camera model)
-# Set to true if you want to ignore lens distortion from NCore camera calibration
-force_zero_distortion: false
-
 # Image subsampling for validation (must evenly divide all camera resolutions)
 # Note: Set to 1 to use full resolution
 # Additional subsampling beyond downsample is typically not needed

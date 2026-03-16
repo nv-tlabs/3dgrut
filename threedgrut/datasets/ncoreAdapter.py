@@ -469,8 +469,7 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
 
             camera_model = camera_models[camera_id]
 
-            # Only OpenCV Pinhole/Fisheye models are supported by the rasterization renderer.
-            # FTheta cameras can't produce pinhole-compatible parameters.
+            # Only OpenCV Pinhole/Fisheye models are currently supported by the rasterization renderer.
             if isinstance(camera_model, ncore.sensors.FThetaCameraModel):
                 return None
 
@@ -490,12 +489,10 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
                 logger.info(f"[Shutter] Camera {camera_id}: Using GLOBAL shutter (force_global_shutter=True)")
             else:
                 shutter_type = scaled_params.shutter_type
-                logger.info(f"[Shutter] Camera {camera_id}: shutter_type = {shutter_type}")
+                logger.info(f"[Shutter] Camera {camera_id}: shutter_type = {shutter_type.name}")
 
             # Build parameter dict from the properly-scaled NCore parameters.
             # Distortion coefficients are resolution-independent and preserved through transform().
-            # force_zero_distortion has already been applied to camera_model in _init_worker,
-            # so get_parameters() returns the correct (possibly zeroed) distortion state.
             # Each camera model type produces a dict matching the tracer's expected keys.
             if isinstance(camera_model, ncore.sensors.OpenCVPinholeCameraModel):
                 params_dict = {
@@ -520,10 +517,7 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
                 logger.warning(f"Camera {camera_id}: unsupported camera model type {type(camera_model).__name__} for intrinsics extraction")
                 return None
 
-            if self.force_zero_distortion:
-                logger.info(f"[Distortion] Camera {camera_id}: Using ZERO distortion (force_zero_distortion=True)")
-            else:
-                logger.info(f"[Distortion] Camera {camera_id}: Using NCore distortion coefficients")
+            logger.info(f"[Distortion] Camera {camera_id}: Using NCore native lens distortion parameters")
 
             # Cache for future use
             model_type_name = type(scaled_params).__name__

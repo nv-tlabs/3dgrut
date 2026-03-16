@@ -61,7 +61,13 @@ class HalfClosedInterval:
 
         return range(cover_range_start, cover_range_stop)
 
-
+    def __contains__(self, item: int | HalfClosedInterval) -> bool:
+        if isinstance(item, int):
+            return self.start <= item < self.end
+        elif isinstance(item, HalfClosedInterval):
+            return (self.start <= item.start) and (item.end <= self.end)
+        else:
+            raise TypeError(f"Expected int or HalfClosedInterval, got {type(item).__name__}")
 
 
 @dataclasses.dataclass(slots=False, kw_only=True)

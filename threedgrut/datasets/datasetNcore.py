@@ -114,13 +114,11 @@ class NCoreDataset(torch.utils.data.Dataset):
         intrinsics_component_group: str = "default",
         masks_component_group: str = "default",
         force_global_shutter: bool = False,  # Force global shutter (use mean pose instead of per-pixel rolling shutter)
-        force_zero_distortion: bool = False,  # Force all distortion coefficients to zero (pinhole camera model)
     ):
         super().__init__()
 
         # Init parameters from config
         self.force_global_shutter = force_global_shutter
-        self.force_zero_distortion = force_zero_distortion
 
         # store relevant parameters from config
         self.split: str = split
@@ -293,16 +291,6 @@ class NCoreDataset(torch.utils.data.Dataset):
                 model_params, device="cpu", dtype=torch.float32
             )
 
-            # Apply force_zero_distortion to camera model for ray generation
-            if self.force_zero_distortion:
-                if hasattr(camera_model, 'radial_coeffs'):
-                    camera_model.radial_coeffs = torch.zeros_like(camera_model.radial_coeffs)
-                if hasattr(camera_model, 'tangential_coeffs'):
-                    camera_model.tangential_coeffs = torch.zeros_like(camera_model.tangential_coeffs)
-                if hasattr(camera_model, 'thin_prism_coeffs'):
-                    camera_model.thin_prism_coeffs = torch.zeros_like(camera_model.thin_prism_coeffs)
-                logger.info(f"[Ray Generation] Camera {camera_id}: Zeroed distortion coefficients for ray generation (force_zero_distortion=True)")
-
             camera_models[camera_id] = camera_model
 
         # Log per-camera image resolutions
@@ -408,16 +396,29 @@ class NCoreDataset(torch.utils.data.Dataset):
         for lidar_id in self.lidar_ids:
             self.lidar_unique_ids[lidar_id].append(self.sequence_lidar_unique_ids[sequence_id][lidar_id])
 
-        # Compute per-sensor frame ranges from the time range
+        # Determine linear per-sensor-frame index ranges depending on dataset time restrictions,
+        # making sure *both* frame start and end-times are fully covered
+        def get_sensor_frame_range(frames_timestamps_us: np.ndarray) -> range:
+            # make sure end-of-frame times are are covered by the time range
+            cover_range = self.time_range_us.cover_range(frames_timestamps_us[:, ncore.data.FrameTimepoint.END])
+            # make sure that the first frame's start-of-frame time is also covered - skip frames as required
+            # (could be more than a single frame if frame ranges are not exclusively partitioning the time range)
+            while len(cover_range) and (
+                int(frames_timestamps_us[cover_range.start, ncore.data.FrameTimepoint.START]) not in self.time_range_us
+            ):
+                cover_range = cover_range[1:]
+
+            return cover_range
+
         self.camera_frame_ranges: dict[str, range] = {
-            camera_id: self.time_range_us.cover_range(
-                self.sequence_camera_sensors[sequence_id][camera_id].get_frames_timestamps_us()
+            camera_id: get_sensor_frame_range(
+                self.sequence_camera_sensors[sequence_id][camera_id].frames_timestamps_us
             )
             for camera_id in self.camera_ids
         }
         self.lidar_frame_ranges: dict[str, range] = {
-            lidar_id: self.time_range_us.cover_range(
-                self.sequence_lidar_sensors[sequence_id][lidar_id].get_frames_timestamps_us()
+            lidar_id: get_sensor_frame_range(
+                self.sequence_lidar_sensors[sequence_id][lidar_id].frames_timestamps_us
             )
             for lidar_id in self.lidar_ids
         }
@@ -622,7 +623,7 @@ class NCoreDataset(torch.utils.data.Dataset):
     ) -> np.ndarray:
         """
         Transform input poses 'T_poses_world' in NCore world frame (metric units) to
-        poses in colmap frame (in *normalized* units), applying world transformation
+        poses in colmap frame, applying world transformation
         (given by 'T_world_to_colmap_world' (4,4)), frame axis conventions, scene rescaling, and origin offsets.
 
         Supports both singular (4,4) and batched (N,4,4) input poses.
