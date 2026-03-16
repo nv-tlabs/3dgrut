@@ -56,7 +56,7 @@ class GSStrategy(BaseStrategy):
             self.densify_grad_norm_accum = torch.zeros((num_gaussians, 1), dtype=torch.float, device=self.model.device)
             self.densify_grad_norm_denom = torch.zeros((num_gaussians, 1), dtype=torch.int, device=self.model.device)
 
-    def post_backward(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
+    def _post_backward(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
         """Callback function to be executed after the `loss.backward()` call."""
 
         # Update densification buffer:
@@ -71,8 +71,8 @@ class GSStrategy(BaseStrategy):
 
         return False
 
-    def post_optimizer_step(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
-        """Callback function to be executed after the `loss.backward()` call."""
+    def _post_optimizer_step(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
+        """Callback function to be executed after the optimizer step."""
         scene_updated = False
         # Densify the Gaussians
 
