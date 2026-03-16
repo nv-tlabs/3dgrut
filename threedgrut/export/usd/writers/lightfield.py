@@ -51,8 +51,9 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
         half_features: bool = False,
         projection_mode_hint: str = "perspective",
         sorting_mode_hint: str = "cameraDistance",
+        linear_srgb: bool = False,
     ) -> None:
-        super().__init__(stage, capabilities, content_root_path)
+        super().__init__(stage, capabilities, content_root_path, linear_srgb=linear_srgb)
         self.half_geometry = half_geometry
         self.half_features = half_features
         self.projection_mode_hint = projection_mode_hint
@@ -90,6 +91,7 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
         # Set rendering hints
         self._set_rendering_hints()
 
+        self.apply_color_space_to_prim(self.prim)
         return self.prim
 
     def _apply_surflet_kernel_schemas(self) -> None:
