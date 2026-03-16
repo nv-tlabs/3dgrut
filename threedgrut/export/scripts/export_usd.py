@@ -115,6 +115,11 @@ Examples:
         action="store_true",
         help="Skip normalizing transform",
     )
+    parser.add_argument(
+        "--linear-srgb",
+        action="store_true",
+        help="Set prim color space to lin_rec709_scene (linear). Default is srgb_rec709_display.",
+    )
 
     # Dataset path (optional, overrides checkpoint's dataset path)
     parser.add_argument(
@@ -230,6 +235,7 @@ def main():
             export_cameras=not args.no_cameras,
             export_background=not args.no_background,
             apply_normalizing_transform=not args.no_transform,
+            linear_srgb=args.linear_srgb,
         )
         logger.info("Using ParticleField3DGaussianSplat schema (standard)")
 
