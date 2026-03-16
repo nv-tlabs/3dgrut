@@ -380,7 +380,7 @@ class Tracer:
 
     @staticmethod
     def __create_camera_parameters(gpu_batch):
-        from threedgrut.datasets.camera_models import ShutterType
+        from threedgrut.datasets.camera_models import ShutterType, FThetaCameraModelParameters
 
         SHUTTER_TYPE_MAP = {
             ShutterType.ROLLING_TOP_TO_BOTTOM: _3dgut_plugin.ShutterType.ROLLING_TOP_TO_BOTTOM,
@@ -464,6 +464,23 @@ class Tracer:
                 focal_length=K["focal_length"],
                 radial_coeffs=K["radial_coeffs"],
                 max_angle=K["max_angle"],
+            )
+            return camera_model_parameters, Tracer.__create_sensor_pose_from_R_T(R_start, T_start, R_end, T_end)
+
+        elif (K := gpu_batch.intrinsics_FThetaCameraModelParameters) is not None:
+            POLYNOMIAL_TYPE_MAP = {
+                FThetaCameraModelParameters.PolynomialType.PIXELDIST_TO_ANGLE: _3dgut_plugin.PolynomialType.PIXELDIST_TO_ANGLE,
+                FThetaCameraModelParameters.PolynomialType.ANGLE_TO_PIXELDIST: _3dgut_plugin.PolynomialType.ANGLE_TO_PIXELDIST,
+            }
+            camera_model_parameters = _3dgut_plugin.fromFThetaCameraModelParameters(
+                resolution=K["resolution"],
+                shutter_type=SHUTTER_TYPE_MAP[K["shutter_type"]],
+                principal_point=K["principal_point"],
+                reference_poly=POLYNOMIAL_TYPE_MAP[K["reference_poly"]],
+                pixeldist_to_angle_poly=K["pixeldist_to_angle_poly"],
+                angle_to_pixeldist_poly=K["angle_to_pixeldist_poly"],
+                max_angle=K["max_angle"],
+                linear_cde=K["linear_cde"],
             )
             return camera_model_parameters, Tracer.__create_sensor_pose_from_R_T(R_start, T_start, R_end, T_end)
 

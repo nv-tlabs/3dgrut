@@ -29,7 +29,7 @@ import torch
 import ncore.data
 import ncore.sensors
 
-from threedgrut.datasets.camera_models import ShutterType
+from threedgrut.datasets.camera_models import FThetaCameraModelParameters, ShutterType
 from threedgrut.datasets.datasetNcore import NCoreDataset
 from threedgrut.datasets.protocols import Batch, BoundedMultiViewDataset, DatasetVisualization
 from threedgrut.datasets.utils import create_camera_visualization, create_pixel_coords
@@ -425,7 +425,6 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
         # Try to get full camera model parameters with proper resolution.
         # Intrinsics are required by rasterization-based renderers (3DGUT) but not by
         # ray-traced renderers (3DGRT) which only use pre-computed rays.
-        # For unsupported camera models (e.g. FTheta), intrinsics extraction is skipped.
         intrinsics_result = self._get_camera_model_parameters_for_resolution(camera_id, render_w, render_h)
         if intrinsics_result is not None:
             intrinsics_params, model_type_name = intrinsics_result
@@ -453,7 +452,7 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
         The caller uses model_type_name to set the correct Batch field
         (e.g. "intrinsics_OpenCVPinholeCameraModelParameters").
 
-        Only supported for OpenCV Pinhole/Fisheye cameras; returns None for other models (e.g. FTheta).
+        Supported for OpenCV Pinhole, OpenCV Fisheye, and FTheta cameras; returns None for other models.
         """
         if camera_id is None or not hasattr(self, 'sequence_camera_models'):
             return None
@@ -468,10 +467,6 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
                 continue
 
             camera_model = camera_models[camera_id]
-
-            # Only OpenCV Pinhole/Fisheye models are currently supported by the rasterization renderer.
-            if isinstance(camera_model, ncore.sensors.FThetaCameraModel):
-                return None
 
             # Get (already-downsampled) parameters and transform to the render resolution
             model_params = camera_model.get_parameters()
@@ -512,6 +507,20 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
                     "focal_length": scaled_params.focal_length,
                     "radial_coeffs": scaled_params.radial_coeffs,
                     "max_angle": scaled_params.max_angle,
+                }
+            elif isinstance(camera_model, ncore.sensors.FThetaCameraModel):
+                # Map ncore's PolynomialType enum to the repo's FThetaCameraModelParameters.PolynomialType
+                # by name, since they are different enum classes with matching member names.
+                reference_poly = FThetaCameraModelParameters.PolynomialType[scaled_params.reference_poly.name]
+                params_dict = {
+                    "resolution": scaled_params.resolution,
+                    "shutter_type": shutter_type,
+                    "principal_point": scaled_params.principal_point,
+                    "reference_poly": reference_poly,
+                    "pixeldist_to_angle_poly": scaled_params.pixeldist_to_angle_poly,
+                    "angle_to_pixeldist_poly": scaled_params.angle_to_pixeldist_poly,
+                    "max_angle": scaled_params.max_angle,
+                    "linear_cde": scaled_params.linear_cde,
                 }
             else:
                 logger.warning(f"Camera {camera_id}: unsupported camera model type {type(camera_model).__name__} for intrinsics extraction")
