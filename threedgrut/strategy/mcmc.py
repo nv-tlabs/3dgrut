@@ -76,7 +76,7 @@ class MCMCStrategy(BaseStrategy):
             device=self.model.device,
         )
 
-    def post_optimizer_step(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
+    def _post_optimizer_step(self, step: int, scene_extent: float, train_dataset, batch=None, writer=None) -> bool:
         # Relocate dead gaussians to the alive areas
         if check_step_condition(
             step,

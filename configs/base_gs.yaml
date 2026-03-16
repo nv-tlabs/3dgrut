@@ -124,6 +124,9 @@ loss:
 # Post-processing configuration
 post_processing:
   method: null # Possible values: null, "ppisp"
+  # Enable the controller for predicting per-frame corrections for novel views.
+  # When false, zero corrections are used for novel views.
+  use_controller: true
   # Number of extra distillation steps after main training (only for "ppisp").
   # When > 0, enables distillation mode: Gaussians and PPISP params are frozen,
   # only the controller is trained for these additional steps.

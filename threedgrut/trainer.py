@@ -341,22 +341,28 @@ class Trainer3DGRUT:
             num_cameras = len(frames_per_camera)
             num_frames = sum(frames_per_camera)
 
+            use_controller = conf.post_processing.get("use_controller", True)
+
             # Distillation mode: controller activates after main training
             # Total iterations = n_iterations, distillation starts at n_iterations - n_distillation_steps
             n_distillation_steps = conf.post_processing.get("n_distillation_steps", 5000)
-            if n_distillation_steps > 0:
+            if use_controller and n_distillation_steps > 0:
                 main_training_steps = conf.n_iterations - n_distillation_steps
                 controller_activation_ratio = main_training_steps / conf.n_iterations
                 controller_distillation = True
                 self._distillation_start_step = main_training_steps
                 logger.info(f"📷 PPISP distillation mode: controller activates at step {main_training_steps}")
-            else:
+            elif use_controller:
                 controller_activation_ratio = 0.8
                 controller_distillation = False
-                self._distillation_start_step = None
+                self._distillation_start_step = -1
+            else:
+                controller_activation_ratio = 0.0
+                controller_distillation = False
+                self._distillation_start_step = -1
 
             ppisp_config = PPISPConfig(
-                use_controller=True,
+                use_controller=use_controller,
                 controller_distillation=controller_distillation,
                 controller_activation_ratio=controller_activation_ratio,
             )
@@ -846,9 +852,10 @@ class Trainer3DGRUT:
             if self.global_step >= conf.n_iterations:
                 return
 
-            # Freeze Gaussians when distillation starts
+            # Freeze Gaussians and suspend strategy when distillation starts
             if self._distillation_start_step >= 0 and self.global_step >= self._distillation_start_step:
                 self.model.freeze_gaussians()
+                self.strategy.suspend()
 
             # Access the GPU-cache batch data
             gpu_batch = self.train_dataset.get_gpu_batch_with_intrinsics(batch)
