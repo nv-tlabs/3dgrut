@@ -21,6 +21,7 @@ Tests the full export pipeline: ExportableModel -> Exporter -> File -> Importer 
 
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -405,6 +406,75 @@ class TestExportImportConsistency:
             assert stage, "Failed to open exported stage"
             errors = _validate_stage(stage)
             assert not errors, "USD validation failed:\n" + "\n".join(e.GetMessage() for e in errors)
+
+
+def _find_prim_with_color_space_api(stage: Usd.Stage):
+    """Return the first prim that has ColorSpaceAPI applied (the Gaussian particle prim)."""
+    for prim in Usd.PrimRange(stage.GetPseudoRoot()):
+        if prim.HasAPI(Usd.ColorSpaceAPI):
+            return prim
+    return None
+
+
+class TestUSDExportColorSpace:
+    """Test that USD export applies ColorSpaceAPI with correct color space name."""
+
+    def test_usd_export_color_space_default_srgb(self):
+        """Export with linear_srgb=False (default) sets color space to srgb_rec709_display."""
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usdz"
+            USDExporter(
+                half_precision=False,
+                export_cameras=False,
+                export_background=False,
+                apply_normalizing_transform=False,
+                linear_srgb=False,
+            ).export(model, usd_path)
+            stage = Usd.Stage.Open(str(usd_path))
+            assert stage
+            prim = _find_prim_with_color_space_api(stage)
+            assert prim is not None, "No prim with ColorSpaceAPI found"
+            api = Usd.ColorSpaceAPI(prim)
+            attr = api.GetColorSpaceNameAttr()
+            assert attr, "ColorSpaceName attribute missing"
+            assert attr.Get() == "srgb_rec709_display"
+
+    def test_usd_export_color_space_linear_srgb(self):
+        """Export with linear_srgb=True sets color space to lin_rec709_scene."""
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usdz"
+            USDExporter(
+                half_precision=False,
+                export_cameras=False,
+                export_background=False,
+                apply_normalizing_transform=False,
+                linear_srgb=True,
+            ).export(model, usd_path)
+            stage = Usd.Stage.Open(str(usd_path))
+            assert stage
+            prim = _find_prim_with_color_space_api(stage)
+            assert prim is not None, "No prim with ColorSpaceAPI found"
+            api = Usd.ColorSpaceAPI(prim)
+            attr = api.GetColorSpaceNameAttr()
+            assert attr, "ColorSpaceName attribute missing"
+            assert attr.Get() == "lin_rec709_scene"
+
+    def test_usd_export_color_space_from_config(self):
+        """Export via from_config with linear_srgb in config sets correct color space."""
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        conf = SimpleNamespace(export_usd=SimpleNamespace(linear_srgb=True))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usdz"
+            exporter = USDExporter.from_config(conf)
+            exporter.export(model, usd_path)
+            stage = Usd.Stage.Open(str(usd_path))
+            assert stage
+            prim = _find_prim_with_color_space_api(stage)
+            assert prim is not None, "No prim with ColorSpaceAPI found"
+            api = Usd.ColorSpaceAPI(prim)
+            assert api.GetColorSpaceNameAttr().Get() == "lin_rec709_scene"
 
 
 if __name__ == "__main__":
