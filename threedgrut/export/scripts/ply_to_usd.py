@@ -18,10 +18,13 @@ import logging
 import sys
 from pathlib import Path
 
+import numpy as np
+
 from hydra.compose import compose
 from hydra.initialize import initialize
 from omegaconf import DictConfig
 
+from threedgrut.export.edit_nurec import crop_model_to_bbox, export_model_to_nurec
 from threedgrut.export.usdz_exporter import USDZExporter
 from threedgrut.model.model import MixtureOfGaussians
 
@@ -54,6 +57,32 @@ def main():
     parser.add_argument(
         "--output_file", type=str, help="Output USDZ file path (defaults to input file path with .usdz extension)"
     )
+    parser.add_argument(
+        "--method",
+        type=str,
+        choices=["3dgut", "3dgrt"],
+        default="3dgut",
+        help="Renderer method used in export config",
+    )
+    parser.add_argument(
+        "--bbox_min",
+        nargs=3,
+        type=float,
+        metavar=("X", "Y", "Z"),
+        help="Optional bbox min for cropping points",
+    )
+    parser.add_argument(
+        "--bbox_max",
+        nargs=3,
+        type=float,
+        metavar=("X", "Y", "Z"),
+        help="Optional bbox max for cropping points",
+    )
+    parser.add_argument(
+        "--nurec_file",
+        type=str,
+        help="Optional intermediate NUREC output path (cropped if bbox is provided)",
+    )
 
     args = parser.parse_args()
 
@@ -77,15 +106,38 @@ def main():
 
     logger.info(f"Converting {input_path} to {output_path}")
 
+    if (args.bbox_min is None) != (args.bbox_max is None):
+        logger.error("--bbox_min and --bbox_max must be provided together")
+        sys.exit(1)
+
+    min_b = np.array(args.bbox_min, dtype=np.float32) if args.bbox_min is not None else None
+    max_b = np.array(args.bbox_max, dtype=np.float32) if args.bbox_max is not None else None
+    if min_b is not None and np.any(min_b > max_b):
+        logger.error(f"Invalid bbox: min {min_b.tolist()} must be <= max {max_b.tolist()}")
+        sys.exit(1)
+
     try:
         # 1. Create model with default config
         logger.info("Loading default configuration")
         conf = load_default_config()
+        conf.render.method = args.method
         model = MixtureOfGaussians(conf)
 
         # 2. Use init_from_ply
         logger.info(f"Loading PLY with init_from_ply: {input_path}")
         model.init_from_ply(str(input_path), init_model=False)
+
+        if min_b is not None:
+            kept, total = crop_model_to_bbox(model, min_b, max_b)
+            logger.info(f"Applied bbox crop: kept {kept}/{total} points")
+            if kept == 0:
+                logger.error("No points remain after bbox crop")
+                sys.exit(1)
+
+        if args.nurec_file:
+            nurec_path = Path(args.nurec_file)
+            logger.info(f"Exporting intermediate NUREC: {nurec_path}")
+            export_model_to_nurec(model, nurec_path, conf, args.method)
 
         # 3. Create USDZExporter
         exporter = USDZExporter()
