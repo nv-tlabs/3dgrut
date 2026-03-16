@@ -123,17 +123,21 @@ class Renderer:
             from ppisp import PPISP, PPISPConfig
 
             # Derive config from training settings to match trainer.py
+            use_controller = conf.post_processing.get("use_controller", True)
             n_distillation_steps = conf.post_processing.get("n_distillation_steps", 5000)
-            if n_distillation_steps > 0:
+            if use_controller and n_distillation_steps > 0:
                 main_training_steps = conf.n_iterations - n_distillation_steps
                 controller_activation_ratio = main_training_steps / conf.n_iterations
                 controller_distillation = True
-            else:
+            elif use_controller:
                 controller_activation_ratio = 0.8
+                controller_distillation = False
+            else:
+                controller_activation_ratio = 0.0
                 controller_distillation = False
 
             ppisp_config = PPISPConfig(
-                use_controller=True,
+                use_controller=use_controller,
                 controller_distillation=controller_distillation,
                 controller_activation_ratio=controller_activation_ratio,
             )
