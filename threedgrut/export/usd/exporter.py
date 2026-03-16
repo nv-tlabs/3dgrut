@@ -180,6 +180,7 @@ class USDExporter(ModelExporter):
         export_background: bool = True,
         apply_normalizing_transform: bool = True,
         sorting_mode_hint: str = "cameraDistance",
+        linear_srgb: bool = False,
     ):
         """
         Initialize the USD exporter.
@@ -192,6 +193,7 @@ class USDExporter(ModelExporter):
             export_background: Include background/environment in export
             apply_normalizing_transform: Apply transform to normalize scene orientation
             sorting_mode_hint: Sorting hint for rendering ("cameraDistance", "zDepth" per UsdVol schema)
+            linear_srgb: If True, set prim color space to lin_rec709_scene; else srgb_rec709_display
         """
         if half_precision:
             half_geometry = True
@@ -202,6 +204,7 @@ class USDExporter(ModelExporter):
         self.export_background = export_background
         self.apply_normalizing_transform = apply_normalizing_transform
         self.sorting_mode_hint = sorting_mode_hint
+        self.linear_srgb = linear_srgb
 
     def _create_default_stage(self, referenced_stages: List[NamedUSDStage]) -> NamedUSDStage:
         """
@@ -220,8 +223,8 @@ class USDExporter(ModelExporter):
             filename_stem = Path(ref_stage.filename).stem
             prim_path = f"/World/{filename_stem}"
             prim = stage.OverridePrim(prim_path)
-            # Reference the file (relative path within USDZ)
-            prim.GetReferences().AddReference(f"./{ref_stage.filename}")
+            # Reference the file (bare filename for in-package resolution; same as NuRec)
+            prim.GetReferences().AddReference(ref_stage.filename)
 
         return NamedUSDStage(filename="default.usda", stage=stage)
 
@@ -296,6 +299,7 @@ class USDExporter(ModelExporter):
             half_geometry=self.half_geometry,
             half_features=self.half_features,
             sorting_mode_hint=self.sorting_mode_hint,
+            linear_srgb=self.linear_srgb,
         )
 
         # Write Gaussians
@@ -404,4 +408,5 @@ class USDExporter(ModelExporter):
             export_background=getattr(export_conf, 'export_background', True),
             apply_normalizing_transform=getattr(export_conf, 'apply_normalizing_transform', True),
             sorting_mode_hint=getattr(export_conf, 'sorting_mode_hint', 'cameraDistance'),
+            linear_srgb=getattr(export_conf, 'linear_srgb', False),
         )
