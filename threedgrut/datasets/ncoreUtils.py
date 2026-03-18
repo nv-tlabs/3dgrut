@@ -224,8 +224,12 @@ class Batch:
     w: Union[list[int], int, None] = None
     batch_size: Optional[int] = None
     camera_id: Union[str, list[str], None] = None  # Camera ID string for intrinsics lookup
-    frame_time: Union[float, list[float], None] = None  # Frame time in milliseconds, relative to first frame (starts at 0.0)
-    frame_idx: Union[int, list[int], None] = None  # 0-based contiguous training frame index (camera-blocked); -1 for validation
+    frame_time: Union[float, list[float], None] = (
+        None  # Frame time in milliseconds, relative to first frame (starts at 0.0)
+    )
+    frame_idx: Union[int, list[int], None] = (
+        None  # 0-based contiguous training frame index (camera-blocked); -1 for validation
+    )
     camera_idx: Union[int, list[int], None] = None  # Camera index
 
     @staticmethod
@@ -407,4 +411,3 @@ class FrameConversion(dataclasses_json.DataClassJsonMixin):
 
         # unbatch dimensions conditionally
         return T_poses.squeeze()  # (N,4,4) or (4,4)
-

@@ -366,13 +366,13 @@ class Tracer:
         T_world_sensor_R_start = torch.from_numpy(R_start.transpose()).float()
         T_world_sensor_quat_start = SensorPose3DModel._SensorPose3DModel__so3_matrix_to_quat(T_world_sensor_R_start)
         T_world_sensor_tquat_start = torch.hstack([T_world_sensor_t_start.cpu(), T_world_sensor_quat_start.cpu()])
-        
+
         # Convert END pose to quaternion
         T_world_sensor_t_end = torch.from_numpy(T_end).float()
         T_world_sensor_R_end = torch.from_numpy(R_end.transpose()).float()
         T_world_sensor_quat_end = SensorPose3DModel._SensorPose3DModel__so3_matrix_to_quat(T_world_sensor_R_end)
         T_world_sensor_tquat_end = torch.hstack([T_world_sensor_t_end.cpu(), T_world_sensor_quat_end.cpu()])
-        
+
         return SensorPose3D(
             T_world_sensors=[T_world_sensor_tquat_start, T_world_sensor_tquat_end],
             timestamps_us=[0, 1],  # Relative timestamps (start=0, end=1)
@@ -391,8 +391,8 @@ class Tracer:
         }
 
         # Check if rays are already in world space (rolling shutter with per-pixel poses)
-        rays_in_world_space = gpu_batch.rays_in_world_space if hasattr(gpu_batch, 'rays_in_world_space') else False
-        
+        rays_in_world_space = gpu_batch.rays_in_world_space if hasattr(gpu_batch, "rays_in_world_space") else False
+
         if rays_in_world_space:
             # Rays are already in world space with correct per-pixel poses baked in
             # Use identity transform (no-op) so rays stay in world space
@@ -402,7 +402,7 @@ class Tracer:
             # Process the camera extrinsics (START and END poses for rolling shutter)
             pose_start = gpu_batch.T_to_world.squeeze()
             assert pose_start.ndim == 2
-            
+
             # Extract END pose for rolling shutter (if available)
             if gpu_batch.T_to_world_end is not None:
                 pose_end = gpu_batch.T_to_world_end.squeeze()
@@ -410,7 +410,7 @@ class Tracer:
             else:
                 # Global shutter: END pose = START pose
                 pose_end = pose_start
-            
+
             # Helper function to convert pose to world-to-camera parameters
             def pose_to_world_to_camera(pose):
                 C2W = np.concatenate((pose[:3, :4].cpu().detach().numpy(), np.zeros((1, 4))))
@@ -419,7 +419,7 @@ class Tracer:
                 R = np.transpose(W2C[:3, :3])
                 T = W2C[:3, 3]
                 return R, T
-            
+
             R_start, T_start = pose_to_world_to_camera(pose_start)
             R_end, T_end = pose_to_world_to_camera(pose_end)
 

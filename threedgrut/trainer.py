@@ -278,12 +278,11 @@ class Trainer3DGRUT:
                     model.init_from_checkpoint(checkpoint, setup_optimizer=False)
                 case "lidar":
                     pc = PointCloud.from_sequence(
-                        list(train_dataset.get_point_clouds(step_frame=1, non_dynamic_points_only=True)), 
-                        device="cpu"
+                        list(train_dataset.get_point_clouds(step_frame=1, non_dynamic_points_only=True)), device="cpu"
                     )
                     idxs = torch.randint(len(pc.xyz_end), (conf.initialization.num_points,))
                     pc = pc.selected_idxs(idxs)
-                    assert conf.dataset.type in ['ncore'], 'can only initialize from lidar with NCoreDataset'
+                    assert conf.dataset.type in ["ncore"], "can only initialize from lidar with NCoreDataset"
                     observer_points = torch.tensor(
                         train_dataset.get_observer_points(), dtype=torch.float32, device=self.device
                     )
@@ -715,8 +714,8 @@ class Trainer3DGRUT:
             exporter.export(self.model, Path(ply_path), dataset=self.train_dataset, conf=conf)
         if conf.export_usd.enabled:
             # Determine format for filename suffix
-            usdz_format = getattr(conf.export_usd, 'format', 'nurec')
-            if usdz_format == 'standard':
+            usdz_format = getattr(conf.export_usd, "format", "nurec")
+            if usdz_format == "standard":
                 format_suffix = "lightfield"
                 exporter = USDExporter.from_config(conf)
             else:
@@ -737,7 +736,7 @@ class Trainer3DGRUT:
                 Path(usdz_path),
                 dataset=self.train_dataset,
                 conf=conf,
-                background=getattr(self, 'background', None),
+                background=getattr(self, "background", None),
             )
 
         # Export post-processing report (PPISP-based)

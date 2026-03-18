@@ -122,7 +122,7 @@ def make(name: str, config, ray_jitter):
                 device="cuda",
                 split="train",
                 camera_ids=config.dataset.get("camera_ids", []),  # Empty list = auto-detect
-                lidar_ids=config.dataset.get("lidar_ids", []),    # Empty list = auto-detect
+                lidar_ids=config.dataset.get("lidar_ids", []),  # Empty list = auto-detect
                 downsample=config.dataset.get("downsample", 1.0),  # Training downsample factor
                 sample_full_image=config.dataset.train.get("sample_full_image", True),
                 window_size=config.dataset.train.get("window_size", 256),
@@ -141,21 +141,23 @@ def make(name: str, config, ray_jitter):
             # Validation uses same temporal window as training by default
             train_seek_offset = config.dataset.train.get("seek_offset_sec", 0.0)
             train_duration = config.dataset.train.get("duration_sec", None)
-            
+
             val_config = config.dataset.get("val", {})
             val_seek_offset_cfg = val_config.get("seek_offset_sec", None)
             val_duration_cfg = val_config.get("duration_sec", None)
-            
+
             # Use training values if validation config is None, -1, or not set
-            val_seek_offset = train_seek_offset if (val_seek_offset_cfg is None or val_seek_offset_cfg < 0) else val_seek_offset_cfg
+            val_seek_offset = (
+                train_seek_offset if (val_seek_offset_cfg is None or val_seek_offset_cfg < 0) else val_seek_offset_cfg
+            )
             val_duration = train_duration if (val_duration_cfg is None or val_duration_cfg < 0) else val_duration_cfg
-            
+
             val_dataset = NCoreDatasetAdapter(
                 datapath=config.path,
                 device="cuda",
                 split="val",
                 camera_ids=config.dataset.get("camera_ids", []),  # Empty list = auto-detect
-                lidar_ids=config.dataset.get("lidar_ids", []),    # Empty list = auto-detect
+                lidar_ids=config.dataset.get("lidar_ids", []),  # Empty list = auto-detect
                 downsample=config.dataset.get("downsample", 1.0),
                 sample_full_image=True,
                 window_size=config.dataset.get("window_size", 256),
@@ -212,21 +214,23 @@ def make_test(name: str, config):
             # Inherit temporal window from training by default
             train_seek_offset = config.dataset.train.get("seek_offset_sec", 0.0)
             train_duration = config.dataset.train.get("duration_sec", None)
-            
+
             val_config = config.dataset.get("val", {})
             val_seek_offset_cfg = val_config.get("seek_offset_sec", None)
             val_duration_cfg = val_config.get("duration_sec", None)
-            
+
             # Use training values if validation config is None, -1, or not set
-            test_seek_offset = train_seek_offset if (val_seek_offset_cfg is None or val_seek_offset_cfg < 0) else val_seek_offset_cfg
+            test_seek_offset = (
+                train_seek_offset if (val_seek_offset_cfg is None or val_seek_offset_cfg < 0) else val_seek_offset_cfg
+            )
             test_duration = train_duration if (val_duration_cfg is None or val_duration_cfg < 0) else val_duration_cfg
-            
+
             dataset = NCoreDatasetAdapter(
                 datapath=config.path,
                 device="cuda",
                 split="val",
                 camera_ids=config.dataset.get("camera_ids", []),  # Empty list = auto-detect
-                lidar_ids=config.dataset.get("lidar_ids", []),    # Empty list = auto-detect
+                lidar_ids=config.dataset.get("lidar_ids", []),  # Empty list = auto-detect
                 downsample=config.dataset.get("downsample", 1.0),
                 sample_full_image=True,
                 window_size=config.dataset.get("window_size", 256),

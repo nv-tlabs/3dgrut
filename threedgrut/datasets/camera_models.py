@@ -121,15 +121,21 @@ class FThetaCameraModelParameters(CameraModelParameters, dataclasses_json.DataCl
     class PolynomialType(IntEnum):
         """Enumerates different possible polynomial types"""
 
-        PIXELDIST_TO_ANGLE = auto()  #: Polynomial mapping pixeldistances-to-angles (also known as "backward" polynomial)
+        PIXELDIST_TO_ANGLE = (
+            auto()
+        )  #: Polynomial mapping pixeldistances-to-angles (also known as "backward" polynomial)
         ANGLE_TO_PIXELDIST = auto()  #: Polynomial mapping angles-to-pixeldistances (also known as "forward" polynomial)
 
-    principal_point: np.ndarray #: U and v coordinate of the principal point, following the NVIDIA default convention for FTheta camera models in which the pixel indices represent the center of the pixel (not the top-left corners). Principal point coordinates will be adapted internally in camera model APIs to reflect the :ref:`image coordinate conventions <image_coordinate_conventions>`
-    reference_poly: PolynomialType #: Indicating which of the two stored polynomials is the model's *reference* polynomial (the other polynomial is only an approximation)
-    pixeldist_to_angle_poly: np.ndarray #: Coefficients of the pixeldistances-to-angles polynomial (float32, [6,])
-    angle_to_pixeldist_poly: np.ndarray #: Coefficients of the angles-to-pixeldistances polynomial (float32, [6,])
+    principal_point: (
+        np.ndarray
+    )  #: U and v coordinate of the principal point, following the NVIDIA default convention for FTheta camera models in which the pixel indices represent the center of the pixel (not the top-left corners). Principal point coordinates will be adapted internally in camera model APIs to reflect the :ref:`image coordinate conventions <image_coordinate_conventions>`
+    reference_poly: PolynomialType  #: Indicating which of the two stored polynomials is the model's *reference* polynomial (the other polynomial is only an approximation)
+    pixeldist_to_angle_poly: np.ndarray  #: Coefficients of the pixeldistances-to-angles polynomial (float32, [6,])
+    angle_to_pixeldist_poly: np.ndarray  #: Coefficients of the angles-to-pixeldistances polynomial (float32, [6,])
     max_angle: float = 0.0  #: Maximal extrinsic ray angle [rad] with the principal direction (float32)
-    linear_cde: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0], dtype=np.float32)) #: Coefficients of the constrained linear term [c,d;e,1] transforming between sensor coordinates (in mm) to image coordinates (in px) (float32, [3,])
+    linear_cde: np.ndarray = field(
+        default_factory=lambda: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    )  #: Coefficients of the constrained linear term [c,d;e,1] transforming between sensor coordinates (in mm) to image coordinates (in px) (float32, [3,])
 
     @staticmethod
     def type() -> str:
@@ -235,7 +241,9 @@ def image_points_to_camera_rays_opencv_fisheye(
     Computes the camera ray for each image point, performing an iterative undistortion of the nonlinear distortion model
     """
 
-    assert isinstance(camera_model_parameters, OpenCVFisheyeCameraModelParameters), "[CameraModel]: camera_model_parameters must be of type OpenCVFisheyeCameraModelParameters"
+    assert isinstance(
+        camera_model_parameters, OpenCVFisheyeCameraModelParameters
+    ), "[CameraModel]: camera_model_parameters must be of type OpenCVFisheyeCameraModelParameters"
 
     dtype: torch.dtype = torch.float32
 
@@ -287,6 +295,7 @@ def image_points_to_camera_rays_opencv_fisheye(
     cam_rays[deltas.flatten() < min_2d_norm, :] = torch.tensor([[0, 0, 1]]).to(normalized_image_points)
 
     return cam_rays
+
 
 def pixels_to_image_points(pixel_idxs) -> torch.Tensor:
     """Given integer-based pixels indices, computes corresponding continuous image point coordinates representing the *center* of each pixel."""

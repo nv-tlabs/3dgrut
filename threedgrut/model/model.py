@@ -512,16 +512,12 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
     def init_from_lidar(self, point_cloud, observer_pts):
         """
         Initialize from lidar point cloud.
-        Observer points can be any set locations that observation came from. 
+        Observer points can be any set locations that observation came from.
         Camera centers, ray source points, etc. They are used to estimate initial scales.
         """
         logger.info(f"Initializing based on lidar point cloud ...")
-        
-        self.default_initialize_from_points(
-            point_cloud.xyz_end.to(device=self.device), 
-            observer_pts, 
-            point_cloud.color
-        )
+
+        self.default_initialize_from_points(point_cloud.xyz_end.to(device=self.device), observer_pts, point_cloud.color)
 
     def default_initialize_from_points(self, pts, observer_pts, colors=None, use_observer_pts=True):
         """
