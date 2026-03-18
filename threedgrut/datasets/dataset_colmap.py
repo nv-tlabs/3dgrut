@@ -29,7 +29,7 @@ from .camera_models import (
     OpenCVFisheyeCameraModelParameters,
     OpenCVPinholeCameraModelParameters,
     ShutterType,
-    image_points_to_camera_rays,
+    image_points_to_camera_rays_opencv_fisheye,
     pixels_to_image_points,
 )
 from .protocols import Batch, BoundedMultiViewDataset, DatasetVisualization
@@ -192,9 +192,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 max_angle=max_angle,
                 shutter_type=ShutterType.GLOBAL,
             )
-            int_pixel_coords = torch.tensor(np.stack([u, v], axis=1), dtype=torch.int32)
-            image_points = pixels_to_image_points(int_pixel_coords)
-            rays_d_cam = image_points_to_camera_rays(params, image_points)
+            pixel_coords = torch.tensor(np.stack([u, v], axis=1), dtype=torch.int32)
+            image_points = pixels_to_image_points(pixel_coords)
+            rays_d_cam = image_points_to_camera_rays_opencv_fisheye(params, image_points)
             rays_o_cam = torch.zeros_like(rays_d_cam)
             pixel_coords = create_pixel_coords(w, h)
             return (
