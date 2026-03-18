@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,7 +31,7 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 import threedgrut.datasets as datasets
 from threedgrut.datasets.protocols import BoundedMultiViewDataset
-from threedgrut.datasets.utils import DEFAULT_DEVICE, MultiEpochsDataLoader
+from threedgrut.datasets.utils import DEFAULT_DEVICE, MultiEpochsDataLoader, PointCloud
 from threedgrut.export import PLYExporter, USDExporter, NuRecExporter
 from threedgrut.model.losses import ssim
 from threedgrut.model.model import MixtureOfGaussians
@@ -276,9 +276,20 @@ class Trainer3DGRUT:
                 case "checkpoint":
                     checkpoint = torch.load(conf.initialization.path, weights_only=False)
                     model.init_from_checkpoint(checkpoint, setup_optimizer=False)
+                case "lidar":
+                    pc = PointCloud.from_sequence(
+                        list(train_dataset.get_point_clouds(step_frame=1, non_dynamic_points_only=True)), device="cpu"
+                    )
+                    idxs = torch.randint(len(pc.xyz_end), (conf.initialization.num_points,))
+                    pc = pc.selected_idxs(idxs)
+                    assert conf.dataset.type in ["ncore"], "can only initialize from lidar with NCoreDataset"
+                    observer_points = torch.tensor(
+                        train_dataset.get_observer_points(), dtype=torch.float32, device=self.device
+                    )
+                    model.init_from_lidar(pc, observer_points)
                 case _:
                     raise ValueError(
-                        f"unrecognized initialization.method {conf.initialization.method}, choose from [colmap, point_cloud, random, checkpoint]"
+                        f"unrecognized initialization.method {conf.initialization.method}, choose from [colmap, point_cloud, random, checkpoint, lidar]"
                     )
 
             self.strategy.init_densification_buffer()
@@ -703,8 +714,8 @@ class Trainer3DGRUT:
             exporter.export(self.model, Path(ply_path), dataset=self.train_dataset, conf=conf)
         if conf.export_usd.enabled:
             # Determine format for filename suffix
-            usdz_format = getattr(conf.export_usd, 'format', 'nurec')
-            if usdz_format == 'standard':
+            usdz_format = getattr(conf.export_usd, "format", "nurec")
+            if usdz_format == "standard":
                 format_suffix = "lightfield"
                 exporter = USDExporter.from_config(conf)
             else:
@@ -725,7 +736,7 @@ class Trainer3DGRUT:
                 Path(usdz_path),
                 dataset=self.train_dataset,
                 conf=conf,
-                background=getattr(self, 'background', None),
+                background=getattr(self, "background", None),
             )
 
         # Export post-processing report (PPISP-based)

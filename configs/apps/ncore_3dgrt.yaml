@@ -1,0 +1,15 @@
+# @package _global_
+
+# order in which configs override each other (/* - denotes a relative search path)
+defaults:
+  - /base_gs
+  - /dataset: ncore
+  - /initialization: lidar
+  - /render: 3dgrt
+  - _self_
+
+# overwrite of default parameters
+num_workers: 16
+
+val_frequency: 999999 # never validate
+
