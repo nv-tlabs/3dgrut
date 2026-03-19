@@ -32,7 +32,7 @@ import ncore.sensors
 from threedgrut.datasets.camera_models import FThetaCameraModelParameters, ShutterType
 from threedgrut.datasets.datasetNcore import NCoreDataset
 from threedgrut.datasets.protocols import Batch, BoundedMultiViewDataset, DatasetVisualization
-from threedgrut.datasets.utils import create_camera_visualization, create_pixel_coords
+from threedgrut.datasets.utils import create_camera_visualization, create_pixel_coords, get_worker_id
 from threedgrut.utils.logger import logger
 
 
@@ -52,55 +52,96 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
         self.device = device
 
         # Store training mode for batch reshaping
-        # When sample_full_image=True, training uses full images (not patches)
-        # Random ray sampling uses 1×N format
         self._sample_full_image = self.sample_full_image
-        self._train_patch_size = None  # Not used for NCore (full images only)
+        self._train_patch_size = None
 
         # Cache for camera intrinsics (populated on first worker init)
         self._camera_intrinsics_cache = {}
 
+        # Per-worker GPU caches: camera-space rays, pixel coordinates
+        # Populated lazily on first use in each DataLoader worker process.
+        # Keys: worker_id -> dict[(camera_id, w, h) -> (rays_ori, rays_dir, pixel_coords)]
+        self._worker_gpu_cache: dict = {}
+
+    def _lazy_worker_gpu_cache(self) -> dict[tuple[str, int, int], tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        """Lazily create and cache camera-space rays + pixel coords on GPU for the current worker.
+
+        Following the same pattern as COLMAP's _lazy_worker_intrinsics_cache (dataset_colmap.py:292).
+        Each DataLoader worker creates its own GPU tensors on first use.
+
+        Returns:
+            Dict mapping (camera_id, w, h) -> (rays_ori, rays_dir, pixel_coords) on GPU.
+        """
+        worker_id = get_worker_id()
+
+        if worker_id not in self._worker_gpu_cache:
+            cache: dict[tuple[str, int, int], tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+
+            for sequence_id in self.sequence_cameras_all_rays:
+                for camera_id, rays_np in self.sequence_cameras_all_rays[sequence_id].items():
+                    # rays_np: (H, W, 3) camera-space ray directions (pre-computed at init)
+                    h_full, w_full = rays_np.shape[:2]
+                    rays_dir = torch.from_numpy(rays_np).to(dtype=torch.float32, device=self.device, non_blocking=True)
+                    rays_ori = torch.zeros_like(rays_dir)  # Intrinsic origin at (0,0,0)
+                    pixel_coords = create_pixel_coords(w_full, h_full, device=self.device)  # (1, H, W, 2)
+                    cache[(camera_id, w_full, h_full)] = (rays_ori, rays_dir, pixel_coords)
+
+                # Also cache subsampled rays for validation (when n_val_image_subsample > 1)
+                if self.n_val_image_subsample > 1:
+                    for camera_id, rays_sub_np in self.sequence_cameras_rays_subsample[sequence_id].items():
+                        camera_model = self.sequence_camera_models[sequence_id][camera_id]
+                        w_full = int(camera_model.resolution[0].item())
+                        h_full = int(camera_model.resolution[1].item())
+                        w_sub = w_full // self.n_val_image_subsample
+                        h_sub = h_full // self.n_val_image_subsample
+                        rays_dir = torch.from_numpy(rays_sub_np.reshape(h_sub, w_sub, 3)).to(
+                            dtype=torch.float32, device=self.device, non_blocking=True
+                        )
+                        rays_ori = torch.zeros_like(rays_dir)
+                        pixel_coords = create_pixel_coords(w_sub, h_sub, device=self.device)
+                        cache[(camera_id, w_sub, h_sub)] = (rays_ori, rays_dir, pixel_coords)
+
+            self._worker_gpu_cache[worker_id] = cache
+
+        return self._worker_gpu_cache[worker_id]
+
     def __getitem__(self, idx) -> dict:
-        """Override to return dict instead of NCoreBatch for DataLoader collation."""
+        """Override to return dict instead of NCoreBatch for DataLoader collation.
+
+        The batch dict does NOT contain rays — camera-space rays are cached on GPU per worker
+        and looked up by (camera_id, w, h) in get_gpu_batch_with_intrinsics. This eliminates
+        the ~61MB CPU->GPU ray transfer per batch.
+        """
         ncore_batch = super().__getitem__(idx)
 
-        # Convert NCoreBatch to dict with only collatable types (tensors, arrays, scalars)
-        # Custom objects like RaysCamMeta and Labels can't be collated by default DataLoader
-        batch_dict = {
-            "rays_cam": ncore_batch.rays_cam,  # torch.Tensor (N, 6)
-            "idx": ncore_batch.idx,  # int or list
-        }
+        batch_dict: dict = {}
 
-        # Extract RGB from Labels object (only collatable tensor)
-        if ncore_batch.labels is not None and hasattr(ncore_batch.labels, "rgb"):
-            if ncore_batch.labels.rgb is not None:
-                batch_dict["rgb"] = ncore_batch.labels.rgb  # torch.Tensor (N, 3)
+        # RGB from labels
+        if ncore_batch.labels is not None and ncore_batch.labels.rgb is not None:
+            batch_dict["rgb"] = ncore_batch.labels.rgb
 
-        # Add image dimensions and camera info for validation
+        # Valid mask (validation only)
+        if (
+            ncore_batch.labels is not None
+            and hasattr(ncore_batch.labels, "valid")
+            and ncore_batch.labels.valid is not None
+        ):
+            batch_dict["valid"] = ncore_batch.labels.valid
+
+        # Camera-to-world poses (start + end for rolling shutter)
+        batch_dict["T_camera_to_world"] = ncore_batch.T_camera_to_world
+        batch_dict["T_camera_to_world_end"] = ncore_batch.T_camera_to_world_end
+
+        # Camera ID for ray cache + intrinsics lookup
+        batch_dict["camera_id"] = ncore_batch.camera_id
+
+        # Image dimensions (required for ray cache lookup and reshaping)
         if ncore_batch.h is not None:
             batch_dict["h"] = ncore_batch.h
         if ncore_batch.w is not None:
             batch_dict["w"] = ncore_batch.w
 
-        # Add camera ID from metadata for intrinsics lookup
-        # Extract camera_id from rays_cam_meta
-        if hasattr(ncore_batch, "rays_cam_meta") and ncore_batch.rays_cam_meta is not None:
-            if hasattr(ncore_batch.rays_cam_meta, "unique_sensor_idx"):
-                # Get the first ray's camera index (for training, all rays in a patch are from same camera)
-                unique_sensor_idx = ncore_batch.rays_cam_meta.unique_sensor_idx
-                if isinstance(unique_sensor_idx, torch.Tensor) and len(unique_sensor_idx) > 0:
-                    camera_idx = int(unique_sensor_idx[0].item())
-                    # Map camera index to camera_id string using the dataset's camera_ids list
-                    if hasattr(self, "camera_ids") and camera_idx < len(self.camera_ids):
-                        batch_dict["camera_id"] = self.camera_ids[camera_idx]
-
-        # Add camera-to-world transformations (START and END) for rolling shutter support
-        if hasattr(ncore_batch, "T_camera_to_world") and ncore_batch.T_camera_to_world is not None:
-            batch_dict["T_camera_to_world"] = ncore_batch.T_camera_to_world
-        if hasattr(ncore_batch, "T_camera_to_world_end") and ncore_batch.T_camera_to_world_end is not None:
-            batch_dict["T_camera_to_world_end"] = ncore_batch.T_camera_to_world_end
-
-        # Pass frame_idx and camera_idx for PPISP post-processing
+        # Frame/camera indices for PPISP post-processing
         if ncore_batch.frame_idx is not None:
             batch_dict["frame_idx"] = ncore_batch.frame_idx
         if ncore_batch.camera_idx is not None:
@@ -240,205 +281,81 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
             create_camera_visualization(cam_list)
 
     def get_gpu_batch_with_intrinsics(self, batch) -> Batch:
+        """Convert NCore batch dict to threedgrut Batch, using GPU-cached camera-space rays.
+
+        Camera-space rays are NOT transferred from CPU each batch. Instead they are
+        looked up from the per-worker GPU cache by (camera_id, w, h). Only the per-frame
+        pose (128 bytes) and RGB image are transferred to GPU.
+
+        The renderer handles rolling shutter interpolation via T_to_world / T_to_world_end
+        and the shutter_type from intrinsics. Rays are always in camera space
+        (rays_in_world_space=False).
         """
-        Convert NCore batch format (dict from DataLoader) to threedgrut Batch format.
 
-        Input batch (dict from DataLoader collation):
-        - rays_cam: (B, N, 6) [origin_x, origin_y, origin_z, dir_x, dir_y, dir_z] in world-global space
-        - rgb: Optional (B, N, 3) RGB values
-        - idx: batch index
+        # --- Resolve camera_id -------------------------------------------------
+        camera_id = batch["camera_id"]
+        if isinstance(camera_id, (list, tuple)):
+            camera_id = camera_id[0]
 
-        Output Batch:
-        - rays_ori: (B, H, W, 3) ray origins in CAMERA space
-        - rays_dir: (B, H, W, 3) ray directions in CAMERA space
-        - T_to_world: (B, 4, 4) camera-to-world transformation matrix (START pose)
-        - T_to_world_end: (B, 4, 4) camera-to-world transformation matrix (END pose for rolling shutter)
-        - rgb_gt: (B, H, W, 3) ground truth RGB
-        """
-        # Extract rays from NCore format (already collated by DataLoader)
-        # NCore stores rays in world-global space
-        if "rays_cam" in batch:
-            rays_cam = batch["rays_cam"]  # (B, N, 6) after collation
+        # --- Resolve image dimensions -------------------------------------------
+        h = batch["h"][0] if isinstance(batch["h"], (list, torch.Tensor)) else batch["h"]
+        w = batch["w"][0] if isinstance(batch["w"], (list, torch.Tensor)) else batch["w"]
+        h, w = int(h), int(w)
 
-            if not isinstance(rays_cam, torch.Tensor):
-                rays_cam = torch.from_numpy(rays_cam)
-            rays_cam = rays_cam.to(self.device, non_blocking=True)
+        # --- Look up cached camera-space rays on GPU (no CPU->GPU transfer) -----
+        worker_cache = self._lazy_worker_gpu_cache()
+        rays_ori, rays_dir, pixel_coords = worker_cache[(camera_id, w, h)]
 
-            # Handle batch dimension from collation
-            if rays_cam.dim() == 2:
-                # Single sample: (N, 6) -> (1, N, 6)
-                rays_cam = rays_cam.unsqueeze(0)
+        # Normalize ray directions and add batch dimension: (H, W, 3) -> (1, H, W, 3)
+        rays_ori = rays_ori.unsqueeze(0)
+        rays_dir = rays_dir.unsqueeze(0)
 
-            # Split into origins and directions: (B, N, 6) -> (B, N, 3) each
-            rays_ori_world = rays_cam[:, :, :3]  # (B, N, 3) in world-global space
-            rays_dir_world = rays_cam[:, :, 3:6]  # (B, N, 3) in world-global space
-            batch_size = rays_ori_world.shape[0]
+        # --- Transfer poses to GPU (small: 2x 64 bytes) -------------------------
+        T_to_world = batch["T_camera_to_world"].to(self.device, non_blocking=True)
+        if T_to_world.ndim == 2:
+            T_to_world = T_to_world.unsqueeze(0)
 
-            # Extract camera-to-world transformations (START and END for rolling shutter)
-            if "T_camera_to_world" in batch and batch["T_camera_to_world"] is not None:
-                T_cam_to_world = batch["T_camera_to_world"].to(self.device)
-                if T_cam_to_world.ndim == 2:  # (4, 4) -> (1, 4, 4)
-                    T_cam_to_world = T_cam_to_world.unsqueeze(0)
-                if T_cam_to_world.shape[0] == 1 and batch_size > 1:
-                    T_cam_to_world = T_cam_to_world.expand(batch_size, -1, -1)
-                T_to_world = T_cam_to_world  # START pose as primary T_to_world
+        T_to_world_end = batch["T_camera_to_world_end"].to(self.device, non_blocking=True)
+        if T_to_world_end.ndim == 2:
+            T_to_world_end = T_to_world_end.unsqueeze(0)
 
-                # Extract END pose for rolling shutter
-                if "T_camera_to_world_end" in batch and batch["T_camera_to_world_end"] is not None:
-                    T_cam_to_world_end = batch["T_camera_to_world_end"].to(self.device)
-                    if T_cam_to_world_end.ndim == 2:  # (4, 4) -> (1, 4, 4)
-                        T_cam_to_world_end = T_cam_to_world_end.unsqueeze(0)
-                    if T_cam_to_world_end.shape[0] == 1 and batch_size > 1:
-                        T_cam_to_world_end = T_cam_to_world_end.expand(batch_size, -1, -1)
-                    T_to_world_end = T_cam_to_world_end
-                else:
-                    # If no END pose, use START pose (global shutter)
-                    T_to_world_end = T_cam_to_world
-
-                # Check if rays are already in world space (rolling shutter with per-pixel poses)
-                rays_in_world_space = batch.get("rays_in_world_space", False)
-
-                if rays_in_world_space:
-                    # Rays already in world space with correct per-pixel poses baked in
-                    # Keep them as-is, renderer will receive identity transform
-                    rays_ori = rays_ori_world.reshape(batch_size, -1, 3)  # (B, N, 3)
-                    rays_dir = rays_dir_world.reshape(batch_size, -1, 3)  # (B, N, 3)
-                    # Still need to normalize directions
-                    rays_dir = torch.nn.functional.normalize(rays_dir, dim=-1)
-                else:
-                    # Transform rays from world space to camera space
-                    # NCore provides rays in world space, but renderer expects camera space
-                    # Use START pose for world->camera transformation
-                    T_world_to_cam = torch.inverse(T_cam_to_world)  # (B, 4, 4)
-                    R = T_world_to_cam[:, :3, :3]  # (B, 3, 3) rotation
-                    t = T_world_to_cam[:, :3, 3]  # (B, 3) translation
-
-                    # Transform ray origins: ori_cam = R @ ori_world + t
-                    rays_ori_flat = rays_ori_world.reshape(batch_size, -1, 3)  # (B, N, 3)
-                    rays_ori = torch.einsum("bnc,bdc->bnd", rays_ori_flat, R) + t.unsqueeze(1)  # (B, N, 3)
-
-                    # Transform ray directions: dir_cam = R @ dir_world (no translation)
-                    rays_dir_flat = rays_dir_world.reshape(batch_size, -1, 3)  # (B, N, 3)
-                    rays_dir = torch.einsum("bnc,bdc->bnd", rays_dir_flat, R)  # (B, N, 3)
-
-                    # Normalize ray directions (NCore provides non-normalized directions
-                    # that include scale/depth information)
-                    rays_dir = torch.nn.functional.normalize(rays_dir, dim=-1)
-            else:
-                # Fallback: no transformation, assume rays already in camera space
-                rays_ori = rays_ori_world.reshape(batch_size, -1, 3)
-                rays_dir = rays_dir_world.reshape(batch_size, -1, 3)
-                # Still need to normalize directions
-                rays_dir = torch.nn.functional.normalize(rays_dir, dim=-1)
-                T_to_world = (
-                    torch.eye(4, dtype=torch.float32, device=self.device).unsqueeze(0).expand(batch_size, -1, -1)
-                )
-                T_to_world_end = T_to_world  # Same pose for fallback
-
-            # Reshape to [B, H, W, 3] format
-            # Check if we have image dimensions (validation or full-image training)
-            if "h" in batch and "w" in batch:
-                # Validation or full-image training: use provided image dimensions
-                h = batch["h"][0] if isinstance(batch["h"], (list, torch.Tensor)) else batch["h"]
-                w = batch["w"][0] if isinstance(batch["w"], (list, torch.Tensor)) else batch["w"]
-                rays_ori = rays_ori.reshape(batch_size, h, w, 3)
-                rays_dir = rays_dir.reshape(batch_size, h, w, 3)
-            else:
-                # Random ray sampling: use 1×N format
-                num_rays = rays_ori.shape[1]
-                rays_ori = rays_ori.reshape(batch_size, 1, num_rays, 3)
-                rays_dir = rays_dir.reshape(batch_size, 1, num_rays, 3)
-        else:
-            # No camera rays, create empty tensors
-            rays_ori = torch.empty((1, 1, 0, 3), dtype=torch.float32, device=self.device)
-            rays_dir = torch.empty((1, 1, 0, 3), dtype=torch.float32, device=self.device)
-            T_to_world = torch.eye(4, dtype=torch.float32, device=self.device).unsqueeze(0)
-            T_to_world_end = T_to_world  # Same pose for no-rays case
-
-        # Extract RGB (already collated by DataLoader, already 0-1 normalized)
+        # --- Transfer RGB to GPU -------------------------------------------------
         rgb_gt = None
-        if "rgb" in batch:
+        if "rgb" in batch and batch["rgb"] is not None:
             rgb = batch["rgb"]
             if not isinstance(rgb, torch.Tensor):
                 rgb = torch.from_numpy(rgb)
             rgb_gt = rgb.to(self.device, non_blocking=True)
-
-            # Add batch dimension if needed
             if rgb_gt.dim() == 2:
-                rgb_gt = rgb_gt.unsqueeze(0)  # (1, N, 3)
+                rgb_gt = rgb_gt.unsqueeze(0)
+            rgb_gt = rgb_gt.reshape(1, h, w, 3)
 
-            # Reshape to [B, H, W, 3]
-            # Check if we have image dimensions (validation or full-image training)
-            if "h" in batch and "w" in batch:
-                # Validation or full-image training: use provided image dimensions
-                h = batch["h"][0] if isinstance(batch["h"], (list, torch.Tensor)) else batch["h"]
-                w = batch["w"][0] if isinstance(batch["w"], (list, torch.Tensor)) else batch["w"]
-                batch_size = rgb_gt.shape[0]
-                rgb_gt = rgb_gt.reshape(batch_size, h, w, 3)
-            else:
-                # Random ray sampling: use 1×N format
-                batch_size, num_rays, _ = rgb_gt.shape
-                rgb_gt = rgb_gt.reshape(batch_size, 1, num_rays, 3)
-
-        # Create bernardin Batch object
+        # --- Build output batch dict --------------------------------------------
         batch_dict = {
             "rays_ori": rays_ori,
             "rays_dir": rays_dir,
             "T_to_world": T_to_world,
-            "T_to_world_end": T_to_world_end,  # END pose for rolling shutter
-            "rays_in_world_space": batch.get("rays_in_world_space", False),  # Flag for renderer
+            "T_to_world_end": T_to_world_end,
+            "rays_in_world_space": False,  # Always camera-space; renderer handles shutter
+            "pixel_coords": pixel_coords,
         }
 
         if rgb_gt is not None:
             batch_dict["rgb_gt"] = rgb_gt
 
-        # Compute resolution for intrinsics scaling
-        if "h" in batch and "w" in batch:
-            # Validation: use provided dimensions
-            h = batch["h"][0] if isinstance(batch["h"], (list, torch.Tensor)) else batch["h"]
-            w = batch["w"][0] if isinstance(batch["w"], (list, torch.Tensor)) else batch["w"]
-            render_w, render_h = int(w), int(h)
-        elif self._train_patch_size is not None:
-            # Training with patches: use window_size
-            render_w = render_h = self._train_patch_size
-        elif rays_ori.shape[1] == 1:
-            # Random rays: use ray count as width, height=1
-            render_w, render_h = rays_ori.shape[2], 1
-        else:
-            # Use actual rendered dimensions
-            render_w, render_h = rays_ori.shape[2], rays_ori.shape[1]
-
-        # Extract camera intrinsics from NCore camera models
-        # The renderer needs real intrinsics to project Gaussians onto the image plane
-        # Rays are in world space, but Gaussians are projected using camera intrinsics
-
-        # Get camera ID for intrinsics lookup
-        camera_id = None
-        if "camera_id" in batch:
-            camera_id = batch["camera_id"]
-            if isinstance(camera_id, (list, tuple)) and len(camera_id) > 0:
-                camera_id = camera_id[0]
-            elif isinstance(camera_id, torch.Tensor):
-                camera_id = camera_id[0].item() if camera_id.numel() > 0 else None
-
-        # Try to get full camera model parameters with proper resolution.
-        # Intrinsics are required by rasterization-based renderers (3DGUT) but not by
-        # ray-traced renderers (3DGRT) which only use pre-computed rays.
-        intrinsics_result = self._get_camera_model_parameters_for_resolution(camera_id, render_w, render_h)
+        # --- Intrinsics ----------------------------------------------------------
+        intrinsics_result = self._get_camera_model_parameters_for_resolution(camera_id, w, h)
         if intrinsics_result is not None:
             intrinsics_params, model_type_name = intrinsics_result
             batch_dict[f"intrinsics_{model_type_name}"] = intrinsics_params
 
-        # Pass frame_idx and camera_idx for PPISP post-processing
+        # --- Frame / camera indices (PPISP post-processing) ----------------------
         if "frame_idx" in batch:
             frame_idx = batch["frame_idx"]
             batch_dict["frame_idx"] = frame_idx[0].item() if isinstance(frame_idx, torch.Tensor) else int(frame_idx)
         if "camera_idx" in batch:
             camera_idx = batch["camera_idx"]
             batch_dict["camera_idx"] = camera_idx[0].item() if isinstance(camera_idx, torch.Tensor) else int(camera_idx)
-
-        # Generate pixel coordinates for post-processing (PPISP)
-        batch_dict["pixel_coords"] = create_pixel_coords(render_w, render_h, device=self.device)
 
         return Batch(**batch_dict)
 
@@ -477,13 +394,9 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
                 new_resolution=(render_w, render_h),
             )
 
-            # Determine shutter type
-            if self.force_global_shutter:
-                shutter_type = ShutterType.GLOBAL
-                logger.info(f"[Shutter] Camera {camera_id}: Using GLOBAL shutter (force_global_shutter=True)")
-            else:
-                shutter_type = scaled_params.shutter_type
-                logger.info(f"[Shutter] Camera {camera_id}: shutter_type = {shutter_type.name}")
+            # Use shutter type from camera parameters (renderer handles interpolation natively)
+            shutter_type = scaled_params.shutter_type
+            logger.info(f"[Shutter] Camera {camera_id}: shutter_type = {shutter_type.name}")
 
             # Build parameter dict from the properly-scaled NCore parameters.
             # Distortion coefficients are resolution-independent and preserved through transform().
