@@ -32,7 +32,6 @@ from threedgrut.export.usd.writers.base import GaussianUSDWriter
 logger = logging.getLogger(__name__)
 
 
-
 class GaussianLightFieldWriter(GaussianUSDWriter):
     """USD Gaussian writer using ParticleField schemas.
 
@@ -106,7 +105,6 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
         ):
             self.prim.ApplyAPI(api_schema)
 
-
     def _create_attributes(self) -> None:
         """Create particle field attributes via UsdVol schema API.
 
@@ -146,9 +144,7 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
             self.orientations_attr = (
                 orient_api.CreateOrientationshAttr() if self.half_geometry else orient_api.CreateOrientationsAttr()
             )
-            self.scales_attr = (
-                scale_api.CreateScaleshAttr() if self.half_geometry else scale_api.CreateScalesAttr()
-            )
+            self.scales_attr = scale_api.CreateScaleshAttr() if self.half_geometry else scale_api.CreateScalesAttr()
             self.opacities_attr = (
                 opacity_api.CreateOpacitieshAttr() if self.half_features else opacity_api.CreateOpacitiesAttr()
             )

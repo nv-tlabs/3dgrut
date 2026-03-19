@@ -28,9 +28,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import torch
-
 from PIL import Image
-
 from pxr import Sdf, Usd, UsdGeom, UsdLux
 
 from threedgrut.model.background import BackgroundColor, SkipBackground
@@ -144,7 +142,7 @@ def create_envmap_hdr_bytes(color: Tuple[float, float, float]) -> bytes:
     else:
         # RGBE encoding
         exp_val = int(math.ceil(math.log2(max_val)))
-        scale = 255.0 / (2.0 ** exp_val)
+        scale = 255.0 / (2.0**exp_val)
         re = int(np.clip(r * scale, 0, 255))
         ge = int(np.clip(g * scale, 0, 255))
         be = int(np.clip(b * scale, 0, 255))

@@ -21,8 +21,8 @@ import numpy as np
 import torch
 from plyfile import PlyData, PlyElement
 
-from threedgrut.export.base import ExportableModel, ModelExporter
 from threedgrut.export.accessor import GaussianExportAccessor
+from threedgrut.export.base import ExportableModel, ModelExporter
 from threedgrut.utils.logger import logger
 
 
@@ -81,7 +81,9 @@ class PLYExporter(ModelExporter):
         # Build PLY dtype
         dtype_full = [
             (attribute, "f4")
-            for attribute in self._construct_list_of_attributes(attrs.albedo, mogt_specular, attrs.scales, attrs.rotations)
+            for attribute in self._construct_list_of_attributes(
+                attrs.albedo, mogt_specular, attrs.scales, attrs.rotations
+            )
         ]
 
         # Create PLY element
