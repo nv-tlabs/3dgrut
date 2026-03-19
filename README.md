@@ -49,10 +49,10 @@ python render.py \
 
 ## BibTeX
 ```bibtex
-@article{FullCircle2025,
-  title   = {FullCircle: Effortless 3D Reconstruction from Casual 360° Captures},
-  author  = {Yalda Foroutan, Ipek Oztas, Daniel Rebain, Aysegul Dundar, Kwang Moo Yi, Lily Goli, Andrea Tagliasacchi},
-  journal = {arXiv},
-  year    = {2025}
+@article{foroutan2026fullcircle,
+  title   = {{FullCircle}: Effortless 3D Reconstruction from Casual 360° Captures},
+  author  = {Foroutan, Yalda and Oztas, Ipek and Rebain, Daniel and Dundar, Aysegul and Yi, Kwang Moo and Goli, Lily and Tagliasacchi, Andrea},
+  journal = {arXiv preprint},
+  year    = {2026}
 }
 ```
