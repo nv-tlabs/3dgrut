@@ -30,7 +30,7 @@ import cv2
 import simplejpeg
 
 from scipy import ndimage
-from scipy.spatial.transform import Rotation as R_scipy, Slerp
+
 
 import ncore.data
 import ncore.data.v4
@@ -38,10 +38,8 @@ import ncore.sensors
 
 from threedgrut.utils.logger import logger
 from threedgrut.datasets.ncoreUtils import (
-    RayFlags,
     HalfClosedInterval,
     Labels,
-    RaysCamMeta,
     Batch as NCoreBatch,
 )
 from threedgrut.datasets.utils import PointCloud, get_center_and_diag
@@ -50,39 +48,6 @@ from threedgrut.utils.misc import to_torch
 
 
 class NCoreDataset(torch.utils.data.Dataset):
-
-    @staticmethod
-    def _interpolate_pose_slerp(T_start: np.ndarray, T_end: np.ndarray, alpha: float = 0.5) -> np.ndarray:
-        """
-        Interpolate between two poses using SLERP for rotation and linear for translation.
-
-        Args:
-            T_start: Start pose (4x4 matrix)
-            T_end: End pose (4x4 matrix)
-            alpha: Interpolation factor (0.0 = start, 1.0 = end)
-
-        Returns:
-            Interpolated pose (4x4 matrix)
-        """
-        # Extract rotations and convert to scipy Rotation objects
-        R_start = R_scipy.from_matrix(T_start[:3, :3])
-        R_end = R_scipy.from_matrix(T_end[:3, :3])
-
-        # SLERP interpolation for rotation
-        slerp_interp = Slerp([0, 1], R_scipy.concatenate([R_start, R_end]))
-        R_interp = slerp_interp([alpha])[0]
-
-        # Linear interpolation for translation
-        t_start = T_start[:3, 3]
-        t_end = T_end[:3, 3]
-        t_interp = (1 - alpha) * t_start + alpha * t_end
-
-        # Reconstruct pose matrix
-        T_interp = np.eye(4, dtype=np.float64)
-        T_interp[:3, :3] = R_interp.as_matrix()
-        T_interp[:3, 3] = t_interp
-
-        return T_interp.astype(np.float32)
 
     def __init__(
         self,
@@ -109,16 +74,12 @@ class NCoreDataset(torch.utils.data.Dataset):
         poses_component_group: str = "default",
         intrinsics_component_group: str = "default",
         masks_component_group: str = "default",
-        force_global_shutter: bool = False,  # Force global shutter (use mean pose instead of per-pixel rolling shutter)
         # JPEG decoding options
         jpeg_backend_cpu: str = "simplejpeg",  # "simplejpeg" (fast, libjpeg-turbo) or "PIL" (fallback)
         simplejpeg_fastdct: bool = False,  # ~4-5% faster decode, minor quality loss
         simplejpeg_fastupsample: bool = False,  # ~4-5% faster chroma upsampling, minor quality loss
     ):
         super().__init__()
-
-        # Init parameters from config
-        self.force_global_shutter = force_global_shutter
 
         # JPEG decoding parameters
         self.jpeg_backend_cpu: str = jpeg_backend_cpu
@@ -600,68 +561,6 @@ class NCoreDataset(torch.utils.data.Dataset):
             self.T_world_to_world_global,
         )
 
-    def _generate_rays_with_shutter_handling(
-        self,
-        camera_model: ncore.sensors.CameraModel,
-        pixel_samples: np.ndarray,
-        ray_samples: np.ndarray,
-        T_sensor_startend: np.ndarray,
-    ) -> tuple[Any, np.ndarray, np.ndarray, bool]:
-        """Generate world rays with proper global/rolling shutter handling.
-
-        Returns:
-            world_rays_return: result from camera_model ray generation (has .world_rays, .timestamps_us)
-            T_camera_to_world: primary camera-to-world pose (4x4)
-            T_camera_to_world_end: end camera-to-world pose (4x4)
-            rays_in_world_space: True if rays already have per-pixel poses baked in
-        """
-        if self.force_global_shutter:
-            world_rays_return = camera_model.pixels_to_world_rays_mean_pose(
-                pixel_samples,
-                T_sensor_startend[0],
-                T_sensor_startend[1],
-                camera_rays=ray_samples,
-            )
-            T_mean = self._interpolate_pose_slerp(
-                T_sensor_startend[0],
-                T_sensor_startend[1],
-                alpha=0.5,
-            )
-            return world_rays_return, T_mean, T_mean, False
-        else:
-            world_rays_return = camera_model.pixels_to_world_rays_shutter_pose(
-                pixel_samples,
-                T_sensor_startend[0],
-                T_sensor_startend[1],
-                camera_rays=ray_samples,
-            )
-            return (
-                world_rays_return,
-                T_sensor_startend[0],
-                T_sensor_startend[1],
-                True,
-            )
-
-    def _build_rays_cam_meta(
-        self,
-        n_rays: int,
-        camera_unique_idx: int,
-        global_frame_idx: int,
-        timestamps_us: Any,
-    ) -> RaysCamMeta:
-        """Build RaysCamMeta for camera rays."""
-        return RaysCamMeta(
-            flags=torch.full(
-                (n_rays,),
-                (RayFlags.CAMERA_SENSOR | RayFlags.WORLD_SPACE | RayFlags.RGB_LABEL).value,
-                dtype=torch.int32,
-                device="cpu",
-            ),
-            unique_sensor_idx=torch.full((n_rays,), camera_unique_idx, dtype=torch.int16, device="cpu"),
-            unique_frame_idx=torch.full((n_rays,), global_frame_idx, dtype=torch.int32, device="cpu"),
-            timestamp_us=timestamps_us,
-        )
-
     def _compute_frame_time_ms(
         self,
         camera_sensor: ncore.sensors.CameraSensor,
@@ -746,44 +645,30 @@ class NCoreDataset(torch.utils.data.Dataset):
             else:
                 valid_camera_ids = self.camera_ids
 
-            # collect camera rays
-            rays: list[np.ndarray] = []
-            rgbs: list[np.ndarray] = []
-            rays_meta: list[RaysCamMeta] = []
-            camera_rays: np.ndarray = np.empty((0, 6), dtype=np.float32)
-            camera_rays_meta: Optional[RaysCamMeta] = None
-            running_n_camera_rays: int = 0
-            T_camera_to_world: Optional[np.ndarray] = None  # Store START pose (primary pose)
-            T_camera_to_world_end: Optional[np.ndarray] = None  # Store END pose for rolling shutter
-            sampled_camera_id: Optional[str] = None  # Track which camera was sampled for intrinsics lookup
-            global_frame_idx: int = idx  # Initialize with dataloader index, will be updated with unique frame index
+            sampled_camera_id: Optional[str] = None
+            global_frame_idx: int = idx
+            w: int = 0
+            h: int = 0
 
             # Iterate over selected cameras (typically just one for full-image training)
             for camera_id in valid_camera_ids:
-                # Track the camera_id for intrinsics lookup (for full-image training, only one camera is used)
                 sampled_camera_id = camera_id
 
                 camera_sensor = self.sequence_camera_sensors[sequence_id][camera_id]
                 camera_model = self.sequence_camera_models[sequence_id][camera_id]
-                camera_unique_idx = self.sequence_camera_unique_ids[sequence_id][camera_id].idx
-                camera_all_rays = self.sequence_cameras_all_rays[sequence_id][camera_id]
                 camera_all_pixels = self.sequence_cameras_all_pixels[sequence_id][camera_id]
-                camera_frame_range = self.camera_frame_ranges[camera_id]
 
                 # Get pre-computed training frame list for unbiased sampling
                 train_frames = self.camera_train_frame_indices[camera_id]
 
                 if len(train_frames) == 0:
-                    # Edge case: no training frames for this camera (shouldn't happen with proper config)
                     continue
 
                 # Randomly sample a frame index directly from training frames list
-                # This ensures every training frame has exactly equal probability (no edge frame bias)
                 closest_idx = self.rng.integers(0, len(train_frames))
                 camera_frame_index = train_frames[closest_idx]
 
-                # Compact, 0-based, contiguous training frame index (camera-blocked).
-                # closest_idx is the position within training frames for this chunk+camera.
+                # Compact, 0-based, contiguous training frame index (camera-blocked)
                 global_frame_idx = self.camera_linear_start_frame_indices[camera_id] + closest_idx
 
                 # Decode image (with accelerated JPEG decoding + downscaling if available)
@@ -794,73 +679,31 @@ class NCoreDataset(torch.utils.data.Dataset):
                 h = int(camera_model.resolution[1].item())
 
                 # Sample ALL pixels from the image (full image training)
-                # Note: n_train_sample_camera_rays is overridden to w*h when sample_full_image=true
-                n_rays = w * h
-                pixel_samples = camera_all_pixels  # Use all pixels (downsampled if downsample < 1.0)
+                pixel_samples = camera_all_pixels
+                labels.rgb = to_torch(
+                    frame_image_array[pixel_samples[:, 1], pixel_samples[:, 0]].astype(np.float32) / 255.0,
+                    device="cpu",
+                )
 
-                # TODO: support masks in losses / metrics, adapt valid pixel set via
-                #       sequence_cameras_frame_valid_pixels_masks / return valid masks in batch
-
-                # Pixel_samples are in downsampled space [0, 1, 2, ...], direct indexing into
-                # camera_all_rays and frame_image_array (both are downsampled)
-                ray_samples = camera_all_rays[pixel_samples[:, 1], pixel_samples[:, 0]]
-                rgbs.append(frame_image_array[pixel_samples[:, 1], pixel_samples[:, 0]].astype(np.float32) / 255.0)
-
-                # Create world rays in world-global frame
+                # Get start/end poses in world-global frame (renderer handles shutter interpolation)
                 T_sensor_startend = self._get_start_end_poses_world_global(camera_sensor, camera_frame_index)
-
-                # Generate rays with proper shutter handling
-                world_rays_return, T_camera_to_world, T_camera_to_world_end, rays_in_world_space = (
-                    self._generate_rays_with_shutter_handling(
-                        camera_model,
-                        pixel_samples,
-                        ray_samples,
-                        T_sensor_startend,
-                    )
-                )
-
-                rays.append(world_rays_return.world_rays.numpy())
-                rays_meta.append(
-                    self._build_rays_cam_meta(
-                        n_rays, camera_unique_idx, global_frame_idx, world_rays_return.timestamps_us
-                    )
-                )
-
-                # Update the running num of lidar rays
-                running_n_camera_rays += n_rays
-
-            if len(rays):
-                camera_rays = np.vstack(rays)
-                camera_rays_meta = RaysCamMeta.collate_fn(rays_meta)
-                labels.rgb = to_torch(np.vstack(rgbs), device="cpu")
 
             frame_time_ms = self._compute_frame_time_ms(camera_sensor, camera_frame_index)
             camera_index = self.camera_ids.index(sampled_camera_id)
 
             sample |= {
-                "rays_cam": to_torch(camera_rays, device="cpu"),
-                "rays_cam_meta": camera_rays_meta,
                 "labels": labels,
-                "T_camera_to_world": (
-                    to_torch(T_camera_to_world, device="cpu") if T_camera_to_world is not None else None
-                ),
-                "T_camera_to_world_end": (
-                    to_torch(T_camera_to_world_end, device="cpu") if T_camera_to_world_end is not None else None
-                ),
-                "rays_in_world_space": rays_in_world_space,  # Flag indicating if rays are already in world space
-                "camera_id": sampled_camera_id,  # Add camera_id for intrinsics lookup
-                "idx": global_frame_idx,  # Globally unique frame index across all cameras
-                "frame_time": frame_time_ms,  # Frame time in milliseconds, relative to first frame (starts at 0.0)
-                "frame_idx": global_frame_idx,  # 0-based contiguous training frame index (camera-blocked)
-                "camera_idx": camera_index,  # Camera index in camera_ids list
+                "T_camera_to_world": to_torch(T_sensor_startend[0], device="cpu"),
+                "T_camera_to_world_end": to_torch(T_sensor_startend[1], device="cpu"),
+                "camera_id": sampled_camera_id,
+                "idx": global_frame_idx,
+                "frame_time": frame_time_ms,
+                "frame_idx": global_frame_idx,
+                "camera_idx": camera_index,
             }
 
             # For full-image training, add image dimensions for proper reshaping
-            if self.sample_full_image and len(camera_rays):
-                # Get dimensions from the camera that was sampled
-                # Store the dimensions of the actual sampled/rendered data
-                # For downsampled training, this is the downsampled resolution
-                # w and h were already calculated earlier (with downsampling if applicable)
+            if self.sample_full_image and labels.rgb is not None:
                 sample["w"] = w
                 sample["h"] = h
 
@@ -882,14 +725,10 @@ class NCoreDataset(torch.utils.data.Dataset):
                 camera_sensor = self.sequence_camera_sensors[sequence_id][camera_id]
                 camera_model = self.sequence_camera_models[sequence_id][camera_id]
                 camera_pixels_subsampled = self.sequence_cameras_pixels_subsample[sequence_id][camera_id]
-                camera_rays_subsampled = self.sequence_cameras_rays_subsample[sequence_id][camera_id]
 
                 # determine frame of current camera (from validation frame list)
                 val_frame_list_idx = idx - run_frames
                 camera_frame_index = val_frames_in_range[val_frame_list_idx]
-
-                # Validation uses frame_idx=-1 (novel-view mode for PPISP, matching COLMAP)
-                global_frame_idx = -1
 
                 # Decode image (with accelerated JPEG decoding + downscaling if available)
                 frame_image_array = self._decode_image(camera_sensor, camera_frame_index)
@@ -916,27 +755,8 @@ class NCoreDataset(torch.utils.data.Dataset):
 
                 valid = frame_valid_pixel_mask[camera_pixels_subsampled[:, 1], camera_pixels_subsampled[:, 0]]
 
-                # Create world rays in world-global frame
+                # Get start/end poses in world-global frame (renderer handles shutter interpolation)
                 T_sensor_startend = self._get_start_end_poses_world_global(camera_sensor, camera_frame_index)
-
-                # Generate rays with proper shutter handling
-                world_rays_return, T_camera_to_world, T_camera_to_world_end, rays_in_world_space = (
-                    self._generate_rays_with_shutter_handling(
-                        camera_model,
-                        camera_pixels_subsampled,
-                        camera_rays_subsampled,
-                        T_sensor_startend,
-                    )
-                )
-
-                camera_rays = world_rays_return.world_rays.numpy()
-                camera_unique_idx = self.sequence_camera_unique_ids[sequence_id][camera_id].idx
-                camera_rays_meta = self._build_rays_cam_meta(
-                    len(camera_rays),
-                    camera_unique_idx,
-                    global_frame_idx,
-                    world_rays_return.timestamps_us,
-                )
 
                 # Get validation image dimensions (may differ from training due to subsampling)
                 if self.n_val_image_subsample > 1:
@@ -947,16 +767,13 @@ class NCoreDataset(torch.utils.data.Dataset):
                 camera_index = self.camera_ids.index(camera_id)
 
                 return NCoreBatch(
-                    rays_cam=to_torch(camera_rays, device="cpu"),
                     labels=Labels(rgb=to_torch(rgb, device="cpu"), valid=to_torch(valid, device="cpu")),
-                    rays_cam_meta=camera_rays_meta,
-                    T_camera_to_world=to_torch(T_camera_to_world, device="cpu"),
-                    T_camera_to_world_end=to_torch(T_camera_to_world_end, device="cpu"),
-                    rays_in_world_space=rays_in_world_space,
+                    T_camera_to_world=to_torch(T_sensor_startend[0], device="cpu"),
+                    T_camera_to_world_end=to_torch(T_sensor_startend[1], device="cpu"),
                     w=w,
                     h=h,
                     camera_id=camera_id,
-                    idx=global_frame_idx,
+                    idx=-1,
                     frame_time=frame_time_ms,
                     frame_idx=-1,  # Validation: -1 signals novel-view mode for PPISP
                     camera_idx=camera_index,
