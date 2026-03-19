@@ -11,6 +11,7 @@ This repository provides the official implementations of **3D Gaussian Ray Traci
 
 To mitigate this limitation, we also propose 3DGUT, which enables support for distorted cameras with complex, time-dependent effects within a rasterization framework, maintaining the efficiency of rasterization methods. By aligning the rendering formulations of 3DGRT and 3DGUT, we introduce a hybrid approach called **3DGRUT**. This technique allows for rendering primary rays via rasterization and secondary rays via ray tracing, combining the strengths of both methods for improved performance and flexibility.
 
+For projects that require a fast, modular, and production-ready Gaussian Splatting framework, we recommend using [gsplat](https://github.com/nerfstudio-project/gsplat), which also provides support for 3DGUT.
 
 > __3D Gaussian Ray Tracing: Fast Tracing of Particle Scenes__
 > [Nicolas Moenne-Loccoz*](https://www.linkedin.com/in/nicolas-moënne-loccoz-71040512/?original_referer=https%3A%2F%2Fwww%2Egoogle%2Ecom%2F&originalSubdomain=ca), [Ashkan Mirzaei*](https://ashmrz.github.io), [Or Perel](https://orperel.github.io/), [Riccardo De Lutio](https://riccardodelutio.github.io/), [Janick Martinez Esturo](https://jme.pub/),
