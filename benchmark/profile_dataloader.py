@@ -54,11 +54,13 @@ Usage examples:
 
 import cProfile
 import gc
+import sys
 import time
 from dataclasses import dataclass, field
 
 import hydra
 import numpy as np
+import torch
 from omegaconf import DictConfig, OmegaConf
 
 OmegaConf.register_new_resolver("int_list", lambda l: [int(x) for x in l])
@@ -92,6 +94,7 @@ ALL_NCORE_CONFIG_KEYS = list(NCORE_CONFIGS.keys())
 class BenchmarkResult:
     name: str
     samples: list[float] = field(default_factory=list)
+    event_pairs: list[tuple[torch.cuda.Event, torch.cuda.Event]] = field(default_factory=list)
 
     @property
     def median_its(self) -> float:
@@ -101,7 +104,10 @@ class BenchmarkResult:
 def _make_dataloader(conf: DictConfig):
     """Construct dataset + dataloader from a fully-composed Hydra config (same path as Trainer)."""
     import threedgrut.datasets as datasets
-    from threedgrut.datasets.utils import MultiEpochsDataLoader, configure_dataloader_for_platform
+    from threedgrut.datasets.utils import (
+        MultiEpochsDataLoader,
+        configure_dataloader_for_platform,
+    )
 
     train_dataset, _ = datasets.make(name=conf.dataset.type, config=conf, ray_jitter=None)
 
@@ -132,10 +138,20 @@ def _apply_dataset_overrides(conf: DictConfig, overrides: dict) -> DictConfig:
 def _next_batch(it, dataloader):
     """Get next batch, re-creating the iterator on epoch boundary."""
     try:
-        return next(it), it
+        # get the item from the iterator
+        cpu_batch = next(it)
+        gpu_batch = dataloader.dataset.get_gpu_batch_with_intrinsics(cpu_batch)
+        return cpu_batch, it
     except StopIteration:
         it = iter(dataloader)
         return next(it), it
+
+
+def reccord_time():
+    cpu_time = time.perf_counter()
+    cuda_event = torch.cuda.Event(enable_timing=True)
+    cuda_event.record()
+    return cpu_time, cuda_event
 
 
 def _run_benchmark(
@@ -152,23 +168,41 @@ def _run_benchmark(
     # Warmup
     for _ in range(warmup_iters):
         _, it = _next_batch(it, dataloader)
+    torch.cuda.synchronize()
 
     # Measure
     if profiler is not None:
         profiler.enable()
 
-    start = time.perf_counter()
+    start, start_cuda = reccord_time()
     for i in range(1, measure_iters + 1):
         _, it = _next_batch(it, dataloader)
+
         if i % sample_n == 0:
-            elapsed = time.perf_counter() - start
-            its = sample_n / elapsed
+            end, end_cuda = reccord_time()
+
+            its = sample_n / (end - start)
             result.samples.append(its)
-            print(f"  {sample_n}-iter avg: {its:>8.1f} it/s")
+            result.event_pairs.append((start_cuda, end_cuda))
+
+            print(f"  {sample_n}-iter avg: {its:>8.1f} it/s\r", end="")
+            sys.stdout.flush()
+
             start = time.perf_counter()
+            start_cuda = torch.cuda.Event(enable_timing=True)
+            start_cuda.record()
 
     if profiler is not None:
         profiler.disable()
+
+    torch.cuda.synchronize()
+    for i, (start_cuda, end_cuda) in enumerate(result.event_pairs):
+        start_cuda.synchronize()
+        end_cuda.synchronize()
+        elapsed = start_cuda.elapsed_time(end_cuda) / 1000.0
+        old_its = result.samples[i]
+        new_its = sample_n / elapsed
+        result.samples[i] = new_its
 
     return result
 
@@ -206,10 +240,10 @@ def _print_summary(results: list[BenchmarkResult]) -> None:
 @hydra.main(config_path="../configs", version_base=None)
 def main(conf: DictConfig) -> None:
     # Extract benchmark parameters (passed via +benchmark.* overrides)
-    bench_conf = OmegaConf.to_container(conf.get("benchmark", {}), resolve=True)
-    warmup_iters: int = bench_conf.get("warmup_iters", 10)
-    measure_iters: int = bench_conf.get("measure_iters", 100)
-    sample_n: int = bench_conf.get("sample_n", 20)
+    bench_conf = OmegaConf.to_container(OmegaConf.create(conf.get("benchmark", {})), resolve=True)
+    warmup_iters: int = bench_conf.get("warmup_iters", 1000)
+    measure_iters: int = bench_conf.get("measure_iters", 10000)
+    sample_n: int = bench_conf.get("sample_n", 1000)
     cprofiler_output: str | None = bench_conf.get("cprofiler_output", None)
     requested_configs: list[str] | None = bench_conf.get("configs", None)
 
@@ -234,10 +268,7 @@ def main(conf: DictConfig) -> None:
         # Validate requested config keys
         for key in config_keys:
             if key not in NCORE_CONFIGS:
-                raise ValueError(
-                    f"Unknown ncore benchmark config: '{key}'. "
-                    f"Available: {ALL_NCORE_CONFIG_KEYS}"
-                )
+                raise ValueError(f"Unknown ncore benchmark config: '{key}'. " f"Available: {ALL_NCORE_CONFIG_KEYS}")
         configs_to_run: list[tuple[str, DictConfig]] = []
         for key in config_keys:
             display_name, overrides = NCORE_CONFIGS[key]
