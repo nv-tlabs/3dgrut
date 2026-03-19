@@ -27,6 +27,7 @@ import numpy as np
 import numpy.typing as npt
 
 import cv2
+import simplejpeg
 
 from scipy import ndimage
 from scipy.spatial.transform import Rotation as R_scipy, Slerp
@@ -109,11 +110,20 @@ class NCoreDataset(torch.utils.data.Dataset):
         intrinsics_component_group: str = "default",
         masks_component_group: str = "default",
         force_global_shutter: bool = False,  # Force global shutter (use mean pose instead of per-pixel rolling shutter)
+        # JPEG decoding options
+        jpeg_backend_cpu: str = "simplejpeg",  # "simplejpeg" (fast, libjpeg-turbo) or "PIL" (fallback)
+        simplejpeg_fastdct: bool = False,  # ~4-5% faster decode, minor quality loss
+        simplejpeg_fastupsample: bool = False,  # ~4-5% faster chroma upsampling, minor quality loss
     ):
         super().__init__()
 
         # Init parameters from config
         self.force_global_shutter = force_global_shutter
+
+        # JPEG decoding parameters
+        self.jpeg_backend_cpu: str = jpeg_backend_cpu
+        self.simplejpeg_fastdct: bool = simplejpeg_fastdct
+        self.simplejpeg_fastupsample: bool = simplejpeg_fastupsample
 
         # store relevant parameters from config
         self.split: str = split
@@ -661,6 +671,64 @@ class NCoreDataset(torch.utils.data.Dataset):
         frame_timestamp_us = camera_sensor.get_frame_timestamp_us(camera_frame_index)
         return float((frame_timestamp_us - self.first_frame_timestamp_us) / 1000.0)
 
+    def _decode_jpeg_bytes(self, encoded: bytes, target_width: int, target_height: int) -> np.ndarray:
+        """Decode JPEG bytes with simplejpeg, applying downscale during decode via min_width/min_height.
+
+        Args:
+            encoded: Raw JPEG-encoded image bytes.
+            target_width: Desired output width (used as min_width for simplejpeg).
+            target_height: Desired output height (used as min_height for simplejpeg).
+
+        Returns:
+            Decoded RGB image as uint8 numpy array at approximately the target resolution.
+        """
+        return simplejpeg.decode_jpeg(
+            encoded,
+            fastdct=self.simplejpeg_fastdct,
+            fastupsample=self.simplejpeg_fastupsample,
+            min_width=target_width,
+            min_height=target_height,
+        )
+
+    def _decode_image(
+        self,
+        camera_sensor: ncore.data.CameraSensorProtocol,
+        frame_index: int,
+    ) -> np.ndarray:
+        """Decode and downscale a camera frame image.
+
+        Uses pre-loaded cache if available, otherwise decodes from disk.
+        When jpeg_backend_cpu="simplejpeg" and the image is JPEG-encoded, uses
+        libjpeg-turbo for faster decoding with optional downscale during decode.
+        Falls back to PIL-based decoding + cv2.resize otherwise.
+
+        Args:
+            camera_sensor: The ncore camera sensor to read from.
+            frame_index: The frame index to decode.
+
+        Returns:
+            Decoded RGB image as uint8 numpy array at the target (downsampled) resolution.
+        """
+        camera_model = self.sequence_camera_models[self.sequence_id][camera_sensor.sensor_id]
+        target_w = int(camera_model.resolution[0].item())
+        target_h = int(camera_model.resolution[1].item())
+
+        # Try simplejpeg fast path for JPEG images
+        if self.jpeg_backend_cpu == "simplejpeg":
+            try:
+                image_data = camera_sensor.get_frame_handle(frame_index).get_data()
+                if image_data.get_encoded_image_format().lower() in ("jpeg", "jpg"):
+                    encoded = image_data.get_encoded_image_data()
+                    return self._decode_jpeg_bytes(encoded, target_w, target_h)
+            except Exception:
+                pass  # fall through to PIL path
+
+        # PIL fallback: full-resolution decode + optional cv2 resize
+        frame_image_array = camera_sensor.get_frame_image_array(frame_index)
+        if self.downsample < 1.0:
+            frame_image_array = cv2.resize(frame_image_array, (target_w, target_h), interpolation=cv2.INTER_AREA)
+        return frame_image_array
+
     def __getitem__(self, idx) -> NCoreBatch:
         """Returns a specific sample of the dataset (depending on split type and parametrization)"""
         # make sure worker is initialized
@@ -718,17 +786,12 @@ class NCoreDataset(torch.utils.data.Dataset):
                 # closest_idx is the position within training frames for this chunk+camera.
                 global_frame_idx = self.camera_linear_start_frame_indices[camera_id] + closest_idx
 
-                # load the image (from sensor, which is original resolution)
-                frame_image_array = camera_sensor.get_frame_image_array(camera_frame_index)
+                # Decode image (with accelerated JPEG decoding + downscaling if available)
+                frame_image_array = self._decode_image(camera_sensor, camera_frame_index)
 
                 # camera_model.resolution is already scaled; get target dimensions from it
                 w = int(camera_model.resolution[0].item())
                 h = int(camera_model.resolution[1].item())
-
-                # Apply downsampling for training
-                if self.downsample < 1.0:
-                    # Downsample the image to match camera_model resolution
-                    frame_image_array = cv2.resize(frame_image_array, (w, h), interpolation=cv2.INTER_AREA)
 
                 # Sample ALL pixels from the image (full image training)
                 # Note: n_train_sample_camera_rays is overridden to w*h when sample_full_image=true
@@ -828,15 +891,12 @@ class NCoreDataset(torch.utils.data.Dataset):
                 # Validation uses frame_idx=-1 (novel-view mode for PPISP, matching COLMAP)
                 global_frame_idx = -1
 
-                # load the image (from sensor, which is original resolution)
-                frame_image_array = camera_sensor.get_frame_image_array(camera_frame_index)
+                # Decode image (with accelerated JPEG decoding + downscaling if available)
+                frame_image_array = self._decode_image(camera_sensor, camera_frame_index)
 
                 # camera_model.resolution is already scaled, so get target dimensions from it
                 w = int(camera_model.resolution[0].item())
                 h = int(camera_model.resolution[1].item())
-
-                if self.downsample < 1.0:
-                    frame_image_array = cv2.resize(frame_image_array, (w, h), interpolation=cv2.INTER_AREA)
 
                 # sample image colors at pixel centers
                 rgb = (
