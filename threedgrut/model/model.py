@@ -28,8 +28,8 @@ import threedgrut.model.background as background
 import threedgut_tracer
 from threedgrut.datasets.protocols import Batch
 from threedgrut.datasets.utils import read_colmap_points3D_text, read_next_bytes
-from threedgrut.export.base import ExportableModel
 from threedgrut.export import PLYExporter
+from threedgrut.export.base import ExportableModel
 from threedgrut.model.geometry import k_nearest_neighbors, nearest_neighbor_dist_cpuKD
 from threedgrut.optimizers import SelectiveAdam
 from threedgrut.utils.logger import logger

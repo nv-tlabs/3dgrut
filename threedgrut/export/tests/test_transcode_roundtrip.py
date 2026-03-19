@@ -28,8 +28,8 @@ import pytest
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
 from threedgrut.export.adapter import AttributesExportAdapter
-from threedgrut.export.importers import PLYImporter, USDImporter
 from threedgrut.export.formats import PLYExporter
+from threedgrut.export.importers import PLYImporter, USDImporter
 from threedgrut.export.usd.exporter import USDExporter
 
 

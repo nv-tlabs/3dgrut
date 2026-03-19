@@ -36,16 +36,16 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from threedgrut.export.adapter import AttributesExportAdapter
+from threedgrut.export.base import ModelExporter
+from threedgrut.export.formats import PLYExporter
 from threedgrut.export.importers import (
     FormatImporter,
     NuRecUSDImporter,
     PLYImporter,
     USDImporter,
 )
-from threedgrut.export.formats import PLYExporter
 from threedgrut.export.usd.exporter import USDExporter
 from threedgrut.export.usd.nurec.exporter import NuRecExporter
-from threedgrut.export.base import ModelExporter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -159,15 +159,18 @@ def get_exporter(
     if format_name == "ply":
         return PLYExporter(), True
     elif format_name == "lightfield":
-        return USDExporter(
-            half_geometry=half_geometry,
-            half_features=half_features,
-            export_cameras=False,
-            export_background=False,
-            apply_normalizing_transform=False,
-            sorting_mode_hint=render_order_hint if render_order_hint is not None else "cameraDistance",
-            linear_srgb=linear_srgb,
-        ), False
+        return (
+            USDExporter(
+                half_geometry=half_geometry,
+                half_features=half_features,
+                export_cameras=False,
+                export_background=False,
+                apply_normalizing_transform=False,
+                sorting_mode_hint=render_order_hint if render_order_hint is not None else "cameraDistance",
+                linear_srgb=linear_srgb,
+            ),
+            False,
+        )
     elif format_name == "nurec":
         return NuRecExporter(), True
     else:
@@ -296,18 +299,20 @@ Examples:
         help="Input file path (ply, usd, usda, usdc, usdz)",
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         type=str,
         required=True,
         help="Output file path",
     )
     parser.add_argument(
-        "-f", "--format",
+        "-f",
+        "--format",
         type=str,
         choices=list(OUTPUT_FORMATS.keys()),
         default=None,
         help=f"Output format. If not specified, inferred from output extension. "
-             f"Choices: {', '.join(OUTPUT_FORMATS.keys())}",
+        f"Choices: {', '.join(OUTPUT_FORMATS.keys())}",
     )
     parser.add_argument(
         "--max-sh-degree",
@@ -348,7 +353,8 @@ Examples:
         help="Set prim color space to lin_rec709_scene (lightfield only). Default is srgb_rec709_display.",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Enable verbose logging",
     )
@@ -403,6 +409,7 @@ def main():
         logger.error(f"Transcode failed: {e}")
         if args.verbose:
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 

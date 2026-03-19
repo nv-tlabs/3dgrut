@@ -34,7 +34,7 @@ from pathlib import Path
 
 import torch
 
-from threedgrut.export import USDExporter, NuRecExporter
+from threedgrut.export import NuRecExporter, USDExporter
 from threedgrut.utils.logger import logger
 
 
@@ -63,13 +63,15 @@ Examples:
 
     # Required arguments
     parser.add_argument(
-        "-c", "--checkpoint",
+        "-c",
+        "--checkpoint",
         type=str,
         required=True,
         help="Path to the 3DGRUT checkpoint file (.pt)",
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         type=str,
         required=True,
         help="Output file path (.usdz, .usda, or .usd)",
@@ -131,7 +133,8 @@ Examples:
 
     # Verbosity
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Enable verbose logging",
     )
@@ -142,7 +145,7 @@ Examples:
 def load_model_from_checkpoint(checkpoint_path: str):
     """Load a 3DGRUT model from checkpoint."""
     from threedgrut.model.model import MixtureOfGaussians
-    
+
     logger.info(f"Loading checkpoint from {checkpoint_path}")
 
     # weights_only=False needed for checkpoints containing numpy arrays (PyTorch 2.6+)
@@ -151,16 +154,16 @@ def load_model_from_checkpoint(checkpoint_path: str):
     # Get configuration from checkpoint
     if "config" not in checkpoint:
         raise ValueError("Checkpoint does not contain 'config' key")
-    
+
     conf = checkpoint["config"]
-    
+
     # Create model from configuration
     model = MixtureOfGaussians(conf, scene_extent=checkpoint.get("scene_extent"))
-    
+
     # Load model parameters from checkpoint (without setting up optimizer)
     model.init_from_checkpoint(checkpoint, setup_optimizer=False)
     model.eval()
-    
+
     return model, conf, model.background
 
 
@@ -169,10 +172,7 @@ def main():
 
     # Configure logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
+    logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     # Validate paths
     checkpoint_path = Path(args.checkpoint)
@@ -193,6 +193,7 @@ def main():
         logger.error(f"Failed to load checkpoint: {e}")
         if args.verbose:
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 
@@ -201,16 +202,16 @@ def main():
     if not args.no_cameras:
         try:
             import threedgrut.datasets as datasets
-            
+
             # Override dataset path if provided via CLI
             if args.dataset:
                 conf.path = args.dataset
                 logger.info(f"Using dataset path from CLI: {args.dataset}")
-            
+
             # Check if dataset path exists in config
-            if not hasattr(conf, 'path') or not conf.path:
+            if not hasattr(conf, "path") or not conf.path:
                 logger.warning("No dataset path in checkpoint. Use --dataset to specify path for camera export.")
-            elif not hasattr(conf, 'dataset') or not hasattr(conf.dataset, 'type'):
+            elif not hasattr(conf, "dataset") or not hasattr(conf.dataset, "type"):
                 logger.warning("No dataset type in checkpoint config. Cannot load dataset for camera export.")
             else:
                 dataset = datasets.make_test(name=conf.dataset.type, config=conf)
@@ -220,6 +221,7 @@ def main():
             logger.warning(f"Failed to load dataset for camera export: {e}")
             if args.verbose:
                 import traceback
+
                 traceback.print_exc()
 
     # Create exporter based on format
@@ -253,6 +255,7 @@ def main():
         logger.error(f"Export failed: {e}")
         if args.verbose:
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 

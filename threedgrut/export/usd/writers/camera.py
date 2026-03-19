@@ -182,12 +182,7 @@ def export_cameras_to_usd(
     # Coordinate transform from 3DGRUT (right-down-front) to USD camera (right-up-back)
     # 3DGRUT: X=right, Y=down, Z=front
     # USD:    X=right, Y=up, Z=back
-    camera_coord_flip = np.array([
-        [1, 0, 0, 0],
-        [0, -1, 0, 0],
-        [0, 0, -1, 0],
-        [0, 0, 0, 1]
-    ], dtype=np.float64)
+    camera_coord_flip = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]], dtype=np.float64)
 
     for i in range(num_cameras):
         camera_name = f"{camera_prefix}_{i:04d}"
@@ -277,12 +272,7 @@ def export_camera_rig_with_timestamps(
     rig_xform = UsdGeom.Xformable(rig_prim)
 
     # Coordinate transform
-    camera_coord_flip = np.array([
-        [1, 0, 0, 0],
-        [0, -1, 0, 0],
-        [0, 0, -1, 0],
-        [0, 0, 0, 1]
-    ], dtype=np.float64)
+    camera_coord_flip = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]], dtype=np.float64)
 
     # USD time code setup
     usd_time_code_per_second = stage.GetTimeCodesPerSecond()
@@ -291,7 +281,7 @@ def export_camera_rig_with_timestamps(
     # Create transform op for rig
     rig_transform_op = rig_xform.AddTransformOp()
 
-    usd_start_time_code = float('inf')
+    usd_start_time_code = float("inf")
     usd_end_time_code = 0.0
 
     # Add time-sampled transforms
