@@ -26,7 +26,9 @@ from pxr import Gf, Sdf, Usd, UsdGeom, UsdUtils, UsdVol
 
 from threedgrut.export.transforms import get_3dgrut_to_usdz_coordinate_transform
 from threedgrut.export.usd.nurec.templates import NamedSerialized
-from threedgrut.export.usd.stage_utils import NamedUSDStage
+from threedgrut.export.usd.stage_utils import (
+    NamedUSDStage,
+)
 from threedgrut.export.usd.stage_utils import (
     initialize_usd_stage as _initialize_usd_stage,
 )

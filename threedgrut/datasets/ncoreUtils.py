@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import dataclasses
 from collections import defaultdict
-
-from typing import Any, Optional, Union
 from enum import IntFlag, auto
 from typing import Any, Optional, Sequence, Union
 
