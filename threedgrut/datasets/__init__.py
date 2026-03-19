@@ -133,7 +133,6 @@ def make(name: str, config, ray_jitter):
                 val_frame_interval=config.dataset.get("val_frame_interval", 8),  # Frame-level split
                 seek_offset_sec=config.dataset.train.get("seek_offset_sec", 0.0),
                 duration_sec=config.dataset.train.get("duration_sec", None),
-                force_global_shutter=config.dataset.get("force_global_shutter", False),
                 poses_component_group=config.dataset.get("poses_component_group", "default"),
                 intrinsics_component_group=config.dataset.get("intrinsics_component_group", "default"),
                 masks_component_group=config.dataset.get("masks_component_group", "default"),
@@ -168,7 +167,6 @@ def make(name: str, config, ray_jitter):
                 val_frame_interval=config.dataset.get("val_frame_interval", 8),  # Frame-level split
                 seek_offset_sec=val_seek_offset,
                 duration_sec=val_duration,
-                force_global_shutter=config.dataset.get("force_global_shutter", False),
                 poses_component_group=config.dataset.get("poses_component_group", "default"),
                 intrinsics_component_group=config.dataset.get("intrinsics_component_group", "default"),
                 masks_component_group=config.dataset.get("masks_component_group", "default"),
@@ -244,7 +242,6 @@ def make_test(name: str, config):
                 val_frame_interval=config.dataset.get("val_frame_interval", 8),  # Frame-level split
                 seek_offset_sec=test_seek_offset,
                 duration_sec=test_duration,
-                force_global_shutter=config.dataset.get("force_global_shutter", False),
                 poses_component_group=config.dataset.get("poses_component_group", "default"),
                 intrinsics_component_group=config.dataset.get("intrinsics_component_group", "default"),
                 masks_component_group=config.dataset.get("masks_component_group", "default"),

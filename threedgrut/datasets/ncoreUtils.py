@@ -19,26 +19,12 @@ import dataclasses
 
 from collections import defaultdict
 
-from typing import Any, Optional, Sequence, Union
-from enum import IntFlag, auto
+from typing import Any, Optional, Union
 
 import numpy as np
 import numpy.typing as npt
 import torch
 import dataclasses_json
-
-
-class RayFlags(IntFlag):
-    """Bitmask flags of per-ray properties (note: limited to 32 variants)"""
-
-    # the ray's coordinates frame [mutually exclusive]
-    WORLD_SPACE = auto()  # set if the ray's 6d coords are relative to the metric world-global space
-
-    # the ray's sensor [mutually exclusive]
-    CAMERA_SENSOR = auto()  # set if the ray originates from a camera sensor
-
-    # general ray-associated attributes [non-mutually exclusive]
-    RGB_LABEL = auto()  # set if the ray has associated RGB values
 
 
 @dataclasses.dataclass(slots=True)
@@ -98,132 +84,33 @@ class Labels:
         return Labels(**out)
 
 
-@dataclasses.dataclass(slots=True, kw_only=True)
-class RaysMeta:
-    """
-    Contains meta data common to all rays irrespective of the sensor type they originate from:
-        - flags: bitmask integer value of each ray's flags (see RayFlags)                                        (n_rays,) [int32]
-        - unique_sensor_idx: the unique sensor index (of this specific sensor type!) the ray originates from     (n_rays,) [int16]
-                             This means that both unique camera and lidar sensor indices are enumerated with
-                             [0,1..], respectively.
-        - unique_frame_idx: the unique frame idx (across *all* sensors of this type!) the ray originates from    (n_rays,) [int32]
-                            This means that both unique camera and lidar frame indices are enumerated with
-                            [0,1..], respectively.
-        - timestamp_us:     the time-of-measurement of the ray                                                   (n_rays,) [int64]
-                            (signed integer only because torch doesn't support large unsigned values yet - note
-                            that int64 can't represent full unix epoch timestamps)
-    """
-
-    # mandatory fields
-    flags: torch.Tensor
-    unique_sensor_idx: torch.Tensor
-    unique_frame_idx: torch.Tensor
-
-    # optional fields
-    timestamp_us: torch.Tensor | None = None
-
-    def __post_init__(self) -> None:
-        # make sure all members have same shape and expected types
-
-        assert self.flags.dtype == torch.int32
-        assert self.flags.dim() == 1
-        assert self.unique_sensor_idx.dtype == torch.int16
-        assert self.unique_sensor_idx.shape == self.flags.shape
-        assert self.unique_frame_idx.dtype == torch.int32
-        assert self.unique_frame_idx.shape == self.flags.shape
-        if (timestamp_us := self.timestamp_us) is not None:
-            assert timestamp_us.dtype == torch.int64
-            assert timestamp_us.shape == self.flags.shape
-
-    def _getitem_basedict(self, indices: torch.Tensor | slice) -> dict[str, torch.Tensor]:
-        """Base case to mimic indexing for subsampling and chunking"""
-
-        # mandatory fields are always returned
-        out = {
-            "flags": self.flags[indices],
-            "unique_sensor_idx": self.unique_sensor_idx[indices],
-            "unique_frame_idx": self.unique_frame_idx[indices],
-        }
-
-        # return optional fields only if present
-        if (timestamp_us := self.timestamp_us) is not None:
-            out |= {"timestamp_us": timestamp_us[indices]}
-
-        return out
-
-    @staticmethod
-    def _collate_fn_basedict(rays_meta: Union[RaysMeta, Sequence[RaysMeta]]) -> dict[str, torch.Tensor]:
-        """Collate function for base ray meta properties (extended by derived types)"""
-        if isinstance(rays_meta, RaysMeta):
-            return rays_meta.__dict__
-
-        # mandatory fields are always returned
-        assert len(rays_meta), "Sequence of rays meta is empty"
-        out = {
-            "flags": torch.cat([s.flags for s in rays_meta], dim=0),
-            "unique_sensor_idx": torch.cat([s.unique_sensor_idx for s in rays_meta], dim=0),
-            "unique_frame_idx": torch.cat([s.unique_frame_idx for s in rays_meta], dim=0),
-        }
-
-        # return optional fields only if present
-        if timestamp_us_list := [s.timestamp_us for s in rays_meta if s.timestamp_us is not None]:
-            out |= {
-                "timestamp_us": torch.cat(timestamp_us_list, dim=0),
-            }
-
-        return out
-
-
-class RaysCamMeta(RaysMeta):
-    """
-    Contains additional meta-data specific to camera rays only [currently empty]
-    """
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-
-    def __getitem__(self, indices: torch.Tensor | slice) -> RaysCamMeta:
-        """Mimic indexing for subsampling and chunking"""
-
-        # no additional properties to extend base-type for now
-        return RaysCamMeta(**self._getitem_basedict(indices))
-
-    @staticmethod
-    def collate_fn(rays_meta: Union[RaysCamMeta, Sequence[RaysCamMeta]]) -> RaysCamMeta:
-        """Collate function for camera ray meta properties"""
-        if isinstance(rays_meta, RaysCamMeta):
-            return rays_meta
-
-        # no additional properties to extend base-type for now
-        return RaysCamMeta(**RaysMeta._collate_fn_basedict(rays_meta))
-
-
 @dataclasses.dataclass(slots=False, kw_only=True)
 class Batch:
     """
     Contains
-        - rays_cam: origins and directions of the camera rays used for training [float] (n_rays, 6)
-        - rays_cam_meta: cam ray's metadata (see RaysCamMeta)
         - idx: batch idx sampled by the dataloader (only valid during val/test time) [int]
         - labels: supervision signal for the rays (color or distance) [float] (n_rays, 3)
-        - worker_id: ID of the worker that generated this batch (None if batch is not generated in a multi-worker env) [int]
-        - h: height of the image - used in validation and test mode [int]
-        - w: width of the image - used in validation and test mode [int]
-        - T_camera_to_world: camera-to-world transformation matrix (4, 4) in world-global space [float]
+        - T_camera_to_world: camera-to-world START pose (4, 4) in world-global space [float]
+        - T_camera_to_world_end: camera-to-world END pose (4, 4) for rolling shutter interpolation [float]
+        - camera_id: camera identifier string for intrinsics / ray cache lookup
+        - h: height of the image [int]
+        - w: width of the image [int]
+
+    Camera-space rays are NOT included in the batch. Instead, they are cached on GPU per
+    worker in NCoreDatasetAdapter and looked up by (camera_id, w, h) in get_gpu_batch_with_intrinsics.
+    The renderer handles rolling shutter interpolation via T_camera_to_world / T_camera_to_world_end
+    and the shutter_type from intrinsics.
     """
 
-    rays_cam: torch.Tensor
-    rays_cam_meta: RaysCamMeta
     idx: list[int]
     labels: Labels
-    worker_id: Union[list[int], int, None] = None
-    T_camera_to_world: Optional[torch.Tensor] = None  # (4, 4) camera-to-world in world-global space (START pose)
-    T_camera_to_world_end: Optional[torch.Tensor] = None  # (4, 4) camera-to-world END pose for rolling shutter
-    rays_in_world_space: bool = False  # True if rays are already in world space (no transform needed)
+    T_camera_to_world: torch.Tensor  # (4, 4) camera-to-world in world-global space (START pose)
+    T_camera_to_world_end: torch.Tensor  # (4, 4) camera-to-world END pose (for rolling shutter interpolation)
+    camera_id: Union[str, list[str], None] = None  # Camera ID string for intrinsics / ray cache lookup
     h: Union[list[int], int, None] = None
     w: Union[list[int], int, None] = None
+    worker_id: Union[list[int], int, None] = None
     batch_size: Optional[int] = None
-    camera_id: Union[str, list[str], None] = None  # Camera ID string for intrinsics lookup
     frame_time: Union[float, list[float], None] = (
         None  # Frame time in milliseconds, relative to first frame (starts at 0.0)
     )
@@ -255,8 +142,6 @@ class Batch:
                 out[k] = None
             else:
                 out[k] = v
-
-        out["rays_cam_meta"] = RaysCamMeta.collate_fn(out["rays_cam_meta"])
 
         out["labels"] = Labels.collate_fn(out["labels"])
 

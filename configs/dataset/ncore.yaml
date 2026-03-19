@@ -26,11 +26,6 @@ jpeg_backend_cpu: simplejpeg
 simplejpeg_fastdct: false        # ~4-5% faster decode, minor quality loss
 simplejpeg_fastupsample: false   # ~4-5% faster chroma upsampling, minor quality loss
 
-# Rolling shutter handling
-# force_global_shutter: true forces global shutter mode (uses mean pose instead of per-pixel interpolation)
-# Set to true for debugging or if rolling shutter artifacts are suspected
-force_global_shutter: false
-
 # Image subsampling for validation (must evenly divide all camera resolutions)
 # Note: Set to 1 to use full resolution
 # Additional subsampling beyond downsample is typically not needed
