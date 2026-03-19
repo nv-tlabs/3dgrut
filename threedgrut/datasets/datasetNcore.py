@@ -16,15 +16,9 @@
 from __future__ import annotations
 
 import json
-
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Generator, NamedTuple, Optional
-from collections import defaultdict
-
-import torch
-import torch.utils.data
-import numpy as np
-import numpy.typing as npt
 
 import cv2
 import simplejpeg
@@ -35,15 +29,21 @@ from scipy import ndimage
 import ncore.data
 import ncore.data.v4
 import ncore.sensors
+import numpy as np
+import numpy.typing as npt
+import torch
+import torch.utils.data
+from scipy import ndimage
+from scipy.spatial.transform import Rotation as R_scipy
+from scipy.spatial.transform import Slerp
 
-from threedgrut.utils.logger import logger
+from threedgrut.datasets.ncoreUtils import Batch as NCoreBatch
 from threedgrut.datasets.ncoreUtils import (
     HalfClosedInterval,
     Labels,
-    Batch as NCoreBatch,
 )
 from threedgrut.datasets.utils import PointCloud, get_center_and_diag
-
+from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import to_torch
 
 
@@ -628,6 +628,7 @@ class NCoreDataset(torch.utils.data.Dataset):
             frame_image_array = cv2.resize(frame_image_array, (target_w, target_h), interpolation=cv2.INTER_AREA)
         return frame_image_array
 
+    @torch.cuda.nvtx.range("ncore_dataset::_getitem")
     def __getitem__(self, idx) -> NCoreBatch:
         """Returns a specific sample of the dataset (depending on split type and parametrization)"""
         # make sure worker is initialized

@@ -20,7 +20,6 @@ from .utils import read_colmap_extrinsics_text, read_colmap_intrinsics_text
 
 
 class ScannetppDataset(ColmapDataset):
-
     def __init__(
         self,
         path,
