@@ -22,8 +22,8 @@ with ParticleField3DGaussianSplat schema.
 """
 
 from threedgrut.export.usd.nurec.exporter import NuRecExporter
-from threedgrut.export.usd.nurec.templates import NamedSerialized, fill_3dgut_template
 from threedgrut.export.usd.nurec.serializer import serialize_nurec_usd
+from threedgrut.export.usd.nurec.templates import NamedSerialized, fill_3dgut_template
 
 __all__ = [
     "NuRecExporter",

@@ -199,8 +199,7 @@ def filter_gaussians(
         low_opacity_count = np.sum(combined_mask) - np.sum(combined_mask & opacity_mask)
         if low_opacity_count > 0:
             logger.info(
-                f"Filtered {low_opacity_count} low-opacity Gaussians "
-                f"(threshold={settings.opacity_threshold:.1e})"
+                f"Filtered {low_opacity_count} low-opacity Gaussians " f"(threshold={settings.opacity_threshold:.1e})"
             )
         stats["low_opacity"] = low_opacity_count
         combined_mask &= opacity_mask

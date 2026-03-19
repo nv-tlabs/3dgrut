@@ -37,7 +37,6 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
-
 from pxr import Sdf, Usd, UsdGeom, UsdPhysics, Vt
 
 
@@ -52,9 +51,7 @@ def _ply_to_usd_mesh(ply_path: Path, usd_path: Path) -> None:
 
     ply_data = PlyData.read(str(ply_path))
     vertex_data = ply_data["vertex"]
-    vertices = np.column_stack(
-        [vertex_data["x"], vertex_data["y"], vertex_data["z"]]
-    ).astype(np.float32)
+    vertices = np.column_stack([vertex_data["x"], vertex_data["y"], vertex_data["z"]]).astype(np.float32)
 
     face_data = ply_data["face"]
     triangles = np.vstack(face_data["vertex_indices"]).astype(np.int32)
@@ -66,12 +63,8 @@ def _ply_to_usd_mesh(ply_path: Path, usd_path: Path) -> None:
     stage = Usd.Stage.CreateInMemory()
     mesh_prim = UsdGeom.Mesh.Define(stage, "/mesh")
     mesh_prim.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(vertices))
-    mesh_prim.CreateFaceVertexCountsAttr(
-        Vt.IntArray.FromNumpy(np.full(len(triangles), 3, dtype=np.int32))
-    )
-    mesh_prim.CreateFaceVertexIndicesAttr(
-        Vt.IntArray.FromNumpy(triangles.ravel())
-    )
+    mesh_prim.CreateFaceVertexCountsAttr(Vt.IntArray.FromNumpy(np.full(len(triangles), 3, dtype=np.int32)))
+    mesh_prim.CreateFaceVertexIndicesAttr(Vt.IntArray.FromNumpy(triangles.ravel()))
     stage.GetRootLayer().defaultPrim = "mesh"
     stage.GetRootLayer().Export(str(usd_path))
     print(f"  Converted PLY -> USD: {usd_path.name} ({len(vertices)} verts, {len(triangles)} faces)")
@@ -183,13 +176,12 @@ def add_mesh_to_usdz(
                         break
             if not ref_usd_path:
                 raise RuntimeError(
-                    "Could not find a USD file with a Volume prim. "
-                    "Use --referencing_usd to specify it explicitly."
+                    "Could not find a USD file with a Volume prim. " "Use --referencing_usd to specify it explicitly."
                 )
 
         referencing_usd = ref_usd_path.name
         print(f"Step 3: Modifying {referencing_usd} ...")
- 
+
         stage = Usd.Stage.Open(str(ref_usd_path))
         if not stage:
             raise RuntimeError(f"Failed to open USD file: {ref_usd_path}")
@@ -250,11 +242,7 @@ def add_mesh_to_usdz(
         with zipfile.ZipFile(input_path, "r") as orig_zip:
             file_order = orig_zip.namelist()
 
-        current_files = {
-            str(f.relative_to(temp_path))
-            for f in temp_path.rglob("*")
-            if f.is_file()
-        }
+        current_files = {str(f.relative_to(temp_path)) for f in temp_path.rglob("*") if f.is_file()}
         new_files = current_files - set(file_order)
         if new_files:
             print(f"New files added: {sorted(new_files)}")
@@ -262,9 +250,7 @@ def add_mesh_to_usdz(
 
         print(f"Write order: {file_order}")
 
-        with zipfile.ZipFile(
-            output_path, "w", compression=zipfile.ZIP_STORED
-        ) as zip_file:
+        with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_STORED) as zip_file:
             for filename in file_order:
                 file_path = temp_path / filename
                 if file_path.exists():
@@ -279,9 +265,7 @@ def add_mesh_to_usdz(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Add a mesh into a USDZ file (input: mesh USD or mesh PLY)"
-    )
+    parser = argparse.ArgumentParser(description="Add a mesh into a USDZ file (input: mesh USD or mesh PLY)")
     parser.add_argument("--input_usdz", required=True, help="Input USDZ file path")
     parser.add_argument("--output_usdz", required=True, help="Output USDZ file path")
     mesh_group = parser.add_mutually_exclusive_group(required=True)
@@ -298,12 +282,8 @@ def main():
         default=None,
         help="Which USD file in the package to modify (default: auto-detect the one with a Volume prim)",
     )
-    parser.add_argument(
-        "--set_collision", action="store_true", help="Enable collision on mesh prims"
-    )
-    parser.add_argument(
-        "--set_invisible", action="store_true", help="Make mesh prims invisible"
-    )
+    parser.add_argument("--set_collision", action="store_true", help="Enable collision on mesh prims")
+    parser.add_argument("--set_invisible", action="store_true", help="Make mesh prims invisible")
 
     args = parser.parse_args()
 

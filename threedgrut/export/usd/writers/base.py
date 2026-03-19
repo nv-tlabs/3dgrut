@@ -114,10 +114,12 @@ class GaussianUSDWriter(ABC):
         """
         min_bounds = np.min(positions, axis=0)
         max_bounds = np.max(positions, axis=0)
-        return Vt.Vec3fArray([
-            Gf.Vec3f(float(min_bounds[0]), float(min_bounds[1]), float(min_bounds[2])),
-            Gf.Vec3f(float(max_bounds[0]), float(max_bounds[1]), float(max_bounds[2])),
-        ])
+        return Vt.Vec3fArray(
+            [
+                Gf.Vec3f(float(min_bounds[0]), float(min_bounds[1]), float(min_bounds[2])),
+                Gf.Vec3f(float(max_bounds[0]), float(max_bounds[1]), float(max_bounds[2])),
+            ]
+        )
 
 
 def create_gaussian_writer(

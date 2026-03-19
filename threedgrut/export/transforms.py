@@ -86,12 +86,14 @@ def get_3dgrut_to_usd_transform() -> np.ndarray:
         4x4 transformation matrix
     """
     # Flip Y and Z to convert from 3DGRUT's coordinate system
-    return np.array([
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, -1.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    ])
+    return np.array(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
 
 
 def get_3dgrut_to_usdz_coordinate_transform() -> np.ndarray:
