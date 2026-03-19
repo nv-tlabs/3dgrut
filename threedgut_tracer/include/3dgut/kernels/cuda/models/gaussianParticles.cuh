@@ -556,15 +556,24 @@ __device__ inline void processHitBwd(
         // ===> d_gsqdist / d_grds =  2 * grds
         const float3 grdsRayHitGrd = gsqdist > 0.0f ? ((2 * grds * weight) / (2 * gdist)) * integratedDepthGrad : make_float3(0.0f);
 
-        // ---> grds = gscl * grd * dot(grd, -1 * gro)
+        // ---> grds = gscl * grd * p  where p = dot(grd, -gro) [non-surfel] or p = -gro.z/grd.z [surfel]
         //
-        // ===> d_grds / d_gscl =  grd * dot(grd, -1 * gro)
+        // ===> d_grds / d_gscl = grdd (element-wise)
         const float3 gsclRayHitGrd = grdd * grdsRayHitGrd;
-        // ===> d_grds / d_grd =  - gscl * grd * (2 dot(grd, -1 * gro)
-        const float3 grdRayHitGrd = -gscl * make_float3(2 * grd.x * gro.x + grd.y * gro.y + grd.z * gro.z, grd.x * gro.x + 2 * grd.y * gro.y + grd.z * gro.z, grd.x * gro.x + grd.y * gro.y + 2 * grd.z * gro.z) * grdsRayHitGrd;
-        //
-        // ===> d_grds / d_gro = - gscl * grd * grd
-        const float3 groRayHitGrd = -gscl * grd * grd * grdsRayHitGrd;
+        // ===> d_grds_i / d_grd_j = gscl_i * (delta_ij * p - grd_i * gro_j)  [non-surfel]
+        //   => grdRayHitGrd_j = gscl_j * grdsRayHitGrd_j * p - gro_j * dot(grdsRayHitGrd * gscl, grd)
+        // ===> d_grds_i / d_gro_j = -gscl_i * grd_i * grd_j                  [non-surfel]
+        //   => groRayHitGrd_j = -grd_j * dot(grdsRayHitGrd * gscl, grd)
+        const float grdScaledDot = dot(grdsRayHitGrd * gscl, grd);
+        float3 grdRayHitGrd, groRayHitGrd;
+        if constexpr (SurfelPrimitive) {
+            const float h = -gro.z / grd.z;
+            grdRayHitGrd  = gscl * grdsRayHitGrd * h - make_float3(0.f, 0.f, (h / grd.z) * grdScaledDot);
+            groRayHitGrd  = make_float3(0.f, 0.f, -grdScaledDot / grd.z);
+        } else {
+            grdRayHitGrd = gscl * grdsRayHitGrd * dot(grd, -1.f * gro) - gro * grdScaledDot;
+            groRayHitGrd = -grd * grdScaledDot;
+        }
 
         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         // ---> rayDns = 1 - prevTrm * (1-galpha) * nextTrm
