@@ -121,8 +121,8 @@ def make(name: str, config, ray_jitter):
                 datapath=config.path,
                 device="cuda",
                 split="train",
-                camera_ids=config.dataset.get("camera_ids", []),  # Empty list = auto-detect
-                lidar_ids=config.dataset.get("lidar_ids", []),  # Empty list = auto-detect
+                camera_ids=config.dataset.get("camera_ids", None),  # Null = auto-select single camera sensor
+                lidar_ids=config.dataset.get("lidar_ids", None),  # Null = auto-select single lidar sensor
                 downsample=config.dataset.get("downsample", 1.0),  # Training downsample factor
                 sample_full_image=config.dataset.train.get("sample_full_image", True),
                 window_size=config.dataset.train.get("window_size", 256),
@@ -139,6 +139,7 @@ def make(name: str, config, ray_jitter):
                 jpeg_backend_cpu=config.dataset.get("jpeg_backend_cpu", "simplejpeg"),
                 simplejpeg_fastdct=config.dataset.get("simplejpeg_fastdct", False),
                 simplejpeg_fastupsample=config.dataset.get("simplejpeg_fastupsample", False),
+                lidar_color_generic_data_name=config.dataset.get("lidar_color_generic_data_name", "rgb"),
             )
             # Validation uses same temporal window as training by default
             train_seek_offset = config.dataset.train.get("seek_offset_sec", 0.0)
@@ -158,8 +159,8 @@ def make(name: str, config, ray_jitter):
                 datapath=config.path,
                 device="cuda",
                 split="val",
-                camera_ids=config.dataset.get("camera_ids", []),  # Empty list = auto-detect
-                lidar_ids=config.dataset.get("lidar_ids", []),  # Empty list = auto-detect
+                camera_ids=config.dataset.get("camera_ids", None),  # Null = auto-select single camera sensor
+                lidar_ids=config.dataset.get("lidar_ids", None),  # Null = auto-select single lidar sensor
                 downsample=config.dataset.get("downsample", 1.0),
                 sample_full_image=True,
                 window_size=config.dataset.get("window_size", 256),
@@ -173,6 +174,7 @@ def make(name: str, config, ray_jitter):
                 jpeg_backend_cpu=config.dataset.get("jpeg_backend_cpu", "simplejpeg"),
                 simplejpeg_fastdct=config.dataset.get("simplejpeg_fastdct", False),
                 simplejpeg_fastupsample=config.dataset.get("simplejpeg_fastupsample", False),
+                lidar_color_generic_data_name=config.dataset.get("lidar_color_generic_data_name", "rgb"),
             )
         case _:
             raise ValueError(
@@ -233,8 +235,8 @@ def make_test(name: str, config):
                 datapath=config.path,
                 device="cuda",
                 split="val",
-                camera_ids=config.dataset.get("camera_ids", []),  # Empty list = auto-detect
-                lidar_ids=config.dataset.get("lidar_ids", []),  # Empty list = auto-detect
+                camera_ids=config.dataset.get("camera_ids", None),  # Null = auto-select single camera sensor
+                lidar_ids=config.dataset.get("lidar_ids", None),  # Null = auto-select single lidar sensor
                 downsample=config.dataset.get("downsample", 1.0),
                 sample_full_image=True,
                 window_size=config.dataset.get("window_size", 256),
@@ -248,6 +250,7 @@ def make_test(name: str, config):
                 jpeg_backend_cpu=config.dataset.get("jpeg_backend_cpu", "simplejpeg"),
                 simplejpeg_fastdct=config.dataset.get("simplejpeg_fastdct", False),
                 simplejpeg_fastupsample=config.dataset.get("simplejpeg_fastupsample", False),
+                lidar_color_generic_data_name=config.dataset.get("lidar_color_generic_data_name", "rgb"),
             )
         case _:
             raise ValueError(

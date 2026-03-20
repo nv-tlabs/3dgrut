@@ -16,34 +16,30 @@
 from __future__ import annotations
 
 import json
-
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Generator, NamedTuple, Optional
-from collections import defaultdict
-
-import torch
-import torch.utils.data
-import numpy as np
-import numpy.typing as npt
 
 import cv2
-import simplejpeg
-
-from scipy import ndimage
-
-
 import ncore.data
 import ncore.data.v4
 import ncore.sensors
+import numpy as np
+import numpy.typing as npt
+import simplejpeg
+import torch
+import torch.utils.data
+from scipy import ndimage
+from scipy.spatial.transform import Rotation as R_scipy
+from scipy.spatial.transform import Slerp
 
-from threedgrut.utils.logger import logger
+from threedgrut.datasets.ncoreUtils import Batch as NCoreBatch
 from threedgrut.datasets.ncoreUtils import (
     HalfClosedInterval,
     Labels,
-    Batch as NCoreBatch,
 )
 from threedgrut.datasets.utils import PointCloud, get_center_and_diag
-
+from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import to_torch
 
 
@@ -56,8 +52,8 @@ class NCoreDataset(torch.utils.data.Dataset):
         duration_sec: Optional[float] = None,
         split: str = "train",
         # Sensors
-        camera_ids=["camera_front_wide_120fov", "camera_cross_left_120fov", "camera_cross_right_120fov"],
-        lidar_ids=["lidar_gt_top_p128_v4p5"],
+        camera_ids: list[str] | None = None,
+        lidar_ids: list[str] | None = None,
         # Misc
         downsample: float = 1.0,  # Training image downsample factor (0.5 = half resolution)
         sample_full_image: bool = True,
@@ -78,6 +74,8 @@ class NCoreDataset(torch.utils.data.Dataset):
         jpeg_backend_cpu: str = "simplejpeg",  # "simplejpeg" (fast, libjpeg-turbo) or "PIL" (fallback)
         simplejpeg_fastdct: bool = False,  # ~4-5% faster decode, minor quality loss
         simplejpeg_fastupsample: bool = False,  # ~4-5% faster chroma upsampling, minor quality loss
+        # Lidar point cloud color data name (if available)
+        lidar_color_generic_data_name: str = "rgb",
     ):
         super().__init__()
 
@@ -85,6 +83,9 @@ class NCoreDataset(torch.utils.data.Dataset):
         self.jpeg_backend_cpu: str = jpeg_backend_cpu
         self.simplejpeg_fastdct: bool = simplejpeg_fastdct
         self.simplejpeg_fastupsample: bool = simplejpeg_fastupsample
+
+        # Lidar point cloud color data name
+        self.lidar_color_generic_data_name: str = lidar_color_generic_data_name
 
         # store relevant parameters from config
         self.split: str = split
@@ -113,11 +114,8 @@ class NCoreDataset(torch.utils.data.Dataset):
         self.intrinsics_component_group: str = intrinsics_component_group
         self.masks_component_group: str = masks_component_group
 
-        # note: we currently assume these sensors are available for all sequences - can be refined if necessary
-        # Auto-detect sensors if not specified
-        self.camera_ids: list[str] = camera_ids if camera_ids else []
-        self.lidar_ids: list[str] = lidar_ids if lidar_ids else []
-        self._auto_detect_sensors = (not camera_ids) or (not lidar_ids)  # Flag for auto-detection
+        self.init_camera_ids: list[str] | None = camera_ids
+        self.init_lidar_ids: list[str] | None = lidar_ids
 
         self.open_consolidated: bool = open_consolidated
 
@@ -226,15 +224,39 @@ class NCoreDataset(torch.utils.data.Dataset):
             masks_component_group_name=self.masks_component_group,
         )
 
-        # Auto-detect available sensors if not specified
-        if self._auto_detect_sensors:
-            if not self.camera_ids:
-                self.camera_ids = sequence_loader.camera_ids
-                logger.info(f"Auto-detected cameras: {self.camera_ids}")
-            if not self.lidar_ids:
-                self.lidar_ids = sequence_loader.lidar_ids
-                logger.info(f"Auto-detected lidars: {self.lidar_ids}")
-            self._auto_detect_sensors = False
+        # Auto-detect _single_ sensors if not specified - sensors need to be specified explicitly
+        # to avoid ambiguity (e.g., in case of multiple downscaled sensors)
+        self.camera_ids: list[str]
+        if self.init_camera_ids is None:
+            self.camera_ids = sequence_loader.camera_ids
+            if len(self.camera_ids) > 1:
+                raise ValueError(
+                    "NCoreDataset: Multiple camera sensors in dataset, explicit"
+                    f" specification of camera sensors required to avoid ambiguity: {self.camera_ids}"
+                )
+            logger.info(f"Auto-detected camera: {self.camera_ids}")
+        else:
+            self.camera_ids = self.init_camera_ids
+            assert all(
+                isinstance(cid, str) for cid in self.camera_ids
+            ), f"NCoreDataset: camera_ids should be a list of strings, got {self.camera_ids}"
+            logger.info(f"Using cameras: {self.camera_ids}")
+
+        self.lidar_ids: list[str]
+        if self.init_lidar_ids is None:
+            self.lidar_ids = sequence_loader.lidar_ids
+            if len(self.lidar_ids) > 1:
+                raise ValueError(
+                    "NCoreDataset: Multiple lidar sensors in dataset, explicit"
+                    f" specification of lidar sensors required to avoid ambiguity: {self.lidar_ids}"
+                )
+            logger.info(f"Auto-detected lidar: {self.lidar_ids}")
+        else:
+            self.lidar_ids = self.init_lidar_ids
+            assert all(
+                isinstance(lid, str) for lid in self.lidar_ids
+            ), f"NCoreDataset: lidar_ids should be a list of strings, got {self.lidar_ids}"
+            logger.info(f"Using lidars: {self.lidar_ids}")
 
         # Load camera sensors
         camera_sensors = self.sequence_camera_sensors[sequence_id] = {
@@ -477,20 +499,17 @@ class NCoreDataset(torch.utils.data.Dataset):
         sequence_id = self.sequence_id
         camera_sensor = self.sequence_camera_sensors[sequence_id][camera_id]
 
-        camera_centers = []
-        for camera_frame_index in self.time_range_us.cover_range(camera_sensor.get_frames_timestamps_us()):
-            T_sensor_world_global = self._transform_poses_to_world_global(
-                camera_sensor.get_frames_T_source_target(
-                    source_node=camera_sensor.sensor_id,
-                    target_node="world",
-                    frame_indices=np.array(camera_frame_index),
-                    frame_timepoint=ncore.data.FrameTimepoint.START,
-                ),
-                self.T_world_to_world_global,
-            )
-            camera_centers.append(T_sensor_world_global[:3, 3])
+        camera_centers = self._transform_poses_to_world_global(
+            camera_sensor.get_frames_T_source_target(
+                source_node=camera_sensor.sensor_id,
+                target_node="world",
+                frame_indices=self.time_range_us.cover_range(camera_sensor.get_frames_timestamps_us()),
+                frame_timepoint=ncore.data.FrameTimepoint.START,
+            ),
+            self.T_world_to_world_global,
+        )[:, :3, 3]
 
-        return np.array(camera_centers)
+        return camera_centers
 
     def get_scene_extent(self):
         # reference implementation
@@ -628,6 +647,7 @@ class NCoreDataset(torch.utils.data.Dataset):
             frame_image_array = cv2.resize(frame_image_array, (target_w, target_h), interpolation=cv2.INTER_AREA)
         return frame_image_array
 
+    @torch.cuda.nvtx.range("ncore_dataset::_getitem")
     def __getitem__(self, idx) -> NCoreBatch:
         """Returns a specific sample of the dataset (depending on split type and parametrization)"""
         # make sure worker is initialized
@@ -864,6 +884,16 @@ class NCoreDataset(torch.utils.data.Dataset):
                 xyz_s = pc.xyz_m_start
                 xyz_e = pc.xyz_m_end
 
+                # load point color, if available
+                if lidar_sensor.has_frame_generic_data(lidar_frame_index, self.lidar_color_generic_data_name):
+                    color = lidar_sensor.get_frame_generic_data(lidar_frame_index, self.lidar_color_generic_data_name)
+                    assert (
+                        color.shape == xyz_s.shape
+                    ), "Color data length does not match point cloud length (expecting 3-channel RGB color per point)"
+                    assert color.dtype == np.uint8, "Expected color data in uint8 format"
+                else:
+                    color = None
+
                 # determine point subset to load
                 point_filter = ...
                 if non_dynamic_points_only:
@@ -874,6 +904,8 @@ class NCoreDataset(torch.utils.data.Dataset):
 
                 xyz_s = xyz_s[point_filter]
                 xyz_e = xyz_e[point_filter]
+                if color is not None:
+                    color = color[point_filter]
 
                 # transform points from sensor to world-global frame
                 T_sensor_world_global = self._transform_poses_to_world_global(
@@ -885,5 +917,8 @@ class NCoreDataset(torch.utils.data.Dataset):
                 xyz_e = (T_sensor_world_global[:3, :3] @ xyz_e.transpose() + T_sensor_world_global[:3, 3:4]).transpose()
 
                 yield PointCloud(
-                    xyz_start=to_torch(xyz_s, device="cpu"), xyz_end=to_torch(xyz_e, device="cpu"), device="cpu"
+                    xyz_start=to_torch(xyz_s, device="cpu"),
+                    xyz_end=to_torch(xyz_e, device="cpu"),
+                    color=to_torch(color, device="cpu") if color is not None else None,
+                    device="cpu",
                 )

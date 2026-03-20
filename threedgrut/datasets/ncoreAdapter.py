@@ -27,7 +27,6 @@ import ncore.data
 import ncore.sensors
 import numpy as np
 import torch
-from ncore.data import FThetaCameraModelParameters, ShutterType
 
 from threedgrut.datasets.datasetNcore import NCoreDataset
 from threedgrut.datasets.protocols import (
@@ -112,6 +111,7 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
 
         return self._worker_gpu_cache[worker_id]
 
+    @torch.cuda.nvtx.range("ncore_adapter::_getitem")
     def __getitem__(self, idx) -> dict:
         """Override to return dict instead of NCoreBatch for DataLoader collation.
 
