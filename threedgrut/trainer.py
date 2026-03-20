@@ -277,12 +277,14 @@ class Trainer3DGRUT:
                     checkpoint = torch.load(conf.initialization.path, weights_only=False)
                     model.init_from_checkpoint(checkpoint, setup_optimizer=False)
                 case "lidar":
+                    assert conf.dataset.type in ["ncore"], "can only initialize from lidar with NCoreDataset"
                     pc = PointCloud.from_sequence(
                         list(train_dataset.get_point_clouds(step_frame=1, non_dynamic_points_only=True)), device="cpu"
                     )
-                    idxs = torch.randint(len(pc.xyz_end), (conf.initialization.num_points,))
-                    pc = pc.selected_idxs(idxs)
-                    assert conf.dataset.type in ["ncore"], "can only initialize from lidar with NCoreDataset"
+                    if conf.initialization.num_points < len(pc.xyz_end):
+                        # Randomly subsample points if there are more points in the point cloud than the specified number of gaussians
+                        idxs = torch.randperm(len(pc.xyz_end))[: conf.initialization.num_points]
+                        pc = pc.selected_idxs(idxs)
                     observer_points = torch.tensor(
                         train_dataset.get_observer_points(), dtype=torch.float32, device=self.device
                     )
