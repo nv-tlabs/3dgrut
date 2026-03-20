@@ -26,12 +26,12 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
-
-from threedgrut.datasets.camera_models import (
+from ncore.data import (
     OpenCVFisheyeCameraModelParameters,
     OpenCVPinholeCameraModelParameters,
     ShutterType,
 )
+
 from threedgrut.export.accessor import GaussianExportAccessor
 from threedgrut.export.base import ExportableModel, ModelExporter
 from threedgrut.export.transforms import (
@@ -85,8 +85,8 @@ def _extract_camera_params_from_dataset(dataset) -> Optional[List]:
                 # Reconstruct CameraModelParameters from dict
                 if camera_name == "OpenCVPinholeCameraModelParameters":
                     params = OpenCVPinholeCameraModelParameters(
-                        resolution=np.array(params_dict["resolution"], dtype=np.int64),
-                        shutter_type=ShutterType(params_dict["shutter_type"]),
+                        resolution=np.array(params_dict["resolution"], dtype=np.uint64),
+                        shutter_type=ShutterType[params_dict["shutter_type"]],
                         principal_point=np.array(params_dict["principal_point"], dtype=np.float32),
                         focal_length=np.array(params_dict["focal_length"], dtype=np.float32),
                         radial_coeffs=np.array(params_dict["radial_coeffs"], dtype=np.float32),
@@ -95,8 +95,8 @@ def _extract_camera_params_from_dataset(dataset) -> Optional[List]:
                     )
                 elif camera_name == "OpenCVFisheyeCameraModelParameters":
                     params = OpenCVFisheyeCameraModelParameters(
-                        resolution=np.array(params_dict["resolution"], dtype=np.int64),
-                        shutter_type=ShutterType(params_dict["shutter_type"]),
+                        resolution=np.array(params_dict["resolution"], dtype=np.uint64),
+                        shutter_type=ShutterType[params_dict["shutter_type"]],
                         principal_point=np.array(params_dict["principal_point"], dtype=np.float32),
                         focal_length=np.array(params_dict["focal_length"], dtype=np.float32),
                         radial_coeffs=np.array(params_dict["radial_coeffs"], dtype=np.float32),
@@ -140,7 +140,7 @@ def _extract_camera_params_from_dataset(dataset) -> Optional[List]:
 
         # Create a single OpenCVPinhole params (no distortion for NeRF synthetic)
         params = OpenCVPinholeCameraModelParameters(
-            resolution=np.array([width, height], dtype=np.int64),
+            resolution=np.array([width, height], dtype=np.uint64),
             shutter_type=ShutterType.GLOBAL,
             principal_point=np.array([cx, cy], dtype=np.float32),
             focal_length=np.array([fx, fy], dtype=np.float32),
