@@ -417,6 +417,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def __len__(self) -> int:
         return self.n_frames
 
+    @torch.cuda.nvtx.range("colmap_dataset::_getitem")
     def __getitem__(self, idx) -> dict:
         # Load image and get its actual dimensions
         image_data = np.asarray(Image.open(self.image_paths[idx]))

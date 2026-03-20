@@ -110,7 +110,7 @@ class PointCloud:
     xyz_end: torch.Tensor  # [N,3]
     device: str
     dtype = torch.float32
-    color: torch.Tensor | None = None
+    color: torch.Tensor | None = None  # uint8 RGB colors in [0, 255], shape [N,3]
 
     def __post_init__(self) -> None:
         assert len(self.xyz_start) == len(self.xyz_end)
