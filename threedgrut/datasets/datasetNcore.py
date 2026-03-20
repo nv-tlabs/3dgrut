@@ -473,20 +473,17 @@ class NCoreDataset(torch.utils.data.Dataset):
         sequence_id = self.sequence_id
         camera_sensor = self.sequence_camera_sensors[sequence_id][camera_id]
 
-        camera_centers = []
-        for camera_frame_index in self.time_range_us.cover_range(camera_sensor.get_frames_timestamps_us()):
-            T_sensor_world_global = self._transform_poses_to_world_global(
-                camera_sensor.get_frames_T_source_target(
-                    source_node=camera_sensor.sensor_id,
-                    target_node="world",
-                    frame_indices=np.array(camera_frame_index),
-                    frame_timepoint=ncore.data.FrameTimepoint.START,
-                ),
-                self.T_world_to_world_global,
-            )
-            camera_centers.append(T_sensor_world_global[:3, 3])
+        camera_centers = self._transform_poses_to_world_global(
+            camera_sensor.get_frames_T_source_target(
+                source_node=camera_sensor.sensor_id,
+                target_node="world",
+                frame_indices=self.time_range_us.cover_range(camera_sensor.get_frames_timestamps_us()),
+                frame_timepoint=ncore.data.FrameTimepoint.START,
+            ),
+            self.T_world_to_world_global,
+        )[:, :3, 3]
 
-        return np.array(camera_centers)
+        return camera_centers
 
     def get_scene_extent(self):
         # reference implementation
