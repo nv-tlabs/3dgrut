@@ -229,6 +229,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def __len__(self):
         return len(self.poses)
 
+    @torch.cuda.nvtx.range("nerf_dataset::_getitem")
     def __getitem__(self, idx) -> dict:
         out_shape = (1, self.image_h, self.image_w, 3)
         img = NeRFDataset.__read_image(

@@ -380,7 +380,10 @@ class Tracer:
 
     @staticmethod
     def __create_camera_parameters(gpu_batch):
-        from threedgrut.datasets.camera_models import ShutterType, FThetaCameraModelParameters
+        from threedgrut.datasets.camera_models import (
+            FThetaCameraModelParameters,
+            ShutterType,
+        )
 
         SHUTTER_TYPE_MAP = {
             ShutterType.ROLLING_TOP_TO_BOTTOM: _3dgut_plugin.ShutterType.ROLLING_TOP_TO_BOTTOM,

@@ -23,16 +23,23 @@ This adapter wraps NCoreDataset and provides the required interface methods.
 """
 
 import cv2
+import ncore.data
+import ncore.sensors
 import numpy as np
 import torch
 
-import ncore.data
-import ncore.sensors
-
 from threedgrut.datasets.camera_models import FThetaCameraModelParameters, ShutterType
 from threedgrut.datasets.datasetNcore import NCoreDataset
-from threedgrut.datasets.protocols import Batch, BoundedMultiViewDataset, DatasetVisualization
-from threedgrut.datasets.utils import create_camera_visualization, create_pixel_coords, get_worker_id
+from threedgrut.datasets.protocols import (
+    Batch,
+    BoundedMultiViewDataset,
+    DatasetVisualization,
+)
+from threedgrut.datasets.utils import (
+    create_camera_visualization,
+    create_pixel_coords,
+    get_worker_id,
+)
 from threedgrut.utils.logger import logger
 
 
@@ -105,6 +112,7 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
 
         return self._worker_gpu_cache[worker_id]
 
+    @torch.cuda.nvtx.range("ncore_adapter::_getitem")
     def __getitem__(self, idx) -> dict:
         """Override to return dict instead of NCoreBatch for DataLoader collation.
 

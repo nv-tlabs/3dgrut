@@ -517,7 +517,12 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         """
         logger.info(f"Initializing based on lidar point cloud ...")
 
-        self.default_initialize_from_points(point_cloud.xyz_end.to(device=self.device), observer_pts, point_cloud.color)
+        self.default_initialize_from_points(
+            point_cloud.xyz_end.to(device=self.device),
+            observer_pts,
+            point_cloud.color,
+            use_observer_pts=self.conf.initialization.use_observation_points,
+        )
 
     def default_initialize_from_points(self, pts, observer_pts, colors=None, use_observer_pts=True):
         """

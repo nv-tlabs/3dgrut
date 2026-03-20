@@ -1,12 +1,12 @@
 type: ncore
 
 # Camera and lidar sensors to use
-# Leave empty to auto-detect all available cameras/lidars
-# Or specify explicitly: 
+# Leave null to auto-detect single available cameras/lidars - needs to be specified explicitly
+# in case of multiple camera/lidar sensors:
 #   camera_ids: [camera_front_wide_120fov, camera_cross_left_120fov, camera_cross_right_120fov]
 #   lidar_ids: [lidar_gt_top_p128_v4p5]
-camera_ids: []  # Empty = auto-detect all cameras
-lidar_ids: []   # Empty = auto-detect all lidars
+camera_ids: null  # Null = auto-select single camera sensor
+lidar_ids: null   # Null = auto-detect single lidar sensor
 
 # V4 component group names (only used when loading NCore V4 datasets)
 poses_component_group: default
@@ -35,6 +35,9 @@ n_val_image_subsample: 1
 # Every Nth frame is validation, rest are training
 # This distributes validation frames throughout the trajectory
 val_frame_interval: 8  # Every 8th frame is validation (12.5% val, 87.5% train)
+
+# Property name to retrieve lidar point RGB colors from (if available)
+lidar_color_generic_data_name: rgb
 
 # Training parameters
 train:
