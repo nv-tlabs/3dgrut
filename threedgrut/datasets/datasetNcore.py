@@ -52,8 +52,8 @@ class NCoreDataset(torch.utils.data.Dataset):
         duration_sec: Optional[float] = None,
         split: str = "train",
         # Sensors
-        camera_ids=["camera_front_wide_120fov", "camera_cross_left_120fov", "camera_cross_right_120fov"],
-        lidar_ids=["lidar_gt_top_p128_v4p5"],
+        camera_ids: list[str] | None = None,
+        lidar_ids: list[str] | None = None,
         # Misc
         downsample: float = 1.0,  # Training image downsample factor (0.5 = half resolution)
         sample_full_image: bool = True,
@@ -109,11 +109,8 @@ class NCoreDataset(torch.utils.data.Dataset):
         self.intrinsics_component_group: str = intrinsics_component_group
         self.masks_component_group: str = masks_component_group
 
-        # note: we currently assume these sensors are available for all sequences - can be refined if necessary
-        # Auto-detect sensors if not specified
-        self.camera_ids: list[str] = camera_ids if camera_ids else []
-        self.lidar_ids: list[str] = lidar_ids if lidar_ids else []
-        self._auto_detect_sensors = (not camera_ids) or (not lidar_ids)  # Flag for auto-detection
+        self.init_camera_ids: list[str] | None = camera_ids
+        self.init_lidar_ids: list[str] | None = lidar_ids
 
         self.open_consolidated: bool = open_consolidated
 
@@ -222,15 +219,39 @@ class NCoreDataset(torch.utils.data.Dataset):
             masks_component_group_name=self.masks_component_group,
         )
 
-        # Auto-detect available sensors if not specified
-        if self._auto_detect_sensors:
-            if not self.camera_ids:
-                self.camera_ids = sequence_loader.camera_ids
-                logger.info(f"Auto-detected cameras: {self.camera_ids}")
-            if not self.lidar_ids:
-                self.lidar_ids = sequence_loader.lidar_ids
-                logger.info(f"Auto-detected lidars: {self.lidar_ids}")
-            self._auto_detect_sensors = False
+        # Auto-detect _single_ sensors if not specified - sensors need to be specified explicitly
+        # to avoid ambiguity (e.g., in case of multiple downscaled sensors)
+        self.camera_ids: list[str]
+        if self.init_camera_ids is None:
+            self.camera_ids = sequence_loader.camera_ids
+            if len(self.camera_ids) > 1:
+                raise ValueError(
+                    "NCoreDataset: Multiple camera sensors in dataset, explicit"
+                    f" specification of camera sensors required to avoid ambiguity: {self.camera_ids}"
+                )
+            logger.info(f"Auto-detected camera: {self.camera_ids}")
+        else:
+            self.camera_ids = self.init_camera_ids
+            assert all(
+                isinstance(cid, str) for cid in self.camera_ids
+            ), f"NCoreDataset: camera_ids should be a list of strings, got {self.camera_ids}"
+            logger.info(f"Using cameras: {self.camera_ids}")
+
+        self.lidar_ids: list[str]
+        if self.init_lidar_ids is None:
+            self.lidar_ids = sequence_loader.lidar_ids
+            if len(self.lidar_ids) > 1:
+                raise ValueError(
+                    "NCoreDataset: Multiple lidar sensors in dataset, explicit"
+                    f" specification of lidar sensors required to avoid ambiguity: {self.lidar_ids}"
+                )
+            logger.info(f"Auto-detected lidar: {self.lidar_ids}")
+        else:
+            self.lidar_ids = self.init_lidar_ids
+            assert all(
+                isinstance(lid, str) for lid in self.lidar_ids
+            ), f"NCoreDataset: lidar_ids should be a list of strings, got {self.lidar_ids}"
+            logger.info(f"Using lidars: {self.lidar_ids}")
 
         # Load camera sensors
         camera_sensors = self.sequence_camera_sensors[sequence_id] = {
