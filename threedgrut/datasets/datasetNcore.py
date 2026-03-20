@@ -74,6 +74,8 @@ class NCoreDataset(torch.utils.data.Dataset):
         jpeg_backend_cpu: str = "simplejpeg",  # "simplejpeg" (fast, libjpeg-turbo) or "PIL" (fallback)
         simplejpeg_fastdct: bool = False,  # ~4-5% faster decode, minor quality loss
         simplejpeg_fastupsample: bool = False,  # ~4-5% faster chroma upsampling, minor quality loss
+        # Lidar point cloud color data name (if available)
+        lidar_color_generic_data_name: str = "rgb",
     ):
         super().__init__()
 
@@ -81,6 +83,9 @@ class NCoreDataset(torch.utils.data.Dataset):
         self.jpeg_backend_cpu: str = jpeg_backend_cpu
         self.simplejpeg_fastdct: bool = simplejpeg_fastdct
         self.simplejpeg_fastupsample: bool = simplejpeg_fastupsample
+
+        # Lidar point cloud color data name
+        self.lidar_color_generic_data_name: str = lidar_color_generic_data_name
 
         # store relevant parameters from config
         self.split: str = split
@@ -879,6 +884,16 @@ class NCoreDataset(torch.utils.data.Dataset):
                 xyz_s = pc.xyz_m_start
                 xyz_e = pc.xyz_m_end
 
+                # load point color, if available
+                if lidar_sensor.has_frame_generic_data(lidar_frame_index, self.lidar_color_generic_data_name):
+                    color = lidar_sensor.get_frame_generic_data(lidar_frame_index, self.lidar_color_generic_data_name)
+                    assert (
+                        color.shape == xyz_s.shape
+                    ), "Color data length does not match point cloud length (expecting 3-channel RGB color per point)"
+                    assert color.dtype == np.uint8, "Expected color data in uint8 format"
+                else:
+                    color = None
+
                 # determine point subset to load
                 point_filter = ...
                 if non_dynamic_points_only:
@@ -889,6 +904,8 @@ class NCoreDataset(torch.utils.data.Dataset):
 
                 xyz_s = xyz_s[point_filter]
                 xyz_e = xyz_e[point_filter]
+                if color is not None:
+                    color = color[point_filter]
 
                 # transform points from sensor to world-global frame
                 T_sensor_world_global = self._transform_poses_to_world_global(
@@ -900,5 +917,8 @@ class NCoreDataset(torch.utils.data.Dataset):
                 xyz_e = (T_sensor_world_global[:3, :3] @ xyz_e.transpose() + T_sensor_world_global[:3, 3:4]).transpose()
 
                 yield PointCloud(
-                    xyz_start=to_torch(xyz_s, device="cpu"), xyz_end=to_torch(xyz_e, device="cpu"), device="cpu"
+                    xyz_start=to_torch(xyz_s, device="cpu"),
+                    xyz_end=to_torch(xyz_e, device="cpu"),
+                    color=to_torch(color, device="cpu") if color is not None else None,
+                    device="cpu",
                 )

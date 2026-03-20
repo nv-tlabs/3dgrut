@@ -139,6 +139,7 @@ def make(name: str, config, ray_jitter):
                 jpeg_backend_cpu=config.dataset.get("jpeg_backend_cpu", "simplejpeg"),
                 simplejpeg_fastdct=config.dataset.get("simplejpeg_fastdct", False),
                 simplejpeg_fastupsample=config.dataset.get("simplejpeg_fastupsample", False),
+                lidar_color_generic_data_name=config.dataset.get("lidar_color_generic_data_name", "rgb"),
             )
             # Validation uses same temporal window as training by default
             train_seek_offset = config.dataset.train.get("seek_offset_sec", 0.0)
@@ -173,6 +174,7 @@ def make(name: str, config, ray_jitter):
                 jpeg_backend_cpu=config.dataset.get("jpeg_backend_cpu", "simplejpeg"),
                 simplejpeg_fastdct=config.dataset.get("simplejpeg_fastdct", False),
                 simplejpeg_fastupsample=config.dataset.get("simplejpeg_fastupsample", False),
+                lidar_color_generic_data_name=config.dataset.get("lidar_color_generic_data_name", "rgb"),
             )
         case _:
             raise ValueError(
@@ -248,6 +250,7 @@ def make_test(name: str, config):
                 jpeg_backend_cpu=config.dataset.get("jpeg_backend_cpu", "simplejpeg"),
                 simplejpeg_fastdct=config.dataset.get("simplejpeg_fastdct", False),
                 simplejpeg_fastupsample=config.dataset.get("simplejpeg_fastupsample", False),
+                lidar_color_generic_data_name=config.dataset.get("lidar_color_generic_data_name", "rgb"),
             )
         case _:
             raise ValueError(
