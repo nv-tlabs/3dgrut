@@ -18,20 +18,19 @@ import os
 import platform
 from typing import Optional
 
+import ncore.sensors
 import numpy as np
 import torch
+from ncore.data import (
+    OpenCVFisheyeCameraModelParameters,
+    OpenCVPinholeCameraModelParameters,
+    ShutterType,
+)
 from PIL import Image
 from torch.utils.data import Dataset
 
 from threedgrut.utils.logger import logger
 
-from .camera_models import (
-    OpenCVFisheyeCameraModelParameters,
-    OpenCVPinholeCameraModelParameters,
-    ShutterType,
-    image_points_to_camera_rays_opencv_fisheye,
-    pixels_to_image_points,
-)
 from .protocols import Batch, BoundedMultiViewDataset, DatasetVisualization
 from .utils import (
     compute_max_radius,
@@ -151,7 +150,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             v = np.arange(h).repeat(w)
             out_shape = (1, h, w, 3)
             params = OpenCVPinholeCameraModelParameters(
-                resolution=np.array([w, h], dtype=np.int64),
+                resolution=np.array([w, h], dtype=np.uint64),
                 shutter_type=ShutterType.GLOBAL,
                 principal_point=np.array([w, h], dtype=np.float32) / 2,
                 focal_length=np.array([focalx, focaly], dtype=np.float32),
@@ -174,7 +173,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             u = np.tile(np.arange(w), h)
             v = np.arange(h).repeat(w)
             out_shape = (1, h, w, 3)
-            resolution = np.array([w, h]).astype(np.int64)
+            resolution = np.array([w, h]).astype(np.uint64)
             principal_point = params[2:4].astype(np.float32)
             focal_length = params[0:2].astype(np.float32)
             radial_coeffs = params[4:].astype(np.float32)
@@ -192,9 +191,10 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 max_angle=max_angle,
                 shutter_type=ShutterType.GLOBAL,
             )
-            pixel_coords = torch.tensor(np.stack([u, v], axis=1), dtype=torch.int32)
-            image_points = pixels_to_image_points(pixel_coords)
-            rays_d_cam = image_points_to_camera_rays_opencv_fisheye(params, image_points)
+            camera_model = ncore.sensors.CameraModel.from_parameters(params, device="cpu", dtype=torch.float32)
+            int_pixel_coords = torch.tensor(np.stack([u, v], axis=1), dtype=torch.int32)
+            image_points = camera_model.pixels_to_image_points(int_pixel_coords)
+            rays_d_cam = camera_model.image_points_to_camera_rays(image_points)
             rays_o_cam = torch.zeros_like(rays_d_cam)
             pixel_coords = create_pixel_coords(w, h)
             return (

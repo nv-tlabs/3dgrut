@@ -23,16 +23,23 @@ This adapter wraps NCoreDataset and provides the required interface methods.
 """
 
 import cv2
-import numpy as np
-import torch
-
 import ncore.data
 import ncore.sensors
+import numpy as np
+import torch
+from ncore.data import FThetaCameraModelParameters, ShutterType
 
-from threedgrut.datasets.camera_models import FThetaCameraModelParameters, ShutterType
 from threedgrut.datasets.datasetNcore import NCoreDataset
-from threedgrut.datasets.protocols import Batch, BoundedMultiViewDataset, DatasetVisualization
-from threedgrut.datasets.utils import create_camera_visualization, create_pixel_coords, get_worker_id
+from threedgrut.datasets.protocols import (
+    Batch,
+    BoundedMultiViewDataset,
+    DatasetVisualization,
+)
+from threedgrut.datasets.utils import (
+    create_camera_visualization,
+    create_pixel_coords,
+    get_worker_id,
+)
 from threedgrut.utils.logger import logger
 
 
@@ -395,8 +402,7 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
             )
 
             # Use shutter type from camera parameters (renderer handles interpolation natively)
-            shutter_type = scaled_params.shutter_type
-            logger.info(f"[Shutter] Camera {camera_id}: shutter_type = {shutter_type.name}")
+            logger.info(f"[Shutter] Camera {camera_id}: shutter_type = {scaled_params.shutter_type.name}")
 
             # Build parameter dict from the properly-scaled NCore parameters.
             # Distortion coefficients are resolution-independent and preserved through transform().
@@ -404,7 +410,7 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
             if isinstance(camera_model, ncore.sensors.OpenCVPinholeCameraModel):
                 params_dict = {
                     "resolution": scaled_params.resolution,
-                    "shutter_type": shutter_type,
+                    "shutter_type": scaled_params.shutter_type.name,
                     "principal_point": scaled_params.principal_point,
                     "focal_length": scaled_params.focal_length,
                     "radial_coeffs": scaled_params.radial_coeffs,
@@ -414,21 +420,18 @@ class NCoreDatasetAdapter(NCoreDataset, BoundedMultiViewDataset, DatasetVisualiz
             elif isinstance(camera_model, ncore.sensors.OpenCVFisheyeCameraModel):
                 params_dict = {
                     "resolution": scaled_params.resolution,
-                    "shutter_type": shutter_type,
+                    "shutter_type": scaled_params.shutter_type.name,
                     "principal_point": scaled_params.principal_point,
                     "focal_length": scaled_params.focal_length,
                     "radial_coeffs": scaled_params.radial_coeffs,
                     "max_angle": scaled_params.max_angle,
                 }
             elif isinstance(camera_model, ncore.sensors.FThetaCameraModel):
-                # Map ncore's PolynomialType enum to the repo's FThetaCameraModelParameters.PolynomialType
-                # by name, since they are different enum classes with matching member names.
-                reference_poly = FThetaCameraModelParameters.PolynomialType[scaled_params.reference_poly.name]
                 params_dict = {
                     "resolution": scaled_params.resolution,
-                    "shutter_type": shutter_type,
+                    "shutter_type": scaled_params.shutter_type.name,
                     "principal_point": scaled_params.principal_point,
-                    "reference_poly": reference_poly,
+                    "reference_poly": scaled_params.reference_poly.name,
                     "pixeldist_to_angle_poly": scaled_params.pixeldist_to_angle_poly,
                     "angle_to_pixeldist_poly": scaled_params.angle_to_pixeldist_poly,
                     "max_angle": scaled_params.max_angle,

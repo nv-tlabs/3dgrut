@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
+from ncore.data import FThetaCameraModelParameters, ShutterType
 from omegaconf import OmegaConf
 
 from threedgrut.datasets.protocols import Batch
@@ -380,14 +381,12 @@ class Tracer:
 
     @staticmethod
     def __create_camera_parameters(gpu_batch):
-        from threedgrut.datasets.camera_models import ShutterType, FThetaCameraModelParameters
-
         SHUTTER_TYPE_MAP = {
-            ShutterType.ROLLING_TOP_TO_BOTTOM: _3dgut_plugin.ShutterType.ROLLING_TOP_TO_BOTTOM,
-            ShutterType.ROLLING_LEFT_TO_RIGHT: _3dgut_plugin.ShutterType.ROLLING_LEFT_TO_RIGHT,
-            ShutterType.ROLLING_BOTTOM_TO_TOP: _3dgut_plugin.ShutterType.ROLLING_BOTTOM_TO_TOP,
-            ShutterType.ROLLING_RIGHT_TO_LEFT: _3dgut_plugin.ShutterType.ROLLING_RIGHT_TO_LEFT,
-            ShutterType.GLOBAL: _3dgut_plugin.ShutterType.GLOBAL,
+            ShutterType.ROLLING_TOP_TO_BOTTOM.name: _3dgut_plugin.ShutterType.ROLLING_TOP_TO_BOTTOM,
+            ShutterType.ROLLING_LEFT_TO_RIGHT.name: _3dgut_plugin.ShutterType.ROLLING_LEFT_TO_RIGHT,
+            ShutterType.ROLLING_BOTTOM_TO_TOP.name: _3dgut_plugin.ShutterType.ROLLING_BOTTOM_TO_TOP,
+            ShutterType.ROLLING_RIGHT_TO_LEFT.name: _3dgut_plugin.ShutterType.ROLLING_RIGHT_TO_LEFT,
+            ShutterType.GLOBAL.name: _3dgut_plugin.ShutterType.GLOBAL,
         }
 
         # Check if rays are already in world space (rolling shutter with per-pixel poses)
@@ -469,8 +468,8 @@ class Tracer:
 
         elif (K := gpu_batch.intrinsics_FThetaCameraModelParameters) is not None:
             POLYNOMIAL_TYPE_MAP = {
-                FThetaCameraModelParameters.PolynomialType.PIXELDIST_TO_ANGLE: _3dgut_plugin.PolynomialType.PIXELDIST_TO_ANGLE,
-                FThetaCameraModelParameters.PolynomialType.ANGLE_TO_PIXELDIST: _3dgut_plugin.PolynomialType.ANGLE_TO_PIXELDIST,
+                FThetaCameraModelParameters.PolynomialType.PIXELDIST_TO_ANGLE.name: _3dgut_plugin.PolynomialType.PIXELDIST_TO_ANGLE,
+                FThetaCameraModelParameters.PolynomialType.ANGLE_TO_PIXELDIST.name: _3dgut_plugin.PolynomialType.ANGLE_TO_PIXELDIST,
             }
             camera_model_parameters = _3dgut_plugin.fromFThetaCameraModelParameters(
                 resolution=K["resolution"],
