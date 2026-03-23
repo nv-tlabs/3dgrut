@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,7 +14,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass
-from typing import Optional, Protocol, final, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
 import numpy as np
 import torch
@@ -24,12 +24,15 @@ import torch
 class Batch:
     rays_ori: torch.Tensor  # [B, H, W, 3] ray origins in arbitrary space
     rays_dir: torch.Tensor  # [B, H, W, 3] ray directions in arbitrary space
-    T_to_world: torch.Tensor  # [B, 4, 4] transformation matrix from the ray space to the world space
+    T_to_world: torch.Tensor  # [B, 4, 4] transformation matrix from the ray space to the world space (START pose)
+    T_to_world_end: Optional[torch.Tensor] = None  # [B, 4, 4] END pose for rolling shutter
+    rays_in_world_space: bool = False  # True if rays are already in world space (no transform needed)
     rgb_gt: Optional[torch.Tensor] = None
     mask: Optional[torch.Tensor] = None
     intrinsics: Optional[list] = None
     intrinsics_OpenCVPinholeCameraModelParameters: Optional[dict] = None
     intrinsics_OpenCVFisheyeCameraModelParameters: Optional[dict] = None
+    intrinsics_FThetaCameraModelParameters: Optional[dict] = None
     # Camera/frame indices for post-processing
     camera_idx: int = -1  # 0-based camera index
     frame_idx: int = -1  # 0-based frame index (global across split)

@@ -1,0 +1,63 @@
+type: ncore
+
+# Camera and lidar sensors to use
+# Leave null to auto-detect single available cameras/lidars - needs to be specified explicitly
+# in case of multiple camera/lidar sensors:
+#   camera_ids: [camera_front_wide_120fov, camera_cross_left_120fov, camera_cross_right_120fov]
+#   lidar_ids: [lidar_gt_top_p128_v4p5]
+camera_ids: null  # Null = auto-select single camera sensor
+lidar_ids: null   # Null = auto-detect single lidar sensor
+
+# V4 component group names (only used when loading NCore V4 datasets)
+poses_component_group: default
+intrinsics_component_group: default
+masks_component_group: default
+
+# Validation rendering frequency
+val_frequency: 100
+
+# Image downsampling for training
+# downsample: 0.5 means half resolution (1920x1280 -> 960x640)
+downsample: 1.0
+
+# JPEG decoding backend and options
+# "simplejpeg" uses libjpeg-turbo for faster decoding; "PIL" is the fallback
+jpeg_backend_cpu: simplejpeg
+simplejpeg_fastdct: false        # ~4-5% faster decode, minor quality loss
+simplejpeg_fastupsample: false   # ~4-5% faster chroma upsampling, minor quality loss
+
+# Image subsampling for validation (must evenly divide all camera resolutions)
+# Note: Set to 1 to use full resolution
+# Additional subsampling beyond downsample is typically not needed
+n_val_image_subsample: 1
+
+# Frame-level train/val split (like COLMAP)
+# Every Nth frame is validation, rest are training
+# This distributes validation frames throughout the trajectory
+val_frame_interval: 8  # Every 8th frame is validation (12.5% val, 87.5% train)
+
+# Property name to retrieve lidar point RGB colors from (if available)
+lidar_color_generic_data_name: rgb
+
+# Training parameters
+train:
+  window_size: 256  # Not used when sample_full_image=true (full images used)
+  seek_offset_sec: 0.0
+  duration_sec: -1  # -1 or 0 = use all available frames; 10.0 = first 10 seconds; None = all frames
+  sample_full_image: true  # Train on full images (downsampled by downsample factor above)
+  n_samples_per_epoch: 1000
+  n_train_sample_timepoints: 1
+  n_train_sample_camera_rays: 4096  # Overridden to w*h when sample_full_image=true
+  
+  ray_jittering:
+    start_iteration: 0
+    apply_every_n_iterations: true
+    type: none
+
+# Validation parameters
+# CRITICAL: Validation uses every Nth frame (distributed throughout trajectory)
+# Training randomly samples from non-validation frames
+val:
+  seek_offset_sec: 0.0
+  duration_sec: -1  # -1 = use all available frames in the dataset
+

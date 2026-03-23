@@ -83,9 +83,7 @@ def _load_nurec_bytes(resolution_root: Path, file_path: Path) -> bytes:
         if p.exists():
             with open(p, "rb") as f:
                 return gzip.decompress(f.read())
-    raise FileNotFoundError(
-        f"NuRec data file not found. Tried: {[str(c) for c in candidates]}"
-    )
+    raise FileNotFoundError(f"NuRec data file not found. Tried: {[str(c) for c in candidates]}")
 
 
 def _decode_state_dict(raw: bytes) -> dict:
@@ -96,9 +94,7 @@ def _decode_state_dict(raw: bytes) -> dict:
     raise ValueError("NuRec msgpack missing nre_data.state_dict")
 
 
-def _tensor_from_state(
-    state: dict, key: str, dtype=np.float16, shape_key: Optional[str] = None
-) -> np.ndarray:
+def _tensor_from_state(state: dict, key: str, dtype=np.float16, shape_key: Optional[str] = None) -> np.ndarray:
     """Decode a tensor from state_dict (bytes + shape)."""
     if shape_key is None:
         shape_key = key + ".shape"
@@ -236,24 +232,18 @@ class NuRecUSDImporter(FormatImporter):
     def _load_usd(self, path: Path) -> Tuple[GaussianAttributes, ModelCapabilities]:
         return self._load_stage(path, resolution_root=path.parent)
 
-    def _load_stage(
-        self, stage_path: Path, resolution_root: Path
-    ) -> Tuple[GaussianAttributes, ModelCapabilities]:
+    def _load_stage(self, stage_path: Path, resolution_root: Path) -> Tuple[GaussianAttributes, ModelCapabilities]:
         stage = Usd.Stage.Open(str(stage_path))
         if not stage:
             raise ValueError(f"Failed to open USD stage: {stage_path}")
 
         volume_prim = _find_nurec_volume_prim(stage)
         if volume_prim is None:
-            raise ValueError(
-                f"No NuRec Volume prim (UsdVol::Volume with omni:nurec:isNuRecVolume) in {stage_path}"
-            )
+            raise ValueError(f"No NuRec Volume prim (UsdVol::Volume with omni:nurec:isNuRecVolume) in {stage_path}")
 
         nurec_path = _get_nurec_file_path(volume_prim)
         if nurec_path is None:
-            raise ValueError(
-                f"NuRec Volume has no OmniNuRecFieldAsset with filePath: {volume_prim.GetPath()}"
-            )
+            raise ValueError(f"NuRec Volume has no OmniNuRecFieldAsset with filePath: {volume_prim.GetPath()}")
 
         raw = _load_nurec_bytes(resolution_root, nurec_path)
         state = _decode_state_dict(raw)
@@ -282,9 +272,7 @@ class NuRecUSDImporter(FormatImporter):
         # Apply Volume local-to-world transform
         xformable = UsdGeom.Xformable(volume_prim)
         world_matrix = xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-        positions, rotations, scales = _apply_volume_transform(
-            positions, rotations, scales, world_matrix
-        )
+        positions, rotations, scales = _apply_volume_transform(positions, rotations, scales, world_matrix)
 
         attrs = GaussianAttributes(
             positions=positions,
@@ -304,7 +292,5 @@ class NuRecUSDImporter(FormatImporter):
             scale_activation="exp",
         )
 
-        logger.info(
-            f"Loaded {num_gaussians} Gaussians from NuRec, SH degree {sh_degree}"
-        )
+        logger.info(f"Loaded {num_gaussians} Gaussians from NuRec, SH degree {sh_degree}")
         return attrs, caps

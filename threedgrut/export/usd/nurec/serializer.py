@@ -18,15 +18,20 @@
 import logging
 import os
 import tempfile
-from pathlib import Path
 import zipfile
+from pathlib import Path
 
 import numpy as np
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdUtils, UsdVol
 
 from threedgrut.export.transforms import get_3dgrut_to_usdz_coordinate_transform
 from threedgrut.export.usd.nurec.templates import NamedSerialized
-from threedgrut.export.usd.stage_utils import NamedUSDStage, initialize_usd_stage as _initialize_usd_stage
+from threedgrut.export.usd.stage_utils import (
+    NamedUSDStage,
+)
+from threedgrut.export.usd.stage_utils import (
+    initialize_usd_stage as _initialize_usd_stage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +243,9 @@ def serialize_usd_default_layer(gauss_stage: NamedUSDStage) -> NamedUSDStage:
     return NamedUSDStage(filename="default.usda", stage=stage)
 
 
-def write_to_usdz(file_path: Path, model_file: NamedSerialized, gauss_usd: NamedUSDStage, default_usd: NamedUSDStage) -> None:
+def write_to_usdz(
+    file_path: Path, model_file: NamedSerialized, gauss_usd: NamedUSDStage, default_usd: NamedUSDStage
+) -> None:
     """
     Write the USDZ file containing the model data and USD stages.
 

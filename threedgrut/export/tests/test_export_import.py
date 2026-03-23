@@ -26,7 +26,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
-
 from pxr import Usd, UsdValidation
 
 from threedgrut.export.base import ExportableModel
@@ -87,15 +86,11 @@ class MockGaussianModel(ExportableModel):
         )  # sigmoid(2) ≈ 0.88
 
         # Albedo (DC term): known RGB values
-        self._albedo = torch.tensor(
-            [[0.5, 0.3, 0.2]] * num_gaussians, dtype=torch.float32, device=device
-        )
+        self._albedo = torch.tensor([[0.5, 0.3, 0.2]] * num_gaussians, dtype=torch.float32, device=device)
 
         # Specular (higher-order SH): zeros for simplicity
         num_specular_coeffs = (sh_degree + 1) ** 2 - 1
-        self._specular = torch.zeros(
-            (num_gaussians, num_specular_coeffs * 3), dtype=torch.float32, device=device
-        )
+        self._specular = torch.zeros((num_gaussians, num_specular_coeffs * 3), dtype=torch.float32, device=device)
 
     def get_positions(self) -> torch.Tensor:
         return self._positions
@@ -149,8 +144,11 @@ class TestPLYExportImport:
             # Verify positions
             expected_positions = model.get_positions().cpu().numpy()
             np.testing.assert_allclose(
-                attrs.positions, expected_positions, rtol=1e-5, atol=1e-6,
-                err_msg="Positions mismatch after PLY export/import"
+                attrs.positions,
+                expected_positions,
+                rtol=1e-5,
+                atol=1e-6,
+                err_msg="Positions mismatch after PLY export/import",
             )
 
     def test_ply_export_import_scales(self):
@@ -169,8 +167,7 @@ class TestPLYExportImport:
             # PLY stores pre-activation values
             expected_scales = model.get_scale(preactivation=True).cpu().numpy()
             np.testing.assert_allclose(
-                attrs.scales, expected_scales, rtol=1e-5, atol=1e-6,
-                err_msg="Scales mismatch after PLY export/import"
+                attrs.scales, expected_scales, rtol=1e-5, atol=1e-6, err_msg="Scales mismatch after PLY export/import"
             )
 
     def test_ply_export_import_densities(self):
@@ -188,8 +185,11 @@ class TestPLYExportImport:
 
             expected_densities = model.get_density(preactivation=True).cpu().numpy()
             np.testing.assert_allclose(
-                attrs.densities, expected_densities, rtol=1e-5, atol=1e-6,
-                err_msg="Densities mismatch after PLY export/import"
+                attrs.densities,
+                expected_densities,
+                rtol=1e-5,
+                atol=1e-6,
+                err_msg="Densities mismatch after PLY export/import",
             )
 
     def test_ply_export_import_rotations(self):
@@ -207,8 +207,11 @@ class TestPLYExportImport:
 
             expected_rotations = model.get_rotation(preactivation=True).cpu().numpy()
             np.testing.assert_allclose(
-                attrs.rotations, expected_rotations, rtol=1e-5, atol=1e-6,
-                err_msg="Rotations mismatch after PLY export/import"
+                attrs.rotations,
+                expected_rotations,
+                rtol=1e-5,
+                atol=1e-6,
+                err_msg="Rotations mismatch after PLY export/import",
             )
 
     def test_ply_export_import_albedo(self):
@@ -226,8 +229,7 @@ class TestPLYExportImport:
 
             expected_albedo = model.get_features_albedo().cpu().numpy()
             np.testing.assert_allclose(
-                attrs.albedo, expected_albedo, rtol=1e-5, atol=1e-6,
-                err_msg="Albedo mismatch after PLY export/import"
+                attrs.albedo, expected_albedo, rtol=1e-5, atol=1e-6, err_msg="Albedo mismatch after PLY export/import"
             )
 
 
@@ -257,8 +259,11 @@ class TestUSDExportImport:
             # Verify positions
             expected_positions = model.get_positions().cpu().numpy()
             np.testing.assert_allclose(
-                attrs.positions, expected_positions, rtol=1e-4, atol=1e-5,
-                err_msg="Positions mismatch after USD export/import"
+                attrs.positions,
+                expected_positions,
+                rtol=1e-4,
+                atol=1e-5,
+                err_msg="Positions mismatch after USD export/import",
             )
 
     def test_usd_export_import_scales_post_activation(self):
@@ -282,8 +287,7 @@ class TestUSDExportImport:
             # USD LightField stores post-activation (actual) scales
             expected_scales = model.get_scale(preactivation=False).cpu().numpy()
             np.testing.assert_allclose(
-                attrs.scales, expected_scales, rtol=1e-4, atol=1e-5,
-                err_msg="Scales mismatch after USD export/import"
+                attrs.scales, expected_scales, rtol=1e-4, atol=1e-5, err_msg="Scales mismatch after USD export/import"
             )
 
     def test_usd_export_import_densities_post_activation(self):
@@ -307,8 +311,11 @@ class TestUSDExportImport:
             # USD LightField stores post-activation (opacity in [0,1])
             expected_densities = model.get_density(preactivation=False).cpu().numpy()
             np.testing.assert_allclose(
-                attrs.densities, expected_densities, rtol=1e-4, atol=1e-5,
-                err_msg="Densities mismatch after USD export/import"
+                attrs.densities,
+                expected_densities,
+                rtol=1e-4,
+                atol=1e-5,
+                err_msg="Densities mismatch after USD export/import",
             )
 
     def test_usd_export_import_rotations(self):
@@ -332,8 +339,11 @@ class TestUSDExportImport:
             # Rotations should be normalized quaternions
             expected_rotations = model.get_rotation(preactivation=False).cpu().numpy()
             np.testing.assert_allclose(
-                attrs.rotations, expected_rotations, rtol=1e-4, atol=1e-5,
-                err_msg="Rotations mismatch after USD export/import"
+                attrs.rotations,
+                expected_rotations,
+                rtol=1e-4,
+                atol=1e-5,
+                err_msg="Rotations mismatch after USD export/import",
             )
 
     def test_usd_export_import_albedo(self):
@@ -356,8 +366,7 @@ class TestUSDExportImport:
 
             expected_albedo = model.get_features_albedo().cpu().numpy()
             np.testing.assert_allclose(
-                attrs.albedo, expected_albedo, rtol=1e-4, atol=1e-5,
-                err_msg="Albedo mismatch after USD export/import"
+                attrs.albedo, expected_albedo, rtol=1e-4, atol=1e-5, err_msg="Albedo mismatch after USD export/import"
             )
 
 
@@ -387,8 +396,11 @@ class TestExportImportConsistency:
 
             # Positions should match exactly
             np.testing.assert_allclose(
-                ply_attrs.positions, usd_attrs.positions, rtol=1e-4, atol=1e-5,
-                err_msg="Positions differ between PLY and USD exports"
+                ply_attrs.positions,
+                usd_attrs.positions,
+                rtol=1e-4,
+                atol=1e-5,
+                err_msg="Positions differ between PLY and USD exports",
             )
 
     def test_usd_export_passes_usd_validation(self):

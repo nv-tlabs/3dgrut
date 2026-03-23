@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,8 +31,8 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 import threedgrut.datasets as datasets
 from threedgrut.datasets.protocols import BoundedMultiViewDataset
-from threedgrut.datasets.utils import DEFAULT_DEVICE, MultiEpochsDataLoader
-from threedgrut.export import PLYExporter, USDExporter, NuRecExporter
+from threedgrut.datasets.utils import DEFAULT_DEVICE, MultiEpochsDataLoader, PointCloud
+from threedgrut.export import NuRecExporter, PLYExporter, USDExporter
 from threedgrut.model.losses import ssim
 from threedgrut.model.model import MixtureOfGaussians
 from threedgrut.optimizers import SelectiveAdam
@@ -276,9 +276,22 @@ class Trainer3DGRUT:
                 case "checkpoint":
                     checkpoint = torch.load(conf.initialization.path, weights_only=False)
                     model.init_from_checkpoint(checkpoint, setup_optimizer=False)
+                case "lidar":
+                    assert conf.dataset.type in ["ncore"], "can only initialize from lidar with NCoreDataset"
+                    pc = PointCloud.from_sequence(
+                        list(train_dataset.get_point_clouds(step_frame=1, non_dynamic_points_only=True)), device="cpu"
+                    )
+                    if conf.initialization.num_points < len(pc.xyz_end):
+                        # Randomly subsample points if there are more points in the point cloud than the specified number of gaussians
+                        idxs = torch.randperm(len(pc.xyz_end))[: conf.initialization.num_points]
+                        pc = pc.selected_idxs(idxs)
+                    observer_points = torch.tensor(
+                        train_dataset.get_observer_points(), dtype=torch.float32, device=self.device
+                    )
+                    model.init_from_lidar(pc, observer_points)
                 case _:
                     raise ValueError(
-                        f"unrecognized initialization.method {conf.initialization.method}, choose from [colmap, point_cloud, random, checkpoint]"
+                        f"unrecognized initialization.method {conf.initialization.method}, choose from [colmap, point_cloud, random, checkpoint, lidar]"
                     )
 
             self.strategy.init_densification_buffer()
@@ -703,8 +716,8 @@ class Trainer3DGRUT:
             exporter.export(self.model, Path(ply_path), dataset=self.train_dataset, conf=conf)
         if conf.export_usd.enabled:
             # Determine format for filename suffix
-            usdz_format = getattr(conf.export_usd, 'format', 'nurec')
-            if usdz_format == 'standard':
+            usdz_format = getattr(conf.export_usd, "format", "nurec")
+            if usdz_format == "standard":
                 format_suffix = "lightfield"
                 exporter = USDExporter.from_config(conf)
             else:
@@ -725,7 +738,7 @@ class Trainer3DGRUT:
                 Path(usdz_path),
                 dataset=self.train_dataset,
                 conf=conf,
-                background=getattr(self, 'background', None),
+                background=getattr(self, "background", None),
             )
 
         # Export post-processing report (PPISP-based)
@@ -833,12 +846,146 @@ class Trainer3DGRUT:
                 while not gui.viz_do_train:
                     time.sleep(0.0001)
 
+    @torch.cuda.nvtx.range(f"run_train_iter")
+    def run_train_iter(self, global_step: int, batch: dict, profilers: dict, metrics: list, conf: DictConfig):
+        # Freeze Gaussians and suspend strategy when distillation starts
+        if self._distillation_start_step >= 0 and global_step >= self._distillation_start_step:
+            self.model.freeze_gaussians()
+            self.strategy.suspend()
+
+        # Access the GPU-cache batch data
+        with torch.cuda.nvtx.range(f"train_iter{global_step}_get_gpu_batch"):
+            gpu_batch = self.train_dataset.get_gpu_batch_with_intrinsics(batch)
+
+        # Perform validation if required
+        is_time_to_validate = (global_step > 0 or conf.validate_first) and (global_step % self.val_frequency == 0)
+        if is_time_to_validate:
+            self.run_validation_pass(conf)
+
+        # Compute the outputs of a single batch
+        with torch.cuda.nvtx.range(f"train_{global_step}_fwd"):
+            profilers["inference"].start()
+            outputs = self.model(gpu_batch, train=True, frame_id=global_step)
+            profilers["inference"].end()
+
+        # Apply post-processing to rendered output
+        if self.post_processing is not None:
+            with torch.cuda.nvtx.range(f"train_{global_step}_post_processing"):
+                outputs = apply_post_processing(self.post_processing, outputs, gpu_batch, training=True)
+
+        # Compute the losses of a single batch
+        with torch.cuda.nvtx.range(f"train_{global_step}_loss"):
+            batch_losses = self.get_losses(gpu_batch, outputs)
+            # Add post-processing regularization loss
+            if self.post_processing is not None:
+                post_processing_reg_loss = self.post_processing.get_regularization_loss()
+                batch_losses["total_loss"] = batch_losses["total_loss"] + post_processing_reg_loss
+                batch_losses["post_processing_reg_loss"] = post_processing_reg_loss
+
+        # Backward strategy step
+        with torch.cuda.nvtx.range(f"train_{global_step}_pre_bwd"):
+            self.strategy.pre_backward(
+                step=global_step,
+                scene_extent=self.scene_extent,
+                train_dataset=self.train_dataset,
+                batch=gpu_batch,
+                writer=self.tracking.writer,
+            )
+
+        # Back-propagate the gradients and update the parameters
+        with torch.cuda.nvtx.range(f"train_{global_step}_bwd"):
+            profilers["backward"].start()
+            batch_losses["total_loss"].backward()
+            profilers["backward"].end()
+
+        # Post backward strategy step
+        with torch.cuda.nvtx.range(f"train_{global_step}_post_bwd"):
+            scene_updated = self.strategy.post_backward(
+                step=global_step,
+                scene_extent=self.scene_extent,
+                train_dataset=self.train_dataset,
+                batch=gpu_batch,
+                writer=self.tracking.writer,
+            )
+
+        # Optimizer step
+        with torch.cuda.nvtx.range(f"train_{global_step}_backprop"):
+            if isinstance(self.model.optimizer, SelectiveAdam):
+                assert (
+                    outputs["mog_visibility"].shape == self.model.density.shape
+                ), f"Visibility shape {outputs['mog_visibility'].shape} does not match density shape {self.model.density.shape}"
+                self.model.optimizer.step(outputs["mog_visibility"])
+            else:
+                self.model.optimizer.step()
+            self.model.optimizer.zero_grad()
+
+        # Scheduler step
+        with torch.cuda.nvtx.range(f"train_{global_step}_scheduler"):
+            self.model.scheduler_step(global_step)
+
+        # Post-processing optimizer/scheduler step
+        if self.post_processing_optimizers is not None:
+            with torch.cuda.nvtx.range(f"train_{global_step}_post_processing_opt"):
+                for opt in self.post_processing_optimizers:
+                    opt.step()
+                    opt.zero_grad()
+                for sched in self.post_processing_schedulers:
+                    sched.step()
+
+        # Post backward strategy step
+        with torch.cuda.nvtx.range(f"train_{global_step}_post_opt_step"):
+            scene_updated = self.strategy.post_optimizer_step(
+                step=global_step,
+                scene_extent=self.scene_extent,
+                train_dataset=self.train_dataset,
+                batch=gpu_batch,
+                writer=self.tracking.writer,
+            )
+
+        # Update the SH if required
+        if self.model.progressive_training and check_step_condition(
+            global_step, 0, 1e6, self.model.feature_dim_increase_interval
+        ):
+            self.model.increase_num_active_features()
+
+        # Update the BVH if required
+        if scene_updated or (
+            conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0
+        ):
+            with torch.cuda.nvtx.range(f"train_{global_step}_bvh"):
+                profilers["build_as"].start()
+                self.model.build_acc(rebuild=True)
+                profilers["build_as"].end()
+
+        # Increment the global step
+        global_step += 1
+        self.global_step = global_step
+
+        # Compute metrics
+        batch_metrics = self.get_metrics(gpu_batch, outputs, batch_losses, profilers, split="training", iteration=iter)
+        if "forward_render" in self.model.renderer.timings:
+            batch_metrics["timings"]["forward_render_cuda"] = self.model.renderer.timings["forward_render"]
+        if "backward_render" in self.model.renderer.timings:
+            batch_metrics["timings"]["backward_render_cuda"] = self.model.renderer.timings["backward_render"]
+        metrics.append(batch_metrics)
+
+        # !!! Below global step has been incremented !!!
+        with torch.cuda.nvtx.range(f"train_{global_step-1}_log_iter"):
+            self.log_training_iter(gpu_batch, outputs, batch_metrics, iter)
+        with torch.cuda.nvtx.range(f"train_{global_step-1}_save_ckpt"):
+            if global_step in conf.checkpoint.iterations:
+                self.save_checkpoint()
+
+        # Updating the GUI
+        with torch.cuda.nvtx.range(f"train_{global_step-1}_update_gui"):
+            if self.conf.with_viser_gui:
+                self.render_gui_viser(scene_updated)
+            elif self.conf.with_gui:
+                self.render_gui(scene_updated)
+
     @torch.cuda.nvtx.range(f"run_train_pass")
     def run_train_pass(self, conf: DictConfig):
         """Runs a single train epoch over the dataset."""
-        global_step = self.global_step
-        model = self.model
-
         metrics = []
         profilers = {
             "inference": CudaTimer(enabled=self.conf.enable_frame_timings),
@@ -847,149 +994,12 @@ class Trainer3DGRUT:
         }
 
         for iter, batch in enumerate(self.train_dataloader):
-
             # Check if we have reached the maximum number of iterations
             if self.global_step >= conf.n_iterations:
                 return
 
-            # Freeze Gaussians and suspend strategy when distillation starts
-            if self._distillation_start_step >= 0 and self.global_step >= self._distillation_start_step:
-                self.model.freeze_gaussians()
-                self.strategy.suspend()
-
-            # Access the GPU-cache batch data
-            gpu_batch = self.train_dataset.get_gpu_batch_with_intrinsics(batch)
-
-            # Perform validation if required
-            is_time_to_validate = (global_step > 0 or conf.validate_first) and (global_step % self.val_frequency == 0)
-            if is_time_to_validate:
-                self.run_validation_pass(conf)
-
-            # Compute the outputs of a single batch
-            with torch.cuda.nvtx.range(f"train_{global_step}_fwd"):
-                profilers["inference"].start()
-                outputs = model(gpu_batch, train=True, frame_id=global_step)
-                profilers["inference"].end()
-
-            # Apply post-processing to rendered output
-            if self.post_processing is not None:
-                with torch.cuda.nvtx.range(f"train_{global_step}_post_processing"):
-                    outputs = apply_post_processing(self.post_processing, outputs, gpu_batch, training=True)
-
-            # Compute the losses of a single batch
-            with torch.cuda.nvtx.range(f"train_{global_step}_loss"):
-                batch_losses = self.get_losses(gpu_batch, outputs)
-
-                # Add post-processing regularization loss
-                if self.post_processing is not None:
-                    post_processing_reg_loss = self.post_processing.get_regularization_loss()
-                    batch_losses["total_loss"] = batch_losses["total_loss"] + post_processing_reg_loss
-                    batch_losses["post_processing_reg_loss"] = post_processing_reg_loss
-
-            # Backward strategy step
-            with torch.cuda.nvtx.range(f"train_{global_step}_pre_bwd"):
-                self.strategy.pre_backward(
-                    step=global_step,
-                    scene_extent=self.scene_extent,
-                    train_dataset=self.train_dataset,
-                    batch=gpu_batch,
-                    writer=self.tracking.writer,
-                )
-
-            # Back-propagate the gradients and update the parameters
-            with torch.cuda.nvtx.range(f"train_{global_step}_bwd"):
-                profilers["backward"].start()
-                batch_losses["total_loss"].backward()
-                profilers["backward"].end()
-
-            # Post backward strategy step
-            with torch.cuda.nvtx.range(f"train_{global_step}_post_bwd"):
-                scene_updated = self.strategy.post_backward(
-                    step=global_step,
-                    scene_extent=self.scene_extent,
-                    train_dataset=self.train_dataset,
-                    batch=gpu_batch,
-                    writer=self.tracking.writer,
-                )
-
-            # Optimizer step
-            with torch.cuda.nvtx.range(f"train_{global_step}_backprop"):
-                if isinstance(model.optimizer, SelectiveAdam):
-                    assert (
-                        outputs["mog_visibility"].shape == model.density.shape
-                    ), f"Visibility shape {outputs['mog_visibility'].shape} does not match density shape {model.density.shape}"
-                    model.optimizer.step(outputs["mog_visibility"])
-                else:
-                    model.optimizer.step()
-                model.optimizer.zero_grad()
-
-            # Scheduler step
-            with torch.cuda.nvtx.range(f"train_{global_step}_scheduler"):
-                model.scheduler_step(global_step)
-
-            # Post-processing optimizer/scheduler step
-            if self.post_processing_optimizers is not None:
-                with torch.cuda.nvtx.range(f"train_{global_step}_post_processing_opt"):
-                    for opt in self.post_processing_optimizers:
-                        opt.step()
-                        opt.zero_grad()
-                    for sched in self.post_processing_schedulers:
-                        sched.step()
-
-            # Post backward strategy step
-            with torch.cuda.nvtx.range(f"train_{global_step}_post_opt_step"):
-                scene_updated = self.strategy.post_optimizer_step(
-                    step=global_step,
-                    scene_extent=self.scene_extent,
-                    train_dataset=self.train_dataset,
-                    batch=gpu_batch,
-                    writer=self.tracking.writer,
-                )
-
-            # Update the SH if required
-            if self.model.progressive_training and check_step_condition(
-                global_step, 0, 1e6, self.model.feature_dim_increase_interval
-            ):
-                self.model.increase_num_active_features()
-
-            # Update the BVH if required
-            if scene_updated or (
-                conf.model.bvh_update_frequency > 0 and global_step % conf.model.bvh_update_frequency == 0
-            ):
-                with torch.cuda.nvtx.range(f"train_{global_step}_bvh"):
-                    profilers["build_as"].start()
-                    model.build_acc(rebuild=True)
-                    profilers["build_as"].end()
-
-            # Increment the global step
-            self.global_step += 1
-            global_step = self.global_step
-
-            # Compute metrics
-            batch_metrics = self.get_metrics(
-                gpu_batch, outputs, batch_losses, profilers, split="training", iteration=iter
-            )
-
-            if "forward_render" in model.renderer.timings:
-                batch_metrics["timings"]["forward_render_cuda"] = model.renderer.timings["forward_render"]
-            if "backward_render" in model.renderer.timings:
-                batch_metrics["timings"]["backward_render_cuda"] = model.renderer.timings["backward_render"]
-            metrics.append(batch_metrics)
-
-            # !!! Below global step has been incremented !!!
-            with torch.cuda.nvtx.range(f"train_{global_step-1}_log_iter"):
-                self.log_training_iter(gpu_batch, outputs, batch_metrics, iter)
-
-            with torch.cuda.nvtx.range(f"train_{global_step-1}_save_ckpt"):
-                if global_step in conf.checkpoint.iterations:
-                    self.save_checkpoint()
-
-            with torch.cuda.nvtx.range(f"train_{global_step-1}_update_gui"):
-                # self.render_gui(scene_updated)  # Updating the GUI
-                if self.conf.with_viser_gui:
-                    self.render_gui_viser(scene_updated)
-                elif self.conf.with_gui:
-                    self.render_gui(scene_updated)
+            # Step for training iteration
+            self.run_train_iter(self.global_step, batch, profilers, metrics, conf)
 
         self.log_training_pass(metrics)
 

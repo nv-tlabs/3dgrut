@@ -11,6 +11,7 @@ This repository provides the official implementations of **3D Gaussian Ray Traci
 
 To mitigate this limitation, we also propose 3DGUT, which enables support for distorted cameras with complex, time-dependent effects within a rasterization framework, maintaining the efficiency of rasterization methods. By aligning the rendering formulations of 3DGRT and 3DGUT, we introduce a hybrid approach called **3DGRUT**. This technique allows for rendering primary rays via rasterization and secondary rays via ray tracing, combining the strengths of both methods for improved performance and flexibility.
 
+For projects that require a fast, modular, and production-ready Gaussian Splatting framework, we recommend using [gsplat](https://github.com/nerfstudio-project/gsplat), which also provides support for 3DGUT.
 
 > __3D Gaussian Ray Tracing: Fast Tracing of Particle Scenes__
 > [Nicolas Moenne-Loccoz*](https://www.linkedin.com/in/nicolas-moënne-loccoz-71040512/?original_referer=https%3A%2F%2Fwww%2Egoogle%2Ecom%2F&originalSubdomain=ca), [Ashkan Mirzaei*](https://ashmrz.github.io), [Or Perel](https://orperel.github.io/), [Riccardo De Lutio](https://riccardodelutio.github.io/), [Janick Martinez Esturo](https://jme.pub/),
@@ -26,8 +27,9 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 
 
 ## 🔥 News
+- ✅[2026/03] **NCore v4:** Support for training from NCore v4 datasets ([NCore](https://github.com/NVIDIA/ncore), [commands](#training-on-ncore-v4-datasets)).
 - ✅[2026/01] Physically-Plausible ISP support.
-- ✅[2025/08] Support for the 3DGRT and 3DGS/3DGRT pipelines is now available with Vulkan API as part of the [Vulkan Gaussian Splatting Project](https://github.com/nvpro-samples/vk_gaussian_splatting). 3DGUT will also be available soon.
+- ✅[2025/08] Support for the 3DGRT and 3DGS/3DGRT pipelines is now available with the Vulkan API as part of the [Vulkan Gaussian Splatting Project](https://github.com/nvpro-samples/vk_gaussian_splatting). 3DGUT will also be available soon.
 - ✅[2025/07] Support for datasets with multiple sensors (only for COLMAP-style datasets).
 - ✅[2025/07] Support for Windows has been added.
 - ✅[2025/06] Playground supports PBR meshes and environment maps.
@@ -46,6 +48,7 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 - [🔧 1 Dependencies and Installation](#-1-dependencies-and-installation)
   - [Running with Docker](#running-with-docker)
 - [💻 2. Train 3DGRT or 3DGUT scenes](#-2-train-3dgrt-or-3dgut-scenes)
+  - [Training on NCore v4 datasets](#training-on-ncore-v4-datasets)
   - [Using image masks](#using-image-masks)
   - [Exporting USDZ for use in Omniverse and Isaac Sim](#exporting-usdz-for-use-in-omniverse-and-isaac-sim)
 - [🎥 3. Rendering from Checkpoints](#-3-rendering-from-checkpoints)
@@ -53,8 +56,9 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
   - [To visualize a pre-trained checkpoint](#to-visualize-a-pre-trained-checkpoint)
 - [📋 4. Evaluations](#-4-evaluations)
 - [🛝 5. Interactive Playground GUI](#-5-interactive-playground-gui)
-- [🎓 6. Citations](#-6-citations)
-- [🙏 7. Acknowledgements](#-7-acknowledgements)
+- [📄 6. Contributing](#-6-contributing)
+- [🎓 7. Citations](#-7-citations)
+- [🙏 8. Acknowledgements](#-8-acknowledgements)
 
 ## 🔧 1 Dependencies and Installation
 - CUDA 11.8+ Compatible System
@@ -96,7 +100,7 @@ docker build --build-arg CUDA_VERSION=12.8.1 -t 3dgrut:cuda128 .
 
 </br>
 
-To set up the environment using conda, first clone the repository and run `./install_env.sh` script as:
+To set up the environment using conda, first clone the repository and run the `./install_env.sh` script as follows:
 
 ```bash
 git clone --recursive https://github.com/nv-tlabs/3dgrut.git
@@ -112,7 +116,7 @@ On Windows, you can use the `install_env.ps1` script to install the environment.
 
 ### Running with Docker
 
-Build the docker image:
+Build the Docker image:
 ```bash
 git clone --recursive https://github.com/nv-tlabs/3dgrut.git
 cd 3dgrut
@@ -125,13 +129,13 @@ xhost +local:root
 docker run -v --rm -it --gpus=all --net=host --ipc=host -v $PWD:/workspace --runtime=nvidia -e DISPLAY 3dgrut
 ```
 > [!NOTE]
-> Remember to set DISPLAY environment variable if you are running on a remote server from command line.
+> Remember to set the DISPLAY environment variable if you are running on a remote server from the command line.
 
 ## 💻 2. Train 3DGRT or 3DGUT scenes
 
 We provide different configurations for training using 3DGRT and 3DGUT models on common benchmark datasets.
-For example you can download [NeRF Synthetic dataset](https://www.kaggle.com/datasets/nguyenhung1903/nerf-synthetic-dataset),
-[MipNeRF360 dataset](https://jonbarron.info/mipnerf360/) or [ScanNet++](https://kaldir.vc.in.tum.de/scannetpp/),
+For example, you can download the [NeRF Synthetic dataset](https://www.kaggle.com/datasets/nguyenhung1903/nerf-synthetic-dataset),
+the [MipNeRF360 dataset](https://jonbarron.info/mipnerf360/), or [ScanNet++](https://kaldir.vc.in.tum.de/scannetpp/),
 and then run one of the following commands:
 
 ```bash
@@ -148,7 +152,19 @@ python train.py --config-name apps/scannetpp_3dgrt.yaml path=data/scannetpp/0a5c
 python train.py --config-name apps/scannetpp_3dgut.yaml path=data/scannetpp/0a5c013435/dslr out_dir=runs experiment_name=0a5c013435_3dgut
 ```
 
-We also support MCMC densification strategy and selective Adam optimizer for 3DGRT and 3DGUT.
+### Training on NCore v4 datasets
+
+Set `path` to your **NCore v4 sequence JSON**. Data layout and tooling are described in the open-source [**NCore**](https://github.com/NVIDIA/ncore) repository. Training defaults are in `configs/dataset/ncore.yaml`.
+
+```bash
+python train.py --config-name apps/ncore_3dgut.yaml      path=<path>/<sequence-meta>.json out_dir=runs experiment_name=ncore_3dgut
+python train.py --config-name apps/ncore_3dgut_mcmc.yaml path=<path>/<sequence-meta>.json out_dir=runs experiment_name=ncore_3dgut_mcmc
+python train.py --config-name apps/ncore_3dgrt.yaml      path=<path>/<sequence-meta>.json out_dir=runs experiment_name=ncore_3dgrt
+python train.py --config-name apps/ncore_3dgrt_mcmc.yaml path=<path>/<sequence-meta>.json out_dir=runs experiment_name=ncore_3dgrt_mcmc
+# Example overrides: dataset.downsample=0.5 num_workers=8
+```
+
+We also support the MCMC densification strategy and the selective Adam optimizer for 3DGRT and 3DGUT.
 
 To enable MCMC, use:
 ```bash
@@ -163,13 +179,13 @@ python train.py --config-name apps/colmap_3dgut.yaml path=data/mipnerf360/bonsai
 ```
 
 If you use MCMC and Selective Adam in your research, please cite [3dgs-mcmc](https://github.com/ubc-vision/3dgs-mcmc), [taming-3dgs](https://github.com/humansensinglab/taming-3dgs),
-and [gSplat](https://github.com/nerfstudio-project/gsplat/tree/main) library from which the code was adopted (links to the code are provided in the source files).
+and the [gSplat](https://github.com/nerfstudio-project/gsplat/tree/main) library from which the code was adopted (links to the code are provided in the source files).
 
 > [!Note]
-> For ScanNet++, we expect the dataset to be preprocessed following [FisheyeGS](https://github.com/zmliao/Fisheye-GS?tab=readme-ov-file#prepare-training-data-on-scannet-dataset)'s method.
+> For ScanNet++, we expect the dataset to be preprocessed using the method described in [FisheyeGS](https://github.com/zmliao/Fisheye-GS?tab=readme-ov-file#prepare-training-data-on-scannet-dataset).
 
 > [!Note]
-> If you're running from PyCharm IDE, enable rich console through:
+> If you're running from the PyCharm IDE, enable the rich console as follows:
 > Run Configuration > Modify Options > Emulate terminal in output console*
 
 ### Using image masks
@@ -217,7 +233,7 @@ Optional flags:
 - `--referencing_usd` — specify which USD file in the package to modify (default: auto-detect the one with a Volume prim).
 
 ## 🎥 3. Rendering from Checkpoints
-Evaluate Checkpoint with Splatting / OptiX Tracer / Torch
+Evaluate a checkpoint with splatting, the OptiX tracer, or PyTorch:
 ```bash
 python render.py --checkpoint runs/lego/ckpt_last.pt --out-dir outputs/eval
 ```
@@ -227,9 +243,9 @@ python render.py --checkpoint runs/lego/ckpt_last.pt --out-dir outputs/eval
 python train.py --config-name apps/nerf_synthetic_3dgut.yaml path=data/nerf_synthetic/lego with_gui=True
 ```
 > [!NOTE]
-> Remember to set DISPLAY environment variable if you are running on a remote server from command line.
+> Remember to set the DISPLAY environment variable if you are running on a remote server from the command line.
 
-Or using the viser GUI contributed by the community (by @tangkangqi):
+Alternatively, use the viser GUI contributed by the community (@tangkangqi):
 ```bash
 python train.py --config-name apps/nerf_synthetic_3dgut.yaml path=data/nerf_synthetic/lego with_viser_gui=True
 ```
@@ -242,11 +258,11 @@ python train.py --config-name apps/nerf_synthetic_3dgut.yaml path=data/nerf_synt
 python train.py --config-name apps/nerf_synthetic_3dgut.yaml path=data/nerf_synthetic/lego with_gui=True test_last=False export_ingp.enabled=False resume=runs/lego/ckpt_last.pt
 ```
 
-On start up, you might see a black screen, but you can use the GUI to navigate to correct camera views:
+On startup, you might see a black screen, but you can use the GUI to navigate to the correct camera views:
 <img src="assets/train_gui_initial.jpg" height="400"/>
 <img src="assets/render_lego.jpg" height="400"/>
 
-Similarly, you can also use the viser GUI by setting `with_viser_gui=True` instead of `with_gui=True`.
+Similarly, you can use the viser GUI by setting `with_viser_gui=True` instead of `with_gui=True`.
 
 
 ## 📋 4. Evaluations
@@ -396,7 +412,7 @@ bash ./benchmark/scannetpp.sh paper/3dgut/unsorted_scannetpp.yaml
 bash ./benchmark/scannetpp_render.sh results/scannetpp
 ```
 > [!Note]
-> We followed [FisheyeGS](https://github.com/zmliao/Fisheye-GS?tab=readme-ov-file#prepare-training-data-on-scannet-dataset)'s convention to prepare the dataset for fair comparisons
+> We followed [FisheyeGS](https://github.com/zmliao/Fisheye-GS?tab=readme-ov-file#prepare-training-data-on-scannet-dataset)'s convention to prepare the dataset for fair comparisons.
 
 |           | PSNR  | SSIM	| Train (s) |	FPS |
 |-----------|-------|-------|-------|------|
@@ -412,7 +428,7 @@ bash ./benchmark/scannetpp_render.sh results/scannetpp
 
 ## 🛝 5. Interactive Playground GUI
 
-The playground allows interactive exploration of pretrained scenes, with raytracing effects such as inserted objects,
+The playground allows interactive exploration of pretrained scenes, with ray-tracing effects such as inserted objects,
 reflections, refractions, depth of field, and more.
 
 Run the playground UI to visualize a pretrained scene with:
@@ -422,18 +438,17 @@ python playground.py --gs_object <ckpt_path>
 
 See [Playground README](threedgrut_playground/README.md) for details.
 
-*Update (2025/04): The playground engine is now exposed and remote rendering is supported,
-see README for details.*
+*Update (2025/04): The playground engine is now exposed, and remote rendering is supported; see README for details.*
 
 ## 📄 6. Contributing
 
 Contributions are welcome! Please feel free to submit a pull request.
 
-Formatting is done with black formatter and isort. Please make sure to run
+Formatting uses `black` and `isort`. Please run
 `black . --target-version=py311 --line-length=120 --exclude=thirdparty/tiny-cuda-nn` and
 `isort . --skip=thirdparty/tiny-cuda-nn --profile=black` before submitting a pull request.
 
-## 🎓 6. Citations
+## 🎓 7. Citations
 
 ```
 @article{loccoz20243dgrt,
@@ -453,7 +468,7 @@ Formatting is done with black formatter and isort. Please make sure to run
 }
 ```
 
-## 🙏 7. Acknowledgements
+## 🙏 8. Acknowledgements
 
 We sincerely thank our colleagues for their valuable contributions to this project.
 
