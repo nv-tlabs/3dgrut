@@ -207,7 +207,12 @@ class Trainer3DGRUT:
             case _:
                 raise ValueError(f"unrecognized model.strategy {conf.strategy.method}")
 
-    def setup_training(self, conf: DictConfig, model: MixtureOfGaussians, train_dataset: BoundedMultiViewDataset):
+    def setup_training(
+        self,
+        conf: DictConfig,
+        model: MixtureOfGaussians,
+        train_dataset: BoundedMultiViewDataset,
+    ):
         """
         Performs required steps to setup the optimization:
         1. Initialize the gaussian model fields: load previous weights from checkpoint, or initialize from scratch.
@@ -227,10 +232,14 @@ class Trainer3DGRUT:
             # Restore post-processing state
             if "post_processing" in checkpoint and self.post_processing is not None:
                 self.post_processing.load_state_dict(checkpoint["post_processing"]["module"])
-                for opt, opt_state in zip(self.post_processing_optimizers, checkpoint["post_processing"]["optimizers"]):
+                for opt, opt_state in zip(
+                    self.post_processing_optimizers,
+                    checkpoint["post_processing"]["optimizers"],
+                ):
                     opt.load_state_dict(opt_state)
                 for sched, sched_state in zip(
-                    self.post_processing_schedulers, checkpoint["post_processing"]["schedulers"]
+                    self.post_processing_schedulers,
+                    checkpoint["post_processing"]["schedulers"],
                 ):
                     sched.load_state_dict(sched_state)
                 logger.info("📷 Post-processing state restored from checkpoint")
@@ -256,12 +265,16 @@ class Trainer3DGRUT:
                     )
                 case "colmap":
                     observer_points = torch.tensor(
-                        train_dataset.get_observer_points(), dtype=torch.float32, device=self.device
+                        train_dataset.get_observer_points(),
+                        dtype=torch.float32,
+                        device=self.device,
                     )
                     model.init_from_colmap(conf.path, observer_points)
                 case "fused_point_cloud":
                     observer_points = torch.tensor(
-                        train_dataset.get_observer_points(), dtype=torch.float32, device=self.device
+                        train_dataset.get_observer_points(),
+                        dtype=torch.float32,
+                        device=self.device,
                     )
                     ply_path = conf.initialization.fused_point_cloud_path
                     logger.info(f"Initializing from accumulated point cloud: {ply_path}")
@@ -279,14 +292,18 @@ class Trainer3DGRUT:
                 case "lidar":
                     assert conf.dataset.type in ["ncore"], "can only initialize from lidar with NCoreDataset"
                     pc = PointCloud.from_sequence(
-                        list(train_dataset.get_point_clouds(step_frame=1, non_dynamic_points_only=True)), device="cpu"
+                        list(train_dataset.get_point_clouds(step_frame=1, non_dynamic_points_only=True)),
+                        device="cpu",
                     )
                     if conf.initialization.num_points < len(pc.xyz_end):
-                        # Randomly subsample points if there are more points in the point cloud than the specified number of gaussians
-                        idxs = torch.randperm(len(pc.xyz_end))[: conf.initialization.num_points]
+                        # Deterministically random subsample points if there are more points than the specified number of gaussians
+                        rng = torch.Generator().manual_seed(conf.seed_initialization)
+                        idxs = torch.randperm(len(pc.xyz_end), generator=rng)[: conf.initialization.num_points]
                         pc = pc.selected_idxs(idxs)
                     observer_points = torch.tensor(
-                        train_dataset.get_observer_points(), dtype=torch.float32, device=self.device
+                        train_dataset.get_observer_points(),
+                        dtype=torch.float32,
+                        device=self.device,
                     )
                     model.init_from_lidar(pc, observer_points)
                 case _:
@@ -338,7 +355,12 @@ class Trainer3DGRUT:
             OmegaConf.save(config=conf, f=fp)
 
         # Pack all components used to track progress of training
-        self.tracking = Dict(writer=writer, run_name=run_name, object_name=object_name, output_dir=out_dir)
+        self.tracking = Dict(
+            writer=writer,
+            run_name=run_name,
+            object_name=object_name,
+            output_dir=out_dir,
+        )
 
     def init_post_processing(self, conf: DictConfig):
         """Initialize post-processing module based on config."""
@@ -388,7 +410,8 @@ class Trainer3DGRUT:
 
             self.post_processing_optimizers = self.post_processing.create_optimizers()
             self.post_processing_schedulers = self.post_processing.create_schedulers(
-                self.post_processing_optimizers, max_optimization_iters=conf.n_iterations
+                self.post_processing_optimizers,
+                max_optimization_iters=conf.n_iterations,
             )
 
             logger.info(f"📷 {method.upper()} initialized: {num_cameras} cameras, {num_frames} frames")
@@ -573,18 +596,39 @@ class Trainer3DGRUT:
         global_step = self.global_step
 
         if "img_pred" in metrics:
-            writer.add_images("image/pred/val", torch.stack(metrics["img_pred"]), global_step, dataformats="NHWC")
+            writer.add_images(
+                "image/pred/val",
+                torch.stack(metrics["img_pred"]),
+                global_step,
+                dataformats="NHWC",
+            )
         if "img_gt" in metrics:
-            writer.add_images("image/gt", torch.stack(metrics["img_gt"]), global_step, dataformats="NHWC")
+            writer.add_images(
+                "image/gt",
+                torch.stack(metrics["img_gt"]),
+                global_step,
+                dataformats="NHWC",
+            )
         if "img_hit_counts" in metrics:
             writer.add_images(
-                "image/hit_counts/val", torch.stack(metrics["img_hit_counts"]), global_step, dataformats="NHWC"
+                "image/hit_counts/val",
+                torch.stack(metrics["img_hit_counts"]),
+                global_step,
+                dataformats="NHWC",
             )
         if "img_pred_dist" in metrics:
-            writer.add_images("image/dist/val", torch.stack(metrics["img_pred_dist"]), global_step, dataformats="NHWC")
+            writer.add_images(
+                "image/dist/val",
+                torch.stack(metrics["img_pred_dist"]),
+                global_step,
+                dataformats="NHWC",
+            )
         if "img_pred_opacity" in metrics:
             writer.add_images(
-                "image/opacity/val", torch.stack(metrics["img_pred_opacity"]), global_step, dataformats="NHWC"
+                "image/opacity/val",
+                torch.stack(metrics["img_pred_opacity"]),
+                global_step,
+                dataformats="NHWC",
             )
 
         mean_timings = {}
@@ -658,7 +702,11 @@ class Trainer3DGRUT:
                 writer.add_scalar("loss/scale/train", scale_loss, global_step)
             if self.post_processing is not None and "post_processing_reg_loss" in batch_metrics["losses"]:
                 post_processing_reg_loss = np.mean(batch_metrics["losses"]["post_processing_reg_loss"])
-                writer.add_scalar("loss/post_processing_reg/train", post_processing_reg_loss, global_step)
+                writer.add_scalar(
+                    "loss/post_processing_reg/train",
+                    post_processing_reg_loss,
+                    global_step,
+                )
             if "psnr" in batch_metrics:
                 writer.add_scalar("psnr/train", batch_metrics["psnr"], self.global_step)
             if "ssim" in batch_metrics:
@@ -677,7 +725,9 @@ class Trainer3DGRUT:
             if "timings" in batch_metrics:
                 for time_key in batch_metrics["timings"]:
                     writer.add_scalar(
-                        "time/" + time_key + "/train", batch_metrics["timings"][time_key], self.global_step
+                        "time/" + time_key + "/train",
+                        batch_metrics["timings"][time_key],
+                        self.global_step,
                     )
 
             writer.add_scalar("num_particles/train", self.model.num_gaussians, self.global_step)
@@ -847,7 +897,14 @@ class Trainer3DGRUT:
                     time.sleep(0.0001)
 
     @torch.cuda.nvtx.range(f"run_train_iter")
-    def run_train_iter(self, global_step: int, batch: dict, profilers: dict, metrics: list, conf: DictConfig):
+    def run_train_iter(
+        self,
+        global_step: int,
+        batch: dict,
+        profilers: dict,
+        metrics: list,
+        conf: DictConfig,
+    ):
         # Freeze Gaussians and suspend strategy when distillation starts
         if self._distillation_start_step >= 0 and global_step >= self._distillation_start_step:
             self.model.freeze_gaussians()
@@ -962,7 +1019,14 @@ class Trainer3DGRUT:
         self.global_step = global_step
 
         # Compute metrics
-        batch_metrics = self.get_metrics(gpu_batch, outputs, batch_losses, profilers, split="training", iteration=iter)
+        batch_metrics = self.get_metrics(
+            gpu_batch,
+            outputs,
+            batch_losses,
+            profilers,
+            split="training",
+            iteration=iter,
+        )
         if "forward_render" in self.model.renderer.timings:
             batch_metrics["timings"]["forward_render_cuda"] = self.model.renderer.timings["forward_render"]
         if "backward_render" in self.model.renderer.timings:
@@ -970,14 +1034,14 @@ class Trainer3DGRUT:
         metrics.append(batch_metrics)
 
         # !!! Below global step has been incremented !!!
-        with torch.cuda.nvtx.range(f"train_{global_step-1}_log_iter"):
+        with torch.cuda.nvtx.range(f"train_{global_step - 1}_log_iter"):
             self.log_training_iter(gpu_batch, outputs, batch_metrics, iter)
-        with torch.cuda.nvtx.range(f"train_{global_step-1}_save_ckpt"):
+        with torch.cuda.nvtx.range(f"train_{global_step - 1}_save_ckpt"):
             if global_step in conf.checkpoint.iterations:
                 self.save_checkpoint()
 
         # Updating the GUI
-        with torch.cuda.nvtx.range(f"train_{global_step-1}_update_gui"):
+        with torch.cuda.nvtx.range(f"train_{global_step - 1}_update_gui"):
             if self.conf.with_viser_gui:
                 self.render_gui_viser(scene_updated)
             elif self.conf.with_gui:
@@ -1016,10 +1080,13 @@ class Trainer3DGRUT:
         }
         metrics = []
         logger.info(f"Step {self.global_step} -- Running validation..")
-        logger.start_progress(task_name="Validation", total_steps=len(self.val_dataloader), color="medium_purple3")
+        logger.start_progress(
+            task_name="Validation",
+            total_steps=len(self.val_dataloader),
+            color="medium_purple3",
+        )
 
         for val_iteration, batch_idx in enumerate(self.val_dataloader):
-
             # Access the GPU-cache batch data
             gpu_batch = self.val_dataset.get_gpu_batch_with_intrinsics(batch_idx)
 
@@ -1034,7 +1101,12 @@ class Trainer3DGRUT:
 
                 batch_losses = self.get_losses(gpu_batch, outputs)
                 batch_metrics = self.get_metrics(
-                    gpu_batch, outputs, batch_losses, profilers, split="validation", iteration=val_iteration
+                    gpu_batch,
+                    outputs,
+                    batch_losses,
+                    profilers,
+                    split="validation",
+                    iteration=val_iteration,
                 )
 
                 self.log_validation_iter(gpu_batch, outputs, batch_metrics, iteration=val_iteration)
