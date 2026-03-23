@@ -487,15 +487,8 @@ class NCoreDataset(torch.utils.data.Dataset):
             dtype=np.int32,
         )
 
-    def get_observer_points(self, camera_id=None):
-        """Return camera centers in world-global space"""
-        # make sure we are initialized
-        self._init_worker()
-
-        # default to first camera if not provided explicitly
-        assert len(self.camera_ids), "NCoreDataset: no camera sensors loaded"
-        camera_id = self.camera_ids[0] if camera_id is None else camera_id
-
+    def _get_camera_centers(self, camera_id: str, frame_indices: np.ndarray) -> np.ndarray:
+        """Return camera centers in world-global space for the given frame indices."""
         sequence_id = self.sequence_id
         camera_sensor = self.sequence_camera_sensors[sequence_id][camera_id]
 
@@ -503,7 +496,7 @@ class NCoreDataset(torch.utils.data.Dataset):
             camera_sensor.get_frames_T_source_target(
                 source_node=camera_sensor.sensor_id,
                 target_node="world",
-                frame_indices=self.time_range_us.cover_range(camera_sensor.get_frames_timestamps_us()),
+                frame_indices=frame_indices,
                 frame_timepoint=ncore.data.FrameTimepoint.START,
             ),
             self.T_world_to_world_global,
@@ -511,13 +504,44 @@ class NCoreDataset(torch.utils.data.Dataset):
 
         return camera_centers
 
+    def get_observer_points(self, camera_id=None):
+        """Return camera centers in world-global space for the current split (train or val).
+
+        For the training split, returns only training frame camera centers
+        (excluding validation frames), matching the behavior of ColmapDataset.
+        """
+        self._init_worker()
+
+        assert len(self.camera_ids), "NCoreDataset: no camera sensors loaded"
+        camera_id = self.camera_ids[0] if camera_id is None else camera_id
+
+        # Use split-appropriate frame indices (train-only or val-only)
+        frame_indices = (
+            self.camera_train_frame_indices[camera_id]
+            if self.split.startswith("train")
+            else self.camera_val_frame_indices[camera_id]
+        )
+        return self._get_camera_centers(camera_id, frame_indices)
+
     def get_scene_extent(self):
-        # reference implementation
-        # pc = PointCloud.from_sequence(list(train_dataset.get_point_clouds(step_frame=10, non_dynamic_points_only=True)), device="cpu")
-        # # Scene extend from bbox of point-cloud
-        # scene_bbox = (pc.xyz_end.min(0).values, pc.xyz_end.max(0).values)
-        # scene_extent = torch.linalg.norm(scene_bbox[1] - scene_bbox[0])
-        _, diagonal = get_center_and_diag(self.get_observer_points())
+        """Compute scene extent from ALL camera centers (both train and val).
+
+        This matches ColmapDataset behavior where cameras_extent is computed
+        from all frames before the train/val split.
+        """
+        self._init_worker()
+
+        assert len(self.camera_ids), "NCoreDataset: no camera sensors loaded"
+        camera_id = self.camera_ids[0]
+
+        # Use all frame indices (train + val) for scene extent, matching ColmapDataset
+        all_frame_indices = np.sort(np.concatenate([
+            self.camera_train_frame_indices[camera_id],
+            self.camera_val_frame_indices[camera_id],
+        ]))
+        all_camera_centers = self._get_camera_centers(camera_id, all_frame_indices)
+
+        _, diagonal = get_center_and_diag(all_camera_centers)
         cameras_extent = diagonal * 1.1
         return cameras_extent
 
