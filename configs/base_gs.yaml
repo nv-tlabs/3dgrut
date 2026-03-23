@@ -5,6 +5,7 @@ defaults:
   - override hydra/job_logging: disabled
 
 path: ???
+seed_initialization: 42  # seed for rng in model initialization
 experiment_name: ""
 resume: ""
 out_dir: "./runs"

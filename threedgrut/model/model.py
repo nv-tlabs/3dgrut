@@ -256,7 +256,6 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
                 file_pts = torch.tensor(pts, dtype=torch.float32, device=self.device)
                 file_rgb = torch.tensor(rgb, dtype=torch.uint8, device=self.device)
             else:
-
                 with open(points_file, "rb") as file:
                     n_pts = read_next_bytes(file, 8, "Q")[0]
                     logger.info(f"Found {n_pts} colmap points")
@@ -280,7 +279,10 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
 
         assert file_rgb.dtype == torch.uint8, "Expecting RGB values to be in [0, 255] range"
         self.default_initialize_from_points(
-            file_pts, observer_pts, file_rgb, use_observer_pts=self.conf.initialization.use_observation_points
+            file_pts,
+            observer_pts,
+            file_rgb,
+            use_observer_pts=self.conf.initialization.use_observation_points,
         )
 
     def init_from_fused_point_cloud(self, pc_path: str, observer_pts):
@@ -318,7 +320,10 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         # Initialize using the same method as COLMAP
         assert file_rgb.dtype == torch.uint8, "Expecting RGB values to be in [0, 255] range"
         self.default_initialize_from_points(
-            file_pts, observer_pts, file_rgb, use_observer_pts=self.conf.initialization.use_observation_points
+            file_pts,
+            observer_pts,
+            file_rgb,
+            use_observer_pts=self.conf.initialization.use_observation_points,
         )
 
     def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
@@ -327,7 +332,10 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         self.positions = torch.nn.Parameter(
             to_torch(
                 np.transpose(
-                    np.stack((data["vertex"]["x"], data["vertex"]["y"], data["vertex"]["z"]), dtype=np.float32)
+                    np.stack(
+                        (data["vertex"]["x"], data["vertex"]["y"], data["vertex"]["z"]),
+                        dtype=np.float32,
+                    )
                 ),
                 device=self.device,
             )
@@ -352,7 +360,11 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
             to_torch(
                 np.transpose(
                     np.stack(
-                        (data["vertex"]["scale_0"], data["vertex"]["scale_1"], data["vertex"]["scale_2"]),
+                        (
+                            data["vertex"]["scale_0"],
+                            data["vertex"]["scale_1"],
+                            data["vertex"]["scale_2"],
+                        ),
                         dtype=np.float32,
                     )
                 ),
@@ -360,13 +372,21 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
             )
         )  # type: ignore
         self.density = torch.nn.Parameter(
-            to_torch(data["vertex"]["opacity"].astype(np.float32).reshape(num_gaussians, 1), device=self.device)
+            to_torch(
+                data["vertex"]["opacity"].astype(np.float32).reshape(num_gaussians, 1),
+                device=self.device,
+            )
         )
         self.features_albedo = torch.nn.Parameter(
             to_torch(
                 np.transpose(
                     np.stack(
-                        (data["vertex"]["f_dc_0"], data["vertex"]["f_dc_1"], data["vertex"]["f_dc_2"]), dtype=np.float32
+                        (
+                            data["vertex"]["f_dc_0"],
+                            data["vertex"]["f_dc_1"],
+                            data["vertex"]["f_dc_2"],
+                        ),
+                        dtype=np.float32,
                     )
                 ),
                 device=self.device,
@@ -447,7 +467,6 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         xyz_max=1.5,
         xyz_min=-1.5,
     ):
-
         logger.info(f"Generating random point cloud ({num_gaussians})...")
 
         # We create random points inside the bounds of the synthetic Blender scenes
@@ -532,11 +551,14 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
 
         dtype = torch.float32
 
+        # Local generator for deterministic random initialization (does not affect global RNG)
+        rng = torch.Generator(device=self.device).manual_seed(self.conf.seed_initialization)
+
         N = pts.shape[0]
         positions = pts
 
         # Random rotations
-        rots = torch.rand((N, 4), dtype=dtype, device=self.device)
+        rots = torch.rand((N, 4), dtype=dtype, device=self.device, generator=rng)
 
         if use_observer_pts:
             # NOTE: it seems we get different scales compared to the original 3DGS implementation
@@ -554,12 +576,17 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
 
         # set density as a constant
         opacities = self.density_activation_inv(
-            torch.full((N, 1), fill_value=self.conf.model.default_density, dtype=dtype, device=self.device)
+            torch.full(
+                (N, 1),
+                fill_value=self.conf.model.default_density,
+                dtype=dtype,
+                device=self.device,
+            )
         )
 
         # set colors, random if they weren't given
         if colors is None:
-            colors = torch.randint(0, 256, (N, 3), dtype=torch.uint8, device=self.device)
+            colors = torch.randint(0, 256, (N, 3), dtype=torch.uint8, device=self.device, generator=rng)
 
         features_albedo = to_torch(RGB2SH(to_np(colors.float() / 255.0)), device=self.device)
 
