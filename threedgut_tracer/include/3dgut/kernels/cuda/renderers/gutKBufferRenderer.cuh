@@ -127,7 +127,7 @@ struct GUTKBufferRenderer : Params {
                 TFeaturesVec particleFeaturesGradientVec = TFeaturesVec::zero();
                 particles.featuresIntegrateBwd(hitParticle.alpha,
                                                hitAlphaGrad,
-                                               particleFeatures[hitParticle.idx],
+                                               tcnn::max(particleFeatures[hitParticle.idx], 0.f),
                                                particleFeaturesGradientVec,
                                                ray.featuresBackward,
                                                ray.featuresGradient);
