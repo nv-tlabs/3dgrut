@@ -52,8 +52,9 @@ else
     MAX_GCC_VERSION=11
 fi
 
-# Check GCC version
+# Check GCC version — prefer a compatible version but allow unsupported if none found
 gcc_version=$(gcc -dumpversion | cut -d '.' -f 1)
+ALLOW_UNSUPPORTED_COMPILER=false
 if [ "$gcc_version" -gt "$MAX_GCC_VERSION" ]; then
     # Try to find a compatible GCC version
     GCC_FOUND=false
@@ -67,10 +68,12 @@ if [ "$gcc_version" -gt "$MAX_GCC_VERSION" ]; then
         fi
     done
     if [ "$GCC_FOUND" = false ]; then
-        echo "ERROR: Default gcc version is $gcc_version (>$MAX_GCC_VERSION), and no compatible gcc found."
-        echo "  CUDA $CUDA_VERSION requires GCC <= $MAX_GCC_VERSION. Install a compatible version:"
-        echo "    sudo apt-get install gcc-$MAX_GCC_VERSION g++-$MAX_GCC_VERSION"
-        exit 1
+        echo "  - gcc: $gcc_version (WARNING: CUDA $CUDA_VERSION officially requires GCC <= $MAX_GCC_VERSION)"
+        echo "    Will use --allow-unsupported-compiler flag for nvcc."
+        echo "    For best results, install: sudo apt-get install gcc-$MAX_GCC_VERSION g++-$MAX_GCC_VERSION"
+        GCC_PATH=$(which gcc)
+        GXX_PATH=$(which g++)
+        ALLOW_UNSUPPORTED_COMPILER=true
     fi
 else
     GCC_PATH=$(which gcc)
@@ -83,6 +86,10 @@ fi
 if [ "$CUDA_VERSION" = "11.8" ]; then
     export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0+PTX"
     PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cu118"
+    # Pin PyTorch to 2.4.0 — latest version with pre-built Kaolin cu118 wheel
+    PYTORCH_VERSION="==2.4.0"
+    TORCHVISION_VERSION="==0.19.0"
+    TORCHAUDIO_VERSION="==2.4.0"
     CUDA_MAJOR_TARGET=11
     CUDA_RUNFILE_URL="https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run"
     CUDA_FULL_VERSION="11.8.0"
@@ -185,6 +192,13 @@ export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 
 NVCC_VERSION=$("$CUDA_HOME/bin/nvcc" --version | grep "release" | sed -n 's/.*release \([0-9]*\.[0-9]*\).*/\1/p')
 echo "  - nvcc: $NVCC_VERSION ($( [ "$USE_SYSTEM_CUDA" = true ] && echo "system" || echo "local" ))"
+
+# If GCC is newer than officially supported, tell nvcc to allow it
+if [ "$ALLOW_UNSUPPORTED_COMPILER" = true ]; then
+    export NVCC_APPEND_FLAGS="--allow-unsupported-compiler"
+    export TORCH_NVCC_FLAGS="--allow-unsupported-compiler"
+    echo "  - nvcc flags: --allow-unsupported-compiler"
+fi
 echo ""
 
 # ==========================================
@@ -192,7 +206,7 @@ echo ""
 # ==========================================
 echo "[4/9] Installing PyTorch with CUDA $CUDA_VERSION..."
 
-uv pip install torch torchvision torchaudio --index-url $PYTORCH_INDEX_URL
+uv pip install "torch${PYTORCH_VERSION:-}" "torchvision${TORCHVISION_VERSION:-}" "torchaudio${TORCHAUDIO_VERSION:-}" --index-url $PYTORCH_INDEX_URL
 echo "  PyTorch installed"
 echo ""
 
@@ -212,7 +226,7 @@ echo "[6/9] Installing Kaolin..."
 
 if [ "$CUDA_MAJOR_TARGET" = "11" ]; then
     # Use pre-built wheel for CUDA 11.8
-    uv pip install kaolin==0.17.0 --find-links https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.5.1_cu118.html
+    uv pip install kaolin==0.17.0 --find-links https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu118.html
     echo "  Kaolin installed from wheel"
 else
     # Build Kaolin from source for CUDA 12.x
