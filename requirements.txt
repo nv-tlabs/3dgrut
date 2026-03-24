@@ -7,7 +7,6 @@ omegaconf
 hydra-core
 scikit-learn
 wandb
-polyscope>=2.3.0
 addict
 rich
 slangtorch==1.3.18
@@ -37,3 +36,6 @@ simplejpeg
 # formatter
 black==25.9.0
 isort==5.13.0
+# graphics user interfaces
+polyscope>=2.3.0
+viser
