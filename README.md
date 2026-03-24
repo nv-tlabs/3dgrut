@@ -90,7 +90,7 @@ source activate_env.sh
 ```
 
 > [!NOTE]
-> The CUDA toolkit (~4GB) is downloaded on first install and cached in `/tmp/`. The toolkit is installed to `.venv/cuda-{version}/`, keeping it fully isolated from the system.
+> If a system CUDA toolkit is detected with a matching major version, it will be used automatically (no download needed). Otherwise, the CUDA toolkit (~4GB) is downloaded and installed locally to `.venv/cuda-{version}/`. To force a local install even with system CUDA available: `FORCE_LOCAL_CUDA=1 ./install_env_uv.sh`
 
 ### Option B: Using conda (Alternative)
 

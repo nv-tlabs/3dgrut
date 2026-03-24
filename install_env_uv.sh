@@ -135,36 +135,56 @@ export CC=$GCC_PATH
 export CXX=$GXX_PATH
 
 # ==========================================
-# Step 3: Install local CUDA toolkit
+# Step 3: Set up CUDA toolkit
 # ==========================================
+# Use system CUDA if available and matching, otherwise download locally.
+# To force local install even with system CUDA: FORCE_LOCAL_CUDA=1 ./install_env_uv.sh
 CUDA_LOCAL_DIR="$(pwd)/.venv/cuda-${CUDA_FULL_VERSION}"
+USE_SYSTEM_CUDA=false
 
-if [ -x "$CUDA_LOCAL_DIR/bin/nvcc" ]; then
-    echo "[3/9] Local CUDA toolkit already installed at $CUDA_LOCAL_DIR"
-else
-    echo "[3/9] Installing local CUDA toolkit ${CUDA_FULL_VERSION}..."
-    CUDA_RUNFILE="/tmp/cuda_${CUDA_FULL_VERSION}_linux.run"
-
-    if [ ! -f "$CUDA_RUNFILE" ]; then
-        echo "  Downloading CUDA ${CUDA_FULL_VERSION} toolkit (~4GB)..."
-        wget -q --show-progress -O "$CUDA_RUNFILE" "$CUDA_RUNFILE_URL"
-    else
-        echo "  Using cached runfile at $CUDA_RUNFILE"
+if [ "${FORCE_LOCAL_CUDA:-0}" != "1" ]; then
+    SYSTEM_NVCC=$(command -v nvcc 2>/dev/null || true)
+    if [ -n "$SYSTEM_NVCC" ]; then
+        SYSTEM_CUDA_VER=$(nvcc --version | grep "release" | sed -n 's/.*release \([0-9]*\.[0-9]*\).*/\1/p')
+        SYSTEM_CUDA_MAJOR=$(echo "$SYSTEM_CUDA_VER" | cut -d '.' -f 1)
+        if [ "$SYSTEM_CUDA_MAJOR" = "$CUDA_MAJOR_TARGET" ]; then
+            USE_SYSTEM_CUDA=true
+            # Derive CUDA_HOME from nvcc location (e.g., /usr/local/cuda/bin/nvcc -> /usr/local/cuda)
+            export CUDA_HOME="$(dirname "$(dirname "$SYSTEM_NVCC")")"
+        fi
     fi
-
-    echo "  Extracting toolkit to $CUDA_LOCAL_DIR (this may take a few minutes)..."
-    chmod +x "$CUDA_RUNFILE"
-    "$CUDA_RUNFILE" --toolkit --toolkitpath="$CUDA_LOCAL_DIR" --silent --no-man-page --override
-    echo "  CUDA ${CUDA_FULL_VERSION} toolkit installed locally"
 fi
 
-# Point environment to the local CUDA toolkit
-export CUDA_HOME="$CUDA_LOCAL_DIR"
+if [ "$USE_SYSTEM_CUDA" = true ]; then
+    echo "[3/9] Using system CUDA toolkit at $CUDA_HOME (nvcc $SYSTEM_CUDA_VER)"
+else
+    if [ -x "$CUDA_LOCAL_DIR/bin/nvcc" ]; then
+        echo "[3/9] Local CUDA toolkit already installed at $CUDA_LOCAL_DIR"
+    else
+        echo "[3/9] Installing local CUDA toolkit ${CUDA_FULL_VERSION}..."
+        CUDA_RUNFILE="/tmp/cuda_${CUDA_FULL_VERSION}_linux.run"
+
+        if [ ! -f "$CUDA_RUNFILE" ]; then
+            echo "  Downloading CUDA ${CUDA_FULL_VERSION} toolkit (~4GB)..."
+            wget -q --show-progress -O "$CUDA_RUNFILE" "$CUDA_RUNFILE_URL"
+        else
+            echo "  Using cached runfile at $CUDA_RUNFILE"
+        fi
+
+        echo "  Extracting toolkit to $CUDA_LOCAL_DIR (this may take a few minutes)..."
+        chmod +x "$CUDA_RUNFILE"
+        "$CUDA_RUNFILE" --toolkit --toolkitpath="$CUDA_LOCAL_DIR" --silent --no-man-page --override
+        echo "  CUDA ${CUDA_FULL_VERSION} toolkit installed locally"
+    fi
+
+    export CUDA_HOME="$CUDA_LOCAL_DIR"
+fi
+
 export PATH="$CUDA_HOME/bin:$PATH"
 export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 
 NVCC_VERSION=$("$CUDA_HOME/bin/nvcc" --version | grep "release" | sed -n 's/.*release \([0-9]*\.[0-9]*\).*/\1/p')
-echo "  - nvcc: $NVCC_VERSION (local)"
+echo "  - nvcc: $NVCC_VERSION ($( [ "$USE_SYSTEM_CUDA" = true ] && echo "system" || echo "local" ))"
 echo ""
 
 # ==========================================
