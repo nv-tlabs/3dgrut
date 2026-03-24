@@ -548,7 +548,7 @@ __device__ inline void processHitBwd(
         //   => groRayHitGrd_j = -grd_j * dot(grdsRayHitGrd * gscl, grd)
         const float grdScaledDot = dot(grdsRayHitGrd * gscl, grd);
         float3 grdRayHitGrd, groRayHitGrd;
-        if constexpr (SurfelPrimitive) {
+        if (SurfelPrimitive) {
             const float h = -gro.z / grd.z;
             grdRayHitGrd  = gscl * grdsRayHitGrd * h - make_float3(0.f, 0.f, (h / grd.z) * grdScaledDot);
             groRayHitGrd  = make_float3(0.f, 0.f, -grdScaledDot / grd.z);
