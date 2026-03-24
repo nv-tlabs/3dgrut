@@ -21,10 +21,7 @@ Provides schema-agnostic interface for writing Gaussian data to USD:
 """
 
 from threedgrut.export.usd.writers.background import export_background_to_usd
-from threedgrut.export.usd.writers.base import (
-    GaussianUSDWriter,
-    create_gaussian_writer,
-)
+from threedgrut.export.usd.writers.base import GaussianUSDWriter, create_gaussian_writer
 from threedgrut.export.usd.writers.camera import export_cameras_to_usd
 from threedgrut.export.usd.writers.lightfield import GaussianLightFieldWriter
 
