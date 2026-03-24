@@ -165,7 +165,7 @@ static __device__ __inline__ void traceVolumetricGS(
                     rayOrigin,
                     rayDirection,
                     rayHit.particleId,
-                    {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr}},
+                    {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr, true}},
                     &rayTransmittance,
                     &rayData.hitDistance,
 #ifdef ENABLE_NORMALS
@@ -178,7 +178,7 @@ static __device__ __inline__ void traceVolumetricGS(
                 particleFeaturesIntegrateFwdFromBuffer(rayDirection,
                                                        hitWeight,
                                                        rayHit.particleId,
-                                                       {{(float3*)params.particleRadiance, nullptr}, params.sphDegree},
+                                                       {{(float3*)params.particleRadiance, nullptr, true}, params.sphDegree},
                                                        &rayData.radiance);
 
                 rayLastHitDistance = fmaxf(rayLastHitDistance, rayHit.distance);
@@ -205,7 +205,7 @@ static __device__ __inline__ void intersectVolumetricGS() {
                                                                  : particleDensityHitCustom(optixGetWorldRayOrigin(),
                                                                                             optixGetWorldRayDirection(),
                                                                                             optixGetPrimitiveIndex(),
-                                                                                            {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr}},
+                                                                                            {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr, true}},
                                                                                             optixGetRayTmin(),
                                                                                             optixGetRayTmax(),
                                                                                             params.hitMaxParticleSquaredDistance,
