@@ -34,10 +34,7 @@ from scipy.spatial.transform import Rotation as R_scipy
 from scipy.spatial.transform import Slerp
 
 from threedgrut.datasets.ncoreUtils import Batch as NCoreBatch
-from threedgrut.datasets.ncoreUtils import (
-    HalfClosedInterval,
-    Labels,
-)
+from threedgrut.datasets.ncoreUtils import HalfClosedInterval, Labels
 from threedgrut.datasets.utils import PointCloud, get_center_and_diag
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import to_torch
