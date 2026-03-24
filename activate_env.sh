@@ -28,10 +28,21 @@ fi
 # Activate the virtual environment
 source .venv/bin/activate
 
-# Set CUDA architecture list based on installed CUDA version
+# Detect local CUDA toolkit installed by install_env_uv.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CUDA_LOCAL_DIR=$(find "$SCRIPT_DIR/.venv" -maxdepth 1 -name "cuda-*" -type d 2>/dev/null | head -1)
+
+if [ -n "$CUDA_LOCAL_DIR" ] && [ -x "$CUDA_LOCAL_DIR/bin/nvcc" ]; then
+    export CUDA_HOME="$CUDA_LOCAL_DIR"
+    export PATH="$CUDA_HOME/bin:$PATH"
+    export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+fi
+
+# Set CUDA architecture list based on nvcc version
 NVCC_VERSION=$(nvcc --version 2>/dev/null | grep "release" | sed -n 's/.*release \([0-9]*\.[0-9]*\).*/\1/p')
 if [ -z "$NVCC_VERSION" ]; then
-    echo "WARNING: nvcc not found in PATH. TORCH_CUDA_ARCH_LIST not set."
+    echo "WARNING: nvcc not found. TORCH_CUDA_ARCH_LIST not set."
+    echo "  Run ./install_env_uv.sh to install a local CUDA toolkit."
 else
     CUDA_MAJOR=$(echo $NVCC_VERSION | cut -d '.' -f 1)
     if [ "$CUDA_MAJOR" -ge 12 ]; then
@@ -62,6 +73,7 @@ if [ -n "$gcc_version" ] && [ -n "$CUDA_MAJOR" ]; then
 fi
 
 echo "3DGRUT environment activated"
+[ -n "$CUDA_HOME" ] && echo "  CUDA_HOME=$CUDA_HOME"
 [ -n "$TORCH_CUDA_ARCH_LIST" ] && echo "  TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
 [ -n "$CC" ] && echo "  CC=$CC"
 [ -n "$CXX" ] && echo "  CXX=$CXX"
