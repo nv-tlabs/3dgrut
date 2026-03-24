@@ -52,11 +52,10 @@ else
     MAX_GCC_VERSION=11
 fi
 
-# Check GCC version — prefer a compatible version but allow unsupported if none found
+# Check GCC version — find or install a compatible version
 gcc_version=$(gcc -dumpversion | cut -d '.' -f 1)
-ALLOW_UNSUPPORTED_COMPILER=false
 if [ "$gcc_version" -gt "$MAX_GCC_VERSION" ]; then
-    # Try to find a compatible GCC version
+    # Try to find an already-installed compatible GCC version
     GCC_FOUND=false
     for v in $(seq $MAX_GCC_VERSION -1 11); do
         if command -v gcc-$v &> /dev/null && command -v g++-$v &> /dev/null; then
@@ -68,12 +67,12 @@ if [ "$gcc_version" -gt "$MAX_GCC_VERSION" ]; then
         fi
     done
     if [ "$GCC_FOUND" = false ]; then
-        echo "  - gcc: $gcc_version (WARNING: CUDA $CUDA_VERSION officially requires GCC <= $MAX_GCC_VERSION)"
-        echo "    Will use --allow-unsupported-compiler flag for nvcc."
-        echo "    For best results, install: sudo apt-get install gcc-$MAX_GCC_VERSION g++-$MAX_GCC_VERSION"
-        GCC_PATH=$(which gcc)
-        GXX_PATH=$(which g++)
-        ALLOW_UNSUPPORTED_COMPILER=true
+        echo "  - gcc: $gcc_version is too new for CUDA $CUDA_VERSION (requires GCC <= $MAX_GCC_VERSION)"
+        echo "    Installing gcc-$MAX_GCC_VERSION g++-$MAX_GCC_VERSION..."
+        sudo apt-get install -y gcc-$MAX_GCC_VERSION g++-$MAX_GCC_VERSION
+        GCC_PATH=$(which gcc-$MAX_GCC_VERSION)
+        GXX_PATH=$(which g++-$MAX_GCC_VERSION)
+        echo "  - gcc: Installed and using gcc-$MAX_GCC_VERSION"
     fi
 else
     GCC_PATH=$(which gcc)
@@ -193,12 +192,6 @@ export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 NVCC_VERSION=$("$CUDA_HOME/bin/nvcc" --version | grep "release" | sed -n 's/.*release \([0-9]*\.[0-9]*\).*/\1/p')
 echo "  - nvcc: $NVCC_VERSION ($( [ "$USE_SYSTEM_CUDA" = true ] && echo "system" || echo "local" ))"
 
-# If GCC is newer than officially supported, tell nvcc to allow it
-if [ "$ALLOW_UNSUPPORTED_COMPILER" = true ]; then
-    export NVCC_APPEND_FLAGS="--allow-unsupported-compiler"
-    export TORCH_NVCC_FLAGS="--allow-unsupported-compiler"
-    echo "  - nvcc flags: --allow-unsupported-compiler"
-fi
 echo ""
 
 # ==========================================
