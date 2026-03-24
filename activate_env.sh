@@ -63,7 +63,7 @@ if [ -n "$gcc_version" ] && [ -n "$CUDA_MAJOR" ]; then
     fi
     if [ "$gcc_version" -gt "$MAX_GCC" ]; then
         for v in $(seq $MAX_GCC -1 11); do
-            if command -v gcc-$v &> /dev/null; then
+            if command -v gcc-$v &> /dev/null && command -v g++-$v &> /dev/null; then
                 export CC=$(which gcc-$v)
                 export CXX=$(which g++-$v)
                 break
