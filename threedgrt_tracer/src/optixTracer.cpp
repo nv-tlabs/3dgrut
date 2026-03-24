@@ -727,7 +727,8 @@ void OptixTracer::buildBVH(torch::Tensor mogPos,
         } else if (_state->gPrimType == MOGTracingSphere) {
             _state->gPrimNumVert = 0;
             _state->gPrimNumTri  = 1; // number of primtive per gaussians
-            reallocatePrimGeomBuffer(cudaStream);
+            reallocateBuffer(&_state->gPrimVrt, _state->gPrimVrtSz, sizeof(float3) * gNum, cudaStream);
+            reallocateBuffer(&_state->gPrimTri, _state->gPrimTriSz, sizeof(float) * gNum, cudaStream);
 
             computeGaussianEnclosingSphere(gNum,
                                            getPtr<float3>(mogPos),
