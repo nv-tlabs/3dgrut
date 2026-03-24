@@ -65,7 +65,7 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
     __forceinline__ __device__ DensityParameters fetchDensityParameters(uint32_t particleIdx) const {
         const auto parameters = particleDensityParameters(
             particleIdx,
-            {reinterpret_cast<gaussianParticle_RawParameters_0*>(m_densityRawParameters.ptr), nullptr});
+            {{reinterpret_cast<gaussianParticle_RawParameters_0*>(m_densityRawParameters.ptr), nullptr, true}});
         return *reinterpret_cast<const DensityParameters*>(&parameters);
     }
 
@@ -218,14 +218,18 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
 
     template <bool exclusiveGradient>
     __forceinline__ __device__ void densityIncidentDirectionBwdToBuffer(uint32_t particlesIdx,
-                                                                        const tcnn::vec3& sourcePosition)
-
+                                                                        const tcnn::vec3& sourcePosition,
+                                                                        const tcnn::vec3& incidentDirectionGrad)
     {
-        particleDensityIncidentDirectionBwdToBuffer(particlesIdx,
-                                                    {{reinterpret_cast<gaussianParticle_RawParameters_0*>(m_densityRawParameters.ptr),
-                                                      reinterpret_cast<gaussianParticle_RawParameters_0*>(m_densityRawParameters.gradPtr),
-                                                      exclusiveGradient}},
-                                                    *reinterpret_cast<const float3*>(&sourcePosition));
+        if constexpr (TDifferentiable) {
+            particleDensityIncidentDirectionBwdToBuffer(
+                particlesIdx,
+                {{reinterpret_cast<gaussianParticle_RawParameters_0*>(m_densityRawParameters.ptr),
+                  reinterpret_cast<gaussianParticle_RawParameters_0*>(m_densityRawParameters.gradPtr),
+                  exclusiveGradient}},
+                *reinterpret_cast<const float3*>(&sourcePosition),
+                *reinterpret_cast<const float3*>(&incidentDirectionGrad));
+        }
     }
 
     using FeaturesParameters = shRadiativeParticle_Parameters_0;
@@ -264,13 +268,16 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
 
     template <bool exclusiveGradient>
     __forceinline__ __device__ void featuresBwdToBuffer(uint32_t particleIdx,
-                                                        const TFeaturesVec& featuresGrad,
-                                                        const tcnn::vec3& incidentDirection) const {
-
-        particleFeaturesBwdToBuffer(particleIdx,
-                                    {{m_featureRawParameters.ptr, m_featureRawParameters.gradPtr, exclusiveGradient}, m_featureActiveShDegree},
-                                    *reinterpret_cast<const float3*>(&featuresGrad),
-                                    *reinterpret_cast<const float3*>(&incidentDirection));
+                                                      const TFeaturesVec& featuresGrad,
+                                                      const tcnn::vec3& incidentDirection,
+                                                      tcnn::vec3& incidentDirectionGrad) const {
+        if constexpr (TDifferentiable) {
+            particleFeaturesBwdToBuffer(particleIdx,
+                                        {{m_featureRawParameters.ptr, m_featureRawParameters.gradPtr, exclusiveGradient}, m_featureActiveShDegree},
+                                        *reinterpret_cast<const float3*>(&featuresGrad),
+                                        *reinterpret_cast<const float3*>(&incidentDirection),
+                                        reinterpret_cast<float3*>(&incidentDirectionGrad));
+        }
     }
 
     template <bool Atomic = false>
