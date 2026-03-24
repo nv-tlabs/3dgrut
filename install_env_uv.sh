@@ -33,7 +33,7 @@ echo ""
 # ==========================================
 # Step 1: Check prerequisites
 # ==========================================
-echo "[1/8] Checking prerequisites..."
+echo "[1/9] Checking prerequisites..."
 
 # Check for uv
 if ! command -v uv &> /dev/null; then
@@ -43,19 +43,10 @@ if ! command -v uv &> /dev/null; then
 fi
 echo "  - uv: $(uv --version)"
 
-# Check for nvcc (CUDA toolkit)
-if ! command -v nvcc &> /dev/null; then
-    echo "ERROR: nvcc not found. Please install CUDA toolkit $CUDA_VERSION"
-    echo "  For Ubuntu: https://developer.nvidia.com/cuda-downloads"
-    exit 1
-fi
-NVCC_VERSION=$(nvcc --version | grep "release" | sed -n 's/.*release \([0-9]*\.[0-9]*\).*/\1/p')
-echo "  - nvcc: $NVCC_VERSION"
-
 # Determine maximum supported GCC version based on CUDA version
 # CUDA 11.8 supports up to gcc-11, CUDA 12.x supports up to gcc-13
-NVCC_MAJOR=$(echo $NVCC_VERSION | cut -d '.' -f 1)
-if [ "$NVCC_MAJOR" -ge 12 ]; then
+CUDA_MAJOR=$(echo $CUDA_VERSION | cut -d '.' -f 1)
+if [ "$CUDA_MAJOR" -ge 12 ]; then
     MAX_GCC_VERSION=13
 else
     MAX_GCC_VERSION=11
@@ -77,7 +68,7 @@ if [ "$gcc_version" -gt "$MAX_GCC_VERSION" ]; then
     done
     if [ "$GCC_FOUND" = false ]; then
         echo "ERROR: Default gcc version is $gcc_version (>$MAX_GCC_VERSION), and no compatible gcc found."
-        echo "  CUDA $NVCC_VERSION requires GCC <= $MAX_GCC_VERSION. Install a compatible version:"
+        echo "  CUDA $CUDA_VERSION requires GCC <= $MAX_GCC_VERSION. Install a compatible version:"
         echo "    sudo apt-get install gcc-$MAX_GCC_VERSION g++-$MAX_GCC_VERSION"
         exit 1
     fi
@@ -93,22 +84,30 @@ if [ "$CUDA_VERSION" = "11.8" ]; then
     export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0+PTX"
     PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cu118"
     CUDA_MAJOR_TARGET=11
-elif [[ "$CUDA_VERSION" == 12* ]]; then
-    # CUDA 12.x - use cu124 wheels (compatible with 12.4+)
-    # PyTorch cu124 supports up to sm_90 (Hopper/Ada)
+    CUDA_RUNFILE_URL="https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run"
+    CUDA_FULL_VERSION="11.8.0"
+elif [ "$CUDA_VERSION" = "12.4" ]; then
     export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0+PTX"
     PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cu124"
     CUDA_MAJOR_TARGET=12
+    CUDA_RUNFILE_URL="https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/cuda_12.4.1_550.54.15_linux.run"
+    CUDA_FULL_VERSION="12.4.1"
+elif [ "$CUDA_VERSION" = "12.6" ]; then
+    export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0+PTX"
+    PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cu124"
+    CUDA_MAJOR_TARGET=12
+    CUDA_RUNFILE_URL="https://developer.download.nvidia.com/compute/cuda/12.6.3/local_installers/cuda_12.6.3_560.35.05_linux.run"
+    CUDA_FULL_VERSION="12.6.3"
+elif [ "$CUDA_VERSION" = "12.8" ]; then
+    export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0+PTX"
+    PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cu124"
+    CUDA_MAJOR_TARGET=12
+    CUDA_RUNFILE_URL="https://developer.download.nvidia.com/compute/cuda/12.8.1/local_installers/cuda_12.8.1_570.124.06_linux.run"
+    CUDA_FULL_VERSION="12.8.1"
 else
     echo "ERROR: Unsupported CUDA version: $CUDA_VERSION"
-    echo "  Supported versions: 11.8, 12.x (e.g., 12.4, 12.6, 12.8)"
+    echo "  Supported versions: 11.8, 12.4, 12.6, 12.8"
     exit 1
-fi
-
-# Verify system CUDA matches requested version
-if [ "$NVCC_MAJOR" != "$CUDA_MAJOR_TARGET" ]; then
-    echo "WARNING: System CUDA ($NVCC_VERSION) does not match requested CUDA ($CUDA_VERSION)"
-    echo "  Proceeding with system CUDA $NVCC_VERSION"
 fi
 
 echo ""
@@ -116,7 +115,7 @@ echo ""
 # ==========================================
 # Step 2: Create virtual environment
 # ==========================================
-echo "[2/8] Creating virtual environment..."
+echo "[2/9] Creating virtual environment..."
 
 if [ -d ".venv" ]; then
     echo "  Virtual environment already exists at .venv"
@@ -136,27 +135,60 @@ export CC=$GCC_PATH
 export CXX=$GXX_PATH
 
 # ==========================================
-# Step 3: Install PyTorch with CUDA
+# Step 3: Install local CUDA toolkit
 # ==========================================
-echo "[3/8] Installing PyTorch with CUDA $CUDA_VERSION..."
+CUDA_LOCAL_DIR="$(pwd)/.venv/cuda-${CUDA_FULL_VERSION}"
+
+if [ -x "$CUDA_LOCAL_DIR/bin/nvcc" ]; then
+    echo "[3/9] Local CUDA toolkit already installed at $CUDA_LOCAL_DIR"
+else
+    echo "[3/9] Installing local CUDA toolkit ${CUDA_FULL_VERSION}..."
+    CUDA_RUNFILE="/tmp/cuda_${CUDA_FULL_VERSION}_linux.run"
+
+    if [ ! -f "$CUDA_RUNFILE" ]; then
+        echo "  Downloading CUDA ${CUDA_FULL_VERSION} toolkit (~4GB)..."
+        wget -q --show-progress -O "$CUDA_RUNFILE" "$CUDA_RUNFILE_URL"
+    else
+        echo "  Using cached runfile at $CUDA_RUNFILE"
+    fi
+
+    echo "  Extracting toolkit to $CUDA_LOCAL_DIR (this may take a few minutes)..."
+    chmod +x "$CUDA_RUNFILE"
+    "$CUDA_RUNFILE" --toolkit --toolkitpath="$CUDA_LOCAL_DIR" --silent --no-man-page --override
+    echo "  CUDA ${CUDA_FULL_VERSION} toolkit installed locally"
+fi
+
+# Point environment to the local CUDA toolkit
+export CUDA_HOME="$CUDA_LOCAL_DIR"
+export PATH="$CUDA_HOME/bin:$PATH"
+export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+
+NVCC_VERSION=$("$CUDA_HOME/bin/nvcc" --version | grep "release" | sed -n 's/.*release \([0-9]*\.[0-9]*\).*/\1/p')
+echo "  - nvcc: $NVCC_VERSION (local)"
+echo ""
+
+# ==========================================
+# Step 4: Install PyTorch with CUDA
+# ==========================================
+echo "[4/9] Installing PyTorch with CUDA $CUDA_VERSION..."
 
 uv pip install torch torchvision torchaudio --index-url $PYTORCH_INDEX_URL
 echo "  PyTorch installed"
 echo ""
 
 # ==========================================
-# Step 4: Install numpy (must be <2.0)
+# Step 5: Install numpy (must be <2.0)
 # ==========================================
-echo "[4/8] Installing numpy<2.0..."
+echo "[5/9] Installing numpy<2.0..."
 
 uv pip install "numpy<2.0"
 echo "  numpy installed"
 echo ""
 
 # ==========================================
-# Step 5: Install Kaolin
+# Step 6: Install Kaolin
 # ==========================================
-echo "[5/8] Installing Kaolin..."
+echo "[6/9] Installing Kaolin..."
 
 if [ "$CUDA_MAJOR_TARGET" = "11" ]; then
     # Use pre-built wheel for CUDA 11.8
@@ -190,18 +222,18 @@ fi
 echo ""
 
 # ==========================================
-# Step 6: Initialize git submodules
+# Step 7: Initialize git submodules
 # ==========================================
-echo "[6/8] Initializing git submodules..."
+echo "[7/9] Initializing git submodules..."
 
 git submodule update --init --recursive
 echo "  Submodules initialized"
 echo ""
 
 # ==========================================
-# Step 7: Install git dependencies and project
+# Step 8: Install git dependencies and project
 # ==========================================
-echo "[7/8] Installing dependencies and project..."
+echo "[8/9] Installing dependencies and project..."
 
 # Install fused-ssim (git dependency)
 uv pip install --no-build-isolation "fused-ssim @ git+https://github.com/rahul-goel/fused-ssim@1272e21a282342e89537159e4bad508b19b34157"
@@ -215,9 +247,9 @@ echo "  Project installed"
 echo ""
 
 # ==========================================
-# Step 8: Install tiny-cuda-nn
+# Step 9: Install tiny-cuda-nn
 # ==========================================
-echo "[8/8] Installing tiny-cuda-nn..."
+echo "[9/9] Installing tiny-cuda-nn..."
 
 pushd thirdparty/tiny-cuda-nn/bindings/torch > /dev/null
 uv pip install --no-build-isolation .
