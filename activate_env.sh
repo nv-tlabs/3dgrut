@@ -62,20 +62,13 @@ if [ -n "$gcc_version" ] && [ -n "$CUDA_MAJOR" ]; then
         MAX_GCC=11
     fi
     if [ "$gcc_version" -gt "$MAX_GCC" ]; then
-        GCC_FOUND=false
         for v in $(seq $MAX_GCC -1 11); do
             if command -v gcc-$v &> /dev/null && command -v g++-$v &> /dev/null; then
                 export CC=$(which gcc-$v)
                 export CXX=$(which g++-$v)
-                GCC_FOUND=true
                 break
             fi
         done
-        if [ "$GCC_FOUND" = false ]; then
-            # No compatible GCC found — allow nvcc to use the system compiler
-            export NVCC_APPEND_FLAGS="--allow-unsupported-compiler"
-            export TORCH_NVCC_FLAGS="--allow-unsupported-compiler"
-        fi
     fi
 fi
 
@@ -84,4 +77,3 @@ echo "3DGRUT environment activated"
 [ -n "$TORCH_CUDA_ARCH_LIST" ] && echo "  TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
 [ -n "$CC" ] && echo "  CC=$CC"
 [ -n "$CXX" ] && echo "  CXX=$CXX"
-[ -n "$NVCC_APPEND_FLAGS" ] && echo "  NVCC_APPEND_FLAGS=$NVCC_APPEND_FLAGS"
