@@ -63,13 +63,13 @@ To mitigate this limitation, we also propose 3DGUT, which enables support for di
 
 ### Option A: Using uv (Recommended)
 
-[uv](https://docs.astral.sh/uv/) provides faster installation and better dependency resolution.
+[uv](https://docs.astral.sh/uv/) provides faster installation and better dependency resolution. The CUDA toolkit is automatically downloaded and installed locally inside the virtual environment — no system-wide CUDA installation is required.
 
 **Prerequisites:**
-1. **CUDA Toolkit** installed system-wide (nvcc available in PATH)
-2. **GCC <= 11** (install if needed: `sudo apt-get install gcc-11 g++-11`)
-3. **uv** installed: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-4. **OpenGL headers** for playground: `sudo apt-get install libgl1-mesa-dev`
+1. **GCC <= 11** for CUDA 11.8, or **GCC <= 13** for CUDA 12.x (install if needed: `sudo apt-get install gcc-11 g++-11`)
+2. **uv** installed: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+3. **OpenGL headers** for playground: `sudo apt-get install libgl1-mesa-dev`
+4. **wget** for downloading CUDA toolkit
 
 **Installation:**
 ```bash
@@ -80,12 +80,17 @@ cd 3dgrut
 chmod +x install_env_uv.sh
 ./install_env_uv.sh
 
-# For older GPUs with CUDA 11.8:
-# CUDA_VERSION=11.8 ./install_env_uv.sh
+# Other supported CUDA versions:
+# CUDA_VERSION=11.8 ./install_env_uv.sh  # For older GPUs
+# CUDA_VERSION=12.4 ./install_env_uv.sh
+# CUDA_VERSION=12.6 ./install_env_uv.sh
 
 # Activate the environment
 source activate_env.sh
 ```
+
+> [!NOTE]
+> The CUDA toolkit (~4GB) is downloaded on first install and cached in `/tmp/`. The toolkit is installed to `.venv/cuda-{version}/`, keeping it fully isolated from the system.
 
 ### Option B: Using conda (Alternative)
 
