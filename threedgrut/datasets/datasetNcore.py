@@ -535,10 +535,14 @@ class NCoreDataset(torch.utils.data.Dataset):
         camera_id = self.camera_ids[0]
 
         # Use all frame indices (train + val) for scene extent, matching ColmapDataset
-        all_frame_indices = np.sort(np.concatenate([
-            self.camera_train_frame_indices[camera_id],
-            self.camera_val_frame_indices[camera_id],
-        ]))
+        all_frame_indices = np.sort(
+            np.concatenate(
+                [
+                    self.camera_train_frame_indices[camera_id],
+                    self.camera_val_frame_indices[camera_id],
+                ]
+            )
+        )
         all_camera_centers = self._get_camera_centers(camera_id, all_frame_indices)
 
         _, diagonal = get_center_and_diag(all_camera_centers)
