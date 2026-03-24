@@ -153,7 +153,7 @@ extern "C" __global__ void __raygen__rg() {
                 if (particleDensityHit(
                         rayOrigin, rayDirection,
                         particleDensityParameters(rayHit.particleId,
-                                                  {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr}}),
+                                                  {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr, true}}),
                         &hitAlpha, &hitDistance,
 #ifdef ENABLE_NORMALS
                         true, &hitNormal
@@ -165,7 +165,7 @@ extern "C" __global__ void __raygen__rg() {
                 ) {
                     const float3 hitRadiance = particleFeaturesFromBuffer(
                         rayHit.particleId,
-                        {{(float3*)params.particleRadiance, (float3*)params.particleRadianceGrad}, (int)params.sphDegree},
+                        {{(float3*)params.particleRadiance, (float3*)params.particleRadianceGrad, false}, (int)params.sphDegree},
                         rayDirection);
 
                     float hitAlphaGrad = 0.f;
@@ -173,7 +173,7 @@ extern "C" __global__ void __raygen__rg() {
                                                          hitAlpha,
                                                          &hitAlphaGrad,
                                                          rayHit.particleId,
-                                                         {{(float3*)params.particleRadiance, (float3*)params.particleRadianceGrad}, params.sphDegree},
+                                                         {{(float3*)params.particleRadiance, (float3*)params.particleRadianceGrad, false}, params.sphDegree},
                                                          hitRadiance,
                                                          &rayRadiance,
                                                          &rayRadianceGrad);
@@ -182,7 +182,7 @@ extern "C" __global__ void __raygen__rg() {
                                                          rayDirection,
                                                          rayHit.particleId,
                                                          {{(gaussianParticle_RawParameters_0*)params.particleDensity,
-                                                           (gaussianParticle_RawParameters_0*)params.particleDensityGrad}},
+                                                           (gaussianParticle_RawParameters_0*)params.particleDensityGrad, false}},
                                                          hitAlpha,
                                                          hitAlphaGrad,
                                                          &rayTransmittance,
@@ -215,7 +215,7 @@ extern "C" __global__ void __intersection__is() {
                                                                  : particleDensityHitCustom(optixGetWorldRayOrigin(),
                                                                                             optixGetWorldRayDirection(),
                                                                                             optixGetPrimitiveIndex(),
-                                                                                            {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr}},
+                                                                                            {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr, true}},
                                                                                             optixGetRayTmin(),
                                                                                             optixGetRayTmax(),
                                                                                             params.hitMaxParticleSquaredDistance,

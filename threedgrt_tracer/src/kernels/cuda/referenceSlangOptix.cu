@@ -140,7 +140,7 @@ extern "C" __global__ void __raygen__rg() {
                     rayOrigin,
                     rayDirection,
                     rayHit.particleId,
-                    {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr}},
+                    {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr, true}},
                     &rayTransmittance,
                     &rayHitDistance,
 #ifdef ENABLE_NORMALS
@@ -153,7 +153,7 @@ extern "C" __global__ void __raygen__rg() {
                 particleFeaturesIntegrateFwdFromBuffer(rayDirection,
                                                        hitWeight,
                                                        rayHit.particleId,
-                                                       {{(float3*)params.particleRadiance, nullptr}, params.sphDegree},
+                                                       {{(float3*)params.particleRadiance, nullptr, true}, params.sphDegree},
                                                        &rayRadiance);
 
                 // NOTE(qi): Race condition here, but as we are writing the same value, it seems it is safe.
@@ -197,7 +197,7 @@ extern "C" __global__ void __intersection__is() {
                                                                  : particleDensityHitCustom(optixGetWorldRayOrigin(),
                                                                                             optixGetWorldRayDirection(),
                                                                                             optixGetPrimitiveIndex(),
-                                                                                            {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr}},
+                                                                                            {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr, true}},
                                                                                             optixGetRayTmin(),
                                                                                             optixGetRayTmax(),
                                                                                             params.hitMaxParticleSquaredDistance,

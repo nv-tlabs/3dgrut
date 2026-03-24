@@ -313,7 +313,7 @@ float3 incidentDirectionFromParameters(
 }
 
 [BackwardDifferentiable][ForceInline]
-no_diff float3 incidentDirectionFromBuffer(
+float3 incidentDirectionFromBuffer(
     no_diff uint32_t particleIdx,
     no_diff RawParametersBuffer parametersBuffer,
     no_diff float3 sourcePosition
@@ -525,12 +525,14 @@ bool particleDensityHitInstance(
 [CudaDeviceExport] void particleDensityIncidentDirectionBwdToBuffer(
     in uint32_t particleIdx,
     gaussianParticle.CommonParameters commonParameters,
-    in float3 sourcePosition
+    in float3 sourcePosition,
+    in float3 incidentDirectionGrad
 )
 {
     bwd_diff(gaussianParticle.incidentDirectionFromBuffer)(
         particleIdx,
         commonParameters.parametersBuffer,
-        sourcePosition
+        sourcePosition,
+        incidentDirectionGrad
     );
 }
