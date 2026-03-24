@@ -98,7 +98,11 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         self.cam_extrinsics = [self.cam_extrinsics[i] for i in np.where(indices)[0]]
         self.poses = self.poses[indices].astype(np.float32)
-        self.image_paths = self.image_paths[indices]  # numpy str array of image paths
+
+        # numpy str array of image paths and mask paths
+        self.image_paths = self.image_paths[indices]
+        self.mask_paths = self.mask_paths[indices]
+
         self.camera_centers = self.camera_centers[indices]
         self.center, self.length_scale, self.scene_bbox = self.compute_spatial_extents()
 
@@ -277,8 +281,6 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
             image_path = os.path.join(self.path, self.get_images_folder(), extr.name)
             self.image_paths.append(image_path)
-
-            # Mask path
             self.mask_paths.append(os.path.splitext(image_path)[0] + "_mask.png")
 
         self.camera_centers = np.array(cam_centers)
@@ -286,6 +288,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.cameras_extent = diagonal * 1.1
 
         self.poses = np.stack(self.poses)
+
         self.image_paths = np.stack(self.image_paths, dtype=str)
         self.mask_paths = np.stack(self.mask_paths, dtype=str)
 
