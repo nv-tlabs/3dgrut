@@ -20,7 +20,7 @@ from typing import Optional
 from .dataset_colmap import ColmapDataset
 from .dataset_nerf import NeRFDataset
 from .dataset_scannetpp import ScannetppDataset
-from .ncoreAdapter import NCoreDatasetAdapter
+from .datasetNcore import NCoreDataset
 from .utils import read_colmap_extrinsics_binary, read_colmap_extrinsics_text
 
 
@@ -117,7 +117,7 @@ def make(name: str, config, ray_jitter):
                 test_split_interval=config.dataset.test_split_interval,
             )
         case "ncore":
-            train_dataset = NCoreDatasetAdapter(
+            train_dataset = NCoreDataset(
                 datapath=config.path,
                 device="cuda",
                 split="train",
@@ -155,7 +155,7 @@ def make(name: str, config, ray_jitter):
             )
             val_duration = train_duration if (val_duration_cfg is None or val_duration_cfg < 0) else val_duration_cfg
 
-            val_dataset = NCoreDatasetAdapter(
+            val_dataset = NCoreDataset(
                 datapath=config.path,
                 device="cuda",
                 split="val",
@@ -231,7 +231,7 @@ def make_test(name: str, config):
             )
             test_duration = train_duration if (val_duration_cfg is None or val_duration_cfg < 0) else val_duration_cfg
 
-            dataset = NCoreDatasetAdapter(
+            dataset = NCoreDataset(
                 datapath=config.path,
                 device="cuda",
                 split="val",
