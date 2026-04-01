@@ -19,7 +19,7 @@ imageio
 msgpack
 dataclasses_json
 # JIT compilation
-setuptools <72.1.0
+setuptools>=78.1.1,<82.0.0
 # Fused-ssim
 fused-ssim @ git+https://github.com/rahul-goel/fused-ssim@1272e21a282342e89537159e4bad508b19b34157
 # Playground
