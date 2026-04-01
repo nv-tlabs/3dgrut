@@ -34,7 +34,7 @@ ppisp @ git+https://github.com/nv-tlabs/ppisp@v1.0.1
 nvidia-ncore==18.6.0
 simplejpeg
 # formatter
-black==25.9.0
+black==26.3.1
 isort==5.13.0
 # graphics user interfaces
 polyscope>=2.3.0
