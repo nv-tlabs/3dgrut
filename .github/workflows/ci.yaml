@@ -77,3 +77,57 @@ jobs:
       - name: Smoketest - python train.py --help # better (smoke) testing requires a GPU
         run: |
           conda run -n 3dgrut python train.py --help
+
+  ci-uv:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda_version:
+          - "11"
+          - "12"
+          # - "13"
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          # this might remove tools that are actually needed,
+          # when set to "true" but frees about 6 GB
+          tool-cache: true
+          # all of these default to true, but feel free to set to
+          # "false" if necessary for your workflow
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.34
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.cuda_version }}
+          method: network
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+        with:
+          python-version: "3.11"
+          enable-cache: "false"
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install 3DGRUT including all dependencies
+        run: |
+          git config --global --add safe.directory "$(pwd)"
+          ./install_env_uv.sh
+        env:
+          TORCH_CUDA_ARCH_LIST: "7.5" # random arch for testing install
+          CUDA_VERSION: ${{ matrix.cuda_version }}
+
+      - name: Smoketest - python train.py --help # better (smoke) testing requires a GPU
+        run: |
+          .venv/bin/python train.py --help
