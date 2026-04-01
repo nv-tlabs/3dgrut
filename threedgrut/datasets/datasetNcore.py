@@ -29,21 +29,26 @@ import numpy.typing as npt
 import simplejpeg
 import torch
 import torch.utils.data
+from ncore.impl.common.transformations import HalfClosedInterval
 from scipy import ndimage
-from scipy.spatial.transform import Rotation as R_scipy
-from scipy.spatial.transform import Slerp
 
-from threedgrut.datasets.ncoreUtils import Batch as NCoreBatch
-from threedgrut.datasets.ncoreUtils import (
-    HalfClosedInterval,
-    Labels,
+from threedgrut.datasets.protocols import (
+    Batch,
+    BoundedMultiViewDataset,
+    DatasetVisualization,
 )
-from threedgrut.datasets.utils import PointCloud, get_center_and_diag
+from threedgrut.datasets.utils import (
+    PointCloud,
+    create_camera_visualization,
+    create_pixel_coords,
+    get_center_and_diag,
+    get_worker_id,
+)
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import to_torch
 
 
-class NCoreDataset(torch.utils.data.Dataset):
+class NCoreDataset(torch.utils.data.Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def __init__(
         self,
@@ -55,6 +60,7 @@ class NCoreDataset(torch.utils.data.Dataset):
         camera_ids: list[str] | None = None,
         lidar_ids: list[str] | None = None,
         # Misc
+        device: str = "cuda",
         downsample: float = 1.0,  # Training image downsample factor (0.5 = half resolution)
         sample_full_image: bool = True,
         window_size: int = 256,
@@ -78,6 +84,16 @@ class NCoreDataset(torch.utils.data.Dataset):
         lidar_color_generic_data_name: str = "rgb",
     ):
         super().__init__()
+
+        self.device = device
+
+        # Cache for camera intrinsics (populated on first worker init)
+        self._camera_intrinsics_cache: dict = {}
+
+        # Per-worker GPU caches: camera-space rays, pixel coordinates
+        # Populated lazily on first use in each DataLoader worker process.
+        # Keys: worker_id -> dict[camera_id -> (rays_ori, rays_dir, pixel_coords)]
+        self._worker_gpu_cache: dict = {}
 
         # JPEG decoding parameters
         self.jpeg_backend_cpu: str = jpeg_backend_cpu
@@ -136,16 +152,16 @@ class NCoreDataset(torch.utils.data.Dataset):
             )
         ), f"NCoreDataset: provided json file {path} not a NCore V4 single-sequence file"
 
-        chunk_time_range_us = HalfClosedInterval(
-            dataset_meta["sequence_timestamp_interval_us"]["start"],
-            dataset_meta["sequence_timestamp_interval_us"]["stop"],
-        )
+        time_start = dataset_meta["sequence_timestamp_interval_us"]["start"]
+        time_stop = dataset_meta["sequence_timestamp_interval_us"]["stop"]
 
-        if seek_offset_sec := seek_offset_sec:
-            chunk_time_range_us.start += int(seek_offset_sec * 1e6)
+        if seek_offset_sec:
+            time_start += int(seek_offset_sec * 1e6)
         # duration_sec = -1 means "use all available frames"
         if duration_sec is not None and duration_sec > 0:
-            chunk_time_range_us.end = min(chunk_time_range_us.start + int(duration_sec * 1e6), chunk_time_range_us.end)
+            time_stop = min(time_start + int(duration_sec * 1e6), time_stop)
+
+        chunk_time_range_us = HalfClosedInterval(time_start, time_stop)
 
         self.sequence_id: str = dataset_meta["sequence_id"]
         self.sequence_meta_file_path: Path = path
@@ -355,6 +371,17 @@ class NCoreDataset(torch.utils.data.Dataset):
                 ).numpy()
             }
 
+        # Pre-compute per-camera resolutions for the current split (used for GPU ray cache lookup)
+        self._camera_resolutions: dict[str, tuple[int, int]] = {}
+        for camera_id in self.camera_ids:
+            camera_model = camera_models[camera_id]
+            w = int(camera_model.resolution[0].item())
+            h = int(camera_model.resolution[1].item())
+            if not self.split.startswith("train") and self.n_val_image_subsample > 1:
+                w = w // self.n_val_image_subsample
+                h = h // self.n_val_image_subsample
+            self._camera_resolutions[camera_id] = (w, h)
+
         # Load lidar sensors
         self.sequence_lidar_sensors[sequence_id] = {
             lidar_id: sequence_loader.get_lidar_sensor(lidar_id) for lidar_id in self.lidar_ids
@@ -413,8 +440,8 @@ class NCoreDataset(torch.utils.data.Dataset):
 
         # Log temporal window and frame counts
         temporal_start_sec = self.time_range_us.start / 1e6
-        temporal_end_sec = self.time_range_us.end / 1e6
-        temporal_duration_sec = (self.time_range_us.end - self.time_range_us.start) / 1e6
+        temporal_end_sec = self.time_range_us.stop / 1e6
+        temporal_duration_sec = (self.time_range_us.stop - self.time_range_us.start) / 1e6
         logger.info(
             f"NCoreDataset [{self.split}] - Temporal window: {temporal_start_sec:.2f}s to {temporal_end_sec:.2f}s (duration: {temporal_duration_sec:.2f}s)"
         )
@@ -535,10 +562,14 @@ class NCoreDataset(torch.utils.data.Dataset):
         camera_id = self.camera_ids[0]
 
         # Use all frame indices (train + val) for scene extent, matching ColmapDataset
-        all_frame_indices = np.sort(np.concatenate([
-            self.camera_train_frame_indices[camera_id],
-            self.camera_val_frame_indices[camera_id],
-        ]))
+        all_frame_indices = np.sort(
+            np.concatenate(
+                [
+                    self.camera_train_frame_indices[camera_id],
+                    self.camera_val_frame_indices[camera_id],
+                ]
+            )
+        )
         all_camera_centers = self._get_camera_centers(camera_id, all_frame_indices)
 
         _, diagonal = get_center_and_diag(all_camera_centers)
@@ -672,15 +703,17 @@ class NCoreDataset(torch.utils.data.Dataset):
         return frame_image_array
 
     @torch.cuda.nvtx.range("ncore_dataset::_getitem")
-    def __getitem__(self, idx) -> NCoreBatch:
-        """Returns a specific sample of the dataset (depending on split type and parametrization)"""
+    def __getitem__(self, idx) -> dict:
+        """Returns a specific sample of the dataset (depending on split type and parametrization).
+
+        Returns a plain dict suitable for PyTorch DataLoader default collation.
+        Camera-space rays are NOT included — they are cached on GPU per worker and
+        looked up by camera_id in get_gpu_batch_with_intrinsics.
+        """
         # make sure worker is initialized
         self._init_worker()
 
         if self.split.startswith("train"):
-            sample: dict[str, Any] = {"worker_id": self.worker_id}
-            labels = Labels()
-
             sequence_id = self.sequence_id
 
             if self.sample_full_image:
@@ -691,15 +724,13 @@ class NCoreDataset(torch.utils.data.Dataset):
 
             sampled_camera_id: Optional[str] = None
             global_frame_idx: int = idx
-            w: int = 0
-            h: int = 0
+            rgb: Optional[torch.Tensor] = None
 
             # Iterate over selected cameras (typically just one for full-image training)
             for camera_id in valid_camera_ids:
                 sampled_camera_id = camera_id
 
                 camera_sensor = self.sequence_camera_sensors[sequence_id][camera_id]
-                camera_model = self.sequence_camera_models[sequence_id][camera_id]
                 camera_all_pixels = self.sequence_cameras_all_pixels[sequence_id][camera_id]
 
                 # Get pre-computed training frame list for unbiased sampling
@@ -718,13 +749,9 @@ class NCoreDataset(torch.utils.data.Dataset):
                 # Decode image (with accelerated JPEG decoding + downscaling if available)
                 frame_image_array = self._decode_image(camera_sensor, camera_frame_index)
 
-                # camera_model.resolution is already scaled; get target dimensions from it
-                w = int(camera_model.resolution[0].item())
-                h = int(camera_model.resolution[1].item())
-
                 # Sample ALL pixels from the image (full image training)
                 pixel_samples = camera_all_pixels
-                labels.rgb = to_torch(
+                rgb = to_torch(
                     frame_image_array[pixel_samples[:, 1], pixel_samples[:, 0]].astype(np.float32) / 255.0,
                     device="cpu",
                 )
@@ -735,23 +762,18 @@ class NCoreDataset(torch.utils.data.Dataset):
             frame_time_ms = self._compute_frame_time_ms(camera_sensor, camera_frame_index)
             camera_index = self.camera_ids.index(sampled_camera_id)
 
-            sample |= {
-                "labels": labels,
+            batch_dict: dict[str, Any] = {
                 "T_camera_to_world": to_torch(T_sensor_startend[0], device="cpu"),
                 "T_camera_to_world_end": to_torch(T_sensor_startend[1], device="cpu"),
                 "camera_id": sampled_camera_id,
-                "idx": global_frame_idx,
-                "frame_time": frame_time_ms,
                 "frame_idx": global_frame_idx,
                 "camera_idx": camera_index,
             }
 
-            # For full-image training, add image dimensions for proper reshaping
-            if self.sample_full_image and labels.rgb is not None:
-                sample["w"] = w
-                sample["h"] = h
+            if rgb is not None:
+                batch_dict["rgb"] = rgb
 
-            return NCoreBatch(**sample)
+            return batch_dict
 
         else:
             # Decode *linear* global sample index, considering only every Nth frame (validation)
@@ -777,9 +799,9 @@ class NCoreDataset(torch.utils.data.Dataset):
                 # Decode image (with accelerated JPEG decoding + downscaling if available)
                 frame_image_array = self._decode_image(camera_sensor, camera_frame_index)
 
-                # camera_model.resolution is already scaled, so get target dimensions from it
-                w = int(camera_model.resolution[0].item())
-                h = int(camera_model.resolution[1].item())
+                # Get full camera model resolution for mask resizing
+                w_full = int(camera_model.resolution[0].item())
+                h_full = int(camera_model.resolution[1].item())
 
                 # sample image colors at pixel centers
                 rgb = (
@@ -794,7 +816,9 @@ class NCoreDataset(torch.utils.data.Dataset):
 
                 if self.downsample < 1.0:
                     frame_valid_pixel_mask = cv2.resize(
-                        frame_valid_pixel_mask.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST
+                        frame_valid_pixel_mask.astype(np.uint8),
+                        (w_full, h_full),
+                        interpolation=cv2.INTER_NEAREST,
                     ).astype(bool)
 
                 valid = frame_valid_pixel_mask[camera_pixels_subsampled[:, 1], camera_pixels_subsampled[:, 0]]
@@ -802,27 +826,18 @@ class NCoreDataset(torch.utils.data.Dataset):
                 # Get start/end poses in world-global frame (renderer handles shutter interpolation)
                 T_sensor_startend = self._get_start_end_poses_world_global(camera_sensor, camera_frame_index)
 
-                # Get validation image dimensions (may differ from training due to subsampling)
-                if self.n_val_image_subsample > 1:
-                    w = w // self.n_val_image_subsample
-                    h = h // self.n_val_image_subsample
-
                 frame_time_ms = self._compute_frame_time_ms(camera_sensor, camera_frame_index)
                 camera_index = self.camera_ids.index(camera_id)
 
-                return NCoreBatch(
-                    labels=Labels(rgb=to_torch(rgb, device="cpu"), valid=to_torch(valid, device="cpu")),
-                    T_camera_to_world=to_torch(T_sensor_startend[0], device="cpu"),
-                    T_camera_to_world_end=to_torch(T_sensor_startend[1], device="cpu"),
-                    w=w,
-                    h=h,
-                    camera_id=camera_id,
-                    idx=-1,
-                    frame_time=frame_time_ms,
-                    frame_idx=-1,  # Validation: -1 signals novel-view mode for PPISP
-                    camera_idx=camera_index,
-                    worker_id=self.worker_id,
-                )
+                return {
+                    "rgb": to_torch(rgb, device="cpu"),
+                    "valid": to_torch(valid, device="cpu"),
+                    "T_camera_to_world": to_torch(T_sensor_startend[0], device="cpu"),
+                    "T_camera_to_world_end": to_torch(T_sensor_startend[1], device="cpu"),
+                    "camera_id": camera_id,
+                    "frame_idx": -1,  # Validation: -1 signals novel-view mode for PPISP
+                    "camera_idx": camera_index,
+                }
 
             raise IndexError(f"Out of range validation sample {idx}")
 
@@ -946,3 +961,334 @@ class NCoreDataset(torch.utils.data.Dataset):
                     color=to_torch(color, device="cpu") if color is not None else None,
                     device="cpu",
                 )
+
+    # ---- Framework protocol methods (BoundedMultiViewDataset, DatasetVisualization) ----
+
+    def _lazy_worker_gpu_cache(self) -> dict[str, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        """Lazily create and cache camera-space rays + pixel coords on GPU for the current worker.
+
+        Each DataLoader worker creates its own GPU tensors on first use.
+
+        Returns:
+            Dict mapping camera_id -> (rays_ori, rays_dir, pixel_coords) on GPU.
+        """
+        worker_id = get_worker_id()
+
+        if worker_id not in self._worker_gpu_cache:
+            cache: dict[str, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+
+            for sequence_id in self.sequence_cameras_all_rays:
+                if self.split.startswith("train"):
+                    # Training: use full-resolution rays
+                    for camera_id, rays_np in self.sequence_cameras_all_rays[sequence_id].items():
+                        h_full, w_full = rays_np.shape[:2]
+                        rays_dir = torch.from_numpy(rays_np).to(
+                            dtype=torch.float32, device=self.device, non_blocking=True
+                        )
+                        rays_ori = torch.zeros_like(rays_dir)
+                        pixel_coords = create_pixel_coords(w_full, h_full, device=self.device)
+                        cache[camera_id] = (rays_ori, rays_dir, pixel_coords)
+                else:
+                    # Validation: use subsampled rays if n_val_image_subsample > 1, else full
+                    if self.n_val_image_subsample > 1:
+                        for camera_id, rays_sub_np in self.sequence_cameras_rays_subsample[sequence_id].items():
+                            w, h = self._camera_resolutions[camera_id]
+                            rays_dir = torch.from_numpy(rays_sub_np.reshape(h, w, 3)).to(
+                                dtype=torch.float32, device=self.device, non_blocking=True
+                            )
+                            rays_ori = torch.zeros_like(rays_dir)
+                            pixel_coords = create_pixel_coords(w, h, device=self.device)
+                            cache[camera_id] = (rays_ori, rays_dir, pixel_coords)
+                    else:
+                        for camera_id, rays_np in self.sequence_cameras_all_rays[sequence_id].items():
+                            h_full, w_full = rays_np.shape[:2]
+                            rays_dir = torch.from_numpy(rays_np).to(
+                                dtype=torch.float32, device=self.device, non_blocking=True
+                            )
+                            rays_ori = torch.zeros_like(rays_dir)
+                            pixel_coords = create_pixel_coords(w_full, h_full, device=self.device)
+                            cache[camera_id] = (rays_ori, rays_dir, pixel_coords)
+
+            self._worker_gpu_cache[worker_id] = cache
+
+        return self._worker_gpu_cache[worker_id]
+
+    def get_gpu_batch_with_intrinsics(self, batch) -> Batch:
+        """Convert batch dict to threedgrut Batch, using GPU-cached camera-space rays.
+
+        Camera-space rays are NOT transferred from CPU each batch. Instead they are
+        looked up from the per-worker GPU cache by camera_id. Only the per-frame
+        pose (128 bytes) and RGB image are transferred to GPU.
+
+        The renderer handles rolling shutter interpolation via T_to_world / T_to_world_end
+        and the shutter_type from intrinsics. Rays are always in camera space
+        (rays_in_world_space=False).
+        """
+
+        # --- Resolve camera_id -------------------------------------------------
+        camera_id = batch["camera_id"]
+        if isinstance(camera_id, (list, tuple)):
+            camera_id = camera_id[0]
+
+        # --- Look up cached camera-space rays on GPU (no CPU->GPU transfer) -----
+        worker_cache = self._lazy_worker_gpu_cache()
+        rays_ori, rays_dir, pixel_coords = worker_cache[camera_id]
+
+        # Derive image dimensions from cached ray tensor shape
+        h, w = rays_dir.shape[0], rays_dir.shape[1]
+
+        # Add batch dimension: (H, W, 3) -> (1, H, W, 3)
+        rays_ori = rays_ori.unsqueeze(0)
+        rays_dir = rays_dir.unsqueeze(0)
+
+        # --- Transfer poses to GPU (small: 2x 64 bytes) -------------------------
+        T_to_world = batch["T_camera_to_world"].to(self.device, non_blocking=True)
+        if T_to_world.ndim == 2:
+            T_to_world = T_to_world.unsqueeze(0)
+
+        T_to_world_end = batch["T_camera_to_world_end"].to(self.device, non_blocking=True)
+        if T_to_world_end.ndim == 2:
+            T_to_world_end = T_to_world_end.unsqueeze(0)
+
+        # --- Transfer RGB to GPU -------------------------------------------------
+        rgb_gt = None
+        if "rgb" in batch and batch["rgb"] is not None:
+            rgb = batch["rgb"]
+            if not isinstance(rgb, torch.Tensor):
+                rgb = torch.from_numpy(rgb)
+            rgb_gt = rgb.to(self.device, non_blocking=True)
+            if rgb_gt.dim() == 2:
+                rgb_gt = rgb_gt.unsqueeze(0)
+            rgb_gt = rgb_gt.reshape(1, h, w, 3)
+
+        # --- Build output batch dict --------------------------------------------
+        batch_dict: dict[str, Any] = {
+            "rays_ori": rays_ori,
+            "rays_dir": rays_dir,
+            "T_to_world": T_to_world,
+            "T_to_world_end": T_to_world_end,
+            "rays_in_world_space": False,  # Always camera-space; renderer handles shutter
+            "pixel_coords": pixel_coords,
+        }
+
+        if rgb_gt is not None:
+            batch_dict["rgb_gt"] = rgb_gt
+
+        # --- Intrinsics ----------------------------------------------------------
+        intrinsics_result = self._get_camera_model_parameters_for_resolution(camera_id, w, h)
+        if intrinsics_result is not None:
+            intrinsics_params, model_type_name = intrinsics_result
+            batch_dict[f"intrinsics_{model_type_name}"] = intrinsics_params
+
+        # --- Frame / camera indices (PPISP post-processing) ----------------------
+        if "frame_idx" in batch:
+            frame_idx = batch["frame_idx"]
+            batch_dict["frame_idx"] = frame_idx[0].item() if isinstance(frame_idx, torch.Tensor) else int(frame_idx)
+        if "camera_idx" in batch:
+            camera_idx = batch["camera_idx"]
+            batch_dict["camera_idx"] = camera_idx[0].item() if isinstance(camera_idx, torch.Tensor) else int(camera_idx)
+
+        return Batch(**batch_dict)
+
+    def _get_camera_model_parameters_for_resolution(self, camera_id, render_w, render_h):
+        """
+        Extract camera model parameters scaled to the render resolution.
+
+        Returns a (params_dict, model_type_name) tuple, where model_type_name is the
+        Python class name of the NCore parameters object (e.g. "OpenCVPinholeCameraModelParameters").
+        The caller uses model_type_name to set the correct Batch field
+        (e.g. "intrinsics_OpenCVPinholeCameraModelParameters").
+
+        Supported for OpenCV Pinhole, OpenCV Fisheye, and FTheta cameras; returns None for other models.
+        """
+        if camera_id is None or not hasattr(self, "sequence_camera_models"):
+            return None
+
+        # Check cache first
+        cache_key = (camera_id, render_w, render_h, "scaled_params")
+        if cache_key in self._camera_intrinsics_cache:
+            return self._camera_intrinsics_cache[cache_key]
+
+        for sequence_id, camera_models in self.sequence_camera_models.items():
+            if camera_id not in camera_models:
+                continue
+
+            camera_model = camera_models[camera_id]
+
+            # Get (already-downsampled) parameters and transform to the render resolution
+            model_params = camera_model.get_parameters()
+            downsampled_w = int(model_params.resolution[0])
+            downsampled_h = int(model_params.resolution[1])
+            render_scale = (render_w / downsampled_w, render_h / downsampled_h)
+            scaled_params = model_params.transform(
+                image_domain_scale=render_scale,
+                new_resolution=(render_w, render_h),
+            )
+
+            # Use shutter type from camera parameters (renderer handles interpolation natively)
+            logger.info(f"[Shutter] Camera {camera_id}: shutter_type = {scaled_params.shutter_type.name}")
+
+            # Build parameter dict from the properly-scaled NCore parameters.
+            # Distortion coefficients are resolution-independent and preserved through transform().
+            # Each camera model type produces a dict matching the tracer's expected keys.
+            if isinstance(camera_model, ncore.sensors.OpenCVPinholeCameraModel):
+                params_dict = {
+                    "resolution": scaled_params.resolution,
+                    "shutter_type": scaled_params.shutter_type.name,
+                    "principal_point": scaled_params.principal_point,
+                    "focal_length": scaled_params.focal_length,
+                    "radial_coeffs": scaled_params.radial_coeffs,
+                    "tangential_coeffs": scaled_params.tangential_coeffs,
+                    "thin_prism_coeffs": scaled_params.thin_prism_coeffs,
+                }
+            elif isinstance(camera_model, ncore.sensors.OpenCVFisheyeCameraModel):
+                params_dict = {
+                    "resolution": scaled_params.resolution,
+                    "shutter_type": scaled_params.shutter_type.name,
+                    "principal_point": scaled_params.principal_point,
+                    "focal_length": scaled_params.focal_length,
+                    "radial_coeffs": scaled_params.radial_coeffs,
+                    "max_angle": scaled_params.max_angle,
+                }
+            elif isinstance(camera_model, ncore.sensors.FThetaCameraModel):
+                params_dict = {
+                    "resolution": scaled_params.resolution,
+                    "shutter_type": scaled_params.shutter_type.name,
+                    "principal_point": scaled_params.principal_point,
+                    "reference_poly": scaled_params.reference_poly.name,
+                    "pixeldist_to_angle_poly": scaled_params.pixeldist_to_angle_poly,
+                    "angle_to_pixeldist_poly": scaled_params.angle_to_pixeldist_poly,
+                    "max_angle": scaled_params.max_angle,
+                    "linear_cde": scaled_params.linear_cde,
+                }
+            else:
+                logger.warning(
+                    f"Camera {camera_id}: unsupported camera model type {type(camera_model).__name__} for intrinsics extraction"
+                )
+                return None
+
+            logger.info(f"[Distortion] Camera {camera_id}: Using NCore native lens distortion parameters")
+
+            # Cache for future use
+            model_type_name = type(scaled_params).__name__
+            result = (params_dict, model_type_name)
+            self._camera_intrinsics_cache[cache_key] = result
+            return result
+
+        return None
+
+    def get_frames_per_camera(self) -> list[int]:
+        """Return split-specific frame counts per camera (training-only for PPISP parameter allocation)."""
+        return [int(n) for n in self.get_n_frames_per_camera(unique_sensors=True)]
+
+    def get_camera_names(self) -> list[str]:
+        """Return camera names ordered by camera index."""
+        return self.get_camera_sensor_ids(unique_sensors=True)
+
+    def create_dataset_camera_visualization(self):
+        """Create camera visualization for GUI display."""
+        cam_list = []
+
+        # Limit number of visualized frames to avoid GUI clutter
+        if self.split == "train":
+            max_frames_per_camera = max(1, 50 // len(self.camera_ids))
+        else:
+            max_frames_per_camera = 10
+
+        sequence_id = self.sequence_id
+        camera_sensors = self.sequence_camera_sensors[sequence_id]
+        camera_models = self.sequence_camera_models[sequence_id]
+
+        for camera_id in self.camera_ids:
+            if camera_id not in camera_sensors:
+                continue
+
+            camera_sensor = camera_sensors[camera_id]
+            camera_model = camera_models[camera_id]
+
+            # Get camera resolution (already scaled by downsample in _init_worker)
+            w = int(camera_model.resolution[0].item())
+            h = int(camera_model.resolution[1].item())
+
+            # Apply validation subsampling to match rendered resolution
+            w_viz = w // self.n_val_image_subsample
+            h_viz = h // self.n_val_image_subsample
+
+            # Calculate field of view (model-dependent)
+            if isinstance(camera_model, ncore.sensors.FThetaCameraModel):
+                fov_w = 2.0 * camera_model.max_angle
+                fov_h = 2.0 * camera_model.max_angle
+            elif hasattr(camera_model, "focal_length"):
+                fx = float(camera_model.focal_length[0])
+                fy = float(camera_model.focal_length[1])
+                fx_viz = fx / self.n_val_image_subsample
+                fy_viz = fy / self.n_val_image_subsample
+                fov_w = 2.0 * np.arctan(0.5 * w_viz / fx_viz)
+                fov_h = 2.0 * np.arctan(0.5 * h_viz / fy_viz)
+            else:
+                logger.warning(
+                    f"Camera {camera_id}: unsupported model type for FOV calculation, skipping visualization"
+                )
+                continue
+
+            camera_frame_range = self.camera_frame_ranges[camera_id]
+            num_frames = camera_frame_range.stop - camera_frame_range.start
+            frame_step = max(1, num_frames // max_frames_per_camera)
+
+            for frame_idx in range(camera_frame_range.start, camera_frame_range.stop, frame_step):
+                try:
+                    T_sensor_to_world_flat = camera_sensor.get_frames_T_source_target(
+                        source_node=camera_sensor.sensor_id,
+                        target_node="world",
+                        frame_indices=np.array(frame_idx),
+                        frame_timepoint=ncore.data.FrameTimepoint.START,
+                    )
+                    if T_sensor_to_world_flat.ndim == 1:
+                        T_sensor_to_world = T_sensor_to_world_flat.reshape(4, 4)
+                    else:
+                        T_sensor_to_world = T_sensor_to_world_flat
+
+                    T_sensor_to_world_global_batch = self._transform_poses_to_world_global(
+                        T_sensor_to_world[None, :, :], self.T_world_to_world_global
+                    )
+                    if T_sensor_to_world_global_batch.ndim == 3:
+                        T_sensor_to_world_global = T_sensor_to_world_global_batch[0]
+                    elif T_sensor_to_world_global_batch.ndim == 2:
+                        T_sensor_to_world_global = T_sensor_to_world_global_batch.reshape(4, 4)
+                    else:
+                        T_sensor_to_world_global = T_sensor_to_world_global_batch
+
+                    T_world_to_sensor = np.linalg.inv(T_sensor_to_world_global)
+
+                    # Polyscope camera convention flip (Y and Z axes)
+                    camera_convention_rot = np.array(
+                        [
+                            [1.0, 0.0, 0.0, 0.0],
+                            [0.0, -1.0, 0.0, 0.0],
+                            [0.0, 0.0, -1.0, 0.0],
+                            [0.0, 0.0, 0.0, 1.0],
+                        ]
+                    )
+                    T_world_to_sensor = camera_convention_rot @ T_world_to_sensor
+
+                    frame_image = camera_sensor.get_frame_image_array(frame_idx)
+                    if self.n_val_image_subsample > 1:
+                        frame_image = cv2.resize(frame_image, (w_viz, h_viz), interpolation=cv2.INTER_AREA)
+                    rgb_img = frame_image.astype(np.float32) / 255.0
+
+                    cam_list.append(
+                        {
+                            "ext_mat": T_world_to_sensor,
+                            "w": w_viz,
+                            "h": h_viz,
+                            "fov_w": fov_w,
+                            "fov_h": fov_h,
+                            "rgb_img": rgb_img,
+                            "split": self.split,
+                        }
+                    )
+                except Exception:
+                    continue
+
+        if cam_list:
+            create_camera_visualization(cam_list)

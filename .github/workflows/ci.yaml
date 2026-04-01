@@ -13,10 +13,36 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  ci:
+  format:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Black and isort
+        run: pip install "black==25.9.0" "isort==5.13.0"
+
+      - name: Check code style (black)
+        run: black . --check --target-version=py311 --line-length=120 --exclude=thirdparty/tiny-cuda-nn
+
+      - name: Check import sorting (isort)
+        run: isort . --check-only --diff --skip=thirdparty/tiny-cuda-nn --profile=black
+
+  ci:
+    name: ci (CUDA ${{ matrix.cuda_version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda_version: ["11.8.0", "12.8.1"]
     container:
       image: ubuntu:24.04
+    env:
+      CUDA_VERSION: ${{ matrix.cuda_version }}
+      PYTHON_VERSION: "3.11"
     steps:
       - name: Install prerequisites
         run: |
@@ -47,8 +73,6 @@ jobs:
         run: |
           git config --global --add safe.directory "$(pwd)"
           ./install_env.sh 3dgrut WITH_GCC11
-        env:
-          TORCH_CUDA_ARCH_LIST: "7.5" # random arch for testing install
 
       - name: Smoketest - python train.py --help # better (smoke) testing requires a GPU
         run: |
