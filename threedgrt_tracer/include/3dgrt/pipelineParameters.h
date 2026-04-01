@@ -22,14 +22,14 @@
 #include <3dgrt/tensorAccessor.h>
 
 struct PipelineParameters {
-    float4 rayToWorld[3];   ///< float3x4 ray to world transformation (row-major)
+    float4 rayToWorld[3];                          ///< float3x4 ray to world transformation (row-major)
     PackedTensorAccessor32<float, 4> rayOrigin;    ///< ray origin
     PackedTensorAccessor32<float, 4> rayDirection; ///< ray direction
 
     const ParticleDensity* particleDensity; ///< position, scale, quaternions, density
     const float* particleRadiance;          ///< spherical harmonics coefficients
     const void* particleExtendedData;       ///< pipeline specific particle data
-    int32_t* particleVisibility;       ///< pipeline specific particle data
+    int32_t* particleVisibility;            ///< pipeline specific particle data
 
     PackedTensorAccessor32<float, 4> rayRadiance;    ///< output integrated ray radiance
     PackedTensorAccessor32<float, 4> rayDensity;     ///< output integrated ray density
@@ -53,10 +53,10 @@ struct PipelineParameters {
     static constexpr unsigned int MaxNumHitPerTrace = 16;
 
 #ifdef PARTICLE_PRIMITIVE_TYPE
-    static constexpr bool CustomPrimitive = (PARTICLE_PRIMITIVE_TYPE == MOGPrimitiveTypes::MOGTracingCustom);
+    static constexpr bool CustomPrimitive   = (PARTICLE_PRIMITIVE_TYPE == MOGPrimitiveTypes::MOGTracingCustom);
     static constexpr bool InstancePrimitive = (PARTICLE_PRIMITIVE_TYPE == MOGPrimitiveTypes::MOGTracingInstances);
-    static constexpr bool SurfelPrimitive = (PARTICLE_PRIMITIVE_TYPE == MOGPrimitiveTypes::MOGTracingTriSurfel);
-    static constexpr bool ClampedPrimitive = PARTICLE_PRIMITIVE_CLAMPED;
+    static constexpr bool SurfelPrimitive   = (PARTICLE_PRIMITIVE_TYPE == MOGPrimitiveTypes::MOGTracingTriSurfel);
+    static constexpr bool ClampedPrimitive  = PARTICLE_PRIMITIVE_CLAMPED;
 #endif
 
 #ifdef PARTICLE_KERNEL_DEGREE
@@ -65,25 +65,23 @@ struct PipelineParameters {
 
 #ifdef __CUDACC__
     inline __device__ float3 rayWorldOrigin(const uint3& idx) const {
-        float3 origin = make_float3(rayOrigin[idx.z][idx.y][idx.x][0], 
-                                    rayOrigin[idx.z][idx.y][idx.x][1], 
+        float3 origin = make_float3(rayOrigin[idx.z][idx.y][idx.x][0],
+                                    rayOrigin[idx.z][idx.y][idx.x][1],
                                     rayOrigin[idx.z][idx.y][idx.x][2]);
         return make_float3(
             rayToWorld[0].x * origin.x + rayToWorld[0].y * origin.y + rayToWorld[0].z * origin.z + rayToWorld[0].w,
             rayToWorld[1].x * origin.x + rayToWorld[1].y * origin.y + rayToWorld[1].z * origin.z + rayToWorld[1].w,
-            rayToWorld[2].x * origin.x + rayToWorld[2].y * origin.y + rayToWorld[2].z * origin.z + rayToWorld[2].w
-        );
+            rayToWorld[2].x * origin.x + rayToWorld[2].y * origin.y + rayToWorld[2].z * origin.z + rayToWorld[2].w);
     }
 
     inline __device__ float3 rayWorldDirection(const uint3& idx) const {
-        float3 direction = make_float3(rayDirection[idx.z][idx.y][idx.x][0], 
-                                       rayDirection[idx.z][idx.y][idx.x][1], 
+        float3 direction = make_float3(rayDirection[idx.z][idx.y][idx.x][0],
+                                       rayDirection[idx.z][idx.y][idx.x][1],
                                        rayDirection[idx.z][idx.y][idx.x][2]);
         return make_float3(
             rayToWorld[0].x * direction.x + rayToWorld[0].y * direction.y + rayToWorld[0].z * direction.z,
             rayToWorld[1].x * direction.x + rayToWorld[1].y * direction.y + rayToWorld[1].z * direction.z,
-            rayToWorld[2].x * direction.x + rayToWorld[2].y * direction.y + rayToWorld[2].z * direction.z
-        );
+            rayToWorld[2].x * direction.x + rayToWorld[2].y * direction.y + rayToWorld[2].z * direction.z);
     }
 #endif
 };

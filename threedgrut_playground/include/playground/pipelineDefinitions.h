@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved. SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,34 +15,35 @@
 
 #pragma once
 
-enum PlaygroundPrimitiveTypes
-{
-    PGRNDPrimitiveNone = 0,
-    PGRNDPrimitiveMirror = 1,
-    PGRNDPrimitiveGlass = 2,
-    PGRNDPrimitiveDiffuse = 3,
-    PGRNDPrimitivePBR = 4
+enum PlaygroundPrimitiveTypes {
+  PGRNDPrimitiveNone = 0,
+  PGRNDPrimitiveMirror = 1,
+  PGRNDPrimitiveGlass = 2,
+  PGRNDPrimitiveDiffuse = 3,
+  PGRNDPrimitivePBR = 4
 };
 
-enum PlaygroundTraceState
-{
-    PGRNDTracePrimitivesPass = 0,        // Tracing mirrors, glasses, meshes..
-    PGRNDTraceRTGaussiansPass = 1,       // Tracing Gaussians with volumetric rendering
-    PGRNDTraceTerminate = 2              // Terminate current ray
+enum PlaygroundTraceState {
+  PGRNDTracePrimitivesPass = 0,  // Tracing mirrors, glasses, meshes..
+  PGRNDTraceRTGaussiansPass = 1, // Tracing Gaussians with volumetric rendering
+  PGRNDTraceTerminate = 2        // Terminate current ray
 };
 
-enum PlaygroundRenderOptions
-{
-    PGRNDRenderNone = 0,
-    PGRNDRenderSmoothNormals = 1<<0,           // Geometry: If enabled, will interpolate precomputed vertex normals
-    PGRNDRenderDisableGaussianTracing = 1<<1,  // Disable Gaussian tracing -- only meshes will be rendered
-    PGRNDRenderDisablePBRTextures = 1<<2       // Disable PBR textures, use base material values only
+enum PlaygroundRenderOptions {
+  PGRNDRenderNone = 0,
+  PGRNDRenderSmoothNormals =
+      1
+      << 0, // Geometry: If enabled, will interpolate precomputed vertex normals
+  PGRNDRenderDisableGaussianTracing =
+      1 << 1, // Disable Gaussian tracing -- only meshes will be rendered
+  PGRNDRenderDisablePBRTextures =
+      1 << 2 // Disable PBR textures, use base material values only
 };
 
-enum GltfAlphaMode
-{
-    // See: https://github.com/KhronosGroup/glTF-Sample-Models/blob/main/2.0/AlphaBlendModeTest/README.md
-    GLTFOpaque = 0,
-    GLTFBlend = 1,
-    GLTFMask = 2
+enum GltfAlphaMode {
+  // See:
+  // https://github.com/KhronosGroup/glTF-Sample-Models/blob/main/2.0/AlphaBlendModeTest/README.md
+  GLTFOpaque = 0,
+  GLTFBlend = 1,
+  GLTFMask = 2
 };

@@ -718,7 +718,7 @@ __device__ inline void processHitBwd(
         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         // ---> gposc = rayOri - gpos
         // ===> d_gposc / d_gpos = -1
-        const float3 rayMoGPosGrd = -gposcGrd;
+        const float3 rayMoGPosGrd        = -gposcGrd;
         particleDensityGradPtr->position = rayMoGPosGrd;
 
         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -736,7 +736,7 @@ __device__ inline void processHitBwd(
         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         // ---> rayDirR = matmul(rayDir, grotMat)
         // ===> d_rayDirR / d_grotmat = matmul_bw_mat(rayDir, grotMat)
-        const float4 grotGrdRayDirR = matmul_bw_quat(rayDirection, rayDirRGrd, grot);
+        const float4 grotGrdRayDirR          = matmul_bw_quat(rayDirection, rayDirRGrd, grot);
         particleDensityGradPtr->quaternion.x = grotGrdPoscr.x + grotGrdRayDirR.x;
         particleDensityGradPtr->quaternion.y = grotGrdPoscr.y + grotGrdRayDirR.y;
         particleDensityGradPtr->quaternion.z = grotGrdPoscr.z + grotGrdRayDirR.z;
