@@ -126,7 +126,7 @@ conda activate $CONDA_ENV
 if [ "$CUDA_VERSION" = "11.8.0" ]; then
     echo "Installing CUDA 11.8.0 ..."
     conda install -y cuda-toolkit cmake ninja -c nvidia/label/cuda-11.8.0
-    conda install -y pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 "numpy<2.0" "mkl<=2022.1.0" -c pytorch -c nvidia/label/cuda-11.8.0
+    conda install -y setuptools==78.1.1 pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 "numpy<2.0" "mkl<=2022.1.0" -c pytorch -c nvidia/label/cuda-11.8.0
     pip3 install --find-links https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.2_cu118.html kaolin==0.17.0
 
 # CUDA 12.8 supports compute capability 10.0 and 12.0
@@ -143,7 +143,7 @@ elif [ "$CUDA_VERSION" = "12.8.1" ]; then
 
     echo "Installing CUDA 12.8.1 ..."
     conda install -y cuda-toolkit cmake ninja gcc_linux-64=$gcc_version -c nvidia/label/cuda-12.8.1
-    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+    pip3 install setuptools==78.1.1 torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
     pip3 install --force-reinstall "numpy<2"
 
     # TODO move to using wheel once kaolin is available
