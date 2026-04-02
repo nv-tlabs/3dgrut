@@ -13,3 +13,21 @@ val_frequency: 999999 # never validate
 
 initialization:
   fused_point_cloud_path: ???  # Path to fused point cloud PLY file to be provided by user at runtime
+
+model:
+  background:
+    color: white
+
+post_processing:
+  method: ppisp
+
+loss:
+  lambda_opacity: 0.0001
+  lambda_scale: 0.005
+
+strategy:
+  perturb:
+    noise_lr: 5000
+    end_iteration: 30000
+  add:
+    max_n_gaussians: 2300000

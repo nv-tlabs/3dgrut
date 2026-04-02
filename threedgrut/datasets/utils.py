@@ -58,7 +58,7 @@ def create_pixel_coords(width: int, height: int, device: torch.device = None) ->
     return torch.stack([pixel_x, pixel_y], dim=-1).unsqueeze(0)  # [1, H, W, 2]
 
 
-def pinhole_camera_rays(x, y, f_x, f_y, w, h, ray_jitter=None):
+def pinhole_camera_rays(x, y, f_x, f_y, w, h, ray_jitter=None, cx=None, cy=None):
     """
     return:
         ray_origin (sz_y, sz_x, 3)
@@ -72,8 +72,13 @@ def pinhole_camera_rays(x, y, f_x, f_y, w, h, ray_jitter=None):
     else:
         jitter_xs = jitter_ys = 0.5
 
-    xs = ((x + jitter_xs) - 0.5 * w) / f_x
-    ys = ((y + jitter_ys) - 0.5 * h) / f_y
+    if cx is None:
+        cx = 0.5 * w
+    if cy is None:
+        cy = 0.5 * h
+
+    xs = ((x + jitter_xs) - cx) / f_x
+    ys = ((y + jitter_ys) - cy) / f_y
 
     ray_lookat = np.stack((xs, ys, np.ones_like(xs)), axis=-1)
     ray_origin = np.zeros_like(ray_lookat)
