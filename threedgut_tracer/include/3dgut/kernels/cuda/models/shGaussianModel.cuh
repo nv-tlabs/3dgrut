@@ -27,7 +27,7 @@ struct ShGaussian {
     //                                    TRay& ray,
     //                                    threedgut::MemoryHandles parameters) {
     //     if (ray.isValid()) {
-    // 
+    //
     //         // mark the ray as front hit if the traversed volume is sufficiently opaque
     //         if (ray.transmittance < params.hitTransmittance) {
     //             ray.hitFront();

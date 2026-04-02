@@ -115,7 +115,7 @@ class Tracer:
             mog_scl = gaussians.get_scale().contiguous()
             particle_density = torch.concat([mog_pos, mog_dns, mog_rot, mog_scl, torch.zeros_like(mog_dns)], dim=1)
 
-            (pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count) = self.tracer_wrapper.trace(
+            pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count = self.tracer_wrapper.trace(
                 frame_id,
                 gpu_batch["poses"].contiguous(),
                 gpu_batch["rays_o_cam"].contiguous(),
@@ -224,7 +224,7 @@ class Tracer:
             min_transmittance = self.conf.render.min_transmittance
             envmap_offset = envmap_offset.contiguous()
 
-            (pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count) = self.tracer_wrapper.trace_hybrid(
+            pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count = self.tracer_wrapper.trace_hybrid(
                 frame_id,
                 poses,
                 ray_o,

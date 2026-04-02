@@ -185,7 +185,7 @@ class NCoreDataset(torch.utils.data.Dataset, BoundedMultiViewDataset, DatasetVis
                 # in case we move back from a worker to the main process we should also re-init
                 self.worker_id = None
                 self.rng = np.random.default_rng(seed=0)  # deterministic sampling
-            case torch.utils.data._utils.worker.WorkerInfo(id=worker_id, seed=worker_seed):  # type:ignore
+            case torch.utils.data._utils.worker.WorkerInfo(id=worker_id, seed=worker_seed):  # type: ignore
                 # worker process case
                 if self.sequence_loaders and self.worker_id is worker_id:
                     # skip re-initialization

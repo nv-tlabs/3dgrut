@@ -25,9 +25,9 @@ public:
     ~CudaBuffer();
 
     size_t size() const;
-    
+
     const void* data() const;
-    
+
     void* data();
 
     uint64_t handle() const;

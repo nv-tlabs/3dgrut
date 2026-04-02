@@ -37,7 +37,7 @@ private:
 
     class CudaTimer;
 
-    bool m_enableKernelTimings  = false;
+    bool m_enableKernelTimings = false;
     std::map<std::string, float> m_timings;
 
     const size_t m_maxNumTimers = 256; // We only keep the most recent 256 timers

@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <3dgrt/pipelineParameters.h>
 #include <3dgrt/kernels/slang/gaussianParticles.cuh>
+#include <3dgrt/pipelineParameters.h>
 // clang-format on
 
 extern "C" {
@@ -150,17 +150,17 @@ extern "C" __global__ void __raygen__rg() {
 #endif
                 );
 
-                particleFeaturesIntegrateFwdFromBuffer(rayDirection, 
+                particleFeaturesIntegrateFwdFromBuffer(rayDirection,
                                                        hitWeight,
                                                        rayHit.particleId,
                                                        {{(float3*)params.particleRadiance, nullptr}, params.sphDegree},
                                                        &rayRadiance);
-                                                       
+
                 // NOTE(qi): Race condition here, but as we are writing the same value, it seems it is safe.
                 if (hitWeight > 0.f) {
                     params.particleVisibility[rayHit.particleId] = 1;
                 }
-                
+
                 rayLastHitDistance = fmaxf(rayLastHitDistance, rayHit.distance);
 
 #ifdef ENABLE_HIT_COUNTS

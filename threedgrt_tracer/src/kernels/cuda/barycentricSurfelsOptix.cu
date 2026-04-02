@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <3dgrt/pipelineParameters.h>
 #include <3dgrt/kernels/cuda/gaussianParticles.cuh>
+#include <3dgrt/pipelineParameters.h>
 #include <cuda_fp16.h>
 // clang-format on
 

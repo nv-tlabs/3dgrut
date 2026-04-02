@@ -15,39 +15,35 @@
 
 #pragma once
 
-enum PlaygroundPrimitiveTypes
-{
-    PGRNDPrimitiveNone = 0,
-    PGRNDPrimitiveMirror = 1,
-    PGRNDPrimitiveGlass = 2,
+enum PlaygroundPrimitiveTypes {
+    PGRNDPrimitiveNone    = 0,
+    PGRNDPrimitiveMirror  = 1,
+    PGRNDPrimitiveGlass   = 2,
     PGRNDPrimitiveDiffuse = 3,
-    PGRNDPrimitiveLight = 4,
-    PGRNDPrimitivePBR = 5
+    PGRNDPrimitiveLight   = 4,
+    PGRNDPrimitivePBR     = 5
 };
 
-enum PlaygroundTraceState
-{
-    PGRNDTraceRTLastGaussiansPass = 0,   // Tracing gaussians with volumetric rendering - until scene extents are hit
-    PGRNDTracePrimitivesPass = 1,        // Tracing mirrors, glasses, meshes..
-    PGRNDTraceRTGaussiansPass = 2,       // Tracing gaussians with volumetric rendering
-    PGRNDTraceTerminate = 3,             // Terminate current ray
-    PGRNDTraceShadows = 4                // Tracing shadow rays
+enum PlaygroundTraceState {
+    PGRNDTraceRTLastGaussiansPass = 0, // Tracing gaussians with volumetric rendering - until scene extents are hit
+    PGRNDTracePrimitivesPass      = 1, // Tracing mirrors, glasses, meshes..
+    PGRNDTraceRTGaussiansPass     = 2, // Tracing gaussians with volumetric rendering
+    PGRNDTraceTerminate           = 3, // Terminate current ray
+    PGRNDTraceShadows             = 4  // Tracing shadow rays
 };
 
-enum PlaygroundRenderOptions
-{
-    PGRNDRenderNone = 0,
-    PGRNDRenderSmoothNormals = 1<<0,           // Geometry: If enabled, will interpolate precomputed vertex normals
-    PGRNDRenderUseSchlickApprox = 1<<1,        // UNUSED: Refractions: use Schlick's approximation for varying reflectance angle
-    PGRNDRenderDisableShadows = 1<<2,          // Disable shadows in the current pass
-    PGRNDRenderDisableGaussianTracing = 1<<3,  // Disable gaussian tracing -- only meshes will be rendered
-    PGRNDRenderDisablePBRTextures = 1<<4       // Disable PBR textures, use base material values only
+enum PlaygroundRenderOptions {
+    PGRNDRenderNone                   = 0,
+    PGRNDRenderSmoothNormals          = 1 << 0, // Geometry: If enabled, will interpolate precomputed vertex normals
+    PGRNDRenderUseSchlickApprox       = 1 << 1, // UNUSED: Refractions: use Schlick's approximation for varying reflectance angle
+    PGRNDRenderDisableShadows         = 1 << 2, // Disable shadows in the current pass
+    PGRNDRenderDisableGaussianTracing = 1 << 3, // Disable gaussian tracing -- only meshes will be rendered
+    PGRNDRenderDisablePBRTextures     = 1 << 4  // Disable PBR textures, use base material values only
 };
 
-enum GltfAlphaMode
-{
+enum GltfAlphaMode {
     // See: https://github.com/KhronosGroup/glTF-Sample-Models/blob/main/2.0/AlphaBlendModeTest/README.md
     GLTFOpaque = 0,
-    GLTFBlend = 1,
-    GLTFMask = 2
+    GLTFBlend  = 1,
+    GLTFMask   = 2
 };

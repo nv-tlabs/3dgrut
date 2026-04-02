@@ -93,7 +93,7 @@ eval "$(conda shell.bash hook)"
 CONDA_ENV_PATH=$(conda env list | sed -E -n "s/^${CONDA_ENV}[[:space:]]+\*?[[:space:]]*(.*)$/\1/p")
 if [ -z "${CONDA_ENV_PATH}" ]; then
   echo "Conda environment '${CONDA_ENV}' not found, creating it"
-  conda create --name ${CONDA_ENV} -y python=3.11
+  conda create --name ${CONDA_ENV} -y python=3.11 setuptools==78.1.1
 else
   echo "NOTE: Conda environment '${CONDA_ENV}' already exists at ${CONDA_ENV_PATH}, skipping environment creation"
 fi

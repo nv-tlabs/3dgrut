@@ -19,7 +19,7 @@ imageio
 msgpack
 dataclasses_json
 # JIT compilation
-setuptools <72.1.0
+setuptools==78.1.1
 # Fused-ssim
 fused-ssim @ git+https://github.com/rahul-goel/fused-ssim@1272e21a282342e89537159e4bad508b19b34157
 # Playground
@@ -34,7 +34,7 @@ ppisp @ git+https://github.com/nv-tlabs/ppisp@v1.0.1
 nvidia-ncore==18.6.0
 simplejpeg
 # formatter
-black==25.9.0
+black==26.3.1
 isort==5.13.0
 # graphics user interfaces
 polyscope>=2.3.0

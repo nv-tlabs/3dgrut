@@ -21,7 +21,6 @@
 #include <iostream>
 #include <vector>
 
-
 #ifndef THREEDGUT_LOGGER_CB
 #ifdef _WIN32
 #define THREEDGUT_LOGGER_CB __cdecl
@@ -32,8 +31,8 @@
 
 namespace threedgut {
 
-// ----------------------------------------------------------------------------- 
-// 
+// -----------------------------------------------------------------------------
+//
 //
 
 struct LoggerParameters {
@@ -50,10 +49,10 @@ struct LoggerParameters {
 
     typedef void(THREEDGUT_LOGGER_CB* Callback)(uint8_t level, const char* msg, void* data);
     typedef void(THREEDGUT_LOGGER_CB* DeviceLaunchCallback)(bool start,
-                                                        const char* tag,
-                                                        int deviceIndex,
-                                                        uint64_t deviceQueue,
-                                                        void* data);
+                                                            const char* tag,
+                                                            int deviceIndex,
+                                                            uint64_t deviceQueue,
+                                                            void* data);
 
     uint8_t maximumLevel                     = Error;
     Callback callback                        = nullptr;
@@ -80,8 +79,8 @@ struct LoggerParameters {
     }
 };
 
-// ----------------------------------------------------------------------------- 
-// 
+// -----------------------------------------------------------------------------
+//
 //
 
 class Logger {
@@ -151,8 +150,8 @@ private:
 #define PROFILE_DEVICE_END(logger, tag, deviceIndex, deviceQueue) \
     logger.logDeviceLaunch(false, tag, deviceIndex, deviceQueue)
 
-// ----------------------------------------------------------------------------- 
-// 
+// -----------------------------------------------------------------------------
+//
 //
 
 class DeviceLaunchesLogger {
