@@ -46,12 +46,12 @@ struct RayData {
     float hitCount; // TODO (operel): convert to uint32
 
     __device__ void initialize() {
-        radiance = make_float3(0.0f);
-        density = 0.0;
-        normal = make_float3(0.f);
-        hitDistance = 0.f;
+        radiance           = make_float3(0.0f);
+        density            = 0.0;
+        normal             = make_float3(0.f);
+        hitDistance        = 0.f;
         rayLastHitDistance = 0.f;
-        hitCount = 0.f;
+        hitCount           = 0.f;
     }
 };
 
@@ -142,10 +142,10 @@ static __device__ __inline__ void traceVolumetricGS(
     }
 
     float rayTransmittance = 1.0f - rayData.density;
-    float2 minMaxT       = intersectAABB(params.aabb, rayOrigin, rayDirection);
-    minMaxT.x = fmaxf(minMaxT.x, tmin);
-    minMaxT.y = fminf(minMaxT.y, tmax);
-    constexpr float epsT = 1e-9;
+    float2 minMaxT         = intersectAABB(params.aabb, rayOrigin, rayDirection);
+    minMaxT.x              = fmaxf(minMaxT.x, tmin);
+    minMaxT.y              = fminf(minMaxT.y, tmax);
+    constexpr float epsT   = 1e-9;
 
     float rayLastHitDistance = fmaxf(0.0f, minMaxT.x - epsT);
     RayPayload rayPayload;
@@ -190,7 +190,7 @@ static __device__ __inline__ void traceVolumetricGS(
         }
     }
 
-    rayData.density = 1 - rayTransmittance;
+    rayData.density            = 1 - rayTransmittance;
     rayData.rayLastHitDistance = rayLastHitDistance;
 }
 

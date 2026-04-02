@@ -15,9 +15,9 @@
 
 #pragma once
 
-template <typename T, int C=1>
+template <typename T, int C = 1>
 class CudaTexture2DFloatObject final {
-    cudaArray_t _array = 0;
+    cudaArray_t _array       = 0;
     cudaTextureObject_t _tex = 0;
 
     void release() {
@@ -34,7 +34,7 @@ class CudaTexture2DFloatObject final {
 public:
     CudaTexture2DFloatObject() = default;
     CudaTexture2DFloatObject(const T* hostData, const int height, const int width) {
-        static_assert((C>0) && (C<5), "CudaTexture2DFloatObject");
+        static_assert((C > 0) && (C < 5), "CudaTexture2DFloatObject");
         reset(hostData, height, width);
     }
     ~CudaTexture2DFloatObject() { release(); }
@@ -43,24 +43,23 @@ public:
         release();
         constexpr int nBytes = sizeof(T) * 8;
         cudaChannelFormatDesc channelDesc =
-            cudaCreateChannelDesc(nBytes, (C>1 ? nBytes : 0),  (C>2 ? nBytes : 0),  (C>3 ? nBytes : 0), cudaChannelFormatKindFloat);
+            cudaCreateChannelDesc(nBytes, (C > 1 ? nBytes : 0), (C > 2 ? nBytes : 0), (C > 3 ? nBytes : 0), cudaChannelFormatKindFloat);
         cudaMallocArray(&_array, &channelDesc, width, height);
 
         cudaMemcpy2DToArray(
-            _array, 0, 0, hostData, width * sizeof(T) * C, width * sizeof(T) * C, height, cudaMemcpyDeviceToDevice
-        );
+            _array, 0, 0, hostData, width * sizeof(T) * C, width * sizeof(T) * C, height, cudaMemcpyDeviceToDevice);
 
         struct cudaResourceDesc resDesc;
         memset(&resDesc, 0, sizeof(resDesc));
-        resDesc.resType = cudaResourceTypeArray;
+        resDesc.resType         = cudaResourceTypeArray;
         resDesc.res.array.array = _array;
 
         struct cudaTextureDesc texDesc;
         memset(&texDesc, 0, sizeof(texDesc));
-        texDesc.addressMode[0] = cudaAddressModeClamp;
-        texDesc.addressMode[1] = cudaAddressModeClamp;
-        texDesc.filterMode = cudaFilterModeLinear;
-        texDesc.readMode = cudaReadModeElementType;
+        texDesc.addressMode[0]   = cudaAddressModeClamp;
+        texDesc.addressMode[1]   = cudaAddressModeClamp;
+        texDesc.filterMode       = cudaFilterModeLinear;
+        texDesc.readMode         = cudaReadModeElementType;
         texDesc.normalizedCoords = 1;
 
         cudaCreateTextureObject(&_tex, &resDesc, &texDesc, NULL);

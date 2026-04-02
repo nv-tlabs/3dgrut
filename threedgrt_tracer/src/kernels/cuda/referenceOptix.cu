@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <3dgrt/pipelineParameters.h>
 #include <3dgrt/kernels/cuda/gaussianParticles.cuh>
+#include <3dgrt/pipelineParameters.h>
 // clang-format on
 
 extern "C" {
@@ -154,8 +154,8 @@ extern "C" __global__ void __raygen__rg() {
                     nullptr
 #endif
                 );
-                
-                // NOTE(qi): Race condition here, but as we are writing the same value, it seems it is safe.            
+
+                // NOTE(qi): Race condition here, but as we are writing the same value, it seems it is safe.
                 if (acceptedHit) {
                     params.particleVisibility[rayHit.particleId] = 1;
                 }
