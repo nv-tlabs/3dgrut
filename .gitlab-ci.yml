@@ -1,0 +1,132 @@
+# This file is a template, and might need editing before it works on your project.
+# This is a sample GitLab CI/CD configuration file that should run without any modifications.
+# It demonstrates a basic 3 stage CI/CD pipeline. Instead of real tests or scripts,
+# it uses echo commands to simulate the pipeline execution.
+#
+# A pipeline is composed of independent jobs that run scripts, grouped into stages.
+# Stages run in sequential order, but jobs within stages run in parallel.
+#
+# For more information, see: https://docs.gitlab.com/ee/ci/yaml/index.html#stages
+#
+# You can copy and paste this template into a new `.gitlab-ci.yml` file.
+# You should not add this template to an existing `.gitlab-ci.yml` file by using the `include:` keyword.
+#
+# To contribute improvements to CI/CD templates, please follow the Development guide at:
+# https://docs.gitlab.com/ee/development/cicd/templates.html
+# This specific template is located at:
+# https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/gitlab/ci/templates/Getting-Started.gitlab-ci.yml
+
+variables:
+  PYTHON_VERSION: "3.11"
+  FF_TIMESTAMPS: true # Enable timestamps in job logs
+  GIT_CLEAN_FLAGS: -ffdx -e .venv
+  TEST_CONDA_PREFIX: "${CI_BUILDS_DIR}/.venv"
+  TEST_CUDA_VERSION: "11.8.0"
+
+workflow:
+  auto_cancel:
+    on_new_commit: interruptible
+  rules:
+    # Those rules follow this logic:
+    # Phase 1: No open merge request, user pushes to a branch: --> Run branch pipeline
+    # Phase 2: Open merge request: --> Do not run branch pipeline, but run merge result pipeline
+    # Phase 3: Open merge request, user pushes to the branch: --> Re-run merge result pipeline
+    # Phase 4: Branch is merged into protected branch: --> Run branch pipeline
+    #
+    # Additionally we do not allow auto-cancel of outdated pipelines on protected branches, we want to collect all
+    # possible data points on these post-merge pipelines.
+    - if: $CI_COMMIT_REF_PROTECTED == "true" # Run branch pipeline on protected branches (main or release)
+      auto_cancel:
+        on_new_commit: none
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" # Run merge request or merge result pipelines (if merge result pipelines are configured in gitlab)
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE != "web" # Do not run branch pipelines if merge request is open, but still allow web use
+      when: never
+    - if: $CI_COMMIT_BRANCH # Run branch pipelines for all branches when triggered by a branch push and no merge request is open
+      auto_cancel:
+        on_new_commit: none
+
+stages:
+  - build
+  - test
+  - benchmark
+
+.gpu_job: &gpu_job
+  image: ubuntu:24.04
+  interruptible: true
+  tags:
+    - 1_gpu
+    - arch/x86_64
+    - colossus
+    - cuda_arch/86
+    - docker
+    - gpu
+    - os/linux
+    - type/docker
+
+build-environment:
+  <<: *gpu_job
+  stage: build
+  parallel:
+    matrix:
+      - CONDA_CUDA_VERSION:
+        - "11.8.0"
+        - "12.8.1"
+  before_script:
+    - nvidia-smi -L
+    - |
+      echo "Install prerequisites ..."
+      apt-get update
+      apt-get install -y --no-install-recommends \
+        build-essential ca-certificates curl git \
+        gcc-11 g++-11 libglib2.0-0
+    - |
+      echo "Install conda ..."
+      curl -sSL -o /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-$(uname -m).sh
+      if [ $CONDA_CUDA_VERSION == $TEST_CUDA_VERSION ]; then
+        rm -rf $TEST_CONDA_PREFIX
+        PREFIX=$TEST_CONDA_PREFIX
+      else
+        PREFIX=/opt/conda
+      fi
+      export PATH=$PREFIX/bin:$PATH
+      bash /tmp/miniconda.sh -b -p $PREFIX && rm -f /tmp/miniconda.sh
+      conda install -y python=${PYTHON_VERSION}
+      conda clean -ya
+  script:
+    - |
+      echo "Install 3DGRUT"
+      git config --global --add safe.directory "/builds/nrs/nre"
+      CUDA_VERSION=${CONDA_CUDA_VERSION} ./install_env.sh 3dgrut WITH_GCC11
+    - |
+      echo "Test environment"
+      conda run -n 3dgrut python train.py --help
+
+# lint-test-job:
+#   <<: *gpu_job
+#   stage: test
+#   before_script:
+#     - export PATH="$TEST_CONDA_PREFIX/bin:$PATH"
+#   script:
+#     - echo "Checking code formatting..."
+#     - ls -la $TEST_CONDA_PREFIX/envs
+#     - conda run -n 3dgrut pip install "black==25.9.0" "isort==5.13.0"
+#     - conda run -n 3dgrut black . --check --target-version=py311 --line-length=120 --exclude=thirdparty/tiny-cuda-nn
+#     - conda run -n 3dgrut isort . --check-only --diff --skip=thirdparty/tiny-cuda-nn --profile=black
+#     - echo "Done."
+
+# unit-test-job:
+#   <<: *gpu_job
+#   stage: test
+#   before_script:
+#     - export PATH="$TEST_CONDA_PREFIX/bin:$PATH"
+#   script:
+#     - echo "Running unit tests... "
+#     - ls -la $TEST_CONDA_PREFIX/envs
+#     - conda run -n 3dgrut python train.py --help
+#     - echo "Code coverage is 90%"
+
+# benchmark-job:      # This job runs in the deploy stage.
+#   stage: benchmark  # It only runs when *both* jobs in the test stage complete successfully.
+#   script:
+#     - echo "Running benchmarks..."
+#     - echo "Benchmarks successfully completed."

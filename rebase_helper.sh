@@ -30,7 +30,7 @@ if [ -z "$TARGET" ]; then
 fi
 
 # Ignore certain files and directories due to git-lfs limitations
-ignore=':(exclude)assets/*.gif :(exclude).gitattributes'
+ignore=':(exclude)assets/*.gif :(exclude).gitattributes :(exclude).gitlab-ci.yml'
 
 # Iterate over commit history backward till the initial commit
 commit=$(git rev-parse HEAD)
