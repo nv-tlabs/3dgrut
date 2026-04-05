@@ -139,7 +139,7 @@ struct GUTProjector : Params, UTParams {
             return false;
         }
 
-        const tcnn::vec3& particleScale = particles.scale(particleParameters);
+        const tcnn::vec3& particleScale   = particles.scale(particleParameters);
         const tcnn::mat3 particleRotation = particles.rotation(particleParameters);
 
         particleSensorRay = particleMean - sensorWorldPosition;
@@ -266,10 +266,10 @@ struct GUTProjector : Params, UTParams {
         bool validConicEstimation = false;
         {
             validConicEstimation = computeProjectedExtentConicOpacity(particleProjCovariance,
-                                                                 particleProjOpacity,
-                                                                 particleProjExtent,
-                                                                 particleProjConicOpacity,
-                                                                 particleMaxConicOpacityPower);
+                                                                      particleProjOpacity,
+                                                                      particleProjExtent,
+                                                                      particleProjConicOpacity,
+                                                                      particleMaxConicOpacityPower);
         }
 
         particlesVisibilityCudaPtr[particleIdx] = validConicEstimation ? 1 : 0;

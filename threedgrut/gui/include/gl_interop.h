@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved. SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,81 +21,86 @@
 #endif
 #include <cuda_gl_interop.h>
 
-
-#define CUDA_CHECK(call)                                              \
-    do {                                                              \
-        cudaError_t error = call;                                     \
-        if (error != cudaSuccess) {                                   \
-            std::stringstream ss;                                     \
-            ss << "CUDA call (" << #call << " ) failed with error: '" \
-               << cudaGetErrorString(error)                           \
-               << "' (" __FILE__ << ":" << __LINE__ << ")\n";         \
-        }                                                             \
-    } while (0)
-
+#define CUDA_CHECK(call)                                                       \
+  do {                                                                         \
+    cudaError_t error = call;                                                  \
+    if (error != cudaSuccess) {                                                \
+      std::stringstream ss;                                                    \
+      ss << "CUDA call (" << #call << " ) failed with error: '"                \
+         << cudaGetErrorString(error) << "' (" __FILE__ << ":" << __LINE__     \
+         << ")\n";                                                             \
+    }                                                                          \
+  } while (0)
 
 using CUDAGraphicsResource = struct cudaGraphicsResource *;
 
 void *cugl_register_gl_buffer(GLuint gl_buffer) {
-    CUDAGraphicsResource cuda_resource;
-    CUDA_CHECK(
-        cudaGraphicsGLRegisterBuffer(&cuda_resource, gl_buffer, cudaGraphicsMapFlagsWriteDiscard));
+  CUDAGraphicsResource cuda_resource;
+  CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cuda_resource, gl_buffer,
+                                          cudaGraphicsMapFlagsWriteDiscard));
 
-    return (void *) cuda_resource;
+  return (void *)cuda_resource;
 }
 
 void *cugl_register_gl_texture(GLuint gl_texture) {
-    CUDAGraphicsResource cuda_resource;
-    CUDA_CHECK(
-        cudaGraphicsGLRegisterImage(&cuda_resource, gl_texture, GL_TEXTURE_2D, cudaGraphicsMapFlagsWriteDiscard));
+  CUDAGraphicsResource cuda_resource;
+  CUDA_CHECK(cudaGraphicsGLRegisterImage(&cuda_resource, gl_texture,
+                                         GL_TEXTURE_2D,
+                                         cudaGraphicsMapFlagsWriteDiscard));
 
-    return (void *) cuda_resource;
+  return (void *)cuda_resource;
 }
 
 void cugl_unregister_cuda_resource(void *cuda_resource) {
-    CUDA_CHECK(cudaGraphicsUnregisterResource((CUDAGraphicsResource) cuda_resource));
+  CUDA_CHECK(
+      cudaGraphicsUnregisterResource((CUDAGraphicsResource)cuda_resource));
 }
 
 void *cugl_map_graphics_resource_ptr(void *cuda_resource, size_t *n_bytes) {
-    void *ptr;
-    CUDA_CHECK(cudaGraphicsMapResources(1, (CUDAGraphicsResource *) &cuda_resource, 0));
-    CUDA_CHECK(
-        cudaGraphicsResourceGetMappedPointer(&ptr, n_bytes, (CUDAGraphicsResource) cuda_resource));
+  void *ptr;
+  CUDA_CHECK(
+      cudaGraphicsMapResources(1, (CUDAGraphicsResource *)&cuda_resource, 0));
+  CUDA_CHECK(cudaGraphicsResourceGetMappedPointer(
+      &ptr, n_bytes, (CUDAGraphicsResource)cuda_resource));
 
-    return ptr;
+  return ptr;
 }
 
 void *cugl_map_graphics_resource_array(void *cuda_resource,
-                                      uint32_t array_index = 0,
-                                      uint32_t mip_level = 0) {
-    void *ptr;
-    CUDA_CHECK(cudaGraphicsMapResources(1, (CUDAGraphicsResource *) &cuda_resource, 0));
-    CUDA_CHECK(cudaGraphicsSubResourceGetMappedArray(
-        (cudaArray_t *) &ptr, (CUDAGraphicsResource) cuda_resource, array_index, mip_level));
-    return ptr;
+                                       uint32_t array_index = 0,
+                                       uint32_t mip_level = 0) {
+  void *ptr;
+  CUDA_CHECK(
+      cudaGraphicsMapResources(1, (CUDAGraphicsResource *)&cuda_resource, 0));
+  CUDA_CHECK(cudaGraphicsSubResourceGetMappedArray(
+      (cudaArray_t *)&ptr, (CUDAGraphicsResource)cuda_resource, array_index,
+      mip_level));
+  return ptr;
 }
 
 void cugl_unmap_graphics_resource(void *cuda_resource) {
-    CUDA_CHECK(cudaGraphicsUnmapResources(1, (CUDAGraphicsResource *) &cuda_resource, 0));
+  CUDA_CHECK(
+      cudaGraphicsUnmapResources(1, (CUDAGraphicsResource *)&cuda_resource, 0));
 }
-
 
 void cugl_memcpy_2d(void *dst, size_t dst_pitch, void *src, size_t src_pitch,
-                   size_t width, size_t height) {
-    CUDA_CHECK(cudaMemcpy2D(dst, dst_pitch, src, src_pitch, width, height,
-                            cudaMemcpyDeviceToDevice));
+                    size_t width, size_t height) {
+  CUDA_CHECK(cudaMemcpy2D(dst, dst_pitch, src, src_pitch, width, height,
+                          cudaMemcpyDeviceToDevice));
 }
 
-void cugl_memcpy_2d_to_array(void *dst, size_t w_offset, size_t h_offset, void *src, size_t src_pitch,
-                            size_t width, size_t height) {
-    CUDA_CHECK(cudaMemcpy2DToArray(
-        (cudaArray_t) dst, w_offset, h_offset, src, src_pitch, width, height,
-        cudaMemcpyDeviceToDevice));
+void cugl_memcpy_2d_to_array(void *dst, size_t w_offset, size_t h_offset,
+                             void *src, size_t src_pitch, size_t width,
+                             size_t height) {
+  CUDA_CHECK(cudaMemcpy2DToArray((cudaArray_t)dst, w_offset, h_offset, src,
+                                 src_pitch, width, height,
+                                 cudaMemcpyDeviceToDevice));
 }
 
-void cugl_memcpy_2d_to_array_async(void *dst, size_t w_offset, size_t h_offset, void *src, size_t src_pitch,
-                            size_t width, size_t height) {
-    CUDA_CHECK(cudaMemcpy2DToArrayAsync(
-        (cudaArray_t) dst, w_offset, h_offset, src, src_pitch, width, height,
-        cudaMemcpyDeviceToDevice));
+void cugl_memcpy_2d_to_array_async(void *dst, size_t w_offset, size_t h_offset,
+                                   void *src, size_t src_pitch, size_t width,
+                                   size_t height) {
+  CUDA_CHECK(cudaMemcpy2DToArrayAsync((cudaArray_t)dst, w_offset, h_offset, src,
+                                      src_pitch, width, height,
+                                      cudaMemcpyDeviceToDevice));
 }

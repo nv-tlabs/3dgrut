@@ -107,7 +107,6 @@ __device__ __inline__ RayPayloadT initializeRay(const threedgut::RenderParameter
     return ray;
 }
 
-
 // Initialize ray based on given pixel coordinates (load-balanced mode)
 template <typename RayPayloadT>
 __device__ __inline__ RayPayloadT initializeRayPerPixel(const threedgut::RenderParameters& params,

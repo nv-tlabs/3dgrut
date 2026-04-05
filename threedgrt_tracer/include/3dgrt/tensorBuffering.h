@@ -31,11 +31,9 @@ template <typename scalar_t>
 inline scalar_t* getPtr(torch::Tensor tensor) {
     if (tensor.dtype() == torch::kInt32) {
         return reinterpret_cast<scalar_t*>(tensor.contiguous().data_ptr<int>());
-    }
-    else if (tensor.dtype() == torch::kFloat32) {
+    } else if (tensor.dtype() == torch::kFloat32) {
         return reinterpret_cast<scalar_t*>(tensor.contiguous().data_ptr<float>());
-    }
-    else {
+    } else {
         throw std::runtime_error("getPtr(tensor) received a tensor of unsupported type");
     }
 }

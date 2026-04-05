@@ -220,7 +220,7 @@ class Tracer:
             if self.frame_timer is not None:
                 self.frame_timer.start()
 
-            (pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count, mog_visibility) = Tracer._Autograd.apply(
+            pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count, mog_visibility = Tracer._Autograd.apply(
                 self.tracer_wrapper,
                 frame_id,
                 gpu_batch.T_to_world.contiguous(),

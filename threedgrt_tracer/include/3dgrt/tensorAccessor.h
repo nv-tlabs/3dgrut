@@ -81,26 +81,26 @@
 #pragma once
 
 #if defined(__OPTIX__)
-    typedef int int32_t;
-    typedef unsigned int uint32_t;
-    typedef long long int64_t;
+typedef int int32_t;
+typedef unsigned int uint32_t;
+typedef long long int64_t;
 #else
-    #include <stdint.h>
+#include <stdint.h>
 #endif
 
 #ifdef __CUDACC__
-    #ifdef __CUDA_ARCH__
-        #define C10_DEVICE __device__
-        #define C10_HOST_DEVICE __device__
-    #else
-        #define C10_DEVICE __device__
-        #define C10_HOST __host__
-        #define C10_HOST_DEVICE __host__ __device__
-    #endif
+#ifdef __CUDA_ARCH__
+#define C10_DEVICE __device__
+#define C10_HOST_DEVICE __device__
 #else
-    #include <algorithm>
-    #define C10_HOST_DEVICE
-    #define C10_HOST
+#define C10_DEVICE __device__
+#define C10_HOST __host__
+#define C10_HOST_DEVICE __host__ __device__
+#endif
+#else
+#include <algorithm>
+#define C10_HOST_DEVICE
+#define C10_HOST
 #endif
 
 // The PtrTraits argument to the TensorAccessor/GenericPackedTensorAccessor
@@ -123,7 +123,7 @@ struct RestrictPtrTraits {
 // to functions and types available there (e.g. IntArrayRef isn't).
 
 // The PtrTraits argument is only relevant to cuda to support `__restrict__` pointers.
-template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+template <typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
 class TensorAccessorBase {
 public:
     typedef typename PtrTraits<T>::PtrType PtrType;
@@ -145,6 +145,7 @@ public:
     C10_HOST_DEVICE const PtrType data() const {
         return data_;
     }
+
 protected:
     PtrType data_;
     const index_t* sizes_;
@@ -155,8 +156,8 @@ protected:
 // `Tensor.accessor<T, N>()`.
 // For CUDA `Tensor`s, `GenericPackedTensorAccessor` is used on the host and only
 // indexing on the device uses `TensorAccessor`s.
-template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-class TensorAccessor : public TensorAccessorBase<T,N,PtrTraits,index_t> {
+template <typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+class TensorAccessor : public TensorAccessorBase<T, N, PtrTraits, index_t> {
 public:
     typedef typename PtrTraits<T>::PtrType PtrType;
 
@@ -164,19 +165,19 @@ public:
         PtrType data_,
         const index_t* sizes_,
         const index_t* strides_)
-        : TensorAccessorBase<T, N, PtrTraits, index_t>(data_,sizes_,strides_) {}
+        : TensorAccessorBase<T, N, PtrTraits, index_t>(data_, sizes_, strides_) {}
 
     C10_HOST_DEVICE TensorAccessor<T, N - 1, PtrTraits, index_t> operator[](index_t i) {
-        return TensorAccessor<T,N-1,PtrTraits,index_t>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
+        return TensorAccessor<T, N - 1, PtrTraits, index_t>(this->data_ + this->strides_[0] * i, this->sizes_ + 1, this->strides_ + 1);
     }
 
-    C10_HOST_DEVICE const TensorAccessor<T, N-1, PtrTraits, index_t> operator[](index_t i) const {
-        return TensorAccessor<T,N-1,PtrTraits,index_t>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
+    C10_HOST_DEVICE const TensorAccessor<T, N - 1, PtrTraits, index_t> operator[](index_t i) const {
+        return TensorAccessor<T, N - 1, PtrTraits, index_t>(this->data_ + this->strides_[0] * i, this->sizes_ + 1, this->strides_ + 1);
     }
 };
 
-template<typename T, template <typename U> class PtrTraits, typename index_t>
-class TensorAccessor<T,1,PtrTraits,index_t> : public TensorAccessorBase<T,1,PtrTraits,index_t> {
+template <typename T, template <typename U> class PtrTraits, typename index_t>
+class TensorAccessor<T, 1, PtrTraits, index_t> : public TensorAccessorBase<T, 1, PtrTraits, index_t> {
 public:
     typedef typename PtrTraits<T>::PtrType PtrType;
 
@@ -184,13 +185,13 @@ public:
         PtrType data_,
         const index_t* sizes_,
         const index_t* strides_)
-        : TensorAccessorBase<T, 1, PtrTraits, index_t>(data_,sizes_,strides_) {}
-    C10_HOST_DEVICE T & operator[](index_t i) {
+        : TensorAccessorBase<T, 1, PtrTraits, index_t>(data_, sizes_, strides_) {}
+    C10_HOST_DEVICE T& operator[](index_t i) {
         // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-        return this->data_[this->strides_[0]*i];
+        return this->data_[this->strides_[0] * i];
     }
-    C10_HOST_DEVICE const T & operator[](index_t i) const {
-        return this->data_[this->strides_[0]*i];
+    C10_HOST_DEVICE const T& operator[](index_t i) const {
+        return this->data_[this->strides_[0] * i];
     }
 };
 
@@ -202,7 +203,7 @@ public:
 // Use RestrictPtrTraits as PtrTraits if you want the tensor's data pointer to be marked as __restrict__.
 // Instantiation from data, sizes, strides is only needed on the host and std::copy isn't available
 // on the device, so those functions are host only.
-template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+template <typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
 class GenericPackedTensorAccessorBase {
 public:
     typedef typename PtrTraits<T>::PtrType PtrType;
@@ -227,7 +228,7 @@ public:
         const source_index_t* strides_)
         : data_(data_) {
         for (const auto i : c10::irange(N)) {
-            this->sizes_[i] = sizes_[i];
+            this->sizes_[i]   = sizes_[i];
             this->strides_[i] = strides_[i];
         }
     }
@@ -244,19 +245,21 @@ public:
     C10_HOST_DEVICE const PtrType data() const {
         return data_;
     }
+
 protected:
     PtrType data_;
     index_t sizes_[N];
     index_t strides_[N];
 };
 
-template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-class GenericPackedTensorAccessor : public GenericPackedTensorAccessorBase<T,N,PtrTraits,index_t> {
+template <typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+class GenericPackedTensorAccessor : public GenericPackedTensorAccessorBase<T, N, PtrTraits, index_t> {
 public:
     typedef typename PtrTraits<T>::PtrType PtrType;
 
 #if !defined(__CUDACC__)
-    C10_HOST GenericPackedTensorAccessor() : GenericPackedTensorAccessorBase<T, N, PtrTraits, index_t>() {}
+    C10_HOST GenericPackedTensorAccessor()
+        : GenericPackedTensorAccessorBase<T, N, PtrTraits, index_t>() {}
 
     C10_HOST GenericPackedTensorAccessor(
         PtrType data_,
@@ -273,27 +276,27 @@ public:
         : GenericPackedTensorAccessorBase<T, N, PtrTraits, index_t>(data_, sizes_, strides_) {}
 #else
     C10_DEVICE TensorAccessor<T, N - 1, PtrTraits, index_t> operator[](index_t i) {
-        index_t* new_sizes = this->sizes_ + 1;
+        index_t* new_sizes   = this->sizes_ + 1;
         index_t* new_strides = this->strides_ + 1;
-        return TensorAccessor<T,N-1,PtrTraits,index_t>(this->data_ + this->strides_[0]*i, new_sizes, new_strides);
+        return TensorAccessor<T, N - 1, PtrTraits, index_t>(this->data_ + this->strides_[0] * i, new_sizes, new_strides);
     }
 
     C10_DEVICE const TensorAccessor<T, N - 1, PtrTraits, index_t> operator[](index_t i) const {
-        const index_t* new_sizes = this->sizes_ + 1;
+        const index_t* new_sizes   = this->sizes_ + 1;
         const index_t* new_strides = this->strides_ + 1;
-        return TensorAccessor<T,N-1,PtrTraits,index_t>(this->data_ + this->strides_[0]*i, new_sizes, new_strides);
+        return TensorAccessor<T, N - 1, PtrTraits, index_t>(this->data_ + this->strides_[0] * i, new_sizes, new_strides);
     }
 #endif
-
 };
 
-template<typename T, template <typename U> class PtrTraits, typename index_t>
-class GenericPackedTensorAccessor<T,1,PtrTraits,index_t> : public GenericPackedTensorAccessorBase<T,1,PtrTraits,index_t> {
+template <typename T, template <typename U> class PtrTraits, typename index_t>
+class GenericPackedTensorAccessor<T, 1, PtrTraits, index_t> : public GenericPackedTensorAccessorBase<T, 1, PtrTraits, index_t> {
 public:
     typedef typename PtrTraits<T>::PtrType PtrType;
 
 #if !defined(__CUDACC__)
-    C10_HOST GenericPackedTensorAccessor() : GenericPackedTensorAccessorBase<T, 1, PtrTraits, index_t>() {}
+    C10_HOST GenericPackedTensorAccessor()
+        : GenericPackedTensorAccessorBase<T, 1, PtrTraits, index_t>() {}
 
     C10_HOST GenericPackedTensorAccessor(
         PtrType data_,
@@ -309,11 +312,11 @@ public:
         const source_index_t* strides_)
         : GenericPackedTensorAccessorBase<T, 1, PtrTraits, index_t>(data_, sizes_, strides_) {}
 #else
-    C10_DEVICE T & operator[](index_t i) {
+    C10_DEVICE T& operator[](index_t i) {
         return this->data_[this->strides_[0] * i];
     }
     C10_DEVICE const T& operator[](index_t i) const {
-        return this->data_[this->strides_[0]*i];
+        return this->data_[this->strides_[0] * i];
     }
 #endif
 };
