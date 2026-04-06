@@ -18,6 +18,10 @@
 #include <3dgrt/mathUtils.h>
 #include <3dgrt/particleDensity.h>
 
+// Define integer types for NVRTC compatibility
+typedef int int32_t;
+typedef unsigned int uint32_t;
+
 void quaternionWXYZToMatrix(const float4& q, float33& ret) {
     const float r = q.x;
     const float x = q.y;
