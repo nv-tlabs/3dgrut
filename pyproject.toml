@@ -14,7 +14,7 @@
 # limitations under the License.
 
 [build-system]
-requires = ["setuptools>64,<80"]
+requires = ["setuptools==78.1.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -24,7 +24,7 @@ description = "Official implementation of 3DGRT and 3DGUT"
 requires-python = ">=3.11"
 
 dependencies = [
-    "setuptools>64,<80",
+    "setuptools==78.1.1",
     "pillow",
     "plyfile",
     "torchmetrics",
@@ -75,6 +75,7 @@ exclude = ["thirdparty*", ".venv*"]
 torch = { index = "pytorch" }
 torchvision = { index = "pytorch" }
 torchmetrics = { index = "pypi" }
+setuptools = { index = "pypi" }
 
 [[tool.uv.index]]
 name = "pypi"

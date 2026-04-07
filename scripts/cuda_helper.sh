@@ -12,7 +12,7 @@ set -euo pipefail
 # Reference: https://github.com/pytorch/pytorch/blob/main/.ci/manywheel/build_cuda.sh#L54
 # Verify with: python -c "import torch; print(torch.version.cuda, torch.cuda.get_arch_list())"
 case "$CUDA_VERSION" in
-    11.8 | 11)
+    11.8.0 | 11.8 | 11)
         export CUDA_FULL_VERSION="11.8.0"
         export CUDA_RUNFILE_URL="https://developer.download.nvidia.com/compute/cuda/${CUDA_FULL_VERSION}/local_installers/cuda_${CUDA_FULL_VERSION}_520.61.05_linux.run"
         export MAX_GCC_VERSION=11
@@ -20,28 +20,28 @@ case "$CUDA_VERSION" in
         # Pin PyTorch to 2.4.0 — latest version with pre-built Kaolin cu118 wheel
         TORCH_VERSION="==2.4.0"
         ;;
-    12.4)
+    12.4.1 | 12.4)
         export CUDA_FULL_VERSION="12.4.1"
         export CUDA_RUNFILE_URL="https://developer.download.nvidia.com/compute/cuda/${CUDA_FULL_VERSION}/local_installers/cuda_${CUDA_FULL_VERSION}_550.54.15_linux.run"
         export MAX_GCC_VERSION=13
         export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0+PTX"
         TORCH_VERSION="==2.6.0"
         ;;
-    12.6)
+    12.6.3 | 12.6)
         export CUDA_FULL_VERSION="12.6.3"
         export CUDA_RUNFILE_URL="https://developer.download.nvidia.com/compute/cuda/${CUDA_FULL_VERSION}/local_installers/cuda_${CUDA_FULL_VERSION}_560.35.05_linux.run"
         export MAX_GCC_VERSION=13
         export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX"
         TORCH_VERSION="==2.8.0"
         ;;
-    12.8 | 12)
+    12.8.1 | 12.8 | 12)
         export CUDA_FULL_VERSION="12.8.1"
         export CUDA_RUNFILE_URL="https://developer.download.nvidia.com/compute/cuda/${CUDA_FULL_VERSION}/local_installers/cuda_${CUDA_FULL_VERSION}_570.124.06_linux.run"
         export MAX_GCC_VERSION=14
         export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX"
         TORCH_VERSION="==2.8.0"
         ;;
-    13.0 | 13)
+    13.0.2 | 13.0 | 13)
         export CUDA_FULL_VERSION="13.0.2"
         export MAX_GCC_VERSION=16
         export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.9;9.0;10.0;12.0+PTX"
@@ -58,7 +58,6 @@ echo "  - cuda: $CUDA_FULL_VERSION"
 CUDA_MAJOR_TARGET=$(echo "$CUDA_FULL_VERSION" | cut -d. -f1)
 CUDA_MINOR_TARGET=$(echo "$CUDA_FULL_VERSION" | cut -d. -f2)
 export CUDA_MAJOR_TARGET CUDA_MINOR_TARGET
-export CUDA_MAJOR="${CUDA_MAJOR_TARGET}"
 export CUDA_CONDA_CHANNEL="nvidia/label/cuda-${CUDA_FULL_VERSION}"
 
 # PyTorch release URL for the given CUDA version

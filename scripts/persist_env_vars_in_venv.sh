@@ -7,7 +7,7 @@ set -euo pipefail
 #
 #       CC  CXX  UV_PYTHON  UV_PROJECT_ENVIRONMENT
 #     CUDA_HOME      CUDA_VERSION    CUDA_FULL_VERSION
-#     CUDA_MAJOR  CUDA_MAJOR_TARGET  CUDA_MINOR_TARGET
+#           CUDA_MAJOR_TARGET  CUDA_MINOR_TARGET
 #    TORCH_CUDA_ARCH_LIST TORCH_INDEX_URL TORCH_VERSION
 
 
@@ -36,7 +36,6 @@ record_var CXX                    "${CXX}"
 record_var CUDA_HOME              "${CUDA_HOME}"
 record_var CUDA_VERSION           "${CUDA_VERSION}"
 record_var CUDA_FULL_VERSION      "${CUDA_FULL_VERSION}"
-record_var CUDA_MAJOR             "${CUDA_MAJOR}"
 record_var CUDA_MAJOR_TARGET      "${CUDA_MAJOR_TARGET}"
 record_var CUDA_MINOR_TARGET      "${CUDA_MINOR_TARGET}"
 record_var TORCH_CUDA_ARCH_LIST   "${TORCH_CUDA_ARCH_LIST}"
@@ -71,7 +70,6 @@ if !  declare -f _threedgrut_orig_deactivate >/dev/null 2>&1; then
     restore_var CUDA_HOME
     restore_var CUDA_VERSION
     restore_var CUDA_FULL_VERSION
-    restore_var CUDA_MAJOR
     restore_var CUDA_MAJOR_TARGET
     restore_var CUDA_MINOR_TARGET
     restore_var TORCH_CUDA_ARCH_LIST
@@ -94,8 +92,8 @@ ENVEOF
 
   echo "  Persisted following environment variables in ${ACTIVATE}:"
   echo "        CC  CXX  UV_PYTHON  UV_PROJECT_ENVIRONMENT         "
-  echo "      CUDA_HOME      CUDA_VERSION    CUDA_FULL_VERSION     "
-  echo "      CUDA_MAJOR  CUDA_MAJOR_TARGET  CUDA_MINOR_TARGET     "
+  echo "      CUDA_HOME     CUDA_VERSION     CUDA_FULL_VERSION     "
+  echo "            CUDA_MAJOR_TARGET  CUDA_MINOR_TARGET           "
   echo "     TORCH_CUDA_ARCH_LIST TORCH_INDEX_URL TORCH_VERSION    "
   echo ""
 

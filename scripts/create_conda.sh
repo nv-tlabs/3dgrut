@@ -102,11 +102,14 @@ echo "Setting conda env vars: CC=$GCC_PATH CXX=$GXX_PATH"
 conda env config vars set "CC=$GCC_PATH" "CXX=$GXX_PATH" \
     "CUDA_MAJOR_TARGET=$CUDA_MAJOR_TARGET" \
     "CUDA_MINOR_TARGET=$CUDA_MINOR_TARGET" \
+    "CUDA_VERSION=$CUDA_VERSION" \
+    "CUDA_FULL_VERSION=$CUDA_FULL_VERSION" \
     "TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST" \
     "TORCH_INDEX_URL=$TORCH_INDEX_URL" \
     "TORCH_VERSION=$TORCH_VERSION" \
     "UV_PROJECT_ENVIRONMENT=$CONDA_PREFIX" \
-    "UV_PYTHON=$(which python)"
+    "UV_PYTHON=$(which python)" \
+    "UV_LINK_MODE=copy"
 
 conda deactivate
 conda activate "$CONDA_ENV"
@@ -125,7 +128,7 @@ echo ""
 # ------------------------------------------
 echo "Installing CUDA toolkit from $CUDA_CONDA_CHANNEL ..."
 
-if [ "$CUDA_MAJOR" -ge 12 ]; then
+if [ "$CUDA_MAJOR_TARGET" -ge 12 ]; then
     conda install -y cuda-toolkit cmake ninja "gcc_linux-64=$gcc_version" -c "$CUDA_CONDA_CHANNEL"
 else
     conda install -y cuda-toolkit cmake ninja -c "$CUDA_CONDA_CHANNEL"
