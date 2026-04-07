@@ -35,7 +35,12 @@ try:
         "NuRecExporter",
         "initialize_usd_stage",
     ]
-except ImportError as e:
+except ModuleNotFoundError as e:
+    # Only suppress the error when the optional `pxr` package (usd-core) is absent.
+    # ModuleNotFoundError won't be raised by bugs inside an already-imported module,
+    # so genuine regressions in the USD exporter code propagate as normal errors.
+    if e.name is None or not e.name.startswith("pxr"):
+        raise
     import warnings
 
     warnings.warn(f"USD export functionality unavailable: {e}", ImportWarning, stacklevel=2)

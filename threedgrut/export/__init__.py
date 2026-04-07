@@ -87,7 +87,13 @@ try:
         "compute_average_visibility",
         "compute_visibility_and_filter",
     ]
-except ImportError as e:
+except ModuleNotFoundError as e:
+    # Only suppress when an optional dependency is absent: pxr (usd-core) for
+    # transforms.py, or torch for filter_visibility.py.  ModuleNotFoundError won't
+    # be raised by bugs inside an already-imported module, so genuine regressions
+    # in these modules propagate as normal errors.
+    if e.name is None or not e.name.startswith("pxr"):
+        raise
     import warnings
 
     warnings.warn(f"Transform/visibility utilities unavailable: {e}", ImportWarning, stacklevel=2)
@@ -102,7 +108,12 @@ try:
         "NuRecExporter",  # Omniverse-compatible format
         "USDImporter",
     ]
-except ImportError as e:
+except ModuleNotFoundError as e:
+    # Only suppress when pxr (usd-core) is absent — the sole optional dep for
+    # all three USD modules.  ModuleNotFoundError won't be raised by bugs inside
+    # an already-imported module, so genuine regressions propagate as normal errors.
+    if e.name is None or not e.name.startswith("pxr"):
+        raise
     import warnings
 
     warnings.warn(f"USD exporters/importers unavailable: {e}", ImportWarning, stacklevel=2)

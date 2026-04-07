@@ -2,7 +2,7 @@
 # Check ABI compatibility between a Kaolin wheel and a PyTorch wheel.
 #
 # Usage:
-#   ./scripts/check_abi.sh [options]
+#   ./scripts/test_kaolin_pytorch_abi.sh [options]
 #
 # Options:
 #   --kaolin-find-link URL   Kaolin find-links page (required)

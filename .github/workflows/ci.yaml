@@ -23,7 +23,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install formatter dependencies
-        run: pip install .[dev]
+        run: pip install black==26.3.1 isort==5.13.0
 
       - name: Check code style
         run: bash formatter.sh --check

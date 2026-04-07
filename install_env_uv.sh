@@ -41,9 +41,9 @@ What this script does:
   3. Creates .venv with Python 3.11 (skipped inside an active conda env)
   4. Pins PyTorch version constraints and configures the PyTorch index
   5. Installs the project and its dependencies (uv pip install -e .[gui])
-  6. Detects TORCH_CUDA_ARCH_LIST from the installed PyTorch wheel
-  7. Installs Kaolin (pre-built wheel for CUDA <=12, built from source for CUDA 13+)
-  8. Installs extra requirements from requirements_extra.txt
+  6. Installs Kaolin (pre-built wheel for CUDA <=12, built from source for CUDA 13+)
+  7. Installs extra requirements from requirements_extra.txt
+  8. Installs slangc
 
 Notes:
   - Run inside an active conda environment (created with scripts/create_conda.sh)
@@ -170,6 +170,14 @@ if [ -z "${CONDA_PREFIX:-}" ]; then
     echo "  Activated .venv"
     echo ""
 else
+    # The conda environment MUST have been created by scripts/create_conda.sh and then
+    # activated (source activate <env>) before reaching this point.
+    # scripts/create_conda.sh calls persist_env_vars_in_venv.sh, which writes
+    # CC, CXX, CUDA_*, TORCH_*, UV_PYTHON, UV_PROJECT_ENVIRONMENT, etc. into the
+    # conda activate/deactivate hooks.  Activating the environment re-exports all of
+    # those variables, so they are guaranteed to be set here under set -u.
+    # Running this script inside a generic conda env that was NOT created by
+    # scripts/create_conda.sh will fail with unbound-variable errors.
     echo "  Running in a pre-configured conda environment, conda manages CUDA toolkit installation"
     echo ""
 fi
@@ -201,7 +209,7 @@ fi
 export UV_CONSTRAINT="$UV_PROJECT_ENVIRONMENT/constraints.txt"
 echo "  UV constraint file: $UV_CONSTRAINT"
 
-export UV_INDEX="${UV_INDEX:-} pytorch=${TORCH_INDEX_URL}"
+export UV_INDEX="${UV_INDEX:+$UV_INDEX }pytorch=${TORCH_INDEX_URL}"
 echo "  PyTorch index: ${TORCH_INDEX_URL}"
 echo ""
 
@@ -213,15 +221,15 @@ uv pip install -e .[dev,gui]
 echo ""
 
 # ==========================================
-# Step 7: Build Kaolin from source (CUDA 13+ only)
+# Step 6: Build Kaolin from source (CUDA 13+ only)
 # ==========================================
 if [ "${CUDA_MAJOR_TARGET:-0}" -le 12 ]; then
-    echo "[7/8] Kaolin installed from wheel"
+    echo "[6/8] Kaolin installed from wheel"
     # Version is of form 2.8.0+cu128
     actual_torch_version=$(uv pip show torch | grep Version | awk '{print $2}' | sed 's/+cu.*//')
     kaolin_find_link="https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-${actual_torch_version}_cu${CUDA_MAJOR_TARGET}${CUDA_MINOR_TARGET}.html"
 else
-    echo "[7/8] Building Kaolin from source (no pre-built wheel for CUDA ${CUDA_MAJOR_TARGET}.x)..."
+    echo "[6/8] Building Kaolin from source (no pre-built wheel for CUDA ${CUDA_MAJOR_TARGET}.x)..."
     # Clone the repository and remove the existing one if it exists
     rm -rf thirdparty/kaolin
     git clone --recursive https://github.com/NVIDIAGameWorks/kaolin.git thirdparty/kaolin
@@ -246,17 +254,17 @@ uv pip install -e .[playground]
 echo ""
 
 # ==========================================
-# Step 8: Install extra requirements
+# Step 7: Install extra requirements
 # ==========================================
-echo "[8/8] Installing extra requirements..."
+echo "[7/8] Installing extra requirements..."
 # Use --no-cache to avoid dependency conflicts during reinstallation
 uv pip install --no-cache --no-build-isolation -r requirements_extra.txt
 echo ""
 
 # ==========================================
-# Step 9: Install slangc
+# Step 8: Install slangc
 # ==========================================
-echo "[9/9] Installing slangc..."
+echo "[8/8] Installing slangc..."
 bash ${SCRIPT_DIR}/scripts/install_slangc.sh
 echo ""
 

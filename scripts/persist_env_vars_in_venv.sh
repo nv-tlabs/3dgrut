@@ -9,6 +9,13 @@ set -euo pipefail
 #     CUDA_HOME      CUDA_VERSION    CUDA_FULL_VERSION
 #           CUDA_MAJOR_TARGET  CUDA_MINOR_TARGET
 #    TORCH_CUDA_ARCH_LIST TORCH_INDEX_URL TORCH_VERSION
+#
+# IMPORTANT: This script runs under `set -u`. All variables listed above are
+# expanded directly (without ${VAR:-} fallbacks) when the heredoc is written.
+# This is intentional: every one of them is required by the build system, so
+# an unbound-variable error here is a hard-fail that surfaces a misconfigured
+# environment early. Callers (e.g. create_venv_cuda.sh) MUST export all of
+# these variables before invoking this script.
 
 
 BANNER="# --- 3DGRUT env vars -------"

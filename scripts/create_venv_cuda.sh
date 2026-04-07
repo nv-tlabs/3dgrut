@@ -154,4 +154,10 @@ echo ""
 export UV_PYTHON="$(pwd)/.venv/bin/python"
 export UV_PROJECT_ENVIRONMENT="$(pwd)/.venv"
 
+# CC/CXX are required by persist_env_vars_in_venv.sh (bare ${CC}/${CXX} expansions
+# under set -u).  cuda_helper.sh always resolves a compatible compiler and exports
+# GCC_PATH/GXX_PATH, so derive CC/CXX from those here.
+export CC="$GCC_PATH"
+export CXX="$GXX_PATH"
+
 bash ${SCRIPT_DIR}/persist_env_vars_in_venv.sh

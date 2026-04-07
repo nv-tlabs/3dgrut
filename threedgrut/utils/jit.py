@@ -28,7 +28,7 @@ def compile_slang_kernel(kernel_files: list[str], output_file: str, defines: lis
     import importlib
     import subprocess
 
-    slang_build_env = os.environ
+    slang_build_env = os.environ.copy()
     slang_build_env["PATH"] += ";" if os.name == "nt" else ":"
 
     try:
@@ -42,7 +42,7 @@ def compile_slang_kernel(kernel_files: list[str], output_file: str, defines: lis
             "slangc",
             "-target",
             "cuda",
-            *(f"-I{path}" for path in include_paths),
+            *(arg for path in include_paths for arg in ("-I", path)),
             "-line-directive-mode",
             "none",
             "-matrix-layout-row-major",  # NB : this is required for cuda target
@@ -157,7 +157,7 @@ def load(
         extra_ldflags=ldflags,
         extra_include_paths=include_paths,
         with_cuda=with_cuda,
-        verbose=True,
+        verbose=verbose,
         *args,
         **kwargs,
     )

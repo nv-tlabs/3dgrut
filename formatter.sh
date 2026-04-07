@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -euof pipefail
+set -euo pipefail
 
 SCRIPT_DIR=$(dirname "$0")
 CHECK_MODE=false
@@ -16,8 +16,11 @@ FAILED=0
 BLACK_OPTS=()
 ISORT_OPTS=()
 if [ "$CHECK_MODE" = true ]; then
+    ACTION="Checking"
     BLACK_OPTS=(--check --diff)
     ISORT_OPTS=(--check --diff)
+else
+    ACTION="Formatting"
 fi
 
 pushd "$SCRIPT_DIR" &> /dev/null
@@ -41,11 +44,11 @@ else
     echo ""
 fi
 
-echo "${CHECK_MODE:+Checking}${CHECK_MODE:-Formatting} Python code with black..."
+echo "$ACTION Python code with black..."
 black . "${BLACK_OPTS[@]}" --target-version=py311 --line-length=120 --extend-exclude=thirdparty/tiny-cuda-nn || FAILED=1
 echo ""
 
-echo "${CHECK_MODE:+Checking}${CHECK_MODE:-Formatting} Python code with isort..."
+echo "$ACTION Python code with isort..."
 isort . "${ISORT_OPTS[@]}" --extend-skip=thirdparty/tiny-cuda-nn --extend-skip=thirdparty/kaolin --profile=black || FAILED=1
 echo ""
 
