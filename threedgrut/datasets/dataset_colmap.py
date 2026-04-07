@@ -33,7 +33,7 @@ from threedgrut.utils.logger import logger
 
 from .protocols import Batch, BoundedMultiViewDataset, DatasetVisualization
 from .utils import (
-    compute_max_radius,
+    compute_opencv_fisheye_max_angle,
     create_camera_visualization,
     create_pixel_coords,
     get_center_and_diag,
@@ -183,11 +183,11 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             principal_point = params[2:4].astype(np.float32)
             focal_length = params[0:2].astype(np.float32)
             radial_coeffs = params[4:].astype(np.float32)
-            # Estimate max angle for fisheye
-            max_radius_pixels = compute_max_radius(resolution.astype(np.float64), principal_point)
-            fov_angle_x = 2.0 * max_radius_pixels / focal_length[0]
-            fov_angle_y = 2.0 * max_radius_pixels / focal_length[1]
-            max_angle = np.max([fov_angle_x, fov_angle_y]) / 2.0
+            # Determine max_angle via a monotonicity search over the distortion polynomial.
+            # This correctly handles both standard fisheye lenses (where the polynomial
+            # folds back before reaching the image corners) and omnidirectional 360-degree
+            # cameras (where the pixel radius bound stops the search instead).
+            max_angle = compute_opencv_fisheye_max_angle(focal_length, radial_coeffs, resolution, principal_point)
 
             params = OpenCVFisheyeCameraModelParameters(
                 principal_point=principal_point,

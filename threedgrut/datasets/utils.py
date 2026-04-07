@@ -203,15 +203,77 @@ def compute_max_distance_to_border(image_size_component: float, principal_point_
         return image_size_component - principal_point_component
 
 
-def compute_max_radius(image_size: np.ndarray, principal_point: np.ndarray) -> float:
-    """Compute the maximum radius from the principal point to the image boundaries."""
-    max_diag = np.array(
-        [
-            compute_max_distance_to_border(image_size[0], principal_point[0]),
-            compute_max_distance_to_border(image_size[1], principal_point[1]),
-        ]
-    )
-    return np.linalg.norm(max_diag).item()
+def compute_opencv_fisheye_max_angle(
+    focal_length: np.ndarray,
+    radial_coeffs: np.ndarray,
+    image_size: np.ndarray,
+    principal_point: np.ndarray,
+    sample_count: int = 2000,
+) -> float:
+    """Compute the maximum valid angle for an OpenCV fisheye camera via a monotonicity search.
+
+    The OpenCV fisheye forward mapping (angle -> distorted radius) is:
+        r_d(theta) = theta * (1 + k1*theta^2 + k2*theta^4 + k3*theta^6 + k4*theta^8)
+
+    The search is performed in normalized (undistorted) image coordinates, where the
+    radius bound for the farthest image corner is:
+        max_r_d = sqrt( (dx/fx)^2 + (dy/fy)^2 )
+        dx = max(cx, W - cx),  dy = max(cy, H - cy)
+
+    This is geometrically precise: it is the exact r_d that the corner pixel corresponds to,
+    accounting for independent x/y focal lengths without needing an f_min approximation.
+
+    The search stops at the first angle where either:
+      - the mapping is no longer monotonically increasing (polynomial folds back), OR
+      - r_d(theta) exceeds max_r_d (projection has left the image boundary).
+
+    This handles both standard inscribed-circle fisheye lenses (monotonicity stops the
+    search) and omnidirectional 360-degree cameras (radius bound stops the search),
+    without requiring an explicit camera-type flag.
+
+    Args:
+        focal_length: [fx, fy] in pixels.
+        radial_coeffs: [k1, k2, k3, k4] OpenCV fisheye distortion coefficients.
+        image_size: [W, H] in pixels.
+        principal_point: [cx, cy] in pixels.
+        sample_count: Number of angle samples between 0 and pi.
+
+    Returns:
+        Maximum valid half-angle in radians.
+    """
+    fx, fy = float(focal_length[0]), float(focal_length[1])
+    k1, k2, k3, k4 = radial_coeffs[:4].astype(np.float64)
+
+    # Normalized corner distance: the exact r_d of the farthest image pixel.
+    dx = compute_max_distance_to_border(float(image_size[0]), float(principal_point[0]))
+    dy = compute_max_distance_to_border(float(image_size[1]), float(principal_point[1]))
+    max_r_d = np.sqrt((dx / fx) ** 2 + (dy / fy) ** 2)
+
+    step = np.pi / sample_count
+    angle = 0.0
+
+    for i in range(1, sample_count + 1):
+        theta = i * step
+        theta2 = theta * theta
+
+        # Forward mapping: r_d = theta * P(theta^2),  P = 1 + k1*t + k2*t^2 + k3*t^3 + k4*t^4
+        poly_val = 1.0 + theta2 * (k1 + theta2 * (k2 + theta2 * (k3 + theta2 * k4)))
+        r_d = theta * poly_val
+
+        # Derivative: d(r_d)/d(theta) = 1 + 3*k1*theta^2 + 5*k2*theta^4 + 7*k3*theta^6 + 9*k4*theta^8
+        d_poly = 1.0 + theta2 * (3.0 * k1 + theta2 * (5.0 * k2 + theta2 * (7.0 * k3 + theta2 * 9.0 * k4)))
+
+        if d_poly <= 0.0:
+            # Polynomial is no longer monotonically increasing — outside the valid domain.
+            break
+
+        angle = theta
+
+        if r_d > max_r_d:
+            # Projection has left the image boundary in normalized coordinates.
+            break
+
+    return angle
 
 
 def create_camera_visualization(cam_list):
