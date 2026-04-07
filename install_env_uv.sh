@@ -228,6 +228,8 @@ else
     # Pin to a fixed commit for reproducibility
     pushd thirdparty/kaolin > /dev/null
       git checkout v0.18.0
+      # Remove usd-core dependency from requirements.txt
+      sed -i '/usd-core/d' tools/requirements.txt
       # Install build dependencies
       uv pip install -r tools/viz_requirements.txt -r tools/requirements.txt -r tools/build_requirements.txt
       # Build and install
