@@ -15,7 +15,7 @@
 
 #include <3dgrt/kernels/slang/common/sphericalHarmonics.slang>
 
-namespace shRadiativeParticle 
+namespace shRadiativeParticle
 {
 static const int RadianceMaxNumSphCoefficients = PARTICLE_RADIANCE_NUM_COEFFS;
 static const int Dim = 3;
@@ -44,7 +44,7 @@ struct Parameters : IDifferentiable
 
 [BackwardDifferentiable][ForceInline]
 Parameters fetchParametersFromBuffer(no_diff uint32_t particleIdx,
-                                     no_diff ParametersBuffer parametersBuffer) 
+                                     no_diff ParametersBuffer parametersBuffer)
 {
     Parameters parameters;
     const uint32_t particleOffset = particleIdx * RadianceMaxNumSphCoefficients;
@@ -54,10 +54,10 @@ Parameters fetchParametersFromBuffer(no_diff uint32_t particleIdx,
     return parameters;
 }
 
-[BackwardDerivativeOf(fetchParametersFromBuffer)][ForceInline] 
+[BackwardDerivativeOf(fetchParametersFromBuffer)][ForceInline]
 void fetchParametersFromBufferBwd(no_diff uint32_t particleIdx,
                                   no_diff ParametersBuffer parametersBuffer,
-                                  Parameters parametersGrad) 
+                                  Parameters parametersGrad)
 {
     const uint32_t particleOffset = particleIdx * RadianceMaxNumSphCoefficients;
     [unroll] for (int i = 0; i < RadianceMaxNumSphCoefficients; ++i) {
@@ -109,9 +109,9 @@ void integrateRadianceFromParameters<let backToFront : bool>(float3 incidentDire
                                                              no_diff uint32_t sphDegree,
                                                              float weight,
                                                              Parameters parameters,
-                                                             inout vector<float, Dim> integratedRadiance) 
+                                                             inout vector<float, Dim> integratedRadiance)
 {
-    if (weight > 0.0f) 
+    if (weight > 0.0f)
     {
         integrateRadiance<backToFront>(
             weight,
@@ -193,12 +193,12 @@ inline void particleFeaturesIntegrateFwd(in float weight,
     if(alpha > 0.0f)
     {
         DifferentialPair<float> alphaDiff = DifferentialPair<float>(alpha, alphaGrad);
-        DifferentialPair<vector<float, shRadiativeParticle.Dim>> featuresDiff = 
+        DifferentialPair<vector<float, shRadiativeParticle.Dim>> featuresDiff =
             DifferentialPair<vector<float, shRadiativeParticle.Dim>>(features, featuresGrad);
 
         const float weight = 1.0f / (1.0f - alpha);
         integratedFeatures = (integratedFeatures - features * alpha) * weight;
-        DifferentialPair<vector<float, shRadiativeParticle.Dim>> integratedFeaturesDiff = 
+        DifferentialPair<vector<float, shRadiativeParticle.Dim>> integratedFeaturesDiff =
             DifferentialPair<vector<float, shRadiativeParticle.Dim>>(integratedFeatures, integratedFeaturesGrad);
 
         bwd_diff(shRadiativeParticle.integrateRadiance<true>)(
@@ -220,15 +220,15 @@ inline void particleFeaturesIntegrateFwd(in float weight,
     shRadiativeParticle.CommonParameters commonParameters,
     in vector<float, shRadiativeParticle.Dim> features,
     inout vector<float, shRadiativeParticle.Dim> integratedFeatures,
-    inout vector<float, shRadiativeParticle.Dim> integratedFeaturesGrad) 
+    inout vector<float, shRadiativeParticle.Dim> integratedFeaturesGrad)
 {
     if (alpha > 0.0f)
     {
         DifferentialPair<float> alphaDiff = DifferentialPair<float>(alpha, alphaGrad);
-        
+
         const float weight = 1.0f / (1.0f - alpha);
         integratedFeatures = (integratedFeatures - features * alpha) * weight;
-        DifferentialPair<vector<float, shRadiativeParticle.Dim>> integratedFeaturesDiff = 
+        DifferentialPair<vector<float, shRadiativeParticle.Dim>> integratedFeaturesDiff =
             DifferentialPair<vector<float, shRadiativeParticle.Dim>>(integratedFeatures, integratedFeaturesGrad);
 
         bwd_diff(shRadiativeParticle.integrateRadianceFromBuffer<true>)(

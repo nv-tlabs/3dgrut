@@ -22,14 +22,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Black and isort
-        run: pip install "black==26.3.1" "isort==5.13.0"
+      - name: Install formatter dependencies
+        run: pip install black==26.3.1 isort==5.13.0
 
-      - name: Check code style (black)
-        run: black . --check --target-version=py311 --line-length=120 --exclude=thirdparty/tiny-cuda-nn
-
-      - name: Check import sorting (isort)
-        run: isort . --check-only --diff --skip=thirdparty/tiny-cuda-nn --profile=black
+      - name: Check code style
+        run: bash formatter.sh --check
 
   ci-legacy:
     name: ci-legacy (CUDA ${{ matrix.cuda_version }})
@@ -58,8 +55,8 @@ jobs:
 
       - name: Install prerequisites
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
             build-essential \
             ca-certificates \
             curl \
@@ -96,14 +93,17 @@ jobs:
 
   ci-uv:
     name: ci-uv (CUDA ${{ matrix.cuda_version }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-${{ matrix.ubuntu_version }}
     strategy:
       fail-fast: false
       matrix:
-        cuda_version:
-          - "11.8.0"
-          - "12.8.1"
-          # - "13"
+        include:
+          - cuda_version: "11.8.0"
+            ubuntu_version: "22.04"
+          - cuda_version: "12.8.1"
+            ubuntu_version: "24.04"
+          - cuda_version: "13.0.2"
+            ubuntu_version: "24.04"
     steps:
       - name: Free Disk Space (Ubuntu)
         uses: jlumbroso/free-disk-space@main

@@ -23,12 +23,24 @@ Includes:
 - Utilities: Stage creation, coordinate transforms
 """
 
-from threedgrut.export.usd.exporter import USDExporter
-from threedgrut.export.usd.nurec.exporter import NuRecExporter
-from threedgrut.export.usd.stage_utils import initialize_usd_stage
+__all__ = []
 
-__all__ = [
-    "USDExporter",
-    "NuRecExporter",
-    "initialize_usd_stage",
-]
+try:
+    from threedgrut.export.usd.exporter import USDExporter
+    from threedgrut.export.usd.nurec.exporter import NuRecExporter
+    from threedgrut.export.usd.stage_utils import initialize_usd_stage
+
+    __all__ += [
+        "USDExporter",
+        "NuRecExporter",
+        "initialize_usd_stage",
+    ]
+except ModuleNotFoundError as e:
+    # Only suppress the error when the optional `pxr` package (usd-core) is absent.
+    # ModuleNotFoundError won't be raised by bugs inside an already-imported module,
+    # so genuine regressions in the USD exporter code propagate as normal errors.
+    if e.name is None or not e.name.startswith("pxr"):
+        raise
+    import warnings
+
+    warnings.warn(f"USD export functionality unavailable: {e}", ImportWarning, stacklevel=2)
