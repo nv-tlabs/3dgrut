@@ -35,6 +35,10 @@ if command -v clang-format &> /dev/null; then
         echo "$CLANG_FILES" | xargs -r clang-format -i
     fi
     echo ""
+
+else
+    echo "clang-format not found. Skipping C/C++/CUDA code formatting. Please install clang-format in the system if you want to format C/C++/CUDA code."
+    echo ""
 fi
 
 echo "${CHECK_MODE:+Checking}${CHECK_MODE:-Formatting} Python code with black..."
