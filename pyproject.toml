@@ -26,6 +26,7 @@ requires-python = ">=3.11"
 dependencies = [
     "setuptools==78.1.1",
     "pillow",
+    "ninja",
     "plyfile",
     "torchmetrics",
     "addict",
@@ -80,6 +81,7 @@ torch = { index = "pytorch" }
 torchvision = { index = "pytorch" }
 torchmetrics = { index = "pypi" }
 setuptools = { index = "pypi" }
+ninja = { index = "pypi" }
 
 [[tool.uv.index]]
 name = "pypi"
