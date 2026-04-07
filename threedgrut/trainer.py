@@ -32,7 +32,6 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 import threedgrut.datasets as datasets
 from threedgrut.datasets.protocols import BoundedMultiViewDataset
 from threedgrut.datasets.utils import DEFAULT_DEVICE, MultiEpochsDataLoader, PointCloud
-from threedgrut.export import NuRecExporter, PLYExporter, USDExporter
 from threedgrut.model.losses import ssim
 from threedgrut.model.model import MixtureOfGaussians
 from threedgrut.optimizers import SelectiveAdam
@@ -327,10 +326,12 @@ class Trainer3DGRUT:
         scene_bbox,
     ):
         gui = None
+
         if conf.with_gui:
             from threedgrut.utils.gui import GUI
 
             gui = GUI(conf, model, train_dataset, val_dataset, scene_bbox)
+
         elif conf.with_viser_gui:
             from threedgrut.utils.viser_gui_util import ViserGUI
 
@@ -763,11 +764,17 @@ class Trainer3DGRUT:
 
         # Export the mixture-of-3d-gaussians
         logger.log_rule("Exporting Models")
+
         if conf.export_ply.enabled:
+            from threedgrut.export import PLYExporter
+
             ply_path = conf.export_ply.path if conf.export_ply.path else os.path.join(out_dir, "export_last.ply")
             exporter = PLYExporter()
             exporter.export(self.model, Path(ply_path), dataset=self.train_dataset, conf=conf)
+
         if conf.export_usd.enabled:
+            from threedgrut.export import NuRecExporter, USDExporter
+
             # Determine format for filename suffix
             usdz_format = getattr(conf.export_usd, "format", "nurec")
             if usdz_format == "standard":
