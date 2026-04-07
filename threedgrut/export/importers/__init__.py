@@ -36,5 +36,7 @@ try:
         "NuRecUSDImporter",
         "USDImporter",
     ]
-except ImportError:
-    pass
+except ImportError as e:
+    import warnings
+
+    warnings.warn(f"USD importers unavailable: {e}", ImportWarning, stacklevel=2)

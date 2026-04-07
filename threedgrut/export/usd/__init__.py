@@ -35,5 +35,7 @@ try:
         "NuRecExporter",
         "initialize_usd_stage",
     ]
-except ImportError:
-    pass
+except ImportError as e:
+    import warnings
+
+    warnings.warn(f"USD export functionality unavailable: {e}", ImportWarning, stacklevel=2)

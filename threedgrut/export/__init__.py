@@ -56,15 +56,6 @@ from threedgrut.export.formats.ply import PLYExporter
 from threedgrut.export.importers.base import FormatImporter
 from threedgrut.export.importers.ply import PLYImporter
 
-# Visibility filtering
-from threedgrut.export.scripts.filter_visibility import (
-    compute_average_visibility,
-    compute_visibility_and_filter,
-)
-
-# Transform utilities
-from threedgrut.export.transforms import estimate_normalizing_transform
-
 __all__ = [
     # Core interfaces
     "ExportableModel",
@@ -75,8 +66,6 @@ __all__ = [
     "ModelCapabilities",
     "ExportFilterSettings",
     "filter_gaussians",
-    # Transforms
-    "estimate_normalizing_transform",
     # Format exporters
     "PLYExporter",
     # Format importers
@@ -84,10 +73,24 @@ __all__ = [
     "PLYImporter",
     # Transcoding adapter
     "AttributesExportAdapter",
-    # Visibility filtering
-    "compute_average_visibility",
-    "compute_visibility_and_filter",
 ]
+
+try:
+    from threedgrut.export.scripts.filter_visibility import (
+        compute_average_visibility,
+        compute_visibility_and_filter,
+    )
+    from threedgrut.export.transforms import estimate_normalizing_transform
+
+    __all__ += [
+        "estimate_normalizing_transform",
+        "compute_average_visibility",
+        "compute_visibility_and_filter",
+    ]
+except ImportError as e:
+    import warnings
+
+    warnings.warn(f"Transform/visibility utilities unavailable: {e}", ImportWarning, stacklevel=2)
 
 try:
     from threedgrut.export.importers.usd import USDImporter
@@ -99,5 +102,7 @@ try:
         "NuRecExporter",  # Omniverse-compatible format
         "USDImporter",
     ]
-except ImportError:
-    pass
+except ImportError as e:
+    import warnings
+
+    warnings.warn(f"USD exporters/importers unavailable: {e}", ImportWarning, stacklevel=2)
