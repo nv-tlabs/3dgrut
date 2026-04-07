@@ -327,10 +327,12 @@ class Trainer3DGRUT:
         scene_bbox,
     ):
         gui = None
+
         if conf.with_gui:
             from threedgrut.utils.gui import GUI
 
             gui = GUI(conf, model, train_dataset, val_dataset, scene_bbox)
+
         elif conf.with_viser_gui:
             from threedgrut.utils.viser_gui_util import ViserGUI
 

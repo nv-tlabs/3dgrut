@@ -207,7 +207,7 @@ echo ""
 # Step 5: Install project and dependencies
 # ==========================================
 echo "[5/8] Installing project and dependencies..."
-uv pip install -e .[gui]
+uv pip install -e .[dev,gui]
 echo ""
 
 # ==========================================
@@ -256,6 +256,13 @@ uv pip install -e .[playground]
 # ==========================================
 echo "[8/8] Installing extra requirements..."
 uv pip install --no-build-isolation -r requirements_extra.txt
+echo ""
+
+# ==========================================
+# Step 9: Install slangc
+# ==========================================
+echo "[9/9] Installing slangc..."
+bash ${SCRIPT_DIR}/scripts/install_slangc.sh
 echo ""
 
 # ==========================================

@@ -47,6 +47,9 @@ echo ""
 # (cuda12) $ python -c "import torch; print(torch.version.cuda, torch.cuda.get_arch_list())"
 # 12.8 ['sm_75', 'sm_80', 'sm_86', 'sm_90', 'sm_100', 'sm_120', 'compute_120']
 #
+# (cuda13) $ python -c "import torch; print(torch.version.cuda, torch.cuda.get_arch_list())"
+# 13.0 ['sm_80', 'sm_90', 'sm_100', 'sm_110', 'sm_120', 'compute_120']
+#
 # Check if CUDA_VERSION is supported
 if [ "$CUDA_VERSION" = "11.8.0" ]; then
     export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0+PTX";
@@ -128,6 +131,7 @@ if [ "$CUDA_VERSION" = "11.8.0" ]; then
     conda install -y cuda-toolkit cmake ninja -c nvidia/label/cuda-11.8.0
     conda install -y pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 "numpy<2.0" "mkl<=2022.1.0" -c pytorch -c nvidia/label/cuda-11.8.0
     pip3 install --find-links https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.2_cu118.html kaolin==0.17.0
+    pip3 install usd-core
 
 # CUDA 12.8 supports compute capability 10.0 and 12.0
 elif [ "$CUDA_VERSION" = "12.8.1" ]; then
@@ -162,7 +166,9 @@ elif [ "$CUDA_VERSION" = "12.8.1" ]; then
     popd
     rm -fr thirdparty/kaolin
 
-# Unsupported CUDA version
+    pip install usd-core
+
+# Unsupported CUDA version in legacy script
 else
     echo "Unsupported CUDA version: $CUDA_VERSION, available options are 11.8.0 and 12.8.1"
     exit 1
