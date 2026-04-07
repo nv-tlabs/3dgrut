@@ -15,6 +15,7 @@
 
 import math
 import os
+import platform
 import sys
 
 import torch
@@ -121,11 +122,12 @@ def load(
 
     # Linker options.
     if os.name == "posix":
+        _cuda_arch = f"{platform.machine()}-linux"
         ldflags = [
             # NOTE: ad-hoc fix for CUDA 12.8.1
             f"-L{os.path.join(CUDA_HOME, 'lib', 'stubs')}",
-            f"-L{os.path.join(CUDA_HOME, 'targets', 'x86_64-linux', 'lib')}",
-            f"-L{os.path.join(CUDA_HOME, 'targets', 'x86_64-linux', 'lib', 'stubs')}",
+            f"-L{os.path.join(CUDA_HOME, 'targets', _cuda_arch, 'lib')}",
+            f"-L{os.path.join(CUDA_HOME, 'targets', _cuda_arch, 'lib', 'stubs')}",
             "-lcuda",
             "-lnvrtc",
         ]
