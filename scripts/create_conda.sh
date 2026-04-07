@@ -95,6 +95,34 @@ else
 fi
 conda activate "$CONDA_ENV"
 
+# Verify the compiler is correct after reactivation
+export CC=$GCC_PATH
+export CXX=$GXX_PATH
+actual_gcc_version=$("$CC" -dumpversion | cut -d '.' -f 1)
+if [ "$actual_gcc_version" -gt "$MAX_GCC_VERSION" ]; then
+    echo "ERROR: CC=$CC reports GCC $actual_gcc_version which exceeds max $MAX_GCC_VERSION for CUDA $CUDA_FULL_VERSION"
+    exit 1
+fi
+echo "  Verified: CC=$CC (GCC $actual_gcc_version), TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
+echo ""
+
+# ------------------------------------------
+# Step 5: Install CUDA toolkit and build tools
+# ------------------------------------------
+echo "Installing CUDA toolkit from $CUDA_CONDA_CHANNEL ..."
+
+if [ "$CUDA_MAJOR_TARGET" -ge 12 ]; then
+    conda install -y cuda-toolkit cmake ninja "gcc_linux-64=$actual_gcc_version" -c "$CUDA_CONDA_CHANNEL"
+else
+    conda install -y cuda-toolkit cmake ninja -c "$CUDA_CONDA_CHANNEL"
+fi
+
+# ------------------------------------------
+# Step 6: Install OpenGL headers for the playground
+# ------------------------------------------
+# Use --override-channels to avoid conflicts with nvidia channel's cuda-toolkit spec
+conda install -c conda-forge --override-channels mesa-libgl-devel-cos7-x86_64 -y
+
 # ------------------------------------------
 # Step 4: Persist CC, CXX, and TORCH_CUDA_ARCH_LIST in the conda env
 # ------------------------------------------
@@ -110,35 +138,6 @@ conda env config vars set "CC=$GCC_PATH" "CXX=$GXX_PATH" \
     "UV_PROJECT_ENVIRONMENT=$CONDA_PREFIX" \
     "UV_PYTHON=$(which python)" \
     "UV_LINK_MODE=copy"
-
-conda deactivate
-conda activate "$CONDA_ENV"
-
-# Verify the compiler is correct after reactivation
-actual_gcc_version=$("$CC" -dumpversion | cut -d '.' -f 1)
-if [ "$actual_gcc_version" -gt "$MAX_GCC_VERSION" ]; then
-    echo "ERROR: CC=$CC reports GCC $actual_gcc_version which exceeds max $MAX_GCC_VERSION for CUDA $CUDA_FULL_VERSION"
-    exit 1
-fi
-echo "  Verified: CC=$CC (GCC $actual_gcc_version), TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
-echo ""
-
-# ------------------------------------------
-# Step 5: Install CUDA toolkit and build tools
-# ------------------------------------------
-echo "Installing CUDA toolkit from $CUDA_CONDA_CHANNEL ..."
-
-if [ "$CUDA_MAJOR_TARGET" -ge 12 ]; then
-    conda install -y cuda-toolkit cmake ninja "gcc_linux-64=$gcc_version" -c "$CUDA_CONDA_CHANNEL"
-else
-    conda install -y cuda-toolkit cmake ninja -c "$CUDA_CONDA_CHANNEL"
-fi
-
-# ------------------------------------------
-# Step 6: Install OpenGL headers for the playground
-# ------------------------------------------
-# Use --override-channels to avoid conflicts with nvidia channel's cuda-toolkit spec
-conda install -c conda-forge --override-channels mesa-libgl-devel-cos7-x86_64 -y
 
 echo ""
 echo "=========================================="

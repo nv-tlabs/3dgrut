@@ -105,7 +105,8 @@ jobs:
             ubuntu_version: "22.04"
           - cuda_version: "12.8.1"
             ubuntu_version: "24.04"
-
+          - cuda_version: "13.0.2"
+            ubuntu_version: "24.04"
     steps:
       - name: Free Disk Space (Ubuntu)
         uses: jlumbroso/free-disk-space@main
