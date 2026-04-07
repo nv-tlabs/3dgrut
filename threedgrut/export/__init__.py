@@ -55,7 +55,6 @@ from threedgrut.export.formats.ply import PLYExporter
 # Format importers
 from threedgrut.export.importers.base import FormatImporter
 from threedgrut.export.importers.ply import PLYImporter
-from threedgrut.export.importers.usd import USDImporter
 
 # Visibility filtering
 from threedgrut.export.scripts.filter_visibility import (
@@ -65,10 +64,6 @@ from threedgrut.export.scripts.filter_visibility import (
 
 # Transform utilities
 from threedgrut.export.transforms import estimate_normalizing_transform
-
-# USD exporters
-from threedgrut.export.usd.exporter import USDExporter
-from threedgrut.export.usd.nurec.exporter import NuRecExporter
 
 __all__ = [
     # Core interfaces
@@ -84,15 +79,25 @@ __all__ = [
     "estimate_normalizing_transform",
     # Format exporters
     "PLYExporter",
-    "USDExporter",  # ParticleField3DGaussianSplat schema
-    "NuRecExporter",  # Omniverse-compatible format
     # Format importers
     "FormatImporter",
     "PLYImporter",
-    "USDImporter",
     # Transcoding adapter
     "AttributesExportAdapter",
     # Visibility filtering
     "compute_average_visibility",
     "compute_visibility_and_filter",
 ]
+
+try:
+    from threedgrut.export.importers.usd import USDImporter
+    from threedgrut.export.usd.exporter import USDExporter
+    from threedgrut.export.usd.nurec.exporter import NuRecExporter
+
+    __all__ += [
+        "USDExporter",  # ParticleField3DGaussianSplat schema
+        "NuRecExporter",  # Omniverse-compatible format
+        "USDImporter",
+    ]
+except ImportError:
+    pass

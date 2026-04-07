@@ -23,12 +23,17 @@ Includes:
 - Utilities: Stage creation, coordinate transforms
 """
 
-from threedgrut.export.usd.exporter import USDExporter
-from threedgrut.export.usd.nurec.exporter import NuRecExporter
-from threedgrut.export.usd.stage_utils import initialize_usd_stage
+__all__ = []
 
-__all__ = [
-    "USDExporter",
-    "NuRecExporter",
-    "initialize_usd_stage",
-]
+try:
+    from threedgrut.export.usd.exporter import USDExporter
+    from threedgrut.export.usd.nurec.exporter import NuRecExporter
+    from threedgrut.export.usd.stage_utils import initialize_usd_stage
+
+    __all__ += [
+        "USDExporter",
+        "NuRecExporter",
+        "initialize_usd_stage",
+    ]
+except ImportError:
+    pass
