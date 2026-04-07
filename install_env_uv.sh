@@ -156,7 +156,8 @@ if [ -z "${CONDA_PREFIX:-}" ]; then
         export CC="${CC:-$(which gcc)}"
         export CXX="${CXX:-$(which g++)}"
         # This should be a symlink to the actual python interpreter, don't use realpath
-        export UV_PYTHON=${SCRIPT_DIR}/.venv/bin/python
+        export UV_PYTHON="$(pwd)/.venv/bin/python"
+        export UV_PROJECT_ENVIRONMENT="$(pwd)/.venv"
         # Compute CUDA related environment variables
         source ${SCRIPT_DIR}/scripts/cuda_helper.sh
         # Using system CUDA if available
@@ -168,7 +169,6 @@ if [ -z "${CONDA_PREFIX:-}" ]; then
     source .venv/bin/activate
     echo "  Activated .venv"
     echo ""
-    export UV_PROJECT_ENVIRONMENT=".venv"
 else
     echo "  Running in a pre-configured conda environment, conda manages CUDA toolkit installation"
     echo ""
@@ -187,6 +187,7 @@ echo "  UV_PROJECT_ENVIRONMENT: $UV_PROJECT_ENVIRONMENT"
 echo "  UV_PYTHON: $UV_PYTHON"
 echo "  TORCH_INDEX_URL: $TORCH_INDEX_URL"
 echo "  TORCH_VERSION: $TORCH_VERSION"
+echo "  TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
 echo ""
 
 # ==========================================
@@ -208,19 +209,6 @@ echo ""
 # ==========================================
 echo "[5/8] Installing project and dependencies..."
 uv pip install -e .[gui]
-echo ""
-
-# ==========================================
-# Step 6: Set TORCH_CUDA_ARCH_LIST
-# ==========================================
-echo "[6/8] Detecting TORCH_CUDA_ARCH_LIST..."
-min_arch=70
-if [ -z "${TORCH_CUDA_ARCH_LIST:-}" ]; then
-    torch_arch_list=$(uv run python -c "import torch,re; min_arch = $min_arch; print(';'.join(m.group(1)+'.'+m.group(2)+m.group(3) for s in torch.cuda.get_arch_list() for m in [re.match(r'sm_(\d+)(\d)([a-z]?)$', s)] if m and int(m.group(1)+m.group(2)) >= min_arch))")
-    torch_arch_list=${torch_arch_list:-9.0}
-    export TORCH_CUDA_ARCH_LIST="$torch_arch_list+PTX"
-fi
-echo "  TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
 echo ""
 
 # ==========================================

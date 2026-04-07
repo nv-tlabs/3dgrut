@@ -151,4 +151,7 @@ CUDA_SOURCE=$([ "$USE_SYSTEM_CUDA" = true ] && echo "system" || echo "local")
 echo "  - nvcc: $NVCC_VERSION ($CUDA_SOURCE)"
 echo ""
 
+export UV_PYTHON="$(pwd)/.venv/bin/python"
+export UV_PROJECT_ENVIRONMENT="$(pwd)/.venv"
+
 bash ${SCRIPT_DIR}/persist_env_vars_in_venv.sh
