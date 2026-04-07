@@ -224,41 +224,32 @@ echo ""
 # Step 6: Build Kaolin from source (CUDA 13+ only)
 # ==========================================
 if [ "${CUDA_MAJOR_TARGET:-0}" -le 12 ]; then
-    echo "[7/8] Kaolin installed from wheel"
-    # version is of form 2.8.0+cu128
+    echo "[6/8] Kaolin installed from wheel"
+    # Version is of form 2.8.0+cu128
     actual_torch_version=$(uv pip show torch | grep Version | awk '{print $2}' | sed 's/+cu.*//')
     kaolin_find_link="https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-${actual_torch_version}_cu${CUDA_MAJOR_TARGET}${CUDA_MINOR_TARGET}.html"
-    # append to UV_FIND_LINKS
-    export UV_FIND_LINKS="${UV_FIND_LINKS:+${UV_FIND_LINKS}:}${kaolin_find_link}"
-    echo "  Kaolin find link: ${kaolin_find_link}"
-    echo ""
 else
-    echo "[7/8] Building Kaolin from source (no pre-built wheel for CUDA ${CUDA_MAJOR_TARGET}.x)..."
-
+    echo "[6/8] Building Kaolin from source (no pre-built wheel for CUDA ${CUDA_MAJOR_TARGET}.x)..."
     # Clone the repository and remove the existing one if it exists
     rm -rf thirdparty/kaolin
     git clone --recursive https://github.com/NVIDIAGameWorks/kaolin.git thirdparty/kaolin
-    pushd thirdparty/kaolin > /dev/null
-
     # Pin to a fixed commit for reproducibility
-    git checkout c2da967b9e0d8e3ebdbd65d3e8464d7e39005203
-
-    # Apply fix for CUDA 12.x compatibility
-    sed -i 's!AT_DISPATCH_FLOATING_TYPES_AND_HALF(feats_in.type()!AT_DISPATCH_FLOATING_TYPES_AND_HALF(feats_in.scalar_type()!g' kaolin/csrc/render/spc/raytrace_cuda.cu
-
-    # Install build dependencies
-    uv pip install ninja imageio imageio-ffmpeg
-    uv pip install -r tools/viz_requirements.txt -r tools/requirements.txt -r tools/build_requirements.txt
-
-    # Build and install
-    IGNORE_TORCH_VER=1 python setup.py install
-
-    # Clean up``
+    pushd thirdparty/kaolin > /dev/null
+      git checkout v0.18.0
+      # Remove usd-core dependency from requirements.txt
+      sed -i '/usd-core/d' tools/requirements.txt
+      # Install build dependencies
+      uv pip install -r tools/viz_requirements.txt -r tools/requirements.txt -r tools/build_requirements.txt
+      # Build and install
+      IGNORE_TORCH_VER=1 python setup.py bdist_wheel
     popd > /dev/null
-    rm -rf thirdparty/kaolin
-    echo "  Kaolin built and installed"
-    echo ""
+    # Clean up
+    kaolin_find_link=$(dirname $(ls thirdparty/kaolin/dist/kaolin-*.whl | head -1))
 fi
+
+# Append to UV_FIND_LINKS and install Kaolin
+export UV_FIND_LINKS="${UV_FIND_LINKS:+${UV_FIND_LINKS}:}${kaolin_find_link}"
+echo "  Kaolin find link: ${kaolin_find_link}"
 uv pip install -e .[playground]
 echo ""
 
@@ -270,6 +261,12 @@ echo "[7/8] Installing extra requirements..."
 uv pip install --no-cache --no-build-isolation -r requirements_extra.txt
 echo ""
 
+# ==========================================
+# Step 8: Install slangc
+# ==========================================
+echo "[8/8] Installing slangc..."
+bash ${SCRIPT_DIR}/scripts/install_slangc.sh
+echo ""
 
 # ==========================================
 # Done!

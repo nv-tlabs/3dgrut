@@ -98,38 +98,15 @@ def setup_3dgut(conf):
     ]
 
     # Compile slang kernels
-    # TODO: do not overwrite files, use config hash to register the needed version
-    import importlib
-    import subprocess
-
-    slang_mod = importlib.import_module("slangtorch")
-    slang_dir = os.path.dirname(slang_mod.__file__)
-
-    slang_build_env = os.environ
-    slang_build_env["PATH"] += ";" if os.name == "nt" else ":"
-    slang_build_env["PATH"] += os.path.join(slang_dir, "bin")
     slang_build_inc_dir = os.path.join(os.path.dirname(__file__), "include", "3dgut")
-
-    subprocess.check_call(
-        [
-            "slangc",
-            "-target",
-            "cuda",
-            "-I",
+    jit.compile_slang_kernel(
+        kernel_files=[f"{os.path.join(slang_build_inc_dir, 'threedgut.slang')}"],
+        output_file=f"{os.path.join(build_dir, 'threedgutSlang.cuh')}",
+        include_paths=[
             os.path.join(os.path.dirname(__file__), "include"),
-            "-I",
             os.path.join(os.path.dirname(__file__), "..", "threedgrt_tracer", "include"),
-            "-line-directive-mode",
-            "none",
-            "-matrix-layout-row-major",  # NB : this is required for cuda target
-            "-Wno-41018",
-            "-O2",
-            *defines,
-            f"{os.path.join(slang_build_inc_dir, 'threedgut.slang')}",
-            "-o",
-            f"{os.path.join(build_dir, 'threedgutSlang.cuh')}",
         ],
-        env=slang_build_env,
+        defines=defines,
     )
 
     # Compile and load.

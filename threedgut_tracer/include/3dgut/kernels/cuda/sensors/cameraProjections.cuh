@@ -17,6 +17,8 @@
 
 #include <3dgut/sensors/sensors.h>
 
+#include <cfloat>
+
 namespace threedgut {
 
 // Computes 2-norm of a [x,y] vector in a numerically stable way

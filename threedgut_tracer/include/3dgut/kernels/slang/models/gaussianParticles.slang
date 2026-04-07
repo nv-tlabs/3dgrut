@@ -183,7 +183,7 @@ struct Parameters : IDifferentiable {
     float3 canonicalRayDirection,
     float3 scale,
     float3x3 rotationT) {
-    
+
     // TODO : unify the computation of normals
     float3 surfelNm = float3(0, 0, 1); // fetchSurfelNm<MOGTRACING_PRIMITIVE_TYPE>(primId % params.gPrimNumTri);
     // resolve direction ambiguities
@@ -248,17 +248,17 @@ float integrateHit<let backToFront : bool>(
            integratedNormal = lerp(integratedNormal, normal, alpha);
        }
    }
-   else 
+   else
    {
        integratedDepth += depth * weight;
-       if (enableNormal) 
+       if (enableNormal)
        {
             integratedNormal += normal * weight;
        }
    }
 
    transmittance *= (1 - alpha);
-   return weight; 
+   return weight;
 }
 
 [BackwardDifferentiable][ForceInline]
@@ -283,12 +283,12 @@ float processHitFromBuffer<let backToFront : bool>(
             enableNormal,
             normal))
     {
-        return integrateHit<backToFront>(alpha, 
-                                         transmittance, 
-                                         depth, 
-                                         integratedDepth, 
-                                         enableNormal, 
-                                         normal, 
+        return integrateHit<backToFront>(alpha,
+                                         transmittance,
+                                         depth,
+                                         integratedDepth,
+                                         enableNormal,
+                                         normal,
                                          integratedNormal);
     }
     return 0.0f;
@@ -329,10 +329,10 @@ no_diff float3 incidentDirectionFromBuffer(
 // ------------------------------------------------------------------------------------------------------------------
 // Entry points
 
-[CudaDeviceExport] 
+[CudaDeviceExport]
 inline gaussianParticle.Parameters particleDensityParameters(
     uint32_t particleIdx,
-    gaussianParticle.CommonParameters commonParameters) 
+    gaussianParticle.CommonParameters commonParameters)
 {
     return gaussianParticle.fetchParameters(
         particleIdx,
@@ -365,7 +365,7 @@ inline bool particleDensityHit(
     inout float integratedDepth,
     in bool enableNormal,
     in float3 normal,
-    inout float3 integratedNormal) 
+    inout float3 integratedNormal)
 {
     return gaussianParticle.integrateHit<false>(
         alpha,
@@ -386,7 +386,7 @@ inline float particleDensityProcessHitFwdFromBuffer(
     inout float transmittance,
     inout float integratedDepth,
     in bool enableNormal,
-    inout float3 integratedNormal) 
+    inout float3 integratedNormal)
 {
     return gaussianParticle.processHitFromBuffer<false>(
         rayOrigin,
@@ -415,15 +415,15 @@ void particleDensityProcessHitBwdToBuffer(
     bool enableNormal,
     in float3 normal,
     inout float3 integratedNormal,
-    inout float3 integratedNormalGrad) 
+    inout float3 integratedNormalGrad)
 {
     if (alpha > 0.0f)
     {
         const float weight = 1.0f / (1.0f - alpha);
-        
+
         transmittance *= weight;
         DifferentialPair<float> transmittanceDiff = DifferentialPair<float>(transmittance, transmittanceGrad);
-        
+
         integratedDepth = (integratedDepth - depth * alpha) * weight;
         DifferentialPair<float> integratedDepthDiff = DifferentialPair<float>(integratedDepth, integratedDepthGrad);
 
@@ -529,8 +529,8 @@ bool particleDensityHitInstance(
 )
 {
     bwd_diff(gaussianParticle.incidentDirectionFromBuffer)(
-        particleIdx, 
-        commonParameters.parametersBuffer, 
+        particleIdx,
+        commonParameters.parametersBuffer,
         sourcePosition
     );
 }
