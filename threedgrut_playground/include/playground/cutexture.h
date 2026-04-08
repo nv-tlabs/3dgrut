@@ -67,7 +67,7 @@ public:
     cudaCreateTextureObject(&_tex, &resDesc, &texDesc, NULL);
   }
   inline const cudaTextureObject_t &tex() const { return _tex; }
-  inline const bool isTexInitialized() const { return _tex != 0; }
+  inline bool isTexInitialized() const { return _tex != 0; }
 };
 
 using CudaTexture2DFloat2Object = CudaTexture2DFloatObject<float, 2>;
