@@ -169,7 +169,7 @@ class NeRFDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     @torch.no_grad()
     def compute_spatial_extents(self):
-        camera_origins = torch.FloatTensor(self.poses[:, :, 3])
+        camera_origins = torch.FloatTensor(self.poses[:, :3, 3])
         center = camera_origins.mean(dim=0)
         dists = torch.linalg.norm(camera_origins - center[None, :], dim=-1)
         mean_dist = torch.mean(dists)  # mean distance between of cameras from center

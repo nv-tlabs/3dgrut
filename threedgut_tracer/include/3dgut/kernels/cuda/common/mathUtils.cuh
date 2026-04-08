@@ -17,6 +17,8 @@
 
 #ifdef __CUDACC__
 
+#include <3dgut/kernels/cuda/common/cudaMath.cuh>
+
 using float33 = float3[3]; // row major matrix
 
 template <class T>
@@ -306,13 +308,7 @@ static __device__ inline float4& operator-=(float4& a, float b) {
 //     return make_int3(a.x * b.x, a.y * b.y, a.z * b.z);
 // }
 
-static __device__ inline float dot(float2 a, float2 b) {
-    return a.x * b.x + a.y * b.y;
-}
-
-static __device__ inline float dot(float3 a, float3 b) {
-    return a.x * b.x + a.y * b.y + a.z * b.z;
-}
+// dot(float2, ...) and dot(float3, ...) provided by cudaMath.cuh (const-ref signatures)
 
 static __device__ inline void bwd_dot(float3 a, float3 b, float3& d_a, float3& d_b, float d_out) {
     d_a.x += d_out * b.x;
@@ -331,13 +327,7 @@ static __device__ inline float sum(const float3 v) {
     return v.x + v.y + v.z;
 }
 
-static __device__ inline float3 cross(float3 a, float3 b) {
-    float3 out;
-    out.x = a.y * b.z - a.z * b.y;
-    out.y = a.z * b.x - a.x * b.z;
-    out.z = a.x * b.y - a.y * b.x;
-    return out;
-}
+// cross(float3, ...) provided by cudaMath.cuh (const-ref signature)
 
 static __device__ inline void bwd_cross(float3 a, float3 b, float3& d_a, float3& d_b, float3 d_out) {
     d_a.x += d_out.z * b.y - d_out.y * b.z;
@@ -426,7 +416,7 @@ static __device__ inline float3 safe_normalize_bw(const float3& v, const float3&
                                               d_out.x * (v.x * v.y) + d_out.y * (v.y * v.y) + d_out.z * (v.z * v.y),
                                               d_out.x * (v.x * v.z) + d_out.y * (v.y * v.z) + d_out.z * (v.z * v.z));
     }
-    return make_float3(0);
+    return make_float3(0.f, 0.f, 0.f);
 }
 
 static __device__ __inline__ float sqr(const float x) {
