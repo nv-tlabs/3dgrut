@@ -28,7 +28,7 @@ fi
 RESULT_DIR=${RESULT_DIR:-"results/colmap_ncore_v4"}
 EXTRA_ARGS=${@:2} # any extra arguments to pass to the script
 
-# if the result directory already exists, warn user and aport execution
+# if the result directory already exists, warn user and abort execution
 if [ -d "$RESULT_DIR" ]; then
     echo "Result directory $RESULT_DIR already exists. Aborting execution."
     exit 1
