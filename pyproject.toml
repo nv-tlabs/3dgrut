@@ -63,7 +63,7 @@ dev = [
 ]
 gui = [
     "libigl",
-    "polyscope>=2.3.0",
+    "polyscope>=2.6.0",
     "viser",
 ]
 playground = [
@@ -92,3 +92,16 @@ url = "https://pypi.org/simple"
 # [[tool.uv.index]]
 # name = "pytorch"
 # url = "https://download.pytorch.org/whl"
+
+[tool.black]
+target-version = ["py311"]
+line-length = 120
+extend-exclude = '''
+/(
+  ^/thirdparty/tiny-cuda-nn
+)/
+'''
+
+[tool.isort]
+skip_gitignore = true
+profile = "black"
