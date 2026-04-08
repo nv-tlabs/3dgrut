@@ -92,7 +92,7 @@ jobs:
           conda run -n 3dgrut python train.py --help
 
   ci-uv:
-    name: ci-uv (CUDA ${{ matrix.cuda_version }})
+    name: ci-uv (CUDA ${{ matrix.cuda_version }} Ubuntu ${{ matrix.ubuntu_version }})
     runs-on: ubuntu-${{ matrix.ubuntu_version }}
     strategy:
       fail-fast: false
@@ -104,6 +104,8 @@ jobs:
             ubuntu_version: "24.04"
           - cuda_version: "13.0.2"
             ubuntu_version: "24.04"
+          - cuda_version: "13.0.2"
+            ubuntu_version: "24.04-arm"
     steps:
       - name: Free Disk Space (Ubuntu)
         uses: jlumbroso/free-disk-space@main
