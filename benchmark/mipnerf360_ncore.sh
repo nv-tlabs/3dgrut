@@ -55,7 +55,7 @@ do
     CUDA_VISIBLE_DEVICES=0 python train.py --config-name $CONFIG \
         use_wandb=False with_gui=False out_dir=$RESULT_DIR \
         path=data/colmap_ncore_v4/$SCENE/$SCENE.json experiment_name=$SCENE \
-        dataset.camera_ids=["camera1_$DATA_FACTOR"] \
+        "dataset.camera_ids=[\"camera1_$DATA_FACTOR\"]" \
         dataset.simplejpeg_fastdct=false \
         dataset.simplejpeg_fastupsample=false \
         $EXTRA_ARGS >> $RESULT_DIR/train_$SCENE.log
