@@ -604,8 +604,8 @@ __device__ inline void processHitBwd(
         // >>> rayRadiance = accumulatedRayRad + weigth * rayRad + (1-galpha)*transmit * residualRayRad
         const float3 rayRad = weight * grad;
         radiance += rayRad;
-        const float3 residualRayRad = maxf3((nextTransmit <= minTransmittance ? make_float3(0) : (integratedRadiance - radiance) / nextTransmit),
-                                            make_float3(0));
+        const float3 residualRayRad = maxf3((nextTransmit <= minTransmittance ? make_float3(0.f, 0.f, 0.f) : (integratedRadiance - radiance) / nextTransmit),
+                                            make_float3(0.f, 0.f, 0.f));
 
         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         // ---> rayDns = 1 - prevTrm * (1-galpha) * nextTrm
