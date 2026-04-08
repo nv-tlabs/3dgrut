@@ -464,8 +464,10 @@ class NCoreDataset(torch.utils.data.Dataset, BoundedMultiViewDataset, DatasetVis
 
         # Compute world-to-world_global transformation from pose graph
         world_world_global_edge = sequence_loader.pose_graph.get_edge("world", "world_global")
-        assert world_world_global_edge is not None, "World-to-world_global poses are required to determine scene extent"
-        T_world_base = world_world_global_edge.T_source_target
+        if world_world_global_edge is not None:
+            T_world_base = world_world_global_edge.T_source_target
+        else:
+            T_world_base = np.eye(4, dtype=np.float64)
         self.T_world_common_world_base: npt.NDArray[np.float64] = T_world_base
         T_world_base_world_common = np.linalg.inv(T_world_base).astype(np.float32)
         self.T_world_to_world_global: np.ndarray = T_world_base_world_common
