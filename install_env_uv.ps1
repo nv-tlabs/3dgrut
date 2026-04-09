@@ -53,7 +53,7 @@ function Write-Error-And-Exit {
     exit 1
 }
 
-# $env:DISTUTILS_USE_SDK=1
+$env:DISTUTILS_USE_SDK=1
 
 # ==========================================
 # Step 1: Initialize git submodules
@@ -108,7 +108,6 @@ Write-Host ""
 Write-Host "[3/9] Detecting Visual Studio build tools..."
 
 # CUDA 12.x officially supports MSVC from VS 2017 through VS 2022.
-# Directory names: year-based (2017, 2019, 2022) or internal version (15, 16, 17).
 $script:CudaCompatibleVsIds = @("2017", "2019", "2022", "15", "16", "17")
 
 function Get-VsVersionFromPath([string]$Path) {
@@ -121,30 +120,16 @@ function Get-VsVersionFromPath([string]$Path) {
     return ""
 }
 
-function Find-VsBuildTool {
-    param([string]$ToolName)
-    $searchPatterns = @(
-        "C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64",
-        "C:\Program Files\Microsoft Visual Studio\*\*\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin",
-        "C:\Program Files\Microsoft Visual Studio\*\*\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja",
-        "C:\Program Files (x86)\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64",
-        "C:\Program Files (x86)\Microsoft Visual Studio\*\*\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin",
-        "C:\Program Files (x86)\Microsoft Visual Studio\*\*\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja"
-    )
+# Resolve glob patterns against VS install directories, preferring CUDA-compatible versions.
+function Find-InVsInstall([string[]]$Patterns) {
     $compatible = $null
     $fallback = $null
-    foreach ($pattern in $searchPatterns) {
-        $resolved = Resolve-Path $pattern -ErrorAction SilentlyContinue
-        foreach ($dir in $resolved) {
-            $tool = Join-Path $dir.Path $ToolName
-            if (Test-Path $tool) {
-                if (-not $fallback) { $fallback = $dir.Path }
-                if (-not $compatible) {
-                    $vsVer = Get-VsVersionFromPath $dir.Path
-                    if ($script:CudaCompatibleVsIds -contains $vsVer) {
-                        $compatible = $dir.Path
-                    }
-                }
+    foreach ($pattern in $Patterns) {
+        foreach ($p in (Resolve-Path $pattern -ErrorAction SilentlyContinue)) {
+            if (-not $fallback) { $fallback = $p.Path }
+            if (-not $compatible -and
+                ($script:CudaCompatibleVsIds -contains (Get-VsVersionFromPath $p.Path))) {
+                $compatible = $p.Path
             }
         }
     }
@@ -152,39 +137,63 @@ function Find-VsBuildTool {
     return $fallback
 }
 
-$clDir    = Find-VsBuildTool "cl.exe"
-$cmakeDir = Find-VsBuildTool "cmake.exe"
-$ninjaDir = Find-VsBuildTool "ninja.exe"
+# If the MSVC environment is already fully configured (Developer Command Prompt,
+# vcvarsall.bat, or ilammy/msvc-dev-cmd in CI), respect it. We verify both cl.exe
+# on PATH and LIB containing x64 paths to catch partial setups that cause x86/x64
+# linker mismatches.
+$existingCl = Get-Command cl.exe -ErrorAction SilentlyContinue
+$libIsX64 = $env:LIB -and ($env:LIB -match "\\x64|\\amd64")
 
-if (-not $clDir) {
-    Write-Error-And-Exit @"
-ERROR: Visual Studio C++ compiler (cl.exe) not found.
+if ($existingCl -and $libIsX64) {
+    $clDir = Split-Path $existingCl.Source
+    Write-Host "  cl.exe:    $clDir (environment already configured)"
+} else {
+    $vcvarsall = Find-InVsInstall @(
+        "C:\Program Files\Microsoft Visual Studio\*\*\VC\Auxiliary\Build\vcvarsall.bat",
+        "C:\Program Files (x86)\Microsoft Visual Studio\*\*\VC\Auxiliary\Build\vcvarsall.bat"
+    )
+    if (-not $vcvarsall) {
+        Write-Error-And-Exit @"
+ERROR: Visual Studio C++ compiler not found.
   Install Visual Studio Build Tools from:
   https://visualstudio.microsoft.com/visual-cpp-build-tools/
   Include the 'Desktop development with C++' workload.
 "@
-}
-
-Write-Host "  cl.exe:    $clDir"
-$env:Path = "$clDir;$env:Path"
-
-if ($cmakeDir) {
-    Write-Host "  cmake.exe: $cmakeDir"
-    $env:Path = "$cmakeDir;$env:Path"
-} else {
-    Write-Host "  cmake.exe: not found in VS, checking PATH..." -ForegroundColor Yellow
-    if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
-        Write-Error-And-Exit "cmake not found. Install CMake or Visual Studio Build Tools."
     }
+    Write-Host "  Initializing MSVC x64 environment via vcvarsall.bat..."
+    foreach ($line in (cmd /c "`"$vcvarsall`" x64 >nul 2>&1 && set" 2>&1)) {
+        if ($line -match "^([^=]+)=(.*)$") {
+            [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+        }
+    }
+    $existingCl = Get-Command cl.exe -ErrorAction SilentlyContinue
+    if (-not $existingCl) { Write-Error-And-Exit "vcvarsall.bat ran but cl.exe is still not on PATH." }
+    $clDir = Split-Path $existingCl.Source
+    Write-Host "  cl.exe:    $clDir"
 }
 
-if ($ninjaDir) {
-    Write-Host "  ninja.exe: $ninjaDir"
-    $env:Path = "$ninjaDir;$env:Path"
-} else {
-    Write-Host "  ninja.exe: not found in VS, checking PATH..." -ForegroundColor Yellow
-    if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
-        Write-Host "  WARNING: ninja not found, builds may be slower" -ForegroundColor Yellow
+# cmake and ninja are normally available after vcvarsall.bat; fall back to VS directory search.
+foreach ($tool in @(
+    @{ Name = "cmake"; Required = $true },
+    @{ Name = "ninja"; Required = $false }
+)) {
+    $cmd = Get-Command $tool.Name -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        $dir = Find-InVsInstall @(
+            "C:\Program Files\Microsoft Visual Studio\*\*\Common7\IDE\CommonExtensions\Microsoft\CMake\*\$($tool.Name).exe",
+            "C:\Program Files (x86)\Microsoft Visual Studio\*\*\Common7\IDE\CommonExtensions\Microsoft\CMake\*\$($tool.Name).exe"
+        )
+        if ($dir) {
+            $dir = Split-Path $dir
+            Write-Host "  $($tool.Name):     $dir"
+            $env:Path = "$dir;$env:Path"
+        } elseif ($tool.Required) {
+            Write-Error-And-Exit "$($tool.Name) not found. Install CMake or Visual Studio Build Tools."
+        } else {
+            Write-Host "  WARNING: $($tool.Name) not found, builds may be slower" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  $($tool.Name):     $(Split-Path $cmd.Source)"
     }
 }
 
