@@ -114,6 +114,7 @@ __global__ void render(threedgut::RenderParameters params,
     finalizeRay(ray, params, sensorRayOriginPtr, worldHitCountPtr, worldHitDistancePtr, radianceDensityPtr, sensorToWorldTransform);
 }
 
+#if FINE_GRAINED_LOAD_BALANCING
 // Fine-grained load balancing rendering kernel: static allocation per virtual tile
 __global__ void renderBalanced(threedgut::RenderParameters params,
                                const tcnn::uvec2* __restrict__ sortedTileRangeIndicesPtr,
@@ -213,6 +214,7 @@ __global__ void renderBalanced(threedgut::RenderParameters params,
         }
     }
 }
+#endif // FINE_GRAINED_LOAD_BALANCING
 
 __global__ void renderBackward(threedgut::RenderParameters params,
                                const tcnn::uvec2* __restrict__ sortedTileRangeIndicesPtr,
