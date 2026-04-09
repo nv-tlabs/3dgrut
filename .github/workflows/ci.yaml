@@ -132,7 +132,7 @@ jobs:
         uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
         with:
           python-version: "3.11"
-          enable-cache: "false"
+          enable-cache: "true"
 
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -150,3 +150,44 @@ jobs:
       - name: Smoketest - python train.py --help # better (smoke) testing requires a GPU
         run: |
           .venv/bin/python train.py --help
+
+  ci-uv-windows:
+    name: ci-uv-windows (CUDA ${{ matrix.cuda_version }})
+    runs-on: windows-latest
+ 
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda_version:
+          - "12.8.1"
+    env:
+      CUDA_VERSION: ${{ matrix.cuda_version }}
+
+    steps:
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64  # Options: x86, x64, arm64
+
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.34
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.cuda_version }}
+          method: network
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+        with:
+          python-version: "3.11"
+          enable-cache: "true"
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+ 
+      - name: Install 3DGRUT including all dependencies
+        shell: pwsh
+        run: |
+          .\install_env_uv.ps1
