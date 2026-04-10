@@ -47,9 +47,9 @@ $envBlock = @"
 $banner
 
 # Save pre-existing values so deactivate can restore them
-`$script:_3DGRUT_OLD_VARS = @{}
+`$global:_3DGRUT_OLD_VARS = @{}
 function Set-3dGrutVar([string]`$Name, [string]`$Value) {
-    `$script:_3DGRUT_OLD_VARS[`$Name] = if (Test-Path "env:`$Name") { (Get-Item "env:`$Name").Value } else { `$null }
+    `$global:_3DGRUT_OLD_VARS[`$Name] = if (Test-Path "env:`$Name") { (Get-Item "env:`$Name").Value } else { `$null }
     Set-Item "env:`$Name" `$Value
 }
 
@@ -68,24 +68,24 @@ $(if ($env:NVCC_APPEND_FLAGS) {
 })
 
 # Add CUDA and VS build tools to PATH
-`$script:_3DGRUT_OLD_PATH = `$env:PATH
+`$global:_3DGRUT_OLD_PATH = `$env:PATH
 `$extraPaths = @("$($env:CUDA_HOME)\bin", "$vsCompilerDir", "$cmakeDir", "$ninjaDir") | Where-Object { `$_ -ne "" }
 `$env:PATH = (`$extraPaths -join ";") + ";" + `$env:PATH
 
 Remove-Item function:Set-3dGrutVar
 
 # Wrap deactivate to undo 3DGRUT env vars
-`$script:_3DGRUT_ORIG_DEACTIVATE = `$function:deactivate
+`$global:_3DGRUT_ORIG_DEACTIVATE = `$function:deactivate
 function global:deactivate([switch] `$NonDestructive) {
-    foreach (`$kv in `$script:_3DGRUT_OLD_VARS.GetEnumerator()) {
+    foreach (`$kv in `$global:_3DGRUT_OLD_VARS.GetEnumerator()) {
         if (`$null -ne `$kv.Value) {
             Set-Item "env:`$(`$kv.Key)" `$kv.Value
         } else {
             Remove-Item "env:`$(`$kv.Key)" -ErrorAction SilentlyContinue
         }
     }
-    `$env:PATH = `$script:_3DGRUT_OLD_PATH
-    & `$script:_3DGRUT_ORIG_DEACTIVATE -NonDestructive:`$NonDestructive
+    `$env:PATH = `$global:_3DGRUT_OLD_PATH
+    & `$global:_3DGRUT_ORIG_DEACTIVATE -NonDestructive:`$NonDestructive
 }
 
 # --- end 3DGRUT env vars ---
