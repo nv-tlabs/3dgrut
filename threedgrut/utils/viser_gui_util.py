@@ -14,16 +14,14 @@
 # limitations under the License.
 
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 import torch
 import viser
-import viser.transforms as tf
 
-from threedgrut.datasets.protocols import Batch, DatasetVisualization
+from threedgrut.datasets.protocols import Batch
 from threedgrut.datasets.utils import DEFAULT_DEVICE, fov2focal
-from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import to_np
 from threedgrut.utils.timer import CudaTimer
 
@@ -40,11 +38,11 @@ class ViserGUI:
         self.server = viser.ViserServer(port=8080)
 
         # GUI state
-        self.viz_do_train = False
+        self.viz_do_train = True
         self.viz_final = True
         self.training_done = False
         self.viz_bbox = False
-        self.live_update = False
+        self.live_update = True
         self.viz_render_styles = ["color", "density", "distance", "hits", "normals"]
         self.viz_render_style = "color"
         self.viz_render_style_scale = 1.0
@@ -57,6 +55,10 @@ class ViserGUI:
         self.render_height = 1080
         self.terminate_gui = False
         self.show_point_cloud = False
+        self.scene_center, self.scene_radius = self._compute_scene_frame()
+
+        self.server.scene.set_up_direction("+z" if self.conf.dataset.type == "nerf" else "-y")
+        self._configure_initial_camera()
 
         # Initialize UI components
         self._init_ui()
@@ -89,6 +91,19 @@ class ViserGUI:
         def _(_):
             self.show_point_cloud = self.show_point_cloud_checkbox.value
 
+        @self.subsample_slider.on_update
+        def _(_):
+            self.viz_render_subsample = self.subsample_slider.value
+
+        @self.reset_view_button.on_click
+        def _(_):
+            for client in self.server.get_clients().values():
+                self.reset_client_view(client)
+
+        @self.server.on_client_connect
+        def _(client: viser.ClientHandle):
+            self.reset_client_view(client)
+
     def _init_ui(self):
         """Initialize UI components"""
         # Main control panel
@@ -109,9 +124,9 @@ class ViserGUI:
             self.subsample_slider = self.server.gui.add_slider("Subsample", min=1, max=8, step=1, initial_value=1)
 
             # Training controls
-            self.do_train_checkbox = self.server.gui.add_checkbox("Do Training", initial_value=False)
+            self.do_train_checkbox = self.server.gui.add_checkbox("Do Training", initial_value=True)
 
-            self.live_update_checkbox = self.server.gui.add_checkbox("Live Update", initial_value=False)
+            self.live_update_checkbox = self.server.gui.add_checkbox("Live Update", initial_value=True)
 
             self.terminate_gui_checkbox = self.server.gui.add_checkbox("Terminate GUI", initial_value=False)
 
@@ -121,6 +136,7 @@ class ViserGUI:
             self.camera_type_dropdown = self.server.gui.add_dropdown(
                 "Camera Type", options=["Perspective", "Fisheye"], initial_value="Perspective"
             )
+            self.reset_view_button = self.server.gui.add_button("Reset View")
 
             # Export controls
             self.export_button = self.server.gui.add_button("Export Model")
@@ -149,9 +165,66 @@ class ViserGUI:
             self.point_cloud.remove()
             self.point_cloud = None
 
-    def get_c2w(self, camera):
-        import numpy as np
+    def _compute_scene_frame(self) -> Tuple[np.ndarray, float]:
+        bbox_min = np.asarray(to_np(self.scene_bbox[0]), dtype=np.float32)
+        bbox_max = np.asarray(to_np(self.scene_bbox[1]), dtype=np.float32)
+        center = 0.5 * (bbox_min + bbox_max)
+        bbox_radius = 0.5 * np.linalg.norm(bbox_max - bbox_min)
+        radius = max(bbox_radius, float(self.train_dataset.get_scene_extent()), 1e-2)
+        return center, radius
 
+    def _get_world_up_direction(self) -> np.ndarray:
+        if self.conf.dataset.type == "nerf":
+            return np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        return np.array([0.0, -1.0, 0.0], dtype=np.float32)
+
+    def _get_default_view_offset(self) -> np.ndarray:
+        if self.conf.dataset.type == "nerf":
+            return np.array([0.0, 1.0, 0.0], dtype=np.float32)
+        return np.array([0.0, 0.0, 1.0], dtype=np.float32)
+
+    def _get_initial_camera_pose_from_dataset(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        poses = self.train_dataset.get_poses()
+        if poses is None or len(poses) == 0:
+            return None
+
+        c2w = np.asarray(poses[0], dtype=np.float32)
+        if c2w.shape != (4, 4):
+            return None
+
+        position = c2w[:3, 3]
+        forward = c2w[:3, 2]
+        up = -c2w[:3, 1]
+
+        # Project scene center onto the camera's forward ray to get an orbit
+        # center that is along the viewing direction at scene-content depth.
+        t = np.dot(self.scene_center - position, forward)
+        if t > 0:
+            look_at = position + forward * t
+        else:
+            look_at = self.scene_center
+
+        return position, look_at, up
+
+    def _configure_initial_camera(self):
+        dataset_camera_pose = self._get_initial_camera_pose_from_dataset()
+        if dataset_camera_pose is not None:
+            position, look_at, up = dataset_camera_pose
+            self.server.initial_camera.position = position
+            self.server.initial_camera.look_at = look_at
+            self.server.initial_camera.up = up
+        else:
+            distance = max(2.0 * self.scene_radius, 1.0)
+            self.server.initial_camera.position = self.scene_center + self._get_default_view_offset() * distance
+            self.server.initial_camera.look_at = self.scene_center
+            self.server.initial_camera.up = self._get_world_up_direction()
+
+    def reset_client_view(self, client: viser.ClientHandle):
+        client.camera.position = np.asarray(self.server.initial_camera.position, dtype=np.float32)
+        client.camera.look_at = np.asarray(self.server.initial_camera.look_at, dtype=np.float32)
+        client.camera.up_direction = np.asarray(self.server.initial_camera.up, dtype=np.float32)
+
+    def get_viser_c2w(self, camera):
         from threedgrut.utils.misc import quaternion_to_so3
 
         c2w = np.eye(4, dtype=np.float32)
@@ -161,20 +234,22 @@ class ViserGUI:
         q_torch = torch.from_numpy(q).float()
         R = quaternion_to_so3(q_torch)[0].cpu().numpy()
         c2w[:3, :3] = R
-        c2w[:3, 3] = camera.position
+        c2w[:3, 3] = np.asarray(camera.position, dtype=np.float32)
         return c2w
 
-    def get_w2c(self, camera):
-        c2w = self.get_c2w(camera)
-        w2c = np.linalg.inv(c2w)
-        return w2c
+    def get_render_c2w(self, camera):
+        # Viser already exposes camera poses in the same COLMAP/OpenCV
+        # right/down/front convention expected by 3DGRUT batches.
+        return self.get_viser_c2w(camera)
+
+    def get_render_w2c(self, camera):
+        return np.linalg.inv(self.get_render_c2w(camera))
 
     def render_from_current_view(
         self, client
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Render from current camera view - rewritten to match polyscope version"""
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray]:
+        """Render from the current Viser camera using the renderer pose convention."""
         # Get current camera parameters from viser
-        # for client in self.server.get_clients().values():
         camera = client.camera
 
         # Get window size and apply subsample
@@ -186,14 +261,8 @@ class ViserGUI:
             window_w = self.resolution_slider.value
             window_h = int(self.resolution_slider.value / camera.aspect)
 
-        # Get camera parameters from viser
-        view_matrix = self.get_c2w(camera)  # This is W2C (world to camera)
-
-        # NOTE(qi): this looks incorrect to me. view_matrix should be C2W already?
-        C2W = view_matrix
-        # # Convert view matrix to camera-to-world (C2W)
-        # C2W = np.linalg.inv(view_matrix)
-        # C2W[:, 1:3] *= -1  # [right up back] to [right down front] - same as polyscope
+        render_c2w = self.get_render_c2w(camera)
+        render_w2c = self.get_render_w2c(camera)
 
         # Get FOV and calculate focal length
         fov_vertical_deg = camera.fov / np.pi * 180.0
@@ -217,7 +286,7 @@ class ViserGUI:
         # Create Batch object similar to polyscope version
         inputs = Batch(
             intrinsics=[FOCAL, FOCAL, window_w / 2, window_h / 2],
-            T_to_world=torch.FloatTensor(C2W).unsqueeze(0),
+            T_to_world=torch.from_numpy(render_c2w).unsqueeze(0),
             rays_ori=torch.zeros((1, window_h, window_w, 3), device=DEFAULT_DEVICE, dtype=torch.float32),
             rays_dir=rays_dir.reshape(1, window_h, window_w, 3),
         )
@@ -232,7 +301,7 @@ class ViserGUI:
 
         points = to_np(self.model.positions)
         points_h = np.concatenate([points, np.ones((points.shape[0], 1))], axis=1)  # (N,4)
-        points_cam = (view_matrix @ points_h.T).T  # (N,4)
+        points_cam = (render_w2c @ points_h.T).T  # (N,4)
 
         X, Y, Z, _ = points_cam.T
 
@@ -249,8 +318,6 @@ class ViserGUI:
 
         points_plane = np.stack([u, v], axis=1)
 
-        # points_plane = self.model.positions[u, v]
-        # Return the same outputs as polyscope version
         return (
             outputs["pred_rgb"],
             outputs["pred_opacity"],
