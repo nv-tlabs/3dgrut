@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import atexit
 import warnings
 from typing import Optional
 
@@ -158,3 +159,16 @@ class RichLogger:
 
 
 logger = RichLogger()
+
+
+def _restore_terminal():
+    try:
+        if logger.progress_alive:
+            logger.progress.stop()
+            logger.progress_alive = False
+        logger.console.show_cursor(True)
+    except Exception:
+        pass
+
+
+atexit.register(_restore_terminal)
