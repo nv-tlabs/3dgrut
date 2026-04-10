@@ -48,7 +48,10 @@ def main(conf: DictConfig) -> None:
     # trainer = Trainer3DGRUT.create_from_ply("export_last.ply", DictConfig(c))
 
     trainer = Trainer3DGRUT(conf)
-    trainer.run_training()
+    try:
+        trainer.run_training()
+    except KeyboardInterrupt:
+        logger.warning("Training interrupted by user.")
 
 
 if __name__ == "__main__":
