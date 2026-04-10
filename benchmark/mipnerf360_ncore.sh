@@ -1,3 +1,5 @@
+#!/bin/bash
+#
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -13,8 +15,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-#!/bin/bash
-
 set -e
 
 
@@ -26,7 +26,7 @@ if [[ -z $CONFIG ]]; then
 fi
 
 RESULT_DIR=${RESULT_DIR:-"results/colmap_ncore_v4"}
-EXTRA_ARGS=${@:2} # any extra arguments to pass to the script
+EXTRA_ARGS=("${@:2}") # any extra arguments to pass to the script
 
 # if the result directory already exists, warn user and abort execution
 if [ -d "$RESULT_DIR" ]; then
@@ -34,8 +34,8 @@ if [ -d "$RESULT_DIR" ]; then
     exit 1
 fi
 
-mkdir -p $RESULT_DIR
-export TORCH_EXTENSIONS_DIR=$RESULT_DIR/.cache
+mkdir -p "$RESULT_DIR"
+export TORCH_EXTENSIONS_DIR="$RESULT_DIR/.cache"
 
 SCENE_LIST="bicycle bonsai counter flowers garden kitchen room stump treehill"
 
@@ -50,14 +50,14 @@ do
     echo "Running: $SCENE, Configuration: $CONFIG"
 
     # train without eval
-    nvidia-smi > $RESULT_DIR/train_$SCENE.log
+    nvidia-smi > "$RESULT_DIR/train_$SCENE.log"
 
-    CUDA_VISIBLE_DEVICES=0 python train.py --config-name $CONFIG \
-        use_wandb=False with_gui=False out_dir=$RESULT_DIR \
-        path=data/colmap_ncore_v4/$SCENE/$SCENE.json experiment_name=$SCENE \
+    CUDA_VISIBLE_DEVICES=0 python train.py --config-name "$CONFIG" \
+        use_wandb=False with_gui=False out_dir="$RESULT_DIR" \
+        path="data/colmap_ncore_v4/$SCENE/$SCENE.json" experiment_name="$SCENE" \
         "dataset.camera_ids=[\"camera1_$DATA_FACTOR\"]" \
         dataset.simplejpeg_fastdct=false \
         dataset.simplejpeg_fastupsample=false \
-        $EXTRA_ARGS >> $RESULT_DIR/train_$SCENE.log
+        "${EXTRA_ARGS[@]}" >> "$RESULT_DIR/train_$SCENE.log"
 
 done
