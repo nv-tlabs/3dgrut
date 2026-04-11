@@ -328,7 +328,7 @@ class Playground:
                 ps.reset_camera_to_home_view()
             if psim.IsItemHovered():
                 psim.SetNextWindowPos([window_w - psim.GetWindowWidth() - 120, 20])
-                psim.Begin("Reset View", None, psim.ImGuiWindowFlags_NoTitleBar)
+                psim.Begin("Reset View", psim.ImGuiWindowFlags_NoTitleBar)
                 psim.TextUnformatted("View Navigation:")
                 psim.TextUnformatted("      Rotate: [left click drag]")
                 psim.TextUnformatted("   Translate: [shift] + [left click drag] OR [right click drag]")
