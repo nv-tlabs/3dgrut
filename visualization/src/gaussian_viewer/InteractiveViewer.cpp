@@ -36,11 +36,11 @@
 #define ANARI_EXTENSION_UTILITY_IMPL
 #include <anari/ext/visrtx/makeVisRTXDevice.h>
 
-#include <glad/gl.h>
-#include <GLFW/glfw3.h>
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+#include <GLFW/glfw3.h>
+#include <glad/gl.h>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -63,8 +63,7 @@
 
 // Triple-buffer with atomic swap: producer writes to staging, consumer reads
 // from committed.  No locks on the hot path.
-template <typename T>
-class TransactionalValue {
+template <typename T> class TransactionalValue {
 public:
   TransactionalValue() = default;
   explicit TransactionalValue(const T &v) : committed_(v), staging_(v) {}
@@ -76,8 +75,7 @@ public:
     return *this;
   }
 
-  template <typename Fn>
-  void assign(Fn &&fn) {
+  template <typename Fn> void assign(Fn &&fn) {
     std::lock_guard<std::mutex> lk(mtx_);
     fn(staging_);
     dirty_.store(true, std::memory_order_release);
@@ -92,8 +90,7 @@ public:
     return true;
   }
 
-  template <typename Fn>
-  bool update(Fn &&fn) {
+  template <typename Fn> bool update(Fn &&fn) {
     if (!dirty_.load(std::memory_order_acquire))
       return false;
     std::lock_guard<std::mutex> lk(mtx_);
@@ -151,8 +148,7 @@ struct FPSCounter {
     frame++;
     auto now = std::chrono::high_resolution_clock::now();
     if (frame % WINDOW == 0) {
-      double elapsed =
-          std::chrono::duration<double>(now - last_).count();
+      double elapsed = std::chrono::duration<double>(now - last_).count();
       fps = WINDOW / elapsed;
       last_ = now;
       return true;
@@ -207,13 +203,14 @@ struct OrbitCamera {
     vec3 right = {-sy, 0.f, cy};
     vec3 camUp = {0.f, 1.f, 0.f};
     for (int i = 0; i < 3; i++)
-      center[i] += right[i] * dx * distance * 0.002f +
-                   camUp[i] * dy * distance * 0.002f;
+      center[i] +=
+          right[i] * dx * distance * 0.002f + camUp[i] * dy * distance * 0.002f;
   }
 
   void zoom(float delta) {
     distance *= (1.f - delta * 0.1f);
-    if (distance < 0.01f) distance = 0.01f;
+    if (distance < 0.01f)
+      distance = 0.01f;
   }
 };
 
@@ -356,8 +353,7 @@ struct App {
     anari::render(device, anariFrame);
     anari::wait(device, anariFrame);
 
-    auto fb =
-        anari::map<uint32_t>(device, anariFrame, "channel.color");
+    auto fb = anari::map<uint32_t>(device, anariFrame, "channel.color");
 
     FramePixels pixels;
     pixels.size = frame_size_shared.ref();
@@ -377,8 +373,7 @@ struct App {
       return;
     camera_modified = false;
 
-    float aspect =
-        fb_size[1] > 0 ? float(fb_size[0]) / float(fb_size[1]) : 1.f;
+    float aspect = fb_size[1] > 0 ? float(fb_size[0]) / float(fb_size[1]) : 1.f;
     CameraState cs;
     if (cam_mode == CameraMode::Orbit)
       cs = orbit_cam.state(aspect);
@@ -441,7 +436,7 @@ struct App {
                                           ImVec2(FLT_MAX, FLT_MAX));
       if (ImGui::Begin("Control Panel", nullptr)) {
         ImGui::Text("Mode: %s",
-                     cam_mode == CameraMode::Orbit ? "Orbit (I)" : "Fly (F)");
+                    cam_mode == CameraMode::Orbit ? "Orbit (I)" : "Fly (F)");
         ImGui::Separator();
 
         bool renderer_dirty = false;
@@ -449,8 +444,8 @@ struct App {
         if (ImGui::ColorEdit3("Background", config.bgColor)) {
           renderer_dirty = true;
         }
-        if (ImGui::SliderFloat("Ambient Radiance", &config.ambientRadiance,
-                                0.f, 5.f, "%.2f")) {
+        if (ImGui::SliderFloat("Ambient Radiance", &config.ambientRadiance, 0.f,
+                               5.f, "%.2f")) {
           renderer_dirty = true;
         }
         if (ImGui::SliderInt("Samples Per Pixel", &config.spp, 1, 64)) {
@@ -459,24 +454,23 @@ struct App {
 
         if (renderer_dirty) {
           RendererConfig rc;
-          rc.bgColor = {config.bgColor[0], config.bgColor[1],
-                        config.bgColor[2], 1.f};
+          rc.bgColor = {config.bgColor[0], config.bgColor[1], config.bgColor[2],
+                        1.f};
           rc.ambientRadiance = config.ambientRadiance;
           rc.spp = config.spp;
           renderer_config_shared = rc;
         }
 
         ImGui::Separator();
-        ImGui::SliderFloat("Light Phi", &config.lightPhi, 0.f, 360.f,
-                           "%.1f");
+        ImGui::SliderFloat("Light Phi", &config.lightPhi, 0.f, 360.f, "%.1f");
         ImGui::SliderFloat("Light Theta", &config.lightTheta, 0.f, 360.f,
                            "%.1f");
-        ImGui::SliderFloat("Light Intensity", &config.lightIntensity, 0.f,
-                           10.f, "%.2f");
+        ImGui::SliderFloat("Light Intensity", &config.lightIntensity, 0.f, 10.f,
+                           "%.2f");
 
         ImGui::Separator();
         if (ImGui::SliderFloat("Gaussian Scale", &config.scaleFactor, 0.01f,
-                                10.f, "%.3f")) {
+                               10.f, "%.3f")) {
           rebuildScene();
         }
 
@@ -625,12 +619,18 @@ struct App {
     if (cam_mode != CameraMode::Fly)
       return;
     float fwd = 0.f, right = 0.f, up = 0.f;
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) fwd += 1.f;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) fwd -= 1.f;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) right += 1.f;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) right -= 1.f;
-    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) up += 1.f;
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) up -= 1.f;
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+      fwd += 1.f;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+      fwd -= 1.f;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+      right += 1.f;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+      right -= 1.f;
+    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+      up += 1.f;
+    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+      up -= 1.f;
     if (fwd != 0.f || right != 0.f || up != 0.f) {
       fly_cam.move(fwd, right, up, dt);
       camera_modified = true;
@@ -663,8 +663,7 @@ static void glfwScrollCb(GLFWwindow *, double x, double y) {
 //  Main
 // ═══════════════════════════════════════════════════════════════════════════════
 
-static void printUsage(const char *argv0)
-{
+static void printUsage(const char *argv0) {
   printf("Usage: %s <path.ply> [options]\n", argv0);
   printf("  --scale-factor F        Multiply Gaussian scales (default: 1.0)\n");
   printf("  --opacity-threshold T   Min opacity to keep (default: 0.05)\n");
@@ -681,8 +680,7 @@ static void printUsage(const char *argv0)
   printf("  Escape      Quit\n");
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
   if (argc < 2) {
     printUsage(argv[0]);
     return 1;
@@ -727,8 +725,8 @@ int main(int argc, char *argv[])
     diagonal = std::sqrt(dx * dx + dy * dy + dz * dz);
   }
 
-  printf("Scene center: (%.3f, %.3f, %.3f)  diagonal: %.3f\n",
-         center[0], center[1], center[2], diagonal);
+  printf("Scene center: (%.3f, %.3f, %.3f)  diagonal: %.3f\n", center[0],
+         center[1], center[2], diagonal);
 
   // ── GLFW + OpenGL ─────────────────────────────────────────────────────────
 
@@ -741,9 +739,8 @@ int main(int argc, char *argv[])
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
 
-  GLFWwindow *window = glfwCreateWindow(winSize[0], winSize[1],
-                                         "Interactive Gaussian Viewer",
-                                         nullptr, nullptr);
+  GLFWwindow *window = glfwCreateWindow(
+      winSize[0], winSize[1], "Interactive Gaussian Viewer", nullptr, nullptr);
   if (!window) {
     fprintf(stderr, "Failed to create GLFW window\n");
     glfwTerminate();
@@ -778,8 +775,7 @@ int main(int argc, char *argv[])
   auto anariCamera = anari::newObject<anari::Camera>(device, "perspective");
   anari::commitParameters(device, anariCamera);
 
-  auto anariRenderer =
-      anari::newObject<anari::Renderer>(device, "default");
+  auto anariRenderer = anari::newObject<anari::Renderer>(device, "default");
   vec4 bgColor = {0.1f, 0.1f, 0.1f, 1.f};
   anari::setParameter(device, anariRenderer, "background", bgColor);
   anari::setParameter(device, anariRenderer, "ambientRadiance", 1.0f);
@@ -848,8 +844,7 @@ int main(int argc, char *argv[])
     glfwPollEvents();
 
     auto now = std::chrono::high_resolution_clock::now();
-    float dt =
-        std::chrono::duration<float>(now - lastTime).count();
+    float dt = std::chrono::duration<float>(now - lastTime).count();
     lastTime = now;
 
     app.updateFlyMovement(dt);

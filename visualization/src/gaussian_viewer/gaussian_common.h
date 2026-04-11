@@ -52,10 +52,7 @@ using mat4 = std::array<float, 16>;
 
 static constexpr float SH_C0 = 0.28209479177387814f;
 
-inline float sigmoid(float x)
-{
-  return 1.0f / (1.0f + std::exp(-x));
-}
+inline float sigmoid(float x) { return 1.0f / (1.0f + std::exp(-x)); }
 
 struct GaussianData {
   std::vector<vec3> positions;
@@ -66,8 +63,7 @@ struct GaussianData {
   vec3 bboxMax;
 };
 
-inline GaussianData loadPLY(const std::string &path, float opacityThreshold)
-{
+inline GaussianData loadPLY(const std::string &path, float opacityThreshold) {
   happly::PLYData ply(path);
 
   auto x = ply.getElement("vertex").getProperty<float>("x");
@@ -116,9 +112,13 @@ inline GaussianData loadPLY(const std::string &path, float opacityThreshold)
     float qw = rot_0[i], qx = rot_1[i], qy = rot_2[i], qz = rot_3[i];
     float qn = std::sqrt(qw * qw + qx * qx + qy * qy + qz * qz);
     if (qn > 0.f) {
-      qw /= qn; qx /= qn; qy /= qn; qz /= qn;
+      qw /= qn;
+      qx /= qn;
+      qy /= qn;
+      qz /= qn;
     } else {
-      qw = 1.f; qx = qy = qz = 0.f;
+      qw = 1.f;
+      qx = qy = qz = 0.f;
     }
 
     data.positions.push_back({x[i], y[i], z[i]});
@@ -135,17 +135,14 @@ inline GaussianData loadPLY(const std::string &path, float opacityThreshold)
   }
 
   printf("After opacity filter (threshold=%.3f): %zu / %zu Gaussians kept\n",
-      opacityThreshold,
-      data.positions.size(),
-      total);
+         opacityThreshold, data.positions.size(), total);
 
   return data;
 }
 
 // Column-major mat4: m[col*4 + row]
-inline mat4 buildTransform(
-    const vec3 &pos, const vec4 &q, const vec3 &s, float sf)
-{
+inline mat4 buildTransform(const vec3 &pos, const vec4 &q, const vec3 &s,
+                           float sf) {
   float w = q[0], x = q[1], y = q[2], z = q[3];
   float s0 = s[0] * sf, s1 = s[1] * sf, s2 = s[2] * sf;
 
@@ -160,16 +157,27 @@ inline mat4 buildTransform(
   float r22 = 1.f - 2.f * (x * x + y * y);
 
   return {{
-      r00 * s0, r10 * s0, r20 * s0, 0.f,
-      r01 * s1, r11 * s1, r21 * s1, 0.f,
-      r02 * s2, r12 * s2, r22 * s2, 0.f,
-      pos[0],   pos[1],   pos[2],   1.f,
+      r00 * s0,
+      r10 * s0,
+      r20 * s0,
+      0.f,
+      r01 * s1,
+      r11 * s1,
+      r21 * s1,
+      0.f,
+      r02 * s2,
+      r12 * s2,
+      r22 * s2,
+      0.f,
+      pos[0],
+      pos[1],
+      pos[2],
+      1.f,
   }};
 }
 
-inline anari::World buildScene(
-    anari::Device device, const GaussianData &data, float scaleFactor)
-{
+inline anari::World buildScene(anari::Device device, const GaussianData &data,
+                               float scaleFactor) {
   uint32_t N = static_cast<uint32_t>(data.positions.size());
 
   auto geometry = anari::newObject<anari::Geometry>(device, "sphere");
@@ -198,8 +206,8 @@ inline anari::World buildScene(
     auto *xfms = anari::map<mat4>(device, xfmArray);
     auto *cols = anari::map<vec3>(device, colArray);
     for (uint32_t i = 0; i < N; i++) {
-      xfms[i] = buildTransform(
-          data.positions[i], data.quats[i], data.scales[i], scaleFactor);
+      xfms[i] = buildTransform(data.positions[i], data.quats[i], data.scales[i],
+                               scaleFactor);
       cols[i] = data.colors[i];
     }
     anari::unmap(device, xfmArray);
@@ -244,14 +252,9 @@ inline anari::World buildScene(
   return world;
 }
 
-inline void anariStatusFunc(const void *,
-    ANARIDevice,
-    ANARIObject source,
-    ANARIDataType,
-    ANARIStatusSeverity severity,
-    ANARIStatusCode,
-    const char *message)
-{
+inline void anariStatusFunc(const void *, ANARIDevice, ANARIObject source,
+                            ANARIDataType, ANARIStatusSeverity severity,
+                            ANARIStatusCode, const char *message) {
   if (severity == ANARI_SEVERITY_FATAL_ERROR) {
     fprintf(stderr, "[FATAL][%p] %s\n", source, message);
     std::exit(1);
