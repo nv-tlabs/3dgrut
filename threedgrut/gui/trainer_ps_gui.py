@@ -30,7 +30,7 @@ from threedgrut.utils.timer import CudaTimer
 trajectory = []
 
 
-class GUI:
+class PolyscopeGUI:
     def __init__(self, conf, model, train_dataset, val_dataset, scene_bbox):
         self.conf = conf
 

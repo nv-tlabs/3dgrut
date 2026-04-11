@@ -328,12 +328,12 @@ class Trainer3DGRUT:
         gui = None
 
         if conf.with_gui:
-            from threedgrut.utils.gui import GUI
+            from threedgrut.gui import PolyscopeGUI
 
-            gui = GUI(conf, model, train_dataset, val_dataset, scene_bbox)
+            gui = PolyscopeGUI(conf, model, train_dataset, val_dataset, scene_bbox)
 
         elif conf.with_viser_gui:
-            from threedgrut.utils.viser_gui_util import ViserGUI
+            from threedgrut.gui import ViserGUI
 
             gui = ViserGUI(conf, model, train_dataset, val_dataset, scene_bbox)
 

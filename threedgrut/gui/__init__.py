@@ -14,5 +14,7 @@
 # limitations under the License.
 
 from .ps_extension import initialize_cugl_interop
+from .trainer_ps_gui import PolyscopeGUI
+from .trainer_viser_gui import ViserGUI
 
-__all__ = ["initialize_cugl_interop"]
+__all__ = ["initialize_cugl_interop", "PolyscopeGUI", "ViserGUI"]
