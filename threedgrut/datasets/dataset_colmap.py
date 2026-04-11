@@ -186,9 +186,11 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 shutter_type=ShutterType.GLOBAL,
                 principal_point=np.array([cx, cy], dtype=np.float32),
                 focal_length=np.array([focalx, focaly], dtype=np.float32),
-                radial_coeffs=np.zeros((6,), dtype=np.float32)
-                if radial_coeffs is None
-                else np.asarray(radial_coeffs, dtype=np.float32),
+                radial_coeffs=(
+                    np.zeros((6,), dtype=np.float32)
+                    if radial_coeffs is None
+                    else np.asarray(radial_coeffs, dtype=np.float32)
+                ),
                 tangential_coeffs=np.zeros((2,), dtype=np.float32),
                 thin_prism_coeffs=np.zeros((4,), dtype=np.float32),
             )
@@ -306,9 +308,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 self.intrinsics[intr.id] = create_fisheye_camera(params, width, height)
 
             else:
-                assert (
-                    False
-                ), (
+                assert False, (
                     f"Colmap camera model '{intr.model}' not handled: supported camera models are "
                     "PINHOLE, SIMPLE_PINHOLE, SIMPLE_RADIAL, and OPENCV_FISHEYE."
                 )
