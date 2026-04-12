@@ -558,21 +558,33 @@ struct App {
           renderer_dirty = true;
         }
 
+        ImGui::Separator();
+        if (ImGui::SliderFloat("Light Phi", &config.lightPhi, 0.f, 360.f, "%.1f"))
+          renderer_dirty = true;
+        if (ImGui::SliderFloat("Light Theta", &config.lightTheta, -90.f, 90.f,
+                               "%.1f"))
+          renderer_dirty = true;
+        if (ImGui::SliderFloat("Light Intensity", &config.lightIntensity, 0.f,
+                               10.f, "%.2f"))
+          renderer_dirty = true;
+
         if (renderer_dirty) {
           RendererConfig rc;
           rc.bgColor = {config.bgColor[0], config.bgColor[1], config.bgColor[2],
                         1.f};
           rc.ambientRadiance = config.ambientRadiance;
           rc.spp = config.spp;
+
+          float phi = config.lightPhi * (3.14159265f / 180.f);
+          float theta = config.lightTheta * (3.14159265f / 180.f);
+          rc.lightDirection = {
+              std::cos(theta) * std::cos(phi),
+              std::sin(theta),
+              std::cos(theta) * std::sin(phi)};
+          rc.lightIntensity = config.lightIntensity;
+
           renderer_config_shared = rc;
         }
-
-        ImGui::Separator();
-        ImGui::SliderFloat("Light Phi", &config.lightPhi, 0.f, 360.f, "%.1f");
-        ImGui::SliderFloat("Light Theta", &config.lightTheta, 0.f, 360.f,
-                           "%.1f");
-        ImGui::SliderFloat("Light Intensity", &config.lightIntensity, 0.f, 10.f,
-                           "%.2f");
 
         ImGui::Separator();
         if (ImGui::SliderFloat("Gaussian Scale", &config.scaleFactor, 0.01f,

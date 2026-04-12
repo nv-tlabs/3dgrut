@@ -69,7 +69,9 @@ PYBIND11_MODULE(_gaussian_renderer_core, m) {
       .def(py::init<>())
       .def_readwrite("bg_color", &RendererConfig::bgColor)
       .def_readwrite("ambient_radiance", &RendererConfig::ambientRadiance)
-      .def_readwrite("spp", &RendererConfig::spp);
+      .def_readwrite("spp", &RendererConfig::spp)
+      .def_readwrite("light_direction", &RendererConfig::lightDirection)
+      .def_readwrite("light_intensity", &RendererConfig::lightIntensity);
 
   // --- CameraState -------------------------------------------------------
 

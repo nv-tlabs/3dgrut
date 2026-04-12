@@ -54,13 +54,10 @@ size_t bytesPerPixel(ANARIDataType pixelType) {
 //   │   │       └── Material  — "matte", colour sourced from per-instance array
 //   │   ├── transform[]       — N column-major 4x4 TRS matrices (one per Gaussian)
 //   │   └── color[]           — N RGB colours
-//   └── Light[3]
-//       ├── key   (directional, upper-left-front, 3.0 irradiance)
-//       ├── fill  (directional, upper-right-front, 1.5 irradiance)
-//       └── back  (directional, lower-back, 0.8 irradiance)
 //
-// The three-point lighting rig gives reasonable shading without any scene-
-// specific tuning.  Each Gaussian's position, orientation, and anisotropic
+// Lighting is not included in the world returned by this function; the caller
+// (GaussianRendererCore) attaches a persistent directional light separately so
+// that it can be updated without a full world rebuild.  Each Gaussian's position, orientation, and anisotropic
 // scale (times the global scaleFactor) are baked into its instance transform
 // via buildTransform().
 anari::World buildScene(anari::Device device,
@@ -112,34 +109,9 @@ anari::World buildScene(anari::Device device,
   anari::setAndReleaseParameter(device, instance, "color", colArray);
   anari::commitParameters(device, instance);
 
-  // Three-point directional lighting: key, fill, and back lights.
-  auto keyLight = anari::newObject<anari::Light>(device, "directional");
-  vec3 keyDir = {-1.f, -1.f, -1.f};
-  anari::setParameter(device, keyLight, "direction", keyDir);
-  anari::setParameter(device, keyLight, "irradiance", 3.0f);
-  anari::commitParameters(device, keyLight);
-
-  auto fillLight = anari::newObject<anari::Light>(device, "directional");
-  vec3 fillDir = {1.f, -0.5f, -0.5f};
-  anari::setParameter(device, fillLight, "direction", fillDir);
-  anari::setParameter(device, fillLight, "irradiance", 1.5f);
-  anari::commitParameters(device, fillLight);
-
-  auto backLight = anari::newObject<anari::Light>(device, "directional");
-  vec3 backDir = {0.f, 0.5f, 1.f};
-  anari::setParameter(device, backLight, "direction", backDir);
-  anari::setParameter(device, backLight, "irradiance", 0.8f);
-  anari::commitParameters(device, backLight);
-
-  ANARILight lights[] = {keyLight, fillLight, backLight};
-
   auto world = anari::newObject<anari::World>(device);
   anari::setParameterArray1D(device, world, "instance", &instance, 1);
   anari::release(device, instance);
-  anari::setParameterArray1D(device, world, "light", lights, 3);
-  anari::release(device, keyLight);
-  anari::release(device, fillLight);
-  anari::release(device, backLight);
   anari::commitParameters(device, world);
 
   return world;
@@ -156,6 +128,8 @@ GaussianRendererCore::~GaussianRendererCore() {
       anari::release(m_device, m_frameObj);
     if (m_rendererObj)
       anari::release(m_device, m_rendererObj);
+    if (m_lightObj)
+      anari::release(m_device, m_lightObj);
     if (m_cameraObj)
       anari::release(m_device, m_cameraObj);
     if (m_world)
@@ -231,11 +205,12 @@ bool GaussianRendererCore::init(const InitOptions &options,
 
   m_cameraObj = anari::newObject<anari::Camera>(m_device, "perspective");
   m_rendererObj = anari::newObject<anari::Renderer>(m_device, "default");
+  m_lightObj = anari::newObject<anari::Light>(m_device, "directional");
   m_frameObj = anari::newObject<anari::Frame>(m_device);
 
-  if (!m_cameraObj || !m_rendererObj || !m_frameObj) {
+  if (!m_cameraObj || !m_rendererObj || !m_lightObj || !m_frameObj) {
     if (errorMessage)
-      *errorMessage = "Failed to create ANARI camera/renderer/frame objects.";
+      *errorMessage = "Failed to create ANARI camera/renderer/light/frame objects.";
     return false;
   }
 
@@ -492,6 +467,16 @@ bool GaussianRendererCore::applyPendingUpdates(std::string *errorMessage) {
     anari::setParameter(
         m_device, m_rendererObj, "pixelSamples", m_rendererConfig.spp);
     anari::commitParameters(m_device, m_rendererObj);
+
+    if (m_lightObj && m_world) {
+      anari::setParameter(m_device, m_lightObj, "direction",
+                          m_rendererConfig.lightDirection);
+      anari::setParameter(m_device, m_lightObj, "irradiance",
+                          m_rendererConfig.lightIntensity);
+      anari::commitParameters(m_device, m_lightObj);
+      anari::commitParameters(m_device, m_world);
+    }
+
     m_rendererDirty = false;
   }
 
@@ -515,6 +500,16 @@ bool GaussianRendererCore::rebuildWorld(std::string *errorMessage) {
   if (m_world)
     anari::release(m_device, m_world);
   m_world = newWorld;
+
+  if (m_lightObj) {
+    anari::setParameter(m_device, m_lightObj, "direction",
+                        m_rendererConfig.lightDirection);
+    anari::setParameter(m_device, m_lightObj, "irradiance",
+                        m_rendererConfig.lightIntensity);
+    anari::commitParameters(m_device, m_lightObj);
+    anari::setParameterArray1D(m_device, m_world, "light", &m_lightObj, 1);
+    anari::commitParameters(m_device, m_world);
+  }
 
   anari::setParameter(m_device, m_frameObj, "world", m_world);
   anari::commitParameters(m_device, m_frameObj);

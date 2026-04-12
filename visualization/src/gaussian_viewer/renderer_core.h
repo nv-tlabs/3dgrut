@@ -28,6 +28,8 @@ struct RendererConfig {
   vec4 bgColor{0.1f, 0.1f, 0.1f, 1.f};  // background clear colour (RGBA)
   float ambientRadiance{1.0f};            // intensity of ambient fill light
   int spp{1};                             // samples per pixel
+  vec3 lightDirection{-1.f, -1.f, -1.f};  // directional light direction
+  float lightIntensity{3.0f};             // directional light irradiance
 };
 
 // Minimal perspective-camera description passed into the ANARI camera.
@@ -195,5 +197,6 @@ private:
   anari::World m_world{nullptr};
   anari::Camera m_cameraObj{nullptr};
   anari::Renderer m_rendererObj{nullptr};
+  anari::Light m_lightObj{nullptr};
   anari::Frame m_frameObj{nullptr};
 };
