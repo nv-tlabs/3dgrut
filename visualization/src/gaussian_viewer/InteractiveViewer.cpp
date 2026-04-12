@@ -36,11 +36,13 @@
 #define ANARI_EXTENSION_UTILITY_IMPL
 #include <anari/ext/visrtx/makeVisRTXDevice.h>
 
+#define GLFW_INCLUDE_NONE
+#include <glad/gl.h>
+#include <GLFW/glfw3.h>
+
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
-#include <GLFW/glfw3.h>
-#include <glad/gl.h>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
