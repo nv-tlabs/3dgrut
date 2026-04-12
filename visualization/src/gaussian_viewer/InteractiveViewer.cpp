@@ -33,12 +33,11 @@
 // Architecture modeled after VIDILabs/open-volume-renderer main_app.cpp:
 // async double-buffered rendering with TransactionalValue handoff.
 
-#define ANARI_EXTENSION_UTILITY_IMPL
-#include <anari/ext/visrtx/makeVisRTXDevice.h>
-
 #define GLFW_INCLUDE_NONE
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
+#include <cuda_gl_interop.h>
+#include <cuda_runtime_api.h>
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -47,11 +46,15 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
-#include "gaussian_common.h"
+#include "renderer_core.h"
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cfloat>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <iomanip>
 #include <mutex>
@@ -144,35 +147,70 @@ private:
 struct FPSCounter {
   static constexpr int WINDOW = 10;
   int frame{0};
-  double fps{0.0};
 
   bool count() {
     frame++;
-    auto now = std::chrono::high_resolution_clock::now();
+    auto now = std::chrono::steady_clock::now();
     if (frame % WINDOW == 0) {
       double elapsed = std::chrono::duration<double>(now - last_).count();
-      fps = WINDOW / elapsed;
+      if (elapsed > 1e-6)
+        fps_.store(WINDOW / elapsed, std::memory_order_relaxed);
       last_ = now;
       return true;
     }
     return false;
   }
 
+  double value() const { return fps_.load(std::memory_order_relaxed); }
+
 private:
-  std::chrono::high_resolution_clock::time_point last_ =
-      std::chrono::high_resolution_clock::now();
+  std::atomic<double> fps_{0.0};
+  std::chrono::steady_clock::time_point last_ = std::chrono::steady_clock::now();
+};
+
+// Background FPS estimator with adaptive smoothing:
+// - low FPS updates react immediately (alpha -> 1)
+// - high FPS updates are smoothed (alpha -> 0.15)
+class AdaptiveFpsEma {
+public:
+  void addSampleSeconds(double deviceSeconds) {
+    if (!(deviceSeconds > 1e-6))
+      return;
+
+    const double instantFps = 1.0 / deviceSeconds;
+    const double alpha = computeAlpha(instantFps);
+    const double prev = fps_.load(std::memory_order_relaxed);
+    const double next = prev > 0.0
+        ? (1.0 - alpha) * prev + alpha * instantFps
+        : instantFps;
+    fps_.store(next, std::memory_order_relaxed);
+  }
+
+  double value() const { return fps_.load(std::memory_order_relaxed); }
+
+private:
+  static double computeAlpha(double instantFps) {
+    if (instantFps <= kLowFpsNoSmoothing)
+      return kAlphaNoSmoothing;
+    if (instantFps >= kHighFpsSmoothed)
+      return kAlphaSmoothed;
+
+    const double t = (instantFps - kLowFpsNoSmoothing)
+        / (kHighFpsSmoothed - kLowFpsNoSmoothing);
+    return kAlphaNoSmoothing + (kAlphaSmoothed - kAlphaNoSmoothing) * t;
+  }
+
+  static constexpr double kLowFpsNoSmoothing = 1.0;
+  static constexpr double kHighFpsSmoothed = 30.0;
+  static constexpr double kAlphaNoSmoothing = 1.0;
+  static constexpr double kAlphaSmoothed = 0.15;
+
+  std::atomic<double> fps_{0.0};
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  Camera
 // ═══════════════════════════════════════════════════════════════════════════════
-
-struct CameraState {
-  vec3 eye{0.f, 0.f, 0.f};
-  vec3 dir{0.f, 0.f, 1.f};
-  vec3 up{0.f, -1.f, 0.f};
-  float aspect{16.f / 9.f};
-};
 
 enum class CameraMode { Orbit, Fly };
 
@@ -196,8 +234,9 @@ struct OrbitCamera {
   }
 
   void orbit(float dx, float dy) {
-    yaw += dx;
-    pitch = std::clamp(pitch + dy, -1.5f, 1.5f);
+    // Drag-to-rotate behavior: scene follows mouse motion.
+    yaw -= dx;
+    pitch = std::clamp(pitch - dy, -1.5f, 1.5f);
   }
 
   void pan(float dx, float dy) {
@@ -251,44 +290,30 @@ struct FlyCamera {
 //  Shared data structures between threads
 // ═══════════════════════════════════════════════════════════════════════════════
 
-struct FramePixels {
-  uvec2 size{0, 0};
-  std::vector<uint32_t> rgba;
-};
-
-struct RendererConfig {
-  vec4 bgColor{0.1f, 0.1f, 0.1f, 1.f};
-  float ambientRadiance{1.0f};
-  int spp{1};
-  bool dirty{true};
-};
-
 // ═══════════════════════════════════════════════════════════════════════════════
 //  Application
 // ═══════════════════════════════════════════════════════════════════════════════
 
 struct App {
-  // ANARI objects (owned by background thread after init)
-  anari::Device device{nullptr};
-  anari::World world{nullptr};
-  anari::Camera anariCamera{nullptr};
-  anari::Renderer anariRenderer{nullptr};
-  anari::Frame anariFrame{nullptr};
+  GaussianRendererCore renderer_core;
+  std::mutex renderer_mutex;
 
   // Double-buffered communication (same pattern as main_app.cpp)
   TransactionalValue<CameraState> camera_shared;
   TransactionalValue<uvec2> frame_size_shared{uvec2{0, 0}};
-  TransactionalValue<FramePixels> frame_outputs;
   TransactionalValue<RendererConfig> renderer_config_shared;
+  std::atomic<bool> frame_ready{false};
 
   // Background thread
   AsyncLoop async_loop{std::bind(&App::render_background, this)};
-  FPSCounter bg_fps;
+  AdaptiveFpsEma bg_fps_ema;
   FPSCounter fg_fps;
 
   // GUI-thread local state
   GLFWwindow *window{nullptr};
   GLuint frame_texture{0};
+  cudaGraphicsResource_t frame_texture_cuda{nullptr};
+  bool cuda_gl_interop{false};
   uvec2 fb_size{0, 0};
 
   CameraMode cam_mode{CameraMode::Orbit};
@@ -298,6 +323,7 @@ struct App {
 
   bool gui_enabled{true};
   bool async_enabled{true};
+  bool invert_orbit_y{false};
 
   struct {
     float scaleFactor{1.0f};
@@ -309,7 +335,6 @@ struct App {
     float lightIntensity{3.0f};
   } config;
 
-  GaussianData gaussianData;
   float sceneDiagonal{1.f};
   vec3 sceneCenter{0.f, 0.f, 0.f};
 
@@ -320,52 +345,38 @@ struct App {
   // ─── Background thread ───────────────────────────────────────────────────
 
   void render_background() {
-    bool size_changed = frame_size_shared.update();
-    if (size_changed) {
-      uvec2 sz = frame_size_shared.ref();
+    std::lock_guard<std::mutex> guard(renderer_mutex);
+
+    if (frame_size_shared.update()) {
+      const uvec2 sz = frame_size_shared.ref();
       if (sz[0] == 0 || sz[1] == 0)
         return;
-      anari::setParameter(device, anariFrame, "size", sz);
-      anari::commitParameters(device, anariFrame);
+      renderer_core.setFrameSize(sz);
     }
     {
-      uvec2 sz = frame_size_shared.ref();
+      const uvec2 sz = frame_size_shared.ref();
       if (sz[0] == 0 || sz[1] == 0)
         return;
     }
 
-    if (camera_shared.update()) {
-      const auto &cam = camera_shared.ref();
-      anari::setParameter(device, anariCamera, "position", cam.eye);
-      anari::setParameter(device, anariCamera, "direction", cam.dir);
-      anari::setParameter(device, anariCamera, "up", cam.up);
-      anari::setParameter(device, anariCamera, "aspect", cam.aspect);
-      anari::commitParameters(device, anariCamera);
+    if (camera_shared.update())
+      renderer_core.setCamera(camera_shared.ref());
+
+    if (renderer_config_shared.update())
+      renderer_core.setRendererConfig(renderer_config_shared.ref());
+
+    std::string error_message;
+    if (!renderer_core.run(&error_message)) {
+      fprintf(stderr, "Background render failed: %s\n", error_message.c_str());
+      return;
     }
+    const double device_seconds =
+        std::max(0.0, static_cast<double>(renderer_core.lastDurationSeconds()));
 
-    if (renderer_config_shared.update()) {
-      const auto &rc = renderer_config_shared.ref();
-      anari::setParameter(device, anariRenderer, "background", rc.bgColor);
-      anari::setParameter(device, anariRenderer, "ambientRadiance",
-                          rc.ambientRadiance);
-      anari::setParameter(device, anariRenderer, "pixelSamples", rc.spp);
-      anari::commitParameters(device, anariRenderer);
-    }
+    // Use renderer-reported duration to represent background render throughput.
+    bg_fps_ema.addSampleSeconds(device_seconds);
 
-    anari::render(device, anariFrame);
-    anari::wait(device, anariFrame);
-
-    auto fb = anari::map<uint32_t>(device, anariFrame, "channel.color");
-
-    FramePixels pixels;
-    pixels.size = frame_size_shared.ref();
-    size_t count = static_cast<size_t>(fb.width) * fb.height;
-    pixels.rgba.assign(fb.data, fb.data + count);
-    anari::unmap(device, anariFrame, "channel.color");
-
-    frame_outputs = pixels;
-
-    bg_fps.count();
+    frame_ready.store(true, std::memory_order_release);
   }
 
   // ─── GUI thread: push camera ─────────────────────────────────────────────
@@ -390,17 +401,109 @@ struct App {
 
   // ─── GUI thread: draw ────────────────────────────────────────────────────
 
+  bool check_cuda_gl_interop() const {
+    unsigned int num_devices = 0;
+    int cuda_devices[8] = {0};
+    cudaError_t err =
+        cudaGLGetDevices(&num_devices, cuda_devices, 8, cudaGLDeviceListAll);
+    if (err != cudaSuccess) {
+      cudaGetLastError(); // clear sticky error for subsequent CUDA calls
+      return false;
+    }
+
+    int current_device = -1;
+    if (cudaGetDevice(&current_device) != cudaSuccess)
+      return false;
+
+    for (unsigned int i = 0; i < num_devices; ++i) {
+      if (cuda_devices[i] == current_device)
+        return true;
+    }
+    return false;
+  }
+
+  void unregister_frame_texture_cuda() {
+    if (frame_texture_cuda) {
+      cudaGraphicsUnregisterResource(frame_texture_cuda);
+      frame_texture_cuda = nullptr;
+    }
+  }
+
+  bool register_frame_texture_cuda() {
+    unregister_frame_texture_cuda();
+    if (!cuda_gl_interop)
+      return false;
+
+    cudaError_t err = cudaGraphicsGLRegisterImage(&frame_texture_cuda,
+                                                  frame_texture,
+                                                  GL_TEXTURE_2D,
+                                                  cudaGraphicsRegisterFlagsWriteDiscard);
+    if (err != cudaSuccess) {
+      fprintf(stderr, "Failed to register GL texture with CUDA: %s\n",
+              cudaGetErrorString(err));
+      frame_texture_cuda = nullptr;
+      return false;
+    }
+    return true;
+  }
+
+  bool upload_cuda_frame_to_texture() {
+    if (!frame_texture_cuda)
+      return false;
+
+    std::lock_guard<std::mutex> guard(renderer_mutex);
+    std::string error_message;
+    auto color = renderer_core.mapColorCUDA(&error_message);
+    if (!color.data) {
+      fprintf(stderr, "Failed to map CUDA framebuffer: %s\n",
+              error_message.c_str());
+      return false;
+    }
+
+    if (color.pixelType != ANARI_UFIXED8_RGBA_SRGB
+        && color.pixelType != ANARI_UFIXED8_VEC4) {
+      fprintf(stderr, "Unsupported CUDA color pixel type for display upload.\n");
+      renderer_core.unmapColorCUDA();
+      return false;
+    }
+
+    const size_t row_bytes = color.width * 4;
+    cudaError_t err = cudaGraphicsMapResources(1, &frame_texture_cuda, nullptr);
+    if (err != cudaSuccess) {
+      fprintf(stderr, "Failed to map CUDA graphics resource: %s\n",
+              cudaGetErrorString(err));
+      renderer_core.unmapColorCUDA();
+      return false;
+    }
+
+    cudaArray_t texture_array = nullptr;
+    err = cudaGraphicsSubResourceGetMappedArray(
+        &texture_array, frame_texture_cuda, 0, 0);
+    if (err == cudaSuccess) {
+      err = cudaMemcpy2DToArray(texture_array,
+                                0,
+                                0,
+                                color.data,
+                                row_bytes,
+                                row_bytes,
+                                color.height,
+                                cudaMemcpyDeviceToDevice);
+    }
+
+    cudaGraphicsUnmapResources(1, &frame_texture_cuda, nullptr);
+    renderer_core.unmapColorCUDA();
+
+    if (err != cudaSuccess) {
+      fprintf(stderr, "Failed to copy CUDA framebuffer into GL texture: %s\n",
+              cudaGetErrorString(err));
+      return false;
+    }
+    return true;
+  }
+
   void draw() {
-    // Consume latest rendered pixels from background thread
-    frame_outputs.update([&](const FramePixels &px) {
-      if (px.size[0] == 0 || px.size[1] == 0)
-        return;
-      glBindTexture(GL_TEXTURE_2D, frame_texture);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, px.size[0], px.size[1], 0,
-                   GL_RGBA, GL_UNSIGNED_BYTE, px.rgba.data());
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    });
+    if (frame_ready.exchange(false, std::memory_order_acq_rel))
+      upload_cuda_frame_to_texture();
 
     // Fullscreen quad (same approach as reference main_app.cpp draw())
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -439,6 +542,7 @@ struct App {
       if (ImGui::Begin("Control Panel", nullptr)) {
         ImGui::Text("Mode: %s",
                     cam_mode == CameraMode::Orbit ? "Orbit (I)" : "Fly (F)");
+        ImGui::Checkbox("Invert Orbit Y", &invert_orbit_y);
         ImGui::Separator();
 
         bool renderer_dirty = false;
@@ -477,9 +581,10 @@ struct App {
         }
 
         ImGui::Separator();
-        ImGui::Text("Gaussians: %zu", gaussianData.positions.size());
-        ImGui::Text("BG FPS: %.1f", bg_fps.fps);
-        ImGui::Text("FG FPS: %.1f", fg_fps.fps);
+        ImGui::Text("Gaussians: %zu", renderer_core.gaussianCount());
+        ImGui::Text("BG FPS (EMA): %.3f",
+                    bg_fps_ema.value());
+        ImGui::Text("FG FPS: %.1f", fg_fps.value());
       }
       ImGui::End();
     }
@@ -490,9 +595,10 @@ struct App {
     // FPS in title bar (same as reference)
     if (fg_fps.count()) {
       std::stringstream title;
-      title << std::fixed << std::setprecision(1)
-            << "Interactive Gaussian Viewer  |  fg=" << fg_fps.fps
-            << " fps  bg=" << bg_fps.fps << " fps";
+      title << std::fixed << std::setprecision(3)
+            << "Interactive Gaussian Viewer  |  fg=" << fg_fps.value()
+            << " fps  bg=" << bg_fps_ema.value()
+            << " fps";
       glfwSetWindowTitle(window, title.str().c_str());
     }
   }
@@ -503,11 +609,15 @@ struct App {
     if (async_enabled)
       async_loop.stop();
 
-    anari::release(device, world);
-    world = buildScene(device, gaussianData, config.scaleFactor);
-    anari::setParameter(device, anariFrame, "world", world);
-    anari::commitParameters(device, anariFrame);
+    {
+      std::lock_guard<std::mutex> guard(renderer_mutex);
+      std::string error_message;
+      if (!renderer_core.setScaleFactor(config.scaleFactor, &error_message))
+        fprintf(stderr, "Failed to rebuild scene: %s\n", error_message.c_str());
+    }
+
     camera_modified = true;
+    frame_ready.store(true, std::memory_order_release);
 
     if (async_enabled) {
       render_background();
@@ -521,6 +631,23 @@ struct App {
     if (w <= 0 || h <= 0)
       return;
     fb_size = {(unsigned)w, (unsigned)h};
+
+    glBindTexture(GL_TEXTURE_2D, frame_texture);
+    glTexImage2D(GL_TEXTURE_2D,
+                 0,
+                 GL_RGBA8,
+                 static_cast<GLsizei>(fb_size[0]),
+                 static_cast<GLsizei>(fb_size[1]),
+                 0,
+                 GL_RGBA,
+                 GL_UNSIGNED_BYTE,
+                 nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    if (cuda_gl_interop)
+      register_frame_texture_cuda();
+
     frame_size_shared = fb_size;
     camera_modified = true;
   }
@@ -538,11 +665,16 @@ struct App {
       gui_enabled = !gui_enabled;
       break;
     case GLFW_KEY_S: {
-      const auto &px = frame_outputs.get();
-      if (px.size[0] > 0 && px.size[1] > 0) {
+      std::lock_guard<std::mutex> guard(renderer_mutex);
+      std::string error_message;
+      auto fb = renderer_core.mapColorHost(&error_message);
+      if (!fb.data) {
+        fprintf(stderr, "Screenshot map failed: %s\n", error_message.c_str());
+      } else {
         stbi_flip_vertically_on_write(1);
-        stbi_write_png("screenshot.png", px.size[0], px.size[1], 4,
-                       px.rgba.data(), 4 * px.size[0]);
+        stbi_write_png("screenshot.png", fb.width, fb.height, 4, fb.data,
+                       4 * fb.width);
+        renderer_core.unmapColorHost();
         printf("Screenshot saved: screenshot.png\n");
       }
       break;
@@ -591,7 +723,8 @@ struct App {
 
     if (cam_mode == CameraMode::Orbit) {
       if (lmbDown) {
-        orbit_cam.orbit(dx * 0.005f, dy * 0.005f);
+        const float orbit_dy = invert_orbit_y ? -dy : dy;
+        orbit_cam.orbit(dx * 0.005f, orbit_dy * 0.005f);
         camera_modified = true;
       }
       if (rmbDown) {
@@ -647,18 +780,25 @@ struct App {
 static App *g_app = nullptr;
 
 static void glfwResizeCb(GLFWwindow *, int w, int h) { g_app->resize(w, h); }
-static void glfwKeyCb(GLFWwindow *, int k, int sc, int a, int m) {
+static void glfwKeyCb(GLFWwindow *window, int k, int sc, int a, int m) {
+  ImGui_ImplGlfw_KeyCallback(window, k, sc, a, m);
   if (!ImGui::GetIO().WantCaptureKeyboard)
     g_app->onKey(k, sc, a, m);
 }
-static void glfwMouseButtonCb(GLFWwindow *, int b, int a, int m) {
+static void glfwMouseButtonCb(GLFWwindow *window, int b, int a, int m) {
+  ImGui_ImplGlfw_MouseButtonCallback(window, b, a, m);
   g_app->onMouseButton(b, a, m);
 }
-static void glfwCursorPosCb(GLFWwindow *, double x, double y) {
+static void glfwCursorPosCb(GLFWwindow *window, double x, double y) {
+  ImGui_ImplGlfw_CursorPosCallback(window, x, y);
   g_app->onCursorPos(x, y);
 }
-static void glfwScrollCb(GLFWwindow *, double x, double y) {
+static void glfwScrollCb(GLFWwindow *window, double x, double y) {
+  ImGui_ImplGlfw_ScrollCallback(window, x, y);
   g_app->onScroll(x, y);
+}
+static void glfwCharCb(GLFWwindow *window, unsigned int c) {
+  ImGui_ImplGlfw_CharCallback(window, c);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -708,28 +848,6 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  // ── Load PLY ──────────────────────────────────────────────────────────────
-
-  auto data = loadPLY(plyPath, opacityThreshold);
-  if (data.positions.empty()) {
-    fprintf(stderr, "No Gaussians survived filtering.\n");
-    return 1;
-  }
-
-  vec3 center;
-  float diagonal;
-  {
-    for (int ax = 0; ax < 3; ax++)
-      center[ax] = (data.bboxMin[ax] + data.bboxMax[ax]) * 0.5f;
-    float dx = data.bboxMax[0] - data.bboxMin[0];
-    float dy = data.bboxMax[1] - data.bboxMin[1];
-    float dz = data.bboxMax[2] - data.bboxMin[2];
-    diagonal = std::sqrt(dx * dx + dy * dy + dz * dz);
-  }
-
-  printf("Scene center: (%.3f, %.3f, %.3f)  diagonal: %.3f\n", center[0],
-         center[1], center[2], diagonal);
-
   // ── GLFW + OpenGL ─────────────────────────────────────────────────────────
 
   if (!glfwInit()) {
@@ -754,65 +872,69 @@ int main(int argc, char *argv[]) {
   int version = gladLoadGL(glfwGetProcAddress);
   if (!version) {
     fprintf(stderr, "Failed to load OpenGL via glad\n");
+    glfwDestroyWindow(window);
     glfwTerminate();
     return 1;
   }
   printf("OpenGL %d.%d loaded\n", GLAD_VERSION_MAJOR(version),
          GLAD_VERSION_MINOR(version));
 
+  // ── App state ─────────────────────────────────────────────────────────────
+
+  App app;
+  app.window = window;
+  app.config.scaleFactor = scaleFactor;
+
+  InitOptions options;
+  options.plyPath = plyPath;
+  options.scaleFactor = scaleFactor;
+  options.opacityThreshold = opacityThreshold;
+  options.frameSize = winSize;
+  options.rendererConfig.spp = 1;
+
+  std::string error_message;
+  if (!app.renderer_core.init(options, &error_message)) {
+    fprintf(stderr, "Renderer init failed: %s\n", error_message.c_str());
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    return 1;
+  }
+
+  app.sceneCenter = app.renderer_core.focusCenter();
+  app.sceneDiagonal = app.renderer_core.sceneDiagonal();
+  const float initial_distance = app.renderer_core.focusDistance();
+  printf("Initial camera focus: (%.3f, %.3f, %.3f)  distance: %.3f  "
+         "scene diagonal: %.3f\n",
+         app.sceneCenter[0],
+         app.sceneCenter[1],
+         app.sceneCenter[2],
+         initial_distance,
+         app.sceneDiagonal);
+
+  app.orbit_cam.center = app.sceneCenter;
+  app.orbit_cam.distance = std::max(0.05f, initial_distance);
+  // Face the scene from -Z by default (matches CLI view direction).
+  app.orbit_cam.yaw = -1.5707963f;
+  app.orbit_cam.pitch = 0.f;
+  app.fly_cam.speed = std::max(0.05f, app.orbit_cam.distance * 0.75f);
+
+  app.cuda_gl_interop = app.check_cuda_gl_interop();
+  if (!app.cuda_gl_interop) {
+    fprintf(stderr,
+            "CUDA-GL interop unavailable. Zero-copy interactive path requires "
+            "matching CUDA and GL devices.\n");
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    return 1;
+  }
+
   // ── Dear ImGui ────────────────────────────────────────────────────────────
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGui::StyleColorsDark();
-  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplGlfw_InitForOpenGL(window, false);
   ImGui_ImplOpenGL3_Init("#version 130");
-
-  // ── ANARI / VisRTX ────────────────────────────────────────────────────────
-
-  auto device = makeVisRTXDevice(anariStatusFunc);
-
-  auto anariWorld = buildScene(device, data, scaleFactor);
-
-  auto anariCamera = anari::newObject<anari::Camera>(device, "perspective");
-  anari::commitParameters(device, anariCamera);
-
-  auto anariRenderer = anari::newObject<anari::Renderer>(device, "default");
-  vec4 bgColor = {0.1f, 0.1f, 0.1f, 1.f};
-  anari::setParameter(device, anariRenderer, "background", bgColor);
-  anari::setParameter(device, anariRenderer, "ambientRadiance", 1.0f);
-  anari::setParameter(device, anariRenderer, "pixelSamples", 1);
-  anari::commitParameters(device, anariRenderer);
-
-  auto anariFrame = anari::newObject<anari::Frame>(device);
-  anari::setParameter(device, anariFrame, "size", winSize);
-  anari::setParameter(device, anariFrame, "channel.color",
-                      ANARI_UFIXED8_RGBA_SRGB);
-  anari::setParameter(device, anariFrame, "world", anariWorld);
-  anari::setParameter(device, anariFrame, "camera", anariCamera);
-  anari::setParameter(device, anariFrame, "renderer", anariRenderer);
-  anari::commitParameters(device, anariFrame);
-
-  // ── App state ─────────────────────────────────────────────────────────────
-
-  App app;
-  app.device = device;
-  app.world = anariWorld;
-  app.anariCamera = anariCamera;
-  app.anariRenderer = anariRenderer;
-  app.anariFrame = anariFrame;
-  app.window = window;
-  app.gaussianData = std::move(data);
-  app.sceneDiagonal = diagonal;
-  app.sceneCenter = center;
-  app.config.scaleFactor = scaleFactor;
-
-  app.orbit_cam.center = center;
-  app.orbit_cam.distance = 0.3f * diagonal;
-  app.orbit_cam.yaw = 0.f;
-  app.orbit_cam.pitch = 0.f;
-
-  app.fly_cam.speed = diagonal * 0.5f;
 
   g_app = &app;
 
@@ -823,6 +945,7 @@ int main(int argc, char *argv[]) {
 
   glfwSetFramebufferSizeCallback(window, glfwResizeCb);
   glfwSetKeyCallback(window, glfwKeyCb);
+  glfwSetCharCallback(window, glfwCharCb);
   glfwSetMouseButtonCallback(window, glfwMouseButtonCb);
   glfwSetCursorPosCallback(window, glfwCursorPosCb);
   glfwSetScrollCallback(window, glfwScrollCb);
@@ -833,8 +956,19 @@ int main(int argc, char *argv[]) {
     glfwGetFramebufferSize(window, &fw, &fh);
     app.resize(fw, fh);
   }
+  if (!app.frame_texture_cuda) {
+    fprintf(stderr, "Failed to enable CUDA-GL interop texture path.\n");
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+    glDeleteTextures(1, &app.frame_texture);
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    return 1;
+  }
 
   // Warm up + start async loop (same as reference constructor)
+  app.push_camera();
   app.render_background();
   app.async_loop.start();
 
@@ -859,18 +993,13 @@ int main(int argc, char *argv[]) {
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
   app.async_loop.stop();
+  app.unregister_frame_texture_cuda();
 
   glDeleteTextures(1, &app.frame_texture);
 
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplGlfw_Shutdown();
   ImGui::DestroyContext();
-
-  anari::release(device, anariCamera);
-  anari::release(device, anariRenderer);
-  anari::release(device, anariWorld);
-  anari::release(device, anariFrame);
-  anari::release(device, device);
 
   glfwDestroyWindow(window);
   glfwTerminate();

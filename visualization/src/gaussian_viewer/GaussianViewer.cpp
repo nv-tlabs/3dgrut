@@ -29,13 +29,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define ANARI_EXTENSION_UTILITY_IMPL
-#include <anari/ext/visrtx/makeVisRTXDevice.h>
-
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
-#include "gaussian_common.h"
+#include "renderer_core.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 static void printUsage(const char *argv0) {
   printf("Usage: %s <path.ply> [options]\n", argv0);
@@ -84,80 +85,43 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  auto data = loadPLY(plyPath, opacityThreshold);
-  if (data.positions.empty()) {
-    fprintf(stderr, "No Gaussians survived filtering.\n");
+  InitOptions options;
+  options.plyPath = plyPath;
+  options.scaleFactor = scaleFactor;
+  options.opacityThreshold = opacityThreshold;
+  options.frameSize = imageSize;
+  options.rendererConfig.spp = spp;
+
+  GaussianRendererCore renderer;
+  std::string errorMessage;
+  if (!renderer.init(options, &errorMessage)) {
+    fprintf(stderr, "Renderer init failed: %s\n", errorMessage.c_str());
     return 1;
   }
 
-  vec3 center;
-  float diagonal = 0.0f;
-  {
-    for (int ax = 0; ax < 3; ax++)
-      center[ax] = (data.bboxMin[ax] + data.bboxMax[ax]) * 0.5f;
+  const auto &center = renderer.sceneCenter();
+  printf("Scene center: (%.3f, %.3f, %.3f)  diagonal: %.3f\n", center[0],
+         center[1], center[2], renderer.sceneDiagonal());
+  printf("Scale factor: %.3f\n", scaleFactor);
+  printf("Rendering %zu Gaussians...\n", renderer.gaussianCount());
 
-    float dx = data.bboxMax[0] - data.bboxMin[0];
-    float dy = data.bboxMax[1] - data.bboxMin[1];
-    float dz = data.bboxMax[2] - data.bboxMin[2];
-    diagonal = std::sqrt(dx * dx + dy * dy + dz * dz);
+  if (!renderer.run(&errorMessage)) {
+    fprintf(stderr, "Render failed: %s\n", errorMessage.c_str());
+    return 1;
   }
 
-  printf("Scene center: (%.3f, %.3f, %.3f)  diagonal: %.3f\n", center[0],
-         center[1], center[2], diagonal);
-  printf("Scale factor: %.3f\n", scaleFactor);
-
-  auto device = makeVisRTXDevice(anariStatusFunc);
-
-  auto world = buildScene(device, data, scaleFactor);
-
-  auto camera = anari::newObject<anari::Camera>(device, "perspective");
-  float pullback = 0.3f * diagonal;
-  vec3 eye = {center[0], center[1], center[2] - pullback};
-  vec3 dir = {0.f, 0.f, 1.f};
-  vec3 up = {0.f, -1.f, 0.f};
-
-  anari::setParameter(device, camera, "position", eye);
-  anari::setParameter(device, camera, "direction", dir);
-  anari::setParameter(device, camera, "up", up);
-  anari::setParameter(device, camera, "aspect",
-                      imageSize[0] / float(imageSize[1]));
-  anari::commitParameters(device, camera);
-
-  auto renderer = anari::newObject<anari::Renderer>(device, "default");
-  vec4 bgColor = {0.1f, 0.1f, 0.1f, 1.f};
-  anari::setParameter(device, renderer, "background", bgColor);
-  anari::setParameter(device, renderer, "ambientRadiance", 1.0f);
-  anari::setParameter(device, renderer, "pixelSamples", spp);
-  anari::commitParameters(device, renderer);
-
-  auto frame = anari::newObject<anari::Frame>(device);
-  anari::setParameter(device, frame, "size", imageSize);
-  anari::setParameter(device, frame, "channel.color", ANARI_UFIXED8_RGBA_SRGB);
-  anari::setParameter(device, frame, "world", world);
-  anari::setParameter(device, frame, "camera", camera);
-  anari::setParameter(device, frame, "renderer", renderer);
-  anari::commitParameters(device, frame);
-
-  printf("Rendering %zu Gaussians...\n", data.positions.size());
-  anari::render(device, frame);
-  anari::wait(device, frame);
-
-  float duration = 0.f;
-  anari::getProperty(device, frame, "duration", duration, ANARI_NO_WAIT);
-  printf("Rendered in %.2f ms\n", duration * 1000);
+  printf("Rendered in %.2f ms\n", renderer.lastDurationSeconds() * 1000.f);
 
   stbi_flip_vertically_on_write(1);
-  auto fb = anari::map<uint32_t>(device, frame, "channel.color");
+  auto fb = renderer.mapColorHost(&errorMessage);
+  if (!fb.data) {
+    fprintf(stderr, "Framebuffer map failed: %s\n", errorMessage.c_str());
+    return 1;
+  }
   stbi_write_png(outputPath.c_str(), fb.width, fb.height, 4, fb.data,
                  4 * fb.width);
-  anari::unmap(device, frame, "channel.color");
+  renderer.unmapColorHost();
   printf("Saved: %s\n", outputPath.c_str());
-
-  anari::release(device, camera);
-  anari::release(device, renderer);
-  anari::release(device, world);
-  anari::release(device, frame);
-  anari::release(device, device);
 
   return 0;
 }

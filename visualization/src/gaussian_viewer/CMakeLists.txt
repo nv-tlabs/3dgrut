@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(anari REQUIRED)
 find_package(VisRTX REQUIRED)
 find_package(OpenGL REQUIRED)
+find_package(CUDAToolkit REQUIRED)
 
 include(FetchContent)
 
@@ -68,6 +69,17 @@ target_link_libraries(imgui_lib PUBLIC glfw glad OpenGL::GL)
 
 # ── offline renderer (GaussianViewer) ────────────────────────────────────────
 
+add_library(gaussian_renderer_core STATIC renderer_core.cpp)
+target_include_directories(gaussian_renderer_core PUBLIC
+  ${happly_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(gaussian_renderer_core PUBLIC
+  VisRTX::anari_library_visrtx
+  anari::anari_static
+  CUDA::cudart
+)
+
 add_executable(GaussianViewer GaussianViewer.cpp)
 
 target_include_directories(GaussianViewer PRIVATE
@@ -77,8 +89,7 @@ target_include_directories(GaussianViewer PRIVATE
 )
 
 target_link_libraries(GaussianViewer PRIVATE
-  VisRTX::anari_library_visrtx
-  anari::anari_static
+  gaussian_renderer_core
 )
 
 add_custom_command(TARGET GaussianViewer POST_BUILD
@@ -98,12 +109,12 @@ target_include_directories(InteractiveViewer PRIVATE
 )
 
 target_link_libraries(InteractiveViewer PRIVATE
-  VisRTX::anari_library_visrtx
-  anari::anari_static
+  gaussian_renderer_core
   imgui_lib
   glad
   glfw
   OpenGL::GL
+  CUDA::cudart
 )
 
 add_custom_command(TARGET InteractiveViewer POST_BUILD

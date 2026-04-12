@@ -29,40 +29,79 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+// Common data types and PLY I/O for 3D Gaussian Splatting visualization.
+//
+// This header defines the in-memory representation of a Gaussian splat scene
+// (GaussianData) and the routines needed to load one from a .ply file exported
+// by a 3DGS training pipeline, decode the stored SH / log-scale / logit-opacity
+// parameters into rendering-ready values, and compute scene-level bounding
+// information (SceneBounds).  It also provides a helper to build per-Gaussian
+// affine transforms (buildTransform) used when instancing the splats via ANARI.
 #pragma once
-
-#include <anari/anari_cpp.hpp>
-#include <anari/anari_cpp/ext/std.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <string>
 #include <vector>
 
 #include "happly.h"
 
+// Lightweight linear-algebra aliases backed by std::array so they can be
+// passed directly to ANARI parameter-setting functions that expect contiguous
+// float data.
 using uvec2 = std::array<unsigned int, 2>;
 using vec3 = std::array<float, 3>;
 using vec4 = std::array<float, 4>;
-using mat4 = std::array<float, 16>;
+using mat4 = std::array<float, 16>;  // column-major 4x4
 
+// 0th-order spherical harmonic coefficient: 1 / (2 * sqrt(pi)).
+// Used to convert the DC SH band stored in the PLY into an RGB color:
+//   color_channel = clamp(SH_C0 * f_dc + 0.5, 0, 1)
 static constexpr float SH_C0 = 0.28209479177387814f;
 
+// Standard logistic sigmoid, used to decode the raw logit-space opacity
+// stored in 3DGS PLY files into the [0, 1] range.
 inline float sigmoid(float x) { return 1.0f / (1.0f + std::exp(-x)); }
 
+// Per-Gaussian attributes loaded from a .ply file after opacity filtering and
+// parameter decoding.  All parallel vectors share the same indexing — element i
+// across positions/colors/scales/quats describes one Gaussian splat.  bboxMin
+// and bboxMax form an axis-aligned bounding box that accounts for each
+// Gaussian's position *plus* its largest scale axis, so they represent the
+// visual extent of the scene rather than just the point centres.
 struct GaussianData {
-  std::vector<vec3> positions;
-  std::vector<vec3> colors;
-  std::vector<vec3> scales;
-  std::vector<vec4> quats;
-  vec3 bboxMin;
-  vec3 bboxMax;
+  std::vector<vec3> positions;  // world-space centres
+  std::vector<vec3> colors;     // linear RGB in [0, 1], decoded from SH DC band
+  std::vector<vec3> scales;     // per-axis radii in world units (exp of stored log-scale)
+  std::vector<vec4> quats;      // orientation as unit quaternion (w, x, y, z)
+  vec3 bboxMin;                 // AABB lower corner (position - max scale)
+  vec3 bboxMax;                 // AABB upper corner (position + max scale)
 };
 
+// Compact summary of the scene's spatial extent, derived from GaussianData's
+// bounding box.  Used as a quick reference for camera placement and distance
+// clamping without re-iterating the full point cloud.
+struct SceneBounds {
+  vec3 center;           // midpoint of the AABB
+  float diagonal{0.f};  // length of the AABB diagonal
+};
+
+// Load a 3D Gaussian Splatting .ply file and return decoded, rendering-ready
+// Gaussian attributes.
+//
+// The PLY format written by common 3DGS training pipelines stores parameters in
+// their optimisation-space encoding:
+//   - opacity  : logit space  -> decoded via sigmoid()
+//   - scale    : log space    -> decoded via exp()
+//   - color    : 0th-order SH -> decoded via SH_C0 * f_dc + 0.5
+//   - rotation : un-normalised quaternion -> normalised to unit length
+//
+// Gaussians whose decoded opacity falls below |opacityThreshold| are discarded
+// (they are nearly invisible and would only waste memory and GPU time).  The
+// bounding box is expanded per surviving Gaussian by its largest scale axis so
+// that it reflects the scene's visual footprint, not just point centres.
 inline GaussianData loadPLY(const std::string &path, float opacityThreshold) {
   happly::PLYData ply(path);
 
@@ -140,7 +179,18 @@ inline GaussianData loadPLY(const std::string &path, float opacityThreshold) {
   return data;
 }
 
-// Column-major mat4: m[col*4 + row]
+// Build a column-major 4x4 affine transform (TRS) for a single Gaussian.
+//
+// The resulting matrix encodes:  M = T * R * S
+//   T  – translation to world-space position |pos|
+//   R  – rotation from unit quaternion |q| (w, x, y, z)
+//   S  – anisotropic scale |s| multiplied by the global |sf| (scale factor)
+//
+// The rotation matrix is derived directly from the quaternion via the standard
+// formula (no intermediate Euler angles), and scale is baked into the rotation
+// columns so that only one 4x4 matrix is needed per Gaussian instance.
+//
+// Storage layout: m[col*4 + row]  (OpenGL / ANARI column-major convention).
 inline mat4 buildTransform(const vec3 &pos, const vec4 &q, const vec3 &s,
                            float sf) {
   float w = q[0], x = q[1], y = q[2], z = q[3];
@@ -176,91 +226,21 @@ inline mat4 buildTransform(const vec3 &pos, const vec4 &q, const vec3 &s,
   }};
 }
 
-inline anari::World buildScene(anari::Device device, const GaussianData &data,
-                               float scaleFactor) {
-  uint32_t N = static_cast<uint32_t>(data.positions.size());
+// Derive the AABB midpoint and diagonal from a loaded GaussianData's bounding
+// box.  Returns a zero-diagonal SceneBounds if no Gaussians are present.
+inline SceneBounds computeSceneBounds(const GaussianData &data) {
+  SceneBounds bounds;
+  bounds.center = {0.f, 0.f, 0.f};
+  if (data.positions.empty())
+    return bounds;
 
-  auto geometry = anari::newObject<anari::Geometry>(device, "sphere");
-  vec3 origin = {0.f, 0.f, 0.f};
-  anari::setParameterArray1D(device, geometry, "vertex.position", &origin, 1);
-  anari::setParameter(device, geometry, "radius", 1.0f);
-  anari::commitParameters(device, geometry);
+  for (int ax = 0; ax < 3; ax++)
+    bounds.center[ax] = (data.bboxMin[ax] + data.bboxMax[ax]) * 0.5f;
 
-  auto material = anari::newObject<anari::Material>(device, "matte");
-  anari::setParameter(device, material, "color", "color");
-  anari::commitParameters(device, material);
+  float dx = data.bboxMax[0] - data.bboxMin[0];
+  float dy = data.bboxMax[1] - data.bboxMin[1];
+  float dz = data.bboxMax[2] - data.bboxMin[2];
+  bounds.diagonal = std::sqrt(dx * dx + dy * dy + dz * dz);
 
-  auto surface = anari::newObject<anari::Surface>(device);
-  anari::setAndReleaseParameter(device, surface, "geometry", geometry);
-  anari::setAndReleaseParameter(device, surface, "material", material);
-  anari::commitParameters(device, surface);
-
-  auto group = anari::newObject<anari::Group>(device);
-  anari::setParameterArray1D(device, group, "surface", &surface, 1);
-  anari::release(device, surface);
-  anari::commitParameters(device, group);
-
-  auto xfmArray = anari::newArray1D(device, ANARI_FLOAT32_MAT4, N);
-  auto colArray = anari::newArray1D(device, ANARI_FLOAT32_VEC3, N);
-  {
-    auto *xfms = anari::map<mat4>(device, xfmArray);
-    auto *cols = anari::map<vec3>(device, colArray);
-    for (uint32_t i = 0; i < N; i++) {
-      xfms[i] = buildTransform(data.positions[i], data.quats[i], data.scales[i],
-                               scaleFactor);
-      cols[i] = data.colors[i];
-    }
-    anari::unmap(device, xfmArray);
-    anari::unmap(device, colArray);
-  }
-
-  auto instance = anari::newObject<anari::Instance>(device, "transform");
-  anari::setAndReleaseParameter(device, instance, "group", group);
-  anari::setAndReleaseParameter(device, instance, "transform", xfmArray);
-  anari::setAndReleaseParameter(device, instance, "color", colArray);
-  anari::commitParameters(device, instance);
-
-  auto keyLight = anari::newObject<anari::Light>(device, "directional");
-  vec3 keyDir = {-1.f, -1.f, -1.f};
-  anari::setParameter(device, keyLight, "direction", keyDir);
-  anari::setParameter(device, keyLight, "irradiance", 3.0f);
-  anari::commitParameters(device, keyLight);
-
-  auto fillLight = anari::newObject<anari::Light>(device, "directional");
-  vec3 fillDir = {1.f, -0.5f, -0.5f};
-  anari::setParameter(device, fillLight, "direction", fillDir);
-  anari::setParameter(device, fillLight, "irradiance", 1.5f);
-  anari::commitParameters(device, fillLight);
-
-  auto backLight = anari::newObject<anari::Light>(device, "directional");
-  vec3 backDir = {0.f, 0.5f, 1.f};
-  anari::setParameter(device, backLight, "direction", backDir);
-  anari::setParameter(device, backLight, "irradiance", 0.8f);
-  anari::commitParameters(device, backLight);
-
-  ANARILight lights[] = {keyLight, fillLight, backLight};
-
-  auto world = anari::newObject<anari::World>(device);
-  anari::setParameterArray1D(device, world, "instance", &instance, 1);
-  anari::release(device, instance);
-  anari::setParameterArray1D(device, world, "light", lights, 3);
-  anari::release(device, keyLight);
-  anari::release(device, fillLight);
-  anari::release(device, backLight);
-  anari::commitParameters(device, world);
-
-  return world;
-}
-
-inline void anariStatusFunc(const void *, ANARIDevice, ANARIObject source,
-                            ANARIDataType, ANARIStatusSeverity severity,
-                            ANARIStatusCode, const char *message) {
-  if (severity == ANARI_SEVERITY_FATAL_ERROR) {
-    fprintf(stderr, "[FATAL][%p] %s\n", source, message);
-    std::exit(1);
-  } else if (severity == ANARI_SEVERITY_ERROR) {
-    fprintf(stderr, "[ERROR][%p] %s\n", source, message);
-  } else if (severity == ANARI_SEVERITY_WARNING) {
-    fprintf(stderr, "[WARN ][%p] %s\n", source, message);
-  }
+  return bounds;
 }
