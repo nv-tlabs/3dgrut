@@ -108,12 +108,15 @@ def main() -> None:
             )
             color_buf = ps.get_quantity_buffer("render", "colors")
 
-        # Extract polyscope's interactive camera
+        # Extract polyscope's interactive camera.
+        # Negate the up vector to convert from polyscope's OpenGL convention
+        # (camera Y-up) to ANARI's Y-down convention.
         view = ps.get_view_camera_parameters()
+        ps_up = view.get_up_dir()
         cam = gr.CameraState()
         cam.eye = tuple(view.get_position())
         cam.dir = tuple(view.get_look_dir())
-        cam.up = tuple(view.get_up_dir())
+        cam.up = (-ps_up[0], -ps_up[1], -ps_up[2])
         cam.aspect = w / max(h, 1)
         renderer.set_camera(cam)
 
