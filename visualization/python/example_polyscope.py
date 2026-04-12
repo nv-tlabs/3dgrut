@@ -26,6 +26,25 @@ import polyscope as ps
 import gaussian_renderer as gr
 
 
+def blit_to_polyscope_buffer(renderer: gr.GaussianRendererCore, ps_buffer) -> None:
+    """Map the renderer's CUDA framebuffer and copy it into a polyscope managed buffer.
+
+    This is a convenience wrapper around the context-manager API that performs a
+    single device-to-device transfer with automatic map/unmap.  The renderer must
+    have been initialised with ``use_float32_color=True`` (the default) so that
+    the pixel format matches polyscope's ``add_color_alpha_image_quantity``
+    internal layout (float32 RGBA).
+
+    Args:
+        renderer: An initialised ``GaussianRendererCore`` after ``run()`` has
+            been called.
+        ps_buffer: A polyscope ``ManagedBuffer`` obtained via
+            ``ps.get_quantity_buffer(name, "colors")``.
+    """
+    with renderer.map_color_cuda() as frame:
+        ps_buffer.update_data_from_device(frame)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="ANARI Gaussian viewer + polyscope")
     parser.add_argument("ply_path", help="Path to a 3DGS .ply file")
@@ -121,7 +140,7 @@ def main() -> None:
         renderer.set_camera(cam)
 
         renderer.run()
-        gr.blit_to_polyscope_buffer(renderer, color_buf)
+        blit_to_polyscope_buffer(renderer, color_buf)
 
     ps.set_user_callback(callback)
     ps.show()
