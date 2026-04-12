@@ -130,6 +130,14 @@ option(BUILD_PYTHON_BINDINGS "Build pybind11 Python module for GaussianRendererC
 
 if(BUILD_PYTHON_BINDINGS)
   find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
+
+  # Make pybind11's legacy FindPythonInterp/FindPythonLibs honour the Python3
+  # that was just discovered (e.g. a venv Python) instead of picking up a
+  # different system-wide interpreter.
+  set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}" CACHE FILEPATH "" FORCE)
+  set(PYTHON_INCLUDE_DIR "${Python3_INCLUDE_DIRS}" CACHE PATH "" FORCE)
+  set(PYTHON_LIBRARY "${Python3_LIBRARIES}" CACHE FILEPATH "" FORCE)
+
   find_package(pybind11 CONFIG QUIET)
   if(NOT pybind11_FOUND)
     FetchContent_Declare(pybind11

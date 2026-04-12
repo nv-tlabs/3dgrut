@@ -114,6 +114,92 @@ if (-not $env:CUDA_HOME -or -not (Test-Path $env:CUDA_HOME)) {
     exit 1
 }
 
+# ── detect / initialize MSVC environment ─────────────────────────────────────
+# Mirrors the logic in install_env_uv.ps1 Step 3.  When using the Ninja
+# generator, rc.exe and mt.exe must be on PATH (MSBuild finds them itself).
+
+$CudaCompatibleVsIds = @("2017", "2019", "2022", "15", "16", "17")
+
+function Get-VsVersionFromPath([string]$Path) {
+    $parts = $Path.Replace("/", "\") -split "\\"
+    for ($i = 0; $i -lt $parts.Length; $i++) {
+        if ($parts[$i] -eq "Microsoft Visual Studio" -and ($i + 1) -lt $parts.Length) {
+            return $parts[$i + 1]
+        }
+    }
+    return ""
+}
+
+function Find-InVsInstall([string[]]$Patterns) {
+    $compatible = $null
+    $fallback = $null
+    foreach ($pattern in $Patterns) {
+        foreach ($p in (Resolve-Path $pattern -ErrorAction SilentlyContinue)) {
+            if (-not $fallback) { $fallback = $p.Path }
+            if (-not $compatible -and
+                ($CudaCompatibleVsIds -contains (Get-VsVersionFromPath $p.Path))) {
+                $compatible = $p.Path
+            }
+        }
+    }
+    if ($compatible) { return $compatible }
+    return $fallback
+}
+
+$existingCl = Get-Command cl.exe -ErrorAction SilentlyContinue
+$existingRc = Get-Command rc.exe -ErrorAction SilentlyContinue
+$libIsX64   = $env:LIB -and ($env:LIB -match "\\x64|\\amd64")
+
+$needVcvars = -not $existingCl -or -not $existingRc -or -not $libIsX64
+if ($needVcvars) {
+    $vcvarsall = Find-InVsInstall @(
+        "C:\Program Files\Microsoft Visual Studio\*\*\VC\Auxiliary\Build\vcvarsall.bat",
+        "C:\Program Files (x86)\Microsoft Visual Studio\*\*\VC\Auxiliary\Build\vcvarsall.bat"
+    )
+    if (-not $vcvarsall) {
+        Write-Host "ERROR: Visual Studio C++ compiler not found." -ForegroundColor Red
+        Write-Host "  Install Visual Studio Build Tools with the 'Desktop development with C++' workload." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "Initializing MSVC x64 environment via vcvarsall.bat..."
+    foreach ($line in (cmd /c "`"$vcvarsall`" x64 >nul 2>&1 && set" 2>&1)) {
+        if ($line -match "^([^=]+)=(.*)$") {
+            [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+        }
+    }
+    $existingCl = Get-Command cl.exe -ErrorAction SilentlyContinue
+    if (-not $existingCl) {
+        Write-Host "ERROR: vcvarsall.bat ran but cl.exe is still not on PATH." -ForegroundColor Red
+        exit 1
+    }
+
+    # Purge stale CMake caches so cached CMAKE_MT-NOTFOUND / CMAKE_RC_COMPILER
+    # values are re-detected with the now-correct environment.
+    if (Test-Path $BuildDir) {
+        Get-ChildItem $BuildDir -Recurse -Filter "CMakeCache.txt" | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+}
+
+foreach ($tool in @(
+    @{ Name = "cmake"; Required = $true },
+    @{ Name = "ninja"; Required = $false }
+)) {
+    $cmd = Get-Command $tool.Name -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        $dir = Find-InVsInstall @(
+            "C:\Program Files\Microsoft Visual Studio\*\*\Common7\IDE\CommonExtensions\Microsoft\CMake\*\$($tool.Name).exe",
+            "C:\Program Files (x86)\Microsoft Visual Studio\*\*\Common7\IDE\CommonExtensions\Microsoft\CMake\*\$($tool.Name).exe"
+        )
+        if ($dir) {
+            $dir = Split-Path $dir
+            $env:Path = "$dir;$env:Path"
+        } elseif ($tool.Required) {
+            Write-Host "ERROR: $($tool.Name) not found. Install CMake or Visual Studio Build Tools." -ForegroundColor Red
+            exit 1
+        }
+    }
+}
+
 # ── pick CMake generator ────────────────────────────────────────────────────
 
 $generatorArgs = @()
@@ -268,6 +354,17 @@ Write-Ok "GaussianViewer built"
 
 $pythonDir = Join-Path $Root "python"
 
+# Multi-config generators (Visual Studio) place outputs in a $BuildType/ subdir;
+# single-config generators (Ninja, Makefiles) place them directly in the build dir.
+$isMultiConfig = -not ($generatorArgs -contains "Ninja" -or $generatorArgs -contains "NMake Makefiles" -or $generatorArgs -contains "Unix Makefiles")
+if ($generatorArgs.Count -eq 0) { $isMultiConfig = $true }  # default on Windows is VS
+
+if ($isMultiConfig) {
+    $viewerOutputDir = Join-Path $viewerBuild $BuildType
+} else {
+    $viewerOutputDir = $viewerBuild
+}
+
 Write-Host ""
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host "  BUILD COMPLETE"                          -ForegroundColor Green
@@ -275,8 +372,8 @@ Write-Host "=========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Install prefix:    $InstallDir"
 Write-Host "  OptiX headers:     $OptiXDir"
-Write-Host "  GaussianViewer:    $(Join-Path (Join-Path $viewerBuild $BuildType) 'GaussianViewer.exe')"
-Write-Host "  InteractiveViewer: $(Join-Path (Join-Path $viewerBuild $BuildType) 'InteractiveViewer.exe')"
+Write-Host "  GaussianViewer:    $(Join-Path $viewerOutputDir 'GaussianViewer.exe')"
+Write-Host "  InteractiveViewer: $(Join-Path $viewerOutputDir 'InteractiveViewer.exe')"
 Write-Host ""
 Write-Host "  To use in your own CMake project:" -ForegroundColor Cyan
 Write-Host "    cmake -DCMAKE_PREFIX_PATH=`"$InstallDir`" .."
@@ -285,5 +382,5 @@ Write-Host "  To use at runtime, add the bin/lib dirs to PATH:" -ForegroundColor
 Write-Host "    `$env:PATH = `"$InstallDir\bin;$InstallDir\lib;`$env:PATH`""
 Write-Host ""
 Write-Host "  To use the Python bindings:" -ForegroundColor Cyan
-Write-Host "    `$env:PYTHONPATH = `"$viewerBuild;$pythonDir;`$env:PYTHONPATH`""
+Write-Host "    `$env:PYTHONPATH = `"$viewerOutputDir;$pythonDir;`$env:PYTHONPATH`""
 Write-Host ""
