@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 #
 # Build the visualization stack (ANARI-SDK, VisRTX, GaussianViewer) via the
-# CMake superbuild in visualization/src/.
+# CMake superbuild in visualization/.
 #
 # The superbuild automatically downloads ANARI-SDK, VisRTX, and (optionally)
 # OptiX headers, then builds gaussian_viewer against them.
 #
 #   visualization/
-#   ├── src/          (superbuild + gaussian_viewer source)
-#   ├── build/        (superbuild build tree)
-#   └── install/      (shared CMAKE_INSTALL_PREFIX)
+#   ├── CMakeLists.txt  (superbuild)
+#   ├── src/            (C++ source)
+#   ├── gaussian_viewer/ (Python package)
+#   ├── build/          (superbuild build tree)
+#   └── install/        (shared CMAKE_INSTALL_PREFIX)
 #
 # Prerequisites: CMake 3.17+, CUDA 12+, a C++17 compiler.
 # OptiX SDK is downloaded automatically unless --optix-dir is given.
@@ -185,7 +187,7 @@ if ! detect_cuda_home; then
   fail "CUDA toolkit not found. Set CUDA_HOME or install CUDA 12+."
 fi
 
-SRC_DIR="${ROOT}/src"
+SRC_DIR="${ROOT}"
 BUILD_DIR="${ROOT}/build"
 INSTALL_DIR="${ROOT}/install"
 
@@ -258,7 +260,7 @@ run_checked "Superbuild build" cmake --build "${BUILD_DIR}" --config "${BUILD_TY
 #  Done
 # ============================================================================
 
-python_dir="${ROOT}/python"
+python_dir="${ROOT}"
 
 # ExternalProject places gaussian_viewer output under this path.
 viewer_build="${BUILD_DIR}/gaussian_viewer-prefix/src/gaussian_viewer-build"
@@ -287,5 +289,5 @@ printf '  To use at runtime, add the bin/lib dirs to LD_LIBRARY_PATH:\n'
 printf '    export LD_LIBRARY_PATH="%s/lib:%s/bin:${LD_LIBRARY_PATH:-}"\n' "${INSTALL_DIR}" "${INSTALL_DIR}"
 printf '\n'
 printf '  To use the Python bindings:\n'
-printf '    export PYTHONPATH="%s:%s:${PYTHONPATH:-}"\n' "${viewer_build}" "${ROOT}/python"
+printf '    export PYTHONPATH="%s:%s:${PYTHONPATH:-}"\n' "${viewer_build}" "${python_dir}"
 printf '\n'

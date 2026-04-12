@@ -1,146 +1,184 @@
 cmake_minimum_required(VERSION 3.17)
-project(VisualizationSuperbuild LANGUAGES NONE)
+project(GaussianViewerSuite LANGUAGES C CXX)
 
-include(ExternalProject)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ── shared install prefix ────────────────────────────────────────────────────
+# ── dependencies (shared) ────────────────────────────────────────────────────
 
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  get_filename_component(_default_prefix "${CMAKE_SOURCE_DIR}/../install" ABSOLUTE)
-  set(CMAKE_INSTALL_PREFIX "${_default_prefix}" CACHE PATH
-      "Shared install prefix for all dependencies" FORCE)
-endif()
+find_package(anari REQUIRED)
+find_package(VisRTX REQUIRED)
+find_package(OpenGL REQUIRED)
+find_package(CUDAToolkit REQUIRED)
 
-set(_ip "${CMAKE_INSTALL_PREFIX}")
+include(FetchContent)
 
-# ── options ──────────────────────────────────────────────────────────────────
+FetchContent_Declare(stb
+  GIT_REPOSITORY https://github.com/nothings/stb.git
+  GIT_SHALLOW    ON
+)
 
-set(OPTIX_ROOT "" CACHE PATH
-    "Path to a local NVIDIA OptiX SDK (must contain an include/ directory). "
-    "When empty the headers are downloaded automatically from GitHub.")
+FetchContent_Declare(happly
+  GIT_REPOSITORY https://github.com/nmwsharp/happly.git
+  GIT_SHALLOW    ON
+)
 
-option(BUILD_PYTHON_BINDINGS
-    "Build pybind11 Python bindings for GaussianRendererCore" OFF)
+# ── dependencies (interactive viewer) ────────────────────────────────────────
 
-# ── resolve OptiX SDK headers ────────────────────────────────────────────────
-# Priority: explicit -DOPTIX_ROOT > Windows auto-detect > GitHub download.
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 
-if(NOT OPTIX_ROOT)
-  if(WIN32)
-    file(GLOB _optix_candidates "C:/ProgramData/NVIDIA Corporation/OptiX SDK*")
-    if(_optix_candidates)
-      list(SORT _optix_candidates)
-      list(GET _optix_candidates -1 OPTIX_ROOT)
-      message(STATUS "Auto-detected local OptiX SDK: ${OPTIX_ROOT}")
-    endif()
+FetchContent_Declare(glfw
+  GIT_REPOSITORY https://github.com/glfw/glfw.git
+  GIT_TAG        3.4
+  GIT_SHALLOW    ON
+)
+
+FetchContent_Declare(imgui
+  GIT_REPOSITORY https://github.com/ocornut/imgui.git
+  GIT_TAG        v1.91.8
+  GIT_SHALLOW    ON
+)
+
+FetchContent_MakeAvailable(stb happly glfw imgui)
+
+# ── glad (generated OpenGL 3.3 core loader) ──────────────────────────────────
+
+set(GLAD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/glad)
+add_library(glad STATIC ${GLAD_DIR}/src/gl.c)
+target_include_directories(glad PUBLIC ${GLAD_DIR}/include)
+
+# ── Dear ImGui library (GLFW + OpenGL3 backend) ─────────────────────────────
+
+add_library(imgui_lib STATIC
+  ${imgui_SOURCE_DIR}/imgui.cpp
+  ${imgui_SOURCE_DIR}/imgui_demo.cpp
+  ${imgui_SOURCE_DIR}/imgui_draw.cpp
+  ${imgui_SOURCE_DIR}/imgui_tables.cpp
+  ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+  ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+  ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+)
+target_include_directories(imgui_lib PUBLIC
+  ${imgui_SOURCE_DIR}
+  ${imgui_SOURCE_DIR}/backends
+)
+target_link_libraries(imgui_lib PUBLIC glfw glad OpenGL::GL)
+
+# ── offline renderer (GaussianViewer) ────────────────────────────────────────
+
+add_library(gaussian_renderer_core STATIC renderer_core.cpp)
+set_target_properties(gaussian_renderer_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(gaussian_renderer_core PUBLIC
+  ${happly_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(gaussian_renderer_core PUBLIC
+  VisRTX::anari_library_visrtx
+  anari::anari_static
+  CUDA::cudart
+)
+
+add_executable(GaussianViewer GaussianViewer.cpp)
+
+target_include_directories(GaussianViewer PRIVATE
+  ${stb_SOURCE_DIR}
+  ${happly_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(GaussianViewer PRIVATE
+  gaussian_renderer_core
+)
+
+add_custom_command(TARGET GaussianViewer POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    $<TARGET_FILE:VisRTX::anari_library_visrtx>
+    $<TARGET_FILE_DIR:GaussianViewer>
+)
+
+# ── interactive viewer ───────────────────────────────────────────────────────
+
+add_executable(InteractiveViewer InteractiveViewer.cpp)
+
+target_include_directories(InteractiveViewer PRIVATE
+  ${stb_SOURCE_DIR}
+  ${happly_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(InteractiveViewer PRIVATE
+  gaussian_renderer_core
+  imgui_lib
+  glad
+  glfw
+  OpenGL::GL
+  CUDA::cudart
+)
+
+add_custom_command(TARGET InteractiveViewer POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    $<TARGET_FILE:VisRTX::anari_library_visrtx>
+    $<TARGET_FILE_DIR:InteractiveViewer>
+)
+
+# ── Python bindings (optional) ───────────────────────────────────────────
+
+option(BUILD_PYTHON_BINDINGS "Build pybind11 Python module for GaussianRendererCore" OFF)
+
+if(BUILD_PYTHON_BINDINGS)
+  find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
+
+  # Make pybind11's legacy FindPythonInterp/FindPythonLibs honour the Python3
+  # that was just discovered (e.g. a venv Python) instead of picking up a
+  # different system-wide interpreter.
+  set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}" CACHE FILEPATH "" FORCE)
+  set(PYTHON_INCLUDE_DIR "${Python3_INCLUDE_DIRS}" CACHE PATH "" FORCE)
+  set(PYTHON_LIBRARY "${Python3_LIBRARIES}" CACHE FILEPATH "" FORCE)
+
+  find_package(pybind11 CONFIG QUIET)
+  if(NOT pybind11_FOUND)
+    FetchContent_Declare(pybind11
+      GIT_REPOSITORY https://github.com/pybind/pybind11.git
+      GIT_TAG        v2.13.6
+      GIT_SHALLOW    ON
+    )
+    FetchContent_MakeAvailable(pybind11)
   endif()
-endif()
 
-if(NOT OPTIX_ROOT OR NOT EXISTS "${OPTIX_ROOT}/include")
-  message(STATUS "No local OptiX SDK found – downloading headers from GitHub …")
-  include(FetchContent)
-  FetchContent_Declare(optix_headers
-    GIT_REPOSITORY https://github.com/NVIDIA/optix-dev.git
-    GIT_TAG        v9.1.0
-    GIT_SHALLOW    ON
+  pybind11_add_module(_gaussian_renderer_core python_bindings.cpp)
+  target_link_libraries(_gaussian_renderer_core PRIVATE gaussian_renderer_core)
+
+  add_custom_command(TARGET _gaussian_renderer_core POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      $<TARGET_FILE:VisRTX::anari_library_visrtx>
+      $<TARGET_FILE_DIR:_gaussian_renderer_core>
   )
-  FetchContent_GetProperties(optix_headers)
-  if(NOT optix_headers_POPULATED)
-    FetchContent_Populate(optix_headers)
-  endif()
-  set(OPTIX_ROOT "${optix_headers_SOURCE_DIR}" CACHE PATH "" FORCE)
 endif()
 
-# ── build type default ───────────────────────────────────────────────────────
+# ── install rules ─────────────────────────────────────────────────────────
+# When built via scikit-build-core the SKBUILD_* variables point to wheel
+# staging directories; otherwise fall back to a conventional layout.
 
-if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
+if(DEFINED SKBUILD_SCRIPTS_DIR)
+  set(_bin_dest "${SKBUILD_SCRIPTS_DIR}")
+else()
+  set(_bin_dest "bin")
 endif()
 
-set(_bt "${CMAKE_BUILD_TYPE}")
+if(DEFINED SKBUILD_PLATLIB_DIR)
+  set(_pkg_dest "${SKBUILD_PLATLIB_DIR}/gaussian_viewer")
+else()
+  set(_pkg_dest "lib")
+endif()
 
-# ── summary ──────────────────────────────────────────────────────────────────
+install(TARGETS GaussianViewer InteractiveViewer RUNTIME DESTINATION "${_bin_dest}")
 
-message(STATUS "Build type:      ${_bt}")
-message(STATUS "Install prefix:  ${_ip}")
-message(STATUS "OptiX SDK:       ${OPTIX_ROOT}")
-message(STATUS "Python bindings: ${BUILD_PYTHON_BINDINGS}")
+if(BUILD_PYTHON_BINDINGS)
+  install(TARGETS _gaussian_renderer_core LIBRARY DESTINATION "${_pkg_dest}")
+endif()
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  1. ANARI-SDK
-# ═════════════════════════════════════════════════════════════════════════════
-
-ExternalProject_Add(anari_sdk
-  GIT_REPOSITORY  https://github.com/KhronosGroup/ANARI-SDK.git
-  GIT_SHALLOW     ON
-  GIT_TAG         v0.15.0
-  CMAKE_ARGS
-    -DCMAKE_BUILD_TYPE=${_bt}
-    -DCMAKE_INSTALL_PREFIX:PATH=${_ip}
-    -DBUILD_SHARED_LIBS=ON
-    -DBUILD_HELIDE_DEVICE=OFF
-    -DBUILD_EXAMPLES=OFF
-    -DBUILD_TESTING=OFF
-    -DBUILD_CTS=OFF
-    -DBUILD_VIEWER=OFF
-  BUILD_COMMAND
-    ${CMAKE_COMMAND} --build <BINARY_DIR> --config ${_bt} --parallel
-  INSTALL_COMMAND
-    ${CMAKE_COMMAND} --install <BINARY_DIR> --config ${_bt}
-)
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  2. VisRTX  (depends on installed ANARI-SDK)
-# ═════════════════════════════════════════════════════════════════════════════
-
-ExternalProject_Add(visrtx
-  GIT_REPOSITORY  https://github.com/NVIDIA/VisRTX.git
-  GIT_TAG         v0.13.0
-  GIT_SHALLOW     ON
-  LIST_SEPARATOR  "|"
-  CMAKE_ARGS
-    -DCMAKE_BUILD_TYPE=${_bt}
-    -DCMAKE_INSTALL_PREFIX:PATH=${_ip}
-    "-DCMAKE_PREFIX_PATH:STRING=${_ip}|${OPTIX_ROOT}"
-    -DOptiX_ROOT:PATH=${OPTIX_ROOT}
-    -DVISRTX_BUILD_RTX_DEVICE=ON
-    -DVISRTX_BUILD_GL_DEVICE=OFF
-    -DVISRTX_BUILD_TESTS=ON
-  BUILD_COMMAND
-    ${CMAKE_COMMAND} --build <BINARY_DIR> --config ${_bt} --parallel
-  INSTALL_COMMAND
-    ${CMAKE_COMMAND} --install <BINARY_DIR> --config ${_bt}
-  DEPENDS anari_sdk
-)
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  3. gaussian_viewer  (local subfolder, depends on both)
-# ═════════════════════════════════════════════════════════════════════════════
-
-set(_gv_cmake_args
-  -DCMAKE_BUILD_TYPE=${_bt}
-  -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_INSTALL_PREFIX}
-  -DCMAKE_PREFIX_PATH:PATH=${_ip}
-  -DBUILD_PYTHON_BINDINGS=${BUILD_PYTHON_BINDINGS}
-)
-
-# When driven by scikit-build-core these variables point to the wheel staging
-# directories.  Forward them so the inner project's install() rules can place
-# executables and Python modules in the right locations.
-foreach(_var SKBUILD_PLATLIB_DIR SKBUILD_SCRIPTS_DIR)
-  if(DEFINED ${_var})
-    list(APPEND _gv_cmake_args "-D${_var}=${${_var}}")
-  endif()
-endforeach()
-
-ExternalProject_Add(gaussian_viewer
-  SOURCE_DIR        ${CMAKE_CURRENT_SOURCE_DIR}/gaussian_viewer
-  DOWNLOAD_COMMAND  ""
-  CMAKE_ARGS        ${_gv_cmake_args}
-  BUILD_COMMAND
-    ${CMAKE_COMMAND} --build <BINARY_DIR> --config ${_bt} --parallel
-  INSTALL_COMMAND
-    ${CMAKE_COMMAND} --install <BINARY_DIR> --config ${_bt}
-  BUILD_ALWAYS      ON
-  DEPENDS anari_sdk visrtx
-)
+install(FILES $<TARGET_FILE:VisRTX::anari_library_visrtx> DESTINATION "${_pkg_dest}")
+install(FILES $<TARGET_FILE:VisRTX::anari_library_visrtx> DESTINATION "${_bin_dest}")

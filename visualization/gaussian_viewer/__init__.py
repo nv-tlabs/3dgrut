@@ -5,10 +5,10 @@ that can be fed directly into polyscope via device-to-device copy.
 
 Quick start::
 
-    import gaussian_renderer as gr
+    import gaussian_viewer as viewer
 
-    renderer = gr.GaussianRendererCore()
-    opts = gr.InitOptions()
+    renderer = viewer.GaussianRendererCore()
+    opts = viewer.InitOptions()
     opts.ply_path = "scene.ply"
     opts.use_float32_color = True  # default; matches polyscope's internal format
     renderer.init(opts)

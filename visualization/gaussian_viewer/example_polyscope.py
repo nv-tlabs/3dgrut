@@ -21,10 +21,10 @@ import argparse
 import numpy as np
 import polyscope as ps
 
-import gaussian_renderer as gr
+import gaussian_viewer as viewer
 
 
-def blit_to_polyscope_buffer(renderer: gr.GaussianRendererCore, ps_buffer) -> None:
+def blit_to_polyscope_buffer(renderer: viewer.GaussianRendererCore, ps_buffer) -> None:
     """Map the renderer's CUDA framebuffer and copy it into a polyscope managed buffer.
 
     This is a convenience wrapper around the context-manager API that performs a
@@ -54,9 +54,9 @@ def main() -> None:
 
     # ── Renderer setup ────────────────────────────────────────────────────
 
-    renderer = gr.GaussianRendererCore()
+    renderer = viewer.GaussianRendererCore()
 
-    opts = gr.InitOptions()
+    opts = viewer.InitOptions()
     opts.ply_path = args.ply_path
     opts.scale_factor = args.scale_factor
     opts.frame_size = (args.width, args.height)
@@ -130,7 +130,7 @@ def main() -> None:
         # (camera Y-up) to ANARI's Y-down convention.
         view = ps.get_view_camera_parameters()
         ps_up = view.get_up_dir()
-        cam = gr.CameraState()
+        cam = viewer.CameraState()
         cam.eye = tuple(view.get_position())
         cam.dir = tuple(view.get_look_dir())
         cam.up = (-ps_up[0], -ps_up[1], -ps_up[2])

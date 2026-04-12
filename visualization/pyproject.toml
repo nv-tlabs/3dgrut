@@ -13,10 +13,10 @@ dependencies = ["numpy"]
 polyscope = ["polyscope>=2.6.0"]
 
 [project.scripts]
-example-polyscope = "gaussian_renderer.example_polyscope:main"
+example-polyscope = "gaussian_viewer.example_polyscope:main"
 
 [tool.scikit-build]
-cmake.source-dir = "src"
+cmake.source-dir = "."
 cmake.args = ["-DBUILD_PYTHON_BINDINGS=ON"]
 cmake.build-type = "Release"
-wheel.packages = ["python/gaussian_renderer"]
+wheel.packages = ["gaussian_viewer"]

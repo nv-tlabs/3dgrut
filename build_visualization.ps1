@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Build the visualization stack (ANARI-SDK, VisRTX, GaussianViewer) via the
-    CMake superbuild in visualization/src/.
+    CMake superbuild in visualization/.
 
 .DESCRIPTION
     Configures and builds the superbuild CMakeLists.txt that automatically
@@ -9,9 +9,11 @@
     against them.
 
         visualization/
-        ├── src/          (superbuild + gaussian_viewer source)
-        ├── build/        (superbuild build tree)
-        └── install/      (shared CMAKE_INSTALL_PREFIX)
+        ├── CMakeLists.txt  (superbuild)
+        ├── src/            (C++ source)
+        ├── gaussian_viewer/ (Python package)
+        ├── build/          (superbuild build tree)
+        └── install/        (shared CMAKE_INSTALL_PREFIX)
 
     Prerequisites: CMake 3.17+, CUDA 12+, a C++17 compiler (Visual Studio).
     OptiX SDK is downloaded automatically unless -OptiXDir is given.
@@ -70,7 +72,7 @@ function Assert-ExitCode {
 # ── resolve paths ────────────────────────────────────────────────────────────
 
 if ($Root -eq "") { $Root = Join-Path $ScriptDir "visualization" }
-$SrcDir     = Join-Path $Root "src"
+$SrcDir     = $Root
 $BuildDir   = Join-Path $Root "build"
 $InstallDir = Join-Path $Root "install"
 
@@ -246,7 +248,7 @@ Assert-ExitCode "Superbuild build"
 #  Done
 # ═════════════════════════════════════════════════════════════════════════════
 
-$pythonDir = Join-Path $Root "python"
+$pythonDir = $Root
 
 # ExternalProject places gaussian_viewer output under this path.
 $viewerBuild = Join-Path $BuildDir "gaussian_viewer-prefix\src\gaussian_viewer-build"
