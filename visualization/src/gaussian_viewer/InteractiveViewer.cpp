@@ -304,7 +304,14 @@ struct App {
   TransactionalValue<CameraState> camera_shared;
   TransactionalValue<uvec2> frame_size_shared{uvec2{0, 0}};
   TransactionalValue<RendererConfig> renderer_config_shared;
+  TransactionalValue<float> scale_factor_shared{1.0f};
   std::atomic<bool> frame_ready{false};
+
+  // Producer-consumer handoff: background thread waits after producing a frame
+  // until the foreground has consumed it, preventing mutex starvation.
+  std::mutex frame_handoff_mtx_;
+  std::condition_variable frame_consumed_cv_;
+  bool frame_consumed_{true};
 
   // Background thread
   AsyncLoop async_loop{std::bind(&App::render_background, this)};
@@ -349,6 +356,17 @@ struct App {
   // ─── Background thread ───────────────────────────────────────────────────
 
   void render_background() {
+    // Wait until the foreground has consumed the previous frame before
+    // rendering another.  The short timeout lets the AsyncLoop check its
+    // stop flag without requiring an external wake-up.
+    {
+      std::unique_lock<std::mutex> lk(frame_handoff_mtx_);
+      frame_consumed_cv_.wait_for(lk, std::chrono::milliseconds(50),
+                                  [this] { return frame_consumed_; });
+      if (!frame_consumed_)
+        return;
+    }
+
     std::lock_guard<std::mutex> guard(renderer_mutex);
 
     if (frame_size_shared.update()) {
@@ -369,6 +387,13 @@ struct App {
     if (renderer_config_shared.update())
       renderer_core.setRendererConfig(renderer_config_shared.ref());
 
+    if (scale_factor_shared.update()) {
+      std::string error_message;
+      if (!renderer_core.setScaleFactor(scale_factor_shared.ref(),
+                                        &error_message))
+        fprintf(stderr, "Failed to rebuild scene: %s\n", error_message.c_str());
+    }
+
     std::string error_message;
     if (!renderer_core.run(&error_message)) {
       fprintf(stderr, "Background render failed: %s\n", error_message.c_str());
@@ -377,9 +402,12 @@ struct App {
     const double device_seconds =
         std::max(0.0, static_cast<double>(renderer_core.lastDurationSeconds()));
 
-    // Use renderer-reported duration to represent background render throughput.
     bg_fps_ema.addSampleSeconds(device_seconds);
 
+    {
+      std::lock_guard<std::mutex> lk(frame_handoff_mtx_);
+      frame_consumed_ = false;
+    }
     frame_ready.store(true, std::memory_order_release);
   }
 
@@ -501,8 +529,14 @@ struct App {
   }
 
   void draw() {
-    if (frame_ready.exchange(false, std::memory_order_acq_rel))
+    if (frame_ready.exchange(false, std::memory_order_acq_rel)) {
       upload_cuda_frame_to_texture();
+      {
+        std::lock_guard<std::mutex> lk(frame_handoff_mtx_);
+        frame_consumed_ = true;
+      }
+      frame_consumed_cv_.notify_one();
+    }
 
     // Fullscreen quad (same approach as reference main_app.cpp draw())
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -598,7 +632,7 @@ struct App {
         ImGui::Separator();
         if (ImGui::SliderFloat("Gaussian Scale", &config.scaleFactor, 0.01f,
                                10.f, "%.3f")) {
-          rebuildScene();
+          scale_factor_shared = config.scaleFactor;
         }
 
         ImGui::Separator();
@@ -619,28 +653,6 @@ struct App {
             << "Interactive Gaussian Viewer  |  fg=" << fg_fps.value()
             << " fps  bg=" << bg_fps_ema.value() << " fps";
       glfwSetWindowTitle(window, title.str().c_str());
-    }
-  }
-
-  // ─── Scene rebuild ───────────────────────────────────────────────────────
-
-  void rebuildScene() {
-    if (async_enabled)
-      async_loop.stop();
-
-    {
-      std::lock_guard<std::mutex> guard(renderer_mutex);
-      std::string error_message;
-      if (!renderer_core.setScaleFactor(config.scaleFactor, &error_message))
-        fprintf(stderr, "Failed to rebuild scene: %s\n", error_message.c_str());
-    }
-
-    camera_modified = true;
-    frame_ready.store(true, std::memory_order_release);
-
-    if (async_enabled) {
-      render_background();
-      async_loop.start();
     }
   }
 
@@ -667,7 +679,7 @@ struct App {
 
   // ─── Key handling ────────────────────────────────────────────────────────
 
-  void onKey(int key, int /*scancode*/, int action, int /*mods*/) {
+  void onKey(int key, int /*scancode*/, int action, int mods) {
     if (action != GLFW_PRESS)
       return;
     switch (key) {
@@ -678,6 +690,8 @@ struct App {
       gui_enabled = !gui_enabled;
       break;
     case GLFW_KEY_S: {
+      if (cam_mode == CameraMode::Fly && !(mods & GLFW_MOD_CONTROL))
+        break;
       std::lock_guard<std::mutex> guard(renderer_mutex);
       std::string error_message;
       auto fb = renderer_core.mapColorHost(&error_message);
@@ -1002,6 +1016,12 @@ int main(int argc, char *argv[]) {
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
+  // Wake the background thread so it exits the CV wait promptly.
+  {
+    std::lock_guard<std::mutex> lk(app.frame_handoff_mtx_);
+    app.frame_consumed_ = true;
+  }
+  app.frame_consumed_cv_.notify_one();
   app.async_loop.stop();
   app.unregister_frame_texture_cuda();
 
