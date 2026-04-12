@@ -202,6 +202,7 @@ bool GaussianRendererCore::init(const InitOptions &options,
 
   m_sceneBounds = computeSceneBounds(m_data);
   m_scaleFactor = options.scaleFactor;
+  m_useFloat32Color = options.useFloat32Color;
   m_frameSize = options.frameSize;
   m_rendererConfig = options.rendererConfig;
   computeCameraHeuristics();
@@ -244,7 +245,8 @@ bool GaussianRendererCore::init(const InitOptions &options,
   m_rendererDirty = true;
 
   anari::setParameter(m_device, m_frameObj, kChannelColor,
-                      ANARI_UFIXED8_RGBA_SRGB);
+                      m_useFloat32Color ? ANARI_FLOAT32_VEC4
+                                        : ANARI_UFIXED8_RGBA_SRGB);
   anari::setParameter(m_device, m_frameObj, kChannelDepth, ANARI_FLOAT32);
   anari::setParameter(m_device, m_frameObj, "camera", m_cameraObj);
   anari::setParameter(m_device, m_frameObj, "renderer", m_rendererObj);
@@ -375,6 +377,20 @@ void GaussianRendererCore::unmapColorCUDA() {
     return;
   anari::unmap(m_device, m_frameObj, kChannelColorCUDA);
   m_cudaMapped = false;
+}
+
+MappedFrameInfo
+GaussianRendererCore::mapColorCUDAInfo(std::string *errorMessage) {
+  MappedFrameInfo info{};
+  auto mapped = mapColorCUDA(errorMessage);
+  if (!mapped.data)
+    return info;
+  info.data = mapped.data;
+  info.width = mapped.width;
+  info.height = mapped.height;
+  info.bytesPerPixel = static_cast<uint32_t>(bytesPerPixel(mapped.pixelType));
+  info.isFloat = (mapped.pixelType == ANARI_FLOAT32_VEC4);
+  return info;
 }
 
 // High-level helper: map the CUDA colour buffer, 2D-copy it into a

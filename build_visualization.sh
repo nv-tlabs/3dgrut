@@ -400,7 +400,8 @@ run_checked "GaussianViewer configure" cmake "${generator_args[@]}" \
   -S "${viewer_src}" \
   -B "${viewer_build}" \
   "-DCMAKE_BUILD_TYPE=${BUILD_TYPE}" \
-  "-DCMAKE_PREFIX_PATH=${INSTALL_DIR}"
+  "-DCMAKE_PREFIX_PATH=${INSTALL_DIR}" \
+  -DBUILD_PYTHON_BINDINGS=ON
 
 step "Building GaussianViewer - ${BUILD_TYPE}, ${JOBS} jobs"
 run_checked "GaussianViewer build" cmake --build "${viewer_build}" --config "${BUILD_TYPE}" --parallel "${JOBS}"
@@ -414,6 +415,8 @@ fi
 if [[ ! -x "${interactive_bin}" && -x "${viewer_build}/${BUILD_TYPE}/InteractiveViewer" ]]; then
   interactive_bin="${viewer_build}/${BUILD_TYPE}/InteractiveViewer"
 fi
+
+python_dir="${ROOT}/python/gaussian_renderer"
 
 printf '\n\033[1;32m=========================================\033[0m\n'
 printf '\033[1;32m  BUILD COMPLETE\033[0m\n'
@@ -429,4 +432,7 @@ printf '    cmake -DCMAKE_PREFIX_PATH="%s" ..\n' "${INSTALL_DIR}"
 printf '\n'
 printf '  To use at runtime, add the bin/lib dirs to LD_LIBRARY_PATH:\n'
 printf '    export LD_LIBRARY_PATH="%s/lib:%s/bin:${LD_LIBRARY_PATH:-}"\n' "${INSTALL_DIR}" "${INSTALL_DIR}"
+printf '\n'
+printf '  To use the Python bindings:\n'
+printf '    export PYTHONPATH="%s:%s:${PYTHONPATH:-}"\n' "${viewer_build}" "${ROOT}/python"
 printf '\n'

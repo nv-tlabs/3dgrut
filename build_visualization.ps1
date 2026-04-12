@@ -253,7 +253,8 @@ cmake @generatorArgs `
     -S $viewerSrc `
     -B $viewerBuild `
     "-DCMAKE_BUILD_TYPE=$BuildType" `
-    "-DCMAKE_PREFIX_PATH=$InstallDir"
+    "-DCMAKE_PREFIX_PATH=$InstallDir" `
+    -DBUILD_PYTHON_BINDINGS=ON
 Assert-ExitCode "GaussianViewer configure"
 
 Write-Step "Building GaussianViewer - $BuildType, $Jobs jobs"
@@ -265,18 +266,24 @@ Write-Ok "GaussianViewer built"
 #  Done
 # ═════════════════════════════════════════════════════════════════════════════
 
+$pythonDir = Join-Path $Root "python"
+
 Write-Host ""
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host "  BUILD COMPLETE"                          -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Install prefix:  $InstallDir"
-Write-Host ""
-Write-Host "  GaussianViewer:  $(Join-Path (Join-Path $viewerBuild $BuildType) 'GaussianViewer.exe')"
+Write-Host "  Install prefix:    $InstallDir"
+Write-Host "  OptiX headers:     $OptiXDir"
+Write-Host "  GaussianViewer:    $(Join-Path (Join-Path $viewerBuild $BuildType) 'GaussianViewer.exe')"
+Write-Host "  InteractiveViewer: $(Join-Path (Join-Path $viewerBuild $BuildType) 'InteractiveViewer.exe')"
 Write-Host ""
 Write-Host "  To use in your own CMake project:" -ForegroundColor Cyan
 Write-Host "    cmake -DCMAKE_PREFIX_PATH=`"$InstallDir`" .."
 Write-Host ""
 Write-Host "  To use at runtime, add the bin/lib dirs to PATH:" -ForegroundColor Cyan
 Write-Host "    `$env:PATH = `"$InstallDir\bin;$InstallDir\lib;`$env:PATH`""
+Write-Host ""
+Write-Host "  To use the Python bindings:" -ForegroundColor Cyan
+Write-Host "    `$env:PYTHONPATH = `"$viewerBuild;$pythonDir;`$env:PYTHONPATH`""
 Write-Host ""

@@ -45,6 +45,17 @@ struct InitOptions {
   float opacityThreshold{0.05f};         // discard Gaussians below this opacity
   uvec2 frameSize{1920, 1080};           // initial framebuffer resolution
   RendererConfig rendererConfig{};       // initial renderer settings
+  bool useFloat32Color{false};           // true = FLOAT32_VEC4, false = UFIXED8_RGBA_SRGB
+};
+
+// Binding-friendly description of a mapped CUDA framebuffer, free of ANARI
+// header dependencies so that Python bindings can consume it directly.
+struct MappedFrameInfo {
+  const void *data = nullptr;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t bytesPerPixel = 0;            // 4 for uint8 RGBA, 16 for float32 RGBA
+  bool isFloat = false;
 };
 
 class GaussianRendererCore {
@@ -90,6 +101,12 @@ public:
   anari::MappedFrameData<void>
   mapColorCUDA(std::string *errorMessage = nullptr);
   void unmapColorCUDA();
+
+  /// Map the CUDA colour buffer and return a MappedFrameInfo describing the
+  /// pointer, dimensions, and pixel format.  The caller must call
+  /// unmapColorCUDA() when done.  Designed for use by Python bindings that
+  /// cannot include ANARI headers.
+  MappedFrameInfo mapColorCUDAInfo(std::string *errorMessage = nullptr);
 
   /// Convenience: map the CUDA colour buffer, perform a device-to-device 2D
   /// memcpy into |dstPtr| (pitched), and unmap.  Supports both synchronous
@@ -155,6 +172,7 @@ private:
 
   // --- User-facing parameters (latched, applied lazily) -------------------
   float m_scaleFactor{1.f};
+  bool m_useFloat32Color{false};
   uvec2 m_frameSize{1920, 1080};
   CameraState m_camera;
   RendererConfig m_rendererConfig;
