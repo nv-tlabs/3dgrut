@@ -3,16 +3,14 @@
 
 Usage::
 
-    python example_polyscope.py /path/to/scene.ply [--scale-factor 1.0]
+    example-polyscope /path/to/scene.ply [--scale-factor 1.0]
 
 The ANARI renderer produces a float32 RGBA CUDA framebuffer which is copied
 device-to-device into polyscope's OpenGL texture every frame — no CPU
 roundtrip.
 
 Prerequisites:
-  - Build the ``_gaussian_renderer_core`` pybind11 module
-    (``-DBUILD_PYTHON_BINDINGS=ON``) and make sure it is importable.
-  - Install polyscope (``pip install polyscope``).
+  - ``pip install gaussian-viewer[polyscope]``
   - Install the CUDA-GL interop backend:
       * ``pip install cuda-python cupy``, OR
       * Use the custom bindings from ``threedgrut.gui.ps_extension``.

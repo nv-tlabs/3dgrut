@@ -1,0 +1,22 @@
+[build-system]
+requires = ["scikit-build-core>=0.11", "pybind11>=2.13"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "gaussian-viewer"
+version = "0.1.0"
+description = "3D Gaussian Splat viewer with ANARI/VisRTX renderer and Python bindings"
+requires-python = ">=3.11"
+dependencies = ["numpy"]
+
+[project.optional-dependencies]
+polyscope = ["polyscope>=2.6.0"]
+
+[project.scripts]
+example-polyscope = "gaussian_renderer.example_polyscope:main"
+
+[tool.scikit-build]
+cmake.source-dir = "src"
+cmake.args = ["-DBUILD_PYTHON_BINDINGS=ON"]
+cmake.build-type = "Release"
+wheel.packages = ["python/gaussian_renderer"]

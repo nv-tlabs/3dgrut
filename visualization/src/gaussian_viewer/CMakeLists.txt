@@ -157,3 +157,28 @@ if(BUILD_PYTHON_BINDINGS)
       $<TARGET_FILE_DIR:_gaussian_renderer_core>
   )
 endif()
+
+# ── install rules ─────────────────────────────────────────────────────────
+# When built via scikit-build-core the SKBUILD_* variables point to wheel
+# staging directories; otherwise fall back to a conventional layout.
+
+if(DEFINED SKBUILD_SCRIPTS_DIR)
+  set(_bin_dest "${SKBUILD_SCRIPTS_DIR}")
+else()
+  set(_bin_dest "bin")
+endif()
+
+if(DEFINED SKBUILD_PLATLIB_DIR)
+  set(_pkg_dest "${SKBUILD_PLATLIB_DIR}/gaussian_renderer")
+else()
+  set(_pkg_dest "lib")
+endif()
+
+install(TARGETS GaussianViewer InteractiveViewer RUNTIME DESTINATION "${_bin_dest}")
+
+if(BUILD_PYTHON_BINDINGS)
+  install(TARGETS _gaussian_renderer_core LIBRARY DESTINATION "${_pkg_dest}")
+endif()
+
+install(FILES $<TARGET_FILE:VisRTX::anari_library_visrtx> DESTINATION "${_pkg_dest}")
+install(FILES $<TARGET_FILE:VisRTX::anari_library_visrtx> DESTINATION "${_bin_dest}")

@@ -117,16 +117,30 @@ ExternalProject_Add(visrtx
 #  3. gaussian_viewer  (local subfolder, depends on both)
 # ═════════════════════════════════════════════════════════════════════════════
 
+set(_gv_cmake_args
+  -DCMAKE_BUILD_TYPE=${_bt}
+  -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_INSTALL_PREFIX}
+  -DCMAKE_PREFIX_PATH:PATH=${_ip}
+  -DBUILD_PYTHON_BINDINGS=${BUILD_PYTHON_BINDINGS}
+)
+
+# When driven by scikit-build-core these variables point to the wheel staging
+# directories.  Forward them so the inner project's install() rules can place
+# executables and Python modules in the right locations.
+foreach(_var SKBUILD_PLATLIB_DIR SKBUILD_SCRIPTS_DIR)
+  if(DEFINED ${_var})
+    list(APPEND _gv_cmake_args "-D${_var}=${${_var}}")
+  endif()
+endforeach()
+
 ExternalProject_Add(gaussian_viewer
   SOURCE_DIR        ${CMAKE_CURRENT_SOURCE_DIR}/gaussian_viewer
   DOWNLOAD_COMMAND  ""
-  CMAKE_ARGS
-    -DCMAKE_BUILD_TYPE=${_bt}
-    -DCMAKE_PREFIX_PATH:PATH=${_ip}
-    -DBUILD_PYTHON_BINDINGS=${BUILD_PYTHON_BINDINGS}
+  CMAKE_ARGS        ${_gv_cmake_args}
   BUILD_COMMAND
     ${CMAKE_COMMAND} --build <BINARY_DIR> --config ${_bt} --parallel
-  INSTALL_COMMAND   ""
+  INSTALL_COMMAND
+    ${CMAKE_COMMAND} --install <BINARY_DIR> --config ${_bt}
   BUILD_ALWAYS      ON
   DEPENDS anari_sdk visrtx
 )

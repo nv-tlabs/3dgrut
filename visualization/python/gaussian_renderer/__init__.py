@@ -19,7 +19,7 @@ Quick start::
         ...
 """
 
-from _gaussian_renderer_core import (  # type: ignore[import-untyped]
+from ._gaussian_renderer_core import (  # type: ignore[import-untyped]
     CameraState,
     CUDAFrameContext,
     GaussianRendererCore,
