@@ -1,25 +1,27 @@
 <#
 .SYNOPSIS
-    Clone and build ANARI-SDK + VisRTX under a local visualization/ folder.
+    Build the visualization stack (ANARI-SDK, VisRTX, GaussianViewer) via the
+    CMake superbuild in visualization/src/.
 
 .DESCRIPTION
-    Downloads, configures, builds, and installs ANARI-SDK and VisRTX (RTX device)
-    into a self-contained visualization/ directory tree:
+    Configures and builds the superbuild CMakeLists.txt that automatically
+    downloads ANARI-SDK, VisRTX, and OptiX headers, then builds gaussian_viewer
+    against them.
 
         visualization/
-        ├── src/          (cloned repos)
-        ├── build/        (out-of-source build trees)
+        ├── src/          (superbuild + gaussian_viewer source)
+        ├── build/        (superbuild build tree)
         └── install/      (shared CMAKE_INSTALL_PREFIX)
 
-    Prerequisites: CMake 3.17+, CUDA 12+, a C++17 compiler (Visual Studio),
-    and the NVIDIA OptiX SDK headers.
+    Prerequisites: CMake 3.17+, CUDA 12+, a C++17 compiler (Visual Studio).
+    OptiX SDK is downloaded automatically unless -OptiXDir is given.
 
 .PARAMETER Root
     Base directory for the entire tree (default: visualization/ next to this script).
 
 .PARAMETER OptiXDir
-    Path to the OptiX SDK. When omitted the script searches the standard
-    ProgramData location.
+    Path to a local OptiX SDK.  When omitted the superbuild downloads the
+    headers from https://github.com/NVIDIA/optix-dev automatically.
 
 .PARAMETER BuildType
     CMake build type (default: Release).
@@ -74,29 +76,6 @@ $InstallDir = Join-Path $Root "install"
 
 if ($Jobs -le 0) { $Jobs = (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum }
 
-# ── locate OptiX SDK ────────────────────────────────────────────────────────
-
-if ($OptiXDir -eq "") {
-    $optixRoot = "C:\ProgramData\NVIDIA Corporation"
-    if (Test-Path $optixRoot) {
-        $found = Get-ChildItem $optixRoot -Directory |
-                 Where-Object { $_.Name -like "OptiX SDK*" } |
-                 Sort-Object Name -Descending |
-                 Select-Object -First 1
-        if ($found) { $OptiXDir = $found.FullName }
-    }
-}
-
-if ($OptiXDir -eq "" -or -not (Test-Path $OptiXDir)) {
-    Write-Host "ERROR: OptiX SDK not found. Specify -OptiXDir explicitly." -ForegroundColor Red
-    exit 1
-}
-$optixInclude = Join-Path $OptiXDir "include"
-if (-not (Test-Path $optixInclude)) {
-    Write-Host "ERROR: OptiX include directory not found at $optixInclude" -ForegroundColor Red
-    exit 1
-}
-
 # ── locate CUDA ──────────────────────────────────────────────────────────────
 
 if (-not $env:CUDA_HOME -or -not (Test-Path $env:CUDA_HOME)) {
@@ -115,8 +94,6 @@ if (-not $env:CUDA_HOME -or -not (Test-Path $env:CUDA_HOME)) {
 }
 
 # ── detect / initialize MSVC environment ─────────────────────────────────────
-# Mirrors the logic in install_env_uv.ps1 Step 3.  When using the Ninja
-# generator, rc.exe and mt.exe must be on PATH (MSBuild finds them itself).
 
 $CudaCompatibleVsIds = @("2017", "2019", "2022", "15", "16", "17")
 
@@ -173,8 +150,6 @@ if ($needVcvars) {
         exit 1
     }
 
-    # Purge stale CMake caches so cached CMAKE_MT-NOTFOUND / CMAKE_RC_COMPILER
-    # values are re-detected with the now-correct environment.
     if (Test-Path $BuildDir) {
         Get-ChildItem $BuildDir -Recurse -Filter "CMakeCache.txt" | Remove-Item -Force -ErrorAction SilentlyContinue
     }
@@ -216,15 +191,17 @@ if ($Generator -ne "") {
 
 Write-Host ""
 Write-Host "=========================================" -ForegroundColor Cyan
-Write-Host "  ANARI-SDK + VisRTX Build"               -ForegroundColor Cyan
+Write-Host "  Visualization Superbuild"               -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "  Root:        $Root"
+Write-Host "  Source:      $SrcDir"
+Write-Host "  Build:       $BuildDir"
 Write-Host "  Install:     $InstallDir"
 Write-Host "  BuildType:   $BuildType"
 Write-Host "  Generator:   $(if ($generatorArgs.Count) { $generatorArgs[1] } else { '(default)' })"
 Write-Host "  Jobs:        $Jobs"
 Write-Host "  CUDA_HOME:   $env:CUDA_HOME"
-Write-Host "  OptiX SDK:   $OptiXDir"
+Write-Host "  OptiX SDK:   $(if ($OptiXDir) { $OptiXDir } else { '(auto-detect / download)' })"
 Write-Host ""
 
 # ── optional clean ───────────────────────────────────────────────────────────
@@ -236,123 +213,43 @@ if ($Clean) {
     Write-Ok "Clean complete"
 }
 
-# ── create directory tree ────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+#  Configure superbuild
+# ═════════════════════════════════════════════════════════════════════════════
 
-foreach ($d in @($SrcDir, $BuildDir, $InstallDir)) {
-    if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+Write-Step "Configuring superbuild"
+
+$cmakeArgs = @()
+$cmakeArgs += $generatorArgs
+$cmakeArgs += @("-S", $SrcDir)
+$cmakeArgs += @("-B", $BuildDir)
+$cmakeArgs += "-DCMAKE_BUILD_TYPE=$BuildType"
+$cmakeArgs += "-DCMAKE_INSTALL_PREFIX=$InstallDir"
+$cmakeArgs += "-DBUILD_PYTHON_BINDINGS=ON"
+
+if ($OptiXDir -ne "") {
+    $cmakeArgs += "-DOPTIX_ROOT=$OptiXDir"
 }
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  1. ANARI-SDK
-# ═════════════════════════════════════════════════════════════════════════════
-
-$anariSrc   = Join-Path $SrcDir   "ANARI-SDK"
-$anariBuild = Join-Path $BuildDir "anari-sdk"
-
-Write-Step "Cloning ANARI-SDK"
-if (Test-Path $anariSrc) {
-    Write-Warn "Source already exists - pulling latest"
-    git -C $anariSrc pull --ff-only
-} else {
-    git clone https://github.com/KhronosGroup/ANARI-SDK.git $anariSrc
-}
-Assert-ExitCode "ANARI-SDK clone/pull"
-
-Write-Step "Configuring ANARI-SDK"
-if (-not (Test-Path $anariBuild)) { New-Item -ItemType Directory -Path $anariBuild -Force | Out-Null }
-
-cmake @generatorArgs `
-    -S $anariSrc `
-    -B $anariBuild `
-    "-DCMAKE_BUILD_TYPE=$BuildType" `
-    "-DCMAKE_INSTALL_PREFIX=$InstallDir" `
-    -DBUILD_SHARED_LIBS=ON `
-    -DBUILD_HELIDE_DEVICE=ON `
-    -DBUILD_EXAMPLES=OFF `
-    -DBUILD_TESTING=OFF `
-    -DBUILD_CTS=OFF `
-    -DBUILD_VIEWER=OFF
-Assert-ExitCode "ANARI-SDK configure"
-
-Write-Step "Building ANARI-SDK - $BuildType, $Jobs jobs"
-cmake --build $anariBuild --config $BuildType --parallel $Jobs
-Assert-ExitCode "ANARI-SDK build"
-
-Write-Step "Installing ANARI-SDK"
-cmake --install $anariBuild --config $BuildType
-Assert-ExitCode "ANARI-SDK install"
-Write-Ok "ANARI-SDK installed to $InstallDir"
+cmake @cmakeArgs
+Assert-ExitCode "Superbuild configure"
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  2. VisRTX
+#  Build everything
 # ═════════════════════════════════════════════════════════════════════════════
 
-$visrtxSrc   = Join-Path $SrcDir   "VisRTX"
-$visrtxBuild = Join-Path $BuildDir "visrtx"
-
-Write-Step "Cloning VisRTX - next_release branch"
-if (Test-Path $visrtxSrc) {
-    Write-Warn "Source already exists - pulling latest"
-    git -C $visrtxSrc pull --ff-only
-} else {
-    git clone --branch next_release https://github.com/NVIDIA/VisRTX.git $visrtxSrc
-}
-Assert-ExitCode "VisRTX clone/pull"
-
-$prefixPath = "$InstallDir;$OptiXDir"
-
-Write-Step "Configuring VisRTX"
-if (-not (Test-Path $visrtxBuild)) { New-Item -ItemType Directory -Path $visrtxBuild -Force | Out-Null }
-
-cmake @generatorArgs `
-    -S $visrtxSrc `
-    -B $visrtxBuild `
-    "-DCMAKE_BUILD_TYPE=$BuildType" `
-    "-DCMAKE_INSTALL_PREFIX=$InstallDir" `
-    "-DCMAKE_PREFIX_PATH=$prefixPath" `
-    "-DOptiX_ROOT=$OptiXDir" `
-    -DVISRTX_BUILD_RTX_DEVICE=ON `
-    -DVISRTX_BUILD_GL_DEVICE=OFF `
-    -DVISRTX_BUILD_TESTS=ON
-Assert-ExitCode "VisRTX configure"
-
-Write-Step "Building VisRTX - $BuildType, $Jobs jobs"
-cmake --build $visrtxBuild --config $BuildType --parallel $Jobs
-Assert-ExitCode "VisRTX build"
-
-Write-Step "Installing VisRTX"
-cmake --install $visrtxBuild --config $BuildType
-Assert-ExitCode "VisRTX install"
-Write-Ok "VisRTX installed to $InstallDir"
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  3. GaussianViewer (standalone sample app)
-# ═════════════════════════════════════════════════════════════════════════════
-
-$viewerSrc   = Join-Path $SrcDir   "gaussian_viewer"
-$viewerBuild = Join-Path $BuildDir "gaussian_viewer"
-
-Write-Step "Configuring GaussianViewer"
-if (-not (Test-Path $viewerBuild)) { New-Item -ItemType Directory -Path $viewerBuild -Force | Out-Null }
-
-cmake @generatorArgs `
-    -S $viewerSrc `
-    -B $viewerBuild `
-    "-DCMAKE_BUILD_TYPE=$BuildType" `
-    "-DCMAKE_PREFIX_PATH=$InstallDir" `
-    -DBUILD_PYTHON_BINDINGS=ON
-Assert-ExitCode "GaussianViewer configure"
-
-Write-Step "Building GaussianViewer - $BuildType, $Jobs jobs"
-cmake --build $viewerBuild --config $BuildType --parallel $Jobs
-Assert-ExitCode "GaussianViewer build"
-Write-Ok "GaussianViewer built"
+Write-Step "Building all targets - $BuildType, $Jobs jobs"
+cmake --build $BuildDir --config $BuildType --parallel $Jobs
+Assert-ExitCode "Superbuild build"
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  Done
 # ═════════════════════════════════════════════════════════════════════════════
 
 $pythonDir = Join-Path $Root "python"
+
+# ExternalProject places gaussian_viewer output under this path.
+$viewerBuild = Join-Path $BuildDir "gaussian_viewer-prefix\src\gaussian_viewer-build"
 
 # Multi-config generators (Visual Studio) place outputs in a $BuildType/ subdir;
 # single-config generators (Ninja, Makefiles) place them directly in the build dir.
@@ -371,7 +268,6 @@ Write-Host "  BUILD COMPLETE"                          -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Install prefix:    $InstallDir"
-Write-Host "  OptiX headers:     $OptiXDir"
 Write-Host "  GaussianViewer:    $(Join-Path $viewerOutputDir 'GaussianViewer.exe')"
 Write-Host "  InteractiveViewer: $(Join-Path $viewerOutputDir 'InteractiveViewer.exe')"
 Write-Host ""

@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 #
-# Clone and build ANARI-SDK + VisRTX under a local visualization/ folder.
+# Build the visualization stack (ANARI-SDK, VisRTX, GaussianViewer) via the
+# CMake superbuild in visualization/src/.
 #
-# This script downloads, configures, builds, and installs ANARI-SDK and VisRTX
-# (RTX device) into a self-contained visualization/ directory tree:
+# The superbuild automatically downloads ANARI-SDK, VisRTX, and (optionally)
+# OptiX headers, then builds gaussian_viewer against them.
 #
 #   visualization/
-#   ├── src/          (cloned repos)
-#   ├── build/        (out-of-source build trees)
+#   ├── src/          (superbuild + gaussian_viewer source)
+#   ├── build/        (superbuild build tree)
 #   └── install/      (shared CMAKE_INSTALL_PREFIX)
 #
-# Prerequisites: CMake 3.17+, CUDA 12+, a C++17 compiler, and OptiX SDK headers.
+# Prerequisites: CMake 3.17+, CUDA 12+, a C++17 compiler.
+# OptiX SDK is downloaded automatically unless --optix-dir is given.
 
 set -euo pipefail
 
@@ -20,9 +22,8 @@ Usage: build_visualization.sh [options]
 
 Options:
   --root PATH          Base directory for visualization tree (default: ./visualization)
-  --optix-dir PATH     Use local OptiX headers directory (must contain include/)
-  --visrtx-branch NAME VisRTX branch to build (default: next_release)
-  --optix-branch NAME  OptiX branch (default: same as --visrtx-branch)
+  --optix-dir PATH     Use local OptiX headers directory (must contain include/).
+                       When omitted, headers are downloaded from GitHub automatically.
   --build-type TYPE    CMake build type (default: Release)
   --generator NAME     CMake generator (default: Ninja if available)
   --jobs N             Parallel build jobs (default: logical CPU count)
@@ -32,7 +33,6 @@ Options:
 Examples:
   ./build_visualization.sh
   ./build_visualization.sh --build-type RelWithDebInfo
-  ./build_visualization.sh --visrtx-branch next_release
   ./build_visualization.sh --optix-dir /usr/local/NVIDIA-OptiX-SDK-8.0.0-linux64-x86_64
 EOF
 }
@@ -60,21 +60,6 @@ require_value() {
   if [[ -z "${value}" ]]; then
     fail "${flag} requires a value"
   fi
-}
-
-validate_optix_dir() {
-  if [[ ! -d "${OPTIX_DIR}" ]]; then
-    fail "OptiX path does not exist: ${OPTIX_DIR}"
-  fi
-  if [[ ! -d "${OPTIX_DIR}/include" ]]; then
-    fail "OptiX include directory not found at ${OPTIX_DIR}/include"
-  fi
-}
-
-remote_branch_exists() {
-  local repo_url="$1"
-  local branch="$2"
-  git ls-remote --exit-code --heads "${repo_url}" "${branch}" >/dev/null 2>&1
 }
 
 detect_cuda_home() {
@@ -112,11 +97,6 @@ detect_cuda_home() {
 
 ROOT=""
 OPTIX_DIR="${OPTIX_DIR:-}"
-OPTIX_IS_LOCAL=false
-VISRTX_BRANCH="next_release"
-OPTIX_BRANCH=""
-OPTIX_BRANCH_EXPLICIT=false
-OPTIX_REPO_URL="https://github.com/NVIDIA/optix-dev.git"
 BUILD_TYPE="Release"
 GENERATOR=""
 JOBS=0
@@ -136,32 +116,10 @@ while [[ $# -gt 0 ]]; do
     --optix-dir)
       require_value "$1" "${2:-}"
       OPTIX_DIR="$2"
-      OPTIX_IS_LOCAL=true
       shift 2
       ;;
     --optix-dir=*)
       OPTIX_DIR="${1#*=}"
-      OPTIX_IS_LOCAL=true
-      shift
-      ;;
-    --visrtx-branch)
-      require_value "$1" "${2:-}"
-      VISRTX_BRANCH="$2"
-      shift 2
-      ;;
-    --visrtx-branch=*)
-      VISRTX_BRANCH="${1#*=}"
-      shift
-      ;;
-    --optix-branch)
-      require_value "$1" "${2:-}"
-      OPTIX_BRANCH="$2"
-      OPTIX_BRANCH_EXPLICIT=true
-      shift 2
-      ;;
-    --optix-branch=*)
-      OPTIX_BRANCH="${1#*=}"
-      OPTIX_BRANCH_EXPLICIT=true
       shift
       ;;
     --build-type)
@@ -211,10 +169,6 @@ if [[ -z "${ROOT}" ]]; then
   ROOT="${SCRIPT_DIR}/visualization"
 fi
 
-if [[ -n "${OPTIX_DIR}" ]]; then
-  OPTIX_IS_LOCAL=true
-fi
-
 if [[ "${JOBS}" -le 0 ]]; then
   if command -v nproc >/dev/null 2>&1; then
     JOBS="$(nproc)"
@@ -225,20 +179,6 @@ fi
 
 if ! [[ "${JOBS}" =~ ^[0-9]+$ ]] || [[ "${JOBS}" -le 0 ]]; then
   fail "--jobs must be a positive integer"
-fi
-
-if [[ -z "${OPTIX_BRANCH}" ]]; then
-  OPTIX_BRANCH="${VISRTX_BRANCH}"
-fi
-
-if [[ "${OPTIX_IS_LOCAL}" == false ]]; then
-  if ! remote_branch_exists "${OPTIX_REPO_URL}" "${OPTIX_BRANCH}"; then
-    if [[ "${OPTIX_BRANCH_EXPLICIT}" == true ]]; then
-      fail "OptiX branch '${OPTIX_BRANCH}' not found in ${OPTIX_REPO_URL}"
-    fi
-    warn "OptiX branch '${OPTIX_BRANCH}' not found in optix-dev, falling back to 'main'"
-    OPTIX_BRANCH="main"
-  fi
 fi
 
 if ! detect_cuda_home; then
@@ -256,10 +196,14 @@ elif command -v ninja >/dev/null 2>&1; then
   generator_args=(-G Ninja)
 fi
 
+# ── summary ──────────────────────────────────────────────────────────────────
+
 printf '\n\033[1;36m=========================================\033[0m\n'
-printf '\033[1;36m  ANARI-SDK + VisRTX Build (Linux)\033[0m\n'
+printf '\033[1;36m  Visualization Superbuild\033[0m\n'
 printf '\033[1;36m=========================================\033[0m\n'
 printf '  Root:        %s\n' "${ROOT}"
+printf '  Source:      %s\n' "${SRC_DIR}"
+printf '  Build:       %s\n' "${BUILD_DIR}"
 printf '  Install:     %s\n' "${INSTALL_DIR}"
 printf '  BuildType:   %s\n' "${BUILD_TYPE}"
 if [[ ${#generator_args[@]} -gt 0 ]]; then
@@ -269,14 +213,14 @@ else
 fi
 printf '  Jobs:        %s\n' "${JOBS}"
 printf '  CUDA_HOME:   %s\n' "${CUDA_HOME}"
-printf '  VisRTX branch: %s\n' "${VISRTX_BRANCH}"
-if [[ "${OPTIX_IS_LOCAL}" == true ]]; then
-  printf '  OptiX source: local (%s)\n' "${OPTIX_DIR}"
+if [[ -n "${OPTIX_DIR}" ]]; then
+  printf '  OptiX SDK:   %s\n' "${OPTIX_DIR}"
 else
-  printf '  OptiX repo:  %s\n' "${OPTIX_REPO_URL}"
-  printf '  OptiX branch: %s\n' "${OPTIX_BRANCH}"
+  printf '  OptiX SDK:   (auto-detect / download)\n'
 fi
 printf '\n'
+
+# ── optional clean ───────────────────────────────────────────────────────────
 
 if [[ "${CLEAN}" == true ]]; then
   step "Cleaning previous build/install directories"
@@ -284,128 +228,40 @@ if [[ "${CLEAN}" == true ]]; then
   ok "Clean complete"
 fi
 
-mkdir -p "${SRC_DIR}" "${BUILD_DIR}" "${INSTALL_DIR}"
-
 # ============================================================================
-# 1) ANARI-SDK
+#  Configure superbuild
 # ============================================================================
 
-anari_src="${SRC_DIR}/ANARI-SDK"
-anari_build="${BUILD_DIR}/anari-sdk"
+step "Configuring superbuild"
 
-step "Cloning ANARI-SDK"
-if [[ -d "${anari_src}/.git" ]]; then
-  warn "Source already exists - pulling latest"
-  run_checked "ANARI-SDK pull" git -C "${anari_src}" pull --ff-only
-else
-  run_checked "ANARI-SDK clone" git clone https://github.com/KhronosGroup/ANARI-SDK.git "${anari_src}"
+cmake_args=("${generator_args[@]}")
+cmake_args+=(-S "${SRC_DIR}")
+cmake_args+=(-B "${BUILD_DIR}")
+cmake_args+=("-DCMAKE_BUILD_TYPE=${BUILD_TYPE}")
+cmake_args+=("-DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}")
+cmake_args+=("-DBUILD_PYTHON_BINDINGS=ON")
+
+if [[ -n "${OPTIX_DIR}" ]]; then
+  cmake_args+=("-DOPTIX_ROOT=${OPTIX_DIR}")
 fi
 
-step "Configuring ANARI-SDK"
-mkdir -p "${anari_build}"
-run_checked "ANARI-SDK configure" cmake "${generator_args[@]}" \
-  -S "${anari_src}" \
-  -B "${anari_build}" \
-  "-DCMAKE_BUILD_TYPE=${BUILD_TYPE}" \
-  "-DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}" \
-  -DBUILD_SHARED_LIBS=ON \
-  -DBUILD_HELIDE_DEVICE=ON \
-  -DBUILD_EXAMPLES=OFF \
-  -DBUILD_TESTING=OFF \
-  -DBUILD_CTS=OFF \
-  -DBUILD_VIEWER=OFF
-
-step "Building ANARI-SDK - ${BUILD_TYPE}, ${JOBS} jobs"
-run_checked "ANARI-SDK build" cmake --build "${anari_build}" --config "${BUILD_TYPE}" --parallel "${JOBS}"
-
-step "Installing ANARI-SDK"
-run_checked "ANARI-SDK install" cmake --install "${anari_build}" --config "${BUILD_TYPE}"
-ok "ANARI-SDK installed to ${INSTALL_DIR}"
+run_checked "Superbuild configure" cmake "${cmake_args[@]}"
 
 # ============================================================================
-# 2) OptiX headers
+#  Build everything
 # ============================================================================
 
-if [[ "${OPTIX_IS_LOCAL}" == true ]]; then
-  validate_optix_dir
-  ok "Using local OptiX headers at ${OPTIX_DIR}"
-else
-  optix_src="${SRC_DIR}/optix-dev"
-  step "Cloning OptiX headers - ${OPTIX_BRANCH} branch"
-  if [[ -d "${optix_src}/.git" ]]; then
-    warn "Source already exists - syncing requested branch"
-    run_checked "OptiX fetch" git -C "${optix_src}" fetch --prune origin
-    run_checked "OptiX checkout ${OPTIX_BRANCH}" git -C "${optix_src}" checkout -B "${OPTIX_BRANCH}" "origin/${OPTIX_BRANCH}"
-    run_checked "OptiX pull ${OPTIX_BRANCH}" git -C "${optix_src}" pull --ff-only origin "${OPTIX_BRANCH}"
-  else
-    run_checked "OptiX clone" git clone --branch "${OPTIX_BRANCH}" --single-branch "${OPTIX_REPO_URL}" "${optix_src}"
-  fi
-  OPTIX_DIR="${optix_src}"
-  validate_optix_dir
-  ok "OptiX headers ready at ${OPTIX_DIR}"
-fi
+step "Building all targets - ${BUILD_TYPE}, ${JOBS} jobs"
+run_checked "Superbuild build" cmake --build "${BUILD_DIR}" --config "${BUILD_TYPE}" --parallel "${JOBS}"
 
 # ============================================================================
-# 3) VisRTX
+#  Done
 # ============================================================================
 
-visrtx_src="${SRC_DIR}/VisRTX"
-visrtx_build="${BUILD_DIR}/visrtx"
-prefix_path="${INSTALL_DIR};${OPTIX_DIR}"
+python_dir="${ROOT}/python"
 
-step "Cloning VisRTX - ${VISRTX_BRANCH} branch"
-if [[ -d "${visrtx_src}/.git" ]]; then
-  warn "Source already exists - syncing requested branch"
-  run_checked "VisRTX fetch" git -C "${visrtx_src}" fetch --prune origin
-  run_checked "VisRTX checkout ${VISRTX_BRANCH}" git -C "${visrtx_src}" checkout -B "${VISRTX_BRANCH}" "origin/${VISRTX_BRANCH}"
-  run_checked "VisRTX pull ${VISRTX_BRANCH}" git -C "${visrtx_src}" pull --ff-only origin "${VISRTX_BRANCH}"
-else
-  run_checked "VisRTX clone" git clone --branch "${VISRTX_BRANCH}" --single-branch https://github.com/NVIDIA/VisRTX.git "${visrtx_src}"
-fi
-
-step "Configuring VisRTX"
-mkdir -p "${visrtx_build}"
-run_checked "VisRTX configure" cmake "${generator_args[@]}" \
-  -S "${visrtx_src}" \
-  -B "${visrtx_build}" \
-  "-DCMAKE_BUILD_TYPE=${BUILD_TYPE}" \
-  "-DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}" \
-  "-DCMAKE_PREFIX_PATH=${prefix_path}" \
-  "-DOptiX_ROOT=${OPTIX_DIR}" \
-  -DVISRTX_BUILD_RTX_DEVICE=ON \
-  -DVISRTX_BUILD_GL_DEVICE=OFF \
-  -DVISRTX_BUILD_TESTS=ON
-
-step "Building VisRTX - ${BUILD_TYPE}, ${JOBS} jobs"
-run_checked "VisRTX build" cmake --build "${visrtx_build}" --config "${BUILD_TYPE}" --parallel "${JOBS}"
-
-step "Installing VisRTX"
-run_checked "VisRTX install" cmake --install "${visrtx_build}" --config "${BUILD_TYPE}"
-ok "VisRTX installed to ${INSTALL_DIR}"
-
-# ============================================================================
-# 4) GaussianViewer (standalone sample app)
-# ============================================================================
-
-viewer_src="${SRC_DIR}/gaussian_viewer"
-viewer_build="${BUILD_DIR}/gaussian_viewer"
-
-if [[ ! -f "${viewer_src}/CMakeLists.txt" ]]; then
-  fail "Expected viewer source at ${viewer_src}. Make sure visualization/src/gaussian_viewer is present."
-fi
-
-step "Configuring GaussianViewer"
-mkdir -p "${viewer_build}"
-run_checked "GaussianViewer configure" cmake "${generator_args[@]}" \
-  -S "${viewer_src}" \
-  -B "${viewer_build}" \
-  "-DCMAKE_BUILD_TYPE=${BUILD_TYPE}" \
-  "-DCMAKE_PREFIX_PATH=${INSTALL_DIR}" \
-  -DBUILD_PYTHON_BINDINGS=ON
-
-step "Building GaussianViewer - ${BUILD_TYPE}, ${JOBS} jobs"
-run_checked "GaussianViewer build" cmake --build "${viewer_build}" --config "${BUILD_TYPE}" --parallel "${JOBS}"
-ok "GaussianViewer built"
+# ExternalProject places gaussian_viewer output under this path.
+viewer_build="${BUILD_DIR}/gaussian_viewer-prefix/src/gaussian_viewer-build"
 
 viewer_bin="${viewer_build}/GaussianViewer"
 interactive_bin="${viewer_build}/InteractiveViewer"
@@ -416,15 +272,12 @@ if [[ ! -x "${interactive_bin}" && -x "${viewer_build}/${BUILD_TYPE}/Interactive
   interactive_bin="${viewer_build}/${BUILD_TYPE}/InteractiveViewer"
 fi
 
-python_dir="${ROOT}/python/gaussian_renderer"
-
 printf '\n\033[1;32m=========================================\033[0m\n'
 printf '\033[1;32m  BUILD COMPLETE\033[0m\n'
 printf '\033[1;32m=========================================\033[0m\n'
 printf '\n'
-printf '  Install prefix:  %s\n' "${INSTALL_DIR}"
-printf '  OptiX headers:   %s\n' "${OPTIX_DIR}"
-printf '  GaussianViewer:  %s\n' "${viewer_bin}"
+printf '  Install prefix:    %s\n' "${INSTALL_DIR}"
+printf '  GaussianViewer:    %s\n' "${viewer_bin}"
 printf '  InteractiveViewer: %s\n' "${interactive_bin}"
 printf '\n'
 printf '  To use in your own CMake project:\n'
