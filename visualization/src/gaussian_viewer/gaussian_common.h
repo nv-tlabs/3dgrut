@@ -54,7 +54,7 @@
 using uvec2 = std::array<unsigned int, 2>;
 using vec3 = std::array<float, 3>;
 using vec4 = std::array<float, 4>;
-using mat4 = std::array<float, 16>;  // column-major 4x4
+using mat4 = std::array<float, 16>; // column-major 4x4
 
 // 0th-order spherical harmonic coefficient: 1 / (2 * sqrt(pi)).
 // Used to convert the DC SH band stored in the PLY into an RGB color:
@@ -72,20 +72,21 @@ inline float sigmoid(float x) { return 1.0f / (1.0f + std::exp(-x)); }
 // Gaussian's position *plus* its largest scale axis, so they represent the
 // visual extent of the scene rather than just the point centres.
 struct GaussianData {
-  std::vector<vec3> positions;  // world-space centres
-  std::vector<vec3> colors;     // linear RGB in [0, 1], decoded from SH DC band
-  std::vector<vec3> scales;     // per-axis radii in world units (exp of stored log-scale)
-  std::vector<vec4> quats;      // orientation as unit quaternion (w, x, y, z)
-  vec3 bboxMin;                 // AABB lower corner (position - max scale)
-  vec3 bboxMax;                 // AABB upper corner (position + max scale)
+  std::vector<vec3> positions; // world-space centres
+  std::vector<vec3> colors;    // linear RGB in [0, 1], decoded from SH DC band
+  std::vector<vec3>
+      scales; // per-axis radii in world units (exp of stored log-scale)
+  std::vector<vec4> quats; // orientation as unit quaternion (w, x, y, z)
+  vec3 bboxMin;            // AABB lower corner (position - max scale)
+  vec3 bboxMax;            // AABB upper corner (position + max scale)
 };
 
 // Compact summary of the scene's spatial extent, derived from GaussianData's
 // bounding box.  Used as a quick reference for camera placement and distance
 // clamping without re-iterating the full point cloud.
 struct SceneBounds {
-  vec3 center;           // midpoint of the AABB
-  float diagonal{0.f};  // length of the AABB diagonal
+  vec3 center;         // midpoint of the AABB
+  float diagonal{0.f}; // length of the AABB diagonal
 };
 
 // Load a 3D Gaussian Splatting .ply file and return decoded, rendering-ready

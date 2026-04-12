@@ -52,16 +52,15 @@ size_t bytesPerPixel(ANARIDataType pixelType) {
 //   │   │   └── Surface
 //   │   │       ├── Geometry  — single unit sphere at the origin
 //   │   │       └── Material  — "matte", colour sourced from per-instance array
-//   │   ├── transform[]       — N column-major 4x4 TRS matrices (one per Gaussian)
-//   │   └── color[]           — N RGB colours
+//   │   ├── transform[]       — N column-major 4x4 TRS matrices (one per
+//   Gaussian) │   └── color[]           — N RGB colours
 //
 // Lighting is not included in the world returned by this function; the caller
 // (GaussianRendererCore) attaches a persistent directional light separately so
-// that it can be updated without a full world rebuild.  Each Gaussian's position, orientation, and anisotropic
-// scale (times the global scaleFactor) are baked into its instance transform
-// via buildTransform().
-anari::World buildScene(anari::Device device,
-                        const GaussianData &data,
+// that it can be updated without a full world rebuild.  Each Gaussian's
+// position, orientation, and anisotropic scale (times the global scaleFactor)
+// are baked into its instance transform via buildTransform().
+anari::World buildScene(anari::Device device, const GaussianData &data,
                         float scaleFactor) {
   uint32_t N = static_cast<uint32_t>(data.positions.size());
 
@@ -128,6 +127,8 @@ GaussianRendererCore::~GaussianRendererCore() {
       anari::release(m_device, m_frameObj);
     if (m_rendererObj)
       anari::release(m_device, m_rendererObj);
+    if (m_headlightObj)
+      anari::release(m_device, m_headlightObj);
     if (m_lightObj)
       anari::release(m_device, m_lightObj);
     if (m_cameraObj)
@@ -199,18 +200,22 @@ bool GaussianRendererCore::init(const InitOptions &options,
   m_supportsCudaFrameBuffers = checkCudaFrameExtension();
   if (!m_supportsCudaFrameBuffers) {
     if (errorMessage)
-      *errorMessage = "VisRTX device does not expose ANARI_NV_FRAME_BUFFERS_CUDA.";
+      *errorMessage =
+          "VisRTX device does not expose ANARI_NV_FRAME_BUFFERS_CUDA.";
     return false;
   }
 
   m_cameraObj = anari::newObject<anari::Camera>(m_device, "perspective");
   m_rendererObj = anari::newObject<anari::Renderer>(m_device, "default");
   m_lightObj = anari::newObject<anari::Light>(m_device, "directional");
+  m_headlightObj = anari::newObject<anari::Light>(m_device, "directional");
   m_frameObj = anari::newObject<anari::Frame>(m_device);
 
-  if (!m_cameraObj || !m_rendererObj || !m_lightObj || !m_frameObj) {
+  if (!m_cameraObj || !m_rendererObj || !m_lightObj || !m_headlightObj ||
+      !m_frameObj) {
     if (errorMessage)
-      *errorMessage = "Failed to create ANARI camera/renderer/light/frame objects.";
+      *errorMessage =
+          "Failed to create ANARI camera/renderer/light/frame objects.";
     return false;
   }
 
@@ -251,8 +256,8 @@ bool GaussianRendererCore::run(std::string *errorMessage) {
   anari::wait(m_device, m_frameObj);
 
   m_lastDurationSeconds = 0.f;
-  anari::getProperty(
-      m_device, m_frameObj, "duration", m_lastDurationSeconds, ANARI_NO_WAIT);
+  anari::getProperty(m_device, m_frameObj, "duration", m_lastDurationSeconds,
+                     ANARI_NO_WAIT);
   return true;
 }
 
@@ -321,9 +326,10 @@ void GaussianRendererCore::unmapColorHost() {
   m_hostMapped = false;
 }
 
-// Map the CUDA device-pointer colour channel (via the ANARI_NV_FRAME_BUFFERS_CUDA
-// extension).  The returned void* points to GPU memory; callers can use it with
-// cudaMemcpy or pass it directly to a downstream CUDA kernel.
+// Map the CUDA device-pointer colour channel (via the
+// ANARI_NV_FRAME_BUFFERS_CUDA extension).  The returned void* points to GPU
+// memory; callers can use it with cudaMemcpy or pass it directly to a
+// downstream CUDA kernel.
 anari::MappedFrameData<void>
 GaussianRendererCore::mapColorCUDA(std::string *errorMessage) {
   anari::MappedFrameData<void> mapped{};
@@ -403,29 +409,19 @@ bool GaussianRendererCore::copyColorCUDAToDevice(void *dstPtr,
 
   cudaError_t err = cudaSuccess;
   if (stream) {
-    err = cudaMemcpy2DAsync(dstPtr,
-                            dstPitchBytes,
-                            mapped.data,
-                            rowBytes,
-                            rowBytes,
-                            mapped.height,
-                            cudaMemcpyDeviceToDevice,
+    err = cudaMemcpy2DAsync(dstPtr, dstPitchBytes, mapped.data, rowBytes,
+                            rowBytes, mapped.height, cudaMemcpyDeviceToDevice,
                             stream);
   } else {
-    err = cudaMemcpy2D(dstPtr,
-                       dstPitchBytes,
-                       mapped.data,
-                       rowBytes,
-                       rowBytes,
-                       mapped.height,
-                       cudaMemcpyDeviceToDevice);
+    err = cudaMemcpy2D(dstPtr, dstPitchBytes, mapped.data, rowBytes, rowBytes,
+                       mapped.height, cudaMemcpyDeviceToDevice);
   }
   unmapColorCUDA();
 
   if (err != cudaSuccess) {
     if (errorMessage)
-      *errorMessage = std::string("cudaMemcpy2D failed: ")
-          + cudaGetErrorString(err);
+      *errorMessage =
+          std::string("cudaMemcpy2D failed: ") + cudaGetErrorString(err);
     return false;
   }
 
@@ -456,24 +452,46 @@ bool GaussianRendererCore::applyPendingUpdates(std::string *errorMessage) {
     anari::setParameter(m_device, m_cameraObj, "up", m_camera.up);
     anari::setParameter(m_device, m_cameraObj, "aspect", m_camera.aspect);
     anari::commitParameters(m_device, m_cameraObj);
+
+    if (m_headlightObj && m_world) {
+      const float irr = m_rendererConfig.headlightEnabled
+                            ? m_rendererConfig.headlightIntensity
+                            : 0.f;
+      anari::setParameter(m_device, m_headlightObj, "direction", m_camera.dir);
+      anari::setParameter(m_device, m_headlightObj, "irradiance", irr);
+      anari::commitParameters(m_device, m_headlightObj);
+      anari::commitParameters(m_device, m_world);
+    }
+
     m_cameraDirty = false;
   }
 
   if (m_rendererDirty) {
-    anari::setParameter(
-        m_device, m_rendererObj, "background", m_rendererConfig.bgColor);
-    anari::setParameter(
-        m_device, m_rendererObj, "ambientRadiance", m_rendererConfig.ambientRadiance);
-    anari::setParameter(
-        m_device, m_rendererObj, "pixelSamples", m_rendererConfig.spp);
+    anari::setParameter(m_device, m_rendererObj, "background",
+                        m_rendererConfig.bgColor);
+    anari::setParameter(m_device, m_rendererObj, "ambientRadiance",
+                        m_rendererConfig.ambientRadiance);
+    anari::setParameter(m_device, m_rendererObj, "pixelSamples",
+                        m_rendererConfig.spp);
     anari::commitParameters(m_device, m_rendererObj);
 
-    if (m_lightObj && m_world) {
-      anari::setParameter(m_device, m_lightObj, "direction",
-                          m_rendererConfig.lightDirection);
-      anari::setParameter(m_device, m_lightObj, "irradiance",
-                          m_rendererConfig.lightIntensity);
-      anari::commitParameters(m_device, m_lightObj);
+    if (m_world) {
+      if (m_lightObj) {
+        anari::setParameter(m_device, m_lightObj, "direction",
+                            m_rendererConfig.lightDirection);
+        anari::setParameter(m_device, m_lightObj, "irradiance",
+                            m_rendererConfig.lightIntensity);
+        anari::commitParameters(m_device, m_lightObj);
+      }
+      if (m_headlightObj) {
+        const float irr = m_rendererConfig.headlightEnabled
+                              ? m_rendererConfig.headlightIntensity
+                              : 0.f;
+        anari::setParameter(m_device, m_headlightObj, "direction",
+                            m_camera.dir);
+        anari::setParameter(m_device, m_headlightObj, "irradiance", irr);
+        anari::commitParameters(m_device, m_headlightObj);
+      }
       anari::commitParameters(m_device, m_world);
     }
 
@@ -507,7 +525,24 @@ bool GaussianRendererCore::rebuildWorld(std::string *errorMessage) {
     anari::setParameter(m_device, m_lightObj, "irradiance",
                         m_rendererConfig.lightIntensity);
     anari::commitParameters(m_device, m_lightObj);
-    anari::setParameterArray1D(m_device, m_world, "light", &m_lightObj, 1);
+  }
+  if (m_headlightObj) {
+    const float irr = m_rendererConfig.headlightEnabled
+                          ? m_rendererConfig.headlightIntensity
+                          : 0.f;
+    anari::setParameter(m_device, m_headlightObj, "direction", m_camera.dir);
+    anari::setParameter(m_device, m_headlightObj, "irradiance", irr);
+    anari::commitParameters(m_device, m_headlightObj);
+  }
+  {
+    anari::Light lights[2];
+    int numLights = 0;
+    if (m_lightObj)
+      lights[numLights++] = m_lightObj;
+    if (m_headlightObj)
+      lights[numLights++] = m_headlightObj;
+    if (numLights > 0)
+      anari::setParameterArray1D(m_device, m_world, "light", lights, numLights);
     anari::commitParameters(m_device, m_world);
   }
 
@@ -591,8 +626,8 @@ void GaussianRendererCore::computeCameraHeuristics() {
     zs.push_back(p[2]);
   }
 
-  vec3 robustCenter = {
-      percentileValue(xs, 0.5f), percentileValue(ys, 0.5f), percentileValue(zs, 0.5f)};
+  vec3 robustCenter = {percentileValue(xs, 0.5f), percentileValue(ys, 0.5f),
+                       percentileValue(zs, 0.5f)};
 
   // Step 3 — Effective radius per Gaussian: distance to robust center + largest
   // scale axis (the Gaussian's visual extent along its dominant direction).
@@ -638,10 +673,8 @@ void GaussianRendererCore::clearFrameMappings() {
 // ANARI status callback registered at device creation.  Forwards warnings and
 // errors to stderr; informational and debug messages are silently dropped to
 // keep the console clean during normal operation.
-void GaussianRendererCore::statusCallback(const void *userData,
-                                          ANARIDevice,
-                                          ANARIObject source,
-                                          ANARIDataType,
+void GaussianRendererCore::statusCallback(const void *userData, ANARIDevice,
+                                          ANARIObject source, ANARIDataType,
                                           ANARIStatusSeverity severity,
                                           ANARIStatusCode,
                                           const char *message) {

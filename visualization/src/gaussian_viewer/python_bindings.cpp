@@ -71,7 +71,10 @@ PYBIND11_MODULE(_gaussian_renderer_core, m) {
       .def_readwrite("ambient_radiance", &RendererConfig::ambientRadiance)
       .def_readwrite("spp", &RendererConfig::spp)
       .def_readwrite("light_direction", &RendererConfig::lightDirection)
-      .def_readwrite("light_intensity", &RendererConfig::lightIntensity);
+      .def_readwrite("light_intensity", &RendererConfig::lightIntensity)
+      .def_readwrite("headlight_enabled", &RendererConfig::headlightEnabled)
+      .def_readwrite("headlight_intensity",
+                     &RendererConfig::headlightIntensity);
 
   // --- CameraState -------------------------------------------------------
 
@@ -101,10 +104,9 @@ PYBIND11_MODULE(_gaussian_renderer_core, m) {
       .def_readonly("is_float", &MappedCUDAFrame::isFloat)
       .def_property_readonly("__cuda_array_interface__",
                              &MappedCUDAFrame::cuda_array_interface)
-      .def("data_ptr",
-           [](const MappedCUDAFrame &self) {
-             return reinterpret_cast<uintptr_t>(self.data);
-           });
+      .def("data_ptr", [](const MappedCUDAFrame &self) {
+        return reinterpret_cast<uintptr_t>(self.data);
+      });
 
   // --- CUDAFrameContext (context manager) --------------------------------
 
@@ -148,9 +150,7 @@ PYBIND11_MODULE(_gaussian_renderer_core, m) {
 
       // CUDA framebuffer access (context manager)
       .def("map_color_cuda",
-           [](GaussianRendererCore &self) {
-             return CUDAFrameContext(self);
-           })
+           [](GaussianRendererCore &self) { return CUDAFrameContext(self); })
 
       // Direct map/unmap for advanced use
       .def("map_color_cuda_info",
@@ -169,12 +169,10 @@ PYBIND11_MODULE(_gaussian_renderer_core, m) {
       .def("unmap_color_cuda", &GaussianRendererCore::unmapColorCUDA)
 
       // Read-only accessors
-      .def_property_readonly("scene_center",
-                             &GaussianRendererCore::sceneCenter)
+      .def_property_readonly("scene_center", &GaussianRendererCore::sceneCenter)
       .def_property_readonly("scene_diagonal",
                              &GaussianRendererCore::sceneDiagonal)
-      .def_property_readonly("focus_center",
-                             &GaussianRendererCore::focusCenter)
+      .def_property_readonly("focus_center", &GaussianRendererCore::focusCenter)
       .def_property_readonly("focus_distance",
                              &GaussianRendererCore::focusDistance)
       .def_property_readonly("gaussian_count",
@@ -183,6 +181,5 @@ PYBIND11_MODULE(_gaussian_renderer_core, m) {
                              &GaussianRendererCore::lastDurationSeconds)
       .def_property_readonly("supports_cuda_frame_buffers",
                              &GaussianRendererCore::supportsCudaFrameBuffers)
-      .def_property_readonly("frame_size",
-                             &GaussianRendererCore::frameSize);
+      .def_property_readonly("frame_size", &GaussianRendererCore::frameSize);
 }

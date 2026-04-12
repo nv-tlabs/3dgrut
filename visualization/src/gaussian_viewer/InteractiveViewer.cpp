@@ -33,11 +33,13 @@
 // Architecture modeled after VIDILabs/open-volume-renderer main_app.cpp:
 // async double-buffered rendering with TransactionalValue handoff.
 
+// clang-format off
 #define GLFW_INCLUDE_NONE
-#include <glad/gl.h>
+#include <glad/gl.h>          // must precede cuda_gl_interop.h / GLFW
 #include <GLFW/glfw3.h>
 #include <cuda_gl_interop.h>
 #include <cuda_runtime_api.h>
+// clang-format on
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -49,9 +51,9 @@
 #include "renderer_core.h"
 
 #include <atomic>
+#include <cfloat>
 #include <chrono>
 #include <condition_variable>
-#include <cfloat>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -165,7 +167,8 @@ struct FPSCounter {
 
 private:
   std::atomic<double> fps_{0.0};
-  std::chrono::steady_clock::time_point last_ = std::chrono::steady_clock::now();
+  std::chrono::steady_clock::time_point last_ =
+      std::chrono::steady_clock::now();
 };
 
 // Background FPS estimator with adaptive smoothing:
@@ -180,9 +183,8 @@ public:
     const double instantFps = 1.0 / deviceSeconds;
     const double alpha = computeAlpha(instantFps);
     const double prev = fps_.load(std::memory_order_relaxed);
-    const double next = prev > 0.0
-        ? (1.0 - alpha) * prev + alpha * instantFps
-        : instantFps;
+    const double next =
+        prev > 0.0 ? (1.0 - alpha) * prev + alpha * instantFps : instantFps;
     fps_.store(next, std::memory_order_relaxed);
   }
 
@@ -195,8 +197,8 @@ private:
     if (instantFps >= kHighFpsSmoothed)
       return kAlphaSmoothed;
 
-    const double t = (instantFps - kLowFpsNoSmoothing)
-        / (kHighFpsSmoothed - kLowFpsNoSmoothing);
+    const double t = (instantFps - kLowFpsNoSmoothing) /
+                     (kHighFpsSmoothed - kLowFpsNoSmoothing);
     return kAlphaNoSmoothing + (kAlphaSmoothed - kAlphaNoSmoothing) * t;
   }
 
@@ -333,6 +335,8 @@ struct App {
     float lightPhi{225.f};
     float lightTheta{225.f};
     float lightIntensity{3.0f};
+    bool headlightEnabled{true};
+    float headlightIntensity{3.0f};
   } config;
 
   float sceneDiagonal{1.f};
@@ -434,10 +438,9 @@ struct App {
     if (!cuda_gl_interop)
       return false;
 
-    cudaError_t err = cudaGraphicsGLRegisterImage(&frame_texture_cuda,
-                                                  frame_texture,
-                                                  GL_TEXTURE_2D,
-                                                  cudaGraphicsRegisterFlagsWriteDiscard);
+    cudaError_t err = cudaGraphicsGLRegisterImage(
+        &frame_texture_cuda, frame_texture, GL_TEXTURE_2D,
+        cudaGraphicsRegisterFlagsWriteDiscard);
     if (err != cudaSuccess) {
       fprintf(stderr, "Failed to register GL texture with CUDA: %s\n",
               cudaGetErrorString(err));
@@ -460,9 +463,10 @@ struct App {
       return false;
     }
 
-    if (color.pixelType != ANARI_UFIXED8_RGBA_SRGB
-        && color.pixelType != ANARI_UFIXED8_VEC4) {
-      fprintf(stderr, "Unsupported CUDA color pixel type for display upload.\n");
+    if (color.pixelType != ANARI_UFIXED8_RGBA_SRGB &&
+        color.pixelType != ANARI_UFIXED8_VEC4) {
+      fprintf(stderr,
+              "Unsupported CUDA color pixel type for display upload.\n");
       renderer_core.unmapColorCUDA();
       return false;
     }
@@ -477,16 +481,11 @@ struct App {
     }
 
     cudaArray_t texture_array = nullptr;
-    err = cudaGraphicsSubResourceGetMappedArray(
-        &texture_array, frame_texture_cuda, 0, 0);
+    err = cudaGraphicsSubResourceGetMappedArray(&texture_array,
+                                                frame_texture_cuda, 0, 0);
     if (err == cudaSuccess) {
-      err = cudaMemcpy2DToArray(texture_array,
-                                0,
-                                0,
-                                color.data,
-                                row_bytes,
-                                row_bytes,
-                                color.height,
+      err = cudaMemcpy2DToArray(texture_array, 0, 0, color.data, row_bytes,
+                                row_bytes, color.height,
                                 cudaMemcpyDeviceToDevice);
     }
 
@@ -559,7 +558,17 @@ struct App {
         }
 
         ImGui::Separator();
-        if (ImGui::SliderFloat("Light Phi", &config.lightPhi, 0.f, 360.f, "%.1f"))
+        if (ImGui::Checkbox("Headlight", &config.headlightEnabled))
+          renderer_dirty = true;
+        if (config.headlightEnabled) {
+          if (ImGui::SliderFloat("Headlight Intensity",
+                                 &config.headlightIntensity, 0.f, 10.f, "%.2f"))
+            renderer_dirty = true;
+        }
+
+        ImGui::Separator();
+        if (ImGui::SliderFloat("Light Phi", &config.lightPhi, 0.f, 360.f,
+                               "%.1f"))
           renderer_dirty = true;
         if (ImGui::SliderFloat("Light Theta", &config.lightTheta, -90.f, 90.f,
                                "%.1f"))
@@ -577,11 +586,11 @@ struct App {
 
           float phi = config.lightPhi * (3.14159265f / 180.f);
           float theta = config.lightTheta * (3.14159265f / 180.f);
-          rc.lightDirection = {
-              std::cos(theta) * std::cos(phi),
-              std::sin(theta),
-              std::cos(theta) * std::sin(phi)};
+          rc.lightDirection = {std::cos(theta) * std::cos(phi), std::sin(theta),
+                               std::cos(theta) * std::sin(phi)};
           rc.lightIntensity = config.lightIntensity;
+          rc.headlightEnabled = config.headlightEnabled;
+          rc.headlightIntensity = config.headlightIntensity;
 
           renderer_config_shared = rc;
         }
@@ -594,8 +603,7 @@ struct App {
 
         ImGui::Separator();
         ImGui::Text("Gaussians: %zu", renderer_core.gaussianCount());
-        ImGui::Text("BG FPS (EMA): %.3f",
-                    bg_fps_ema.value());
+        ImGui::Text("BG FPS (EMA): %.3f", bg_fps_ema.value());
         ImGui::Text("FG FPS: %.1f", fg_fps.value());
       }
       ImGui::End();
@@ -609,8 +617,7 @@ struct App {
       std::stringstream title;
       title << std::fixed << std::setprecision(3)
             << "Interactive Gaussian Viewer  |  fg=" << fg_fps.value()
-            << " fps  bg=" << bg_fps_ema.value()
-            << " fps";
+            << " fps  bg=" << bg_fps_ema.value() << " fps";
       glfwSetWindowTitle(window, title.str().c_str());
     }
   }
@@ -645,14 +652,8 @@ struct App {
     fb_size = {(unsigned)w, (unsigned)h};
 
     glBindTexture(GL_TEXTURE_2D, frame_texture);
-    glTexImage2D(GL_TEXTURE_2D,
-                 0,
-                 GL_RGBA8,
-                 static_cast<GLsizei>(fb_size[0]),
-                 static_cast<GLsizei>(fb_size[1]),
-                 0,
-                 GL_RGBA,
-                 GL_UNSIGNED_BYTE,
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(fb_size[0]),
+                 static_cast<GLsizei>(fb_size[1]), 0, GL_RGBA, GL_UNSIGNED_BYTE,
                  nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -917,11 +918,8 @@ int main(int argc, char *argv[]) {
   const float initial_distance = app.renderer_core.focusDistance();
   printf("Initial camera focus: (%.3f, %.3f, %.3f)  distance: %.3f  "
          "scene diagonal: %.3f\n",
-         app.sceneCenter[0],
-         app.sceneCenter[1],
-         app.sceneCenter[2],
-         initial_distance,
-         app.sceneDiagonal);
+         app.sceneCenter[0], app.sceneCenter[1], app.sceneCenter[2],
+         initial_distance, app.sceneDiagonal);
 
   app.orbit_cam.center = app.sceneCenter;
   app.orbit_cam.distance = std::max(0.05f, initial_distance);

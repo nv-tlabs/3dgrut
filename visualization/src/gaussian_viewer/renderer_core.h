@@ -25,29 +25,31 @@
 
 // Parameters forwarded to the ANARI renderer object each frame.
 struct RendererConfig {
-  vec4 bgColor{0.1f, 0.1f, 0.1f, 1.f};  // background clear colour (RGBA)
-  float ambientRadiance{1.0f};            // intensity of ambient fill light
-  int spp{1};                             // samples per pixel
-  vec3 lightDirection{-1.f, -1.f, -1.f};  // directional light direction
-  float lightIntensity{3.0f};             // directional light irradiance
+  vec4 bgColor{0.1f, 0.1f, 0.1f, 1.f};   // background clear colour (RGBA)
+  float ambientRadiance{1.0f};           // intensity of ambient fill light
+  int spp{1};                            // samples per pixel
+  vec3 lightDirection{-1.f, -1.f, -1.f}; // directional light direction
+  float lightIntensity{3.0f};            // directional light irradiance
+  bool headlightEnabled{true};           // camera-following directional light
+  float headlightIntensity{5.0f};        // irradiance of the headlight
 };
 
 // Minimal perspective-camera description passed into the ANARI camera.
 struct CameraState {
-  vec3 eye{0.f, 0.f, 0.f};       // camera world-space position
-  vec3 dir{0.f, 0.f, 1.f};       // forward direction (unit vector)
-  vec3 up{0.f, -1.f, 0.f};       // up vector (Y-down convention)
-  float aspect{16.f / 9.f};      // viewport width / height
+  vec3 eye{0.f, 0.f, 0.f};  // camera world-space position
+  vec3 dir{0.f, 0.f, 1.f};  // forward direction (unit vector)
+  vec3 up{0.f, -1.f, 0.f};  // up vector (Y-down convention)
+  float aspect{16.f / 9.f}; // viewport width / height
 };
 
 // Everything needed to bootstrap the renderer.
 struct InitOptions {
-  std::string plyPath;                    // path to a 3DGS .ply file
-  float scaleFactor{1.0f};               // global multiplier on Gaussian scales
-  float opacityThreshold{0.05f};         // discard Gaussians below this opacity
-  uvec2 frameSize{1920, 1080};           // initial framebuffer resolution
-  RendererConfig rendererConfig{};       // initial renderer settings
-  bool useFloat32Color{false};           // true = FLOAT32_VEC4, false = UFIXED8_RGBA_SRGB
+  std::string plyPath;             // path to a 3DGS .ply file
+  float scaleFactor{1.0f};         // global multiplier on Gaussian scales
+  float opacityThreshold{0.05f};   // discard Gaussians below this opacity
+  uvec2 frameSize{1920, 1080};     // initial framebuffer resolution
+  RendererConfig rendererConfig{}; // initial renderer settings
+  bool useFloat32Color{false}; // true = FLOAT32_VEC4, false = UFIXED8_RGBA_SRGB
 };
 
 // Binding-friendly description of a mapped CUDA framebuffer, free of ANARI
@@ -56,7 +58,7 @@ struct MappedFrameInfo {
   const void *data = nullptr;
   uint32_t width = 0;
   uint32_t height = 0;
-  uint32_t bytesPerPixel = 0;            // 4 for uint8 RGBA, 16 for float32 RGBA
+  uint32_t bytesPerPixel = 0; // 4 for uint8 RGBA, 16 for float32 RGBA
   bool isFloat = false;
 };
 
@@ -113,8 +115,7 @@ public:
   /// Convenience: map the CUDA colour buffer, perform a device-to-device 2D
   /// memcpy into |dstPtr| (pitched), and unmap.  Supports both synchronous
   /// (stream == nullptr) and async copies.
-  bool copyColorCUDAToDevice(void *dstPtr,
-                             size_t dstPitchBytes,
+  bool copyColorCUDAToDevice(void *dstPtr, size_t dstPitchBytes,
                              cudaStream_t stream = nullptr,
                              std::string *errorMessage = nullptr);
 
@@ -153,12 +154,9 @@ private:
 
   /// ANARI status callback — routes device messages to stderr, filtered by
   /// severity (warnings and above).
-  static void statusCallback(const void *userData,
-                             ANARIDevice,
-                             ANARIObject source,
-                             ANARIDataType,
-                             ANARIStatusSeverity severity,
-                             ANARIStatusCode,
+  static void statusCallback(const void *userData, ANARIDevice,
+                             ANARIObject source, ANARIDataType,
+                             ANARIStatusSeverity severity, ANARIStatusCode,
                              const char *message);
 
 private:
@@ -169,8 +167,8 @@ private:
   // --- Scene data ---------------------------------------------------------
   GaussianData m_data;
   SceneBounds m_sceneBounds;
-  vec3 m_focusCenter{0.f, 0.f, 0.f};   // heuristic camera look-at point
-  float m_focusDistance{1.f};            // heuristic viewing distance
+  vec3 m_focusCenter{0.f, 0.f, 0.f}; // heuristic camera look-at point
+  float m_focusDistance{1.f};        // heuristic viewing distance
 
   // --- User-facing parameters (latched, applied lazily) -------------------
   float m_scaleFactor{1.f};
@@ -198,5 +196,6 @@ private:
   anari::Camera m_cameraObj{nullptr};
   anari::Renderer m_rendererObj{nullptr};
   anari::Light m_lightObj{nullptr};
+  anari::Light m_headlightObj{nullptr};
   anari::Frame m_frameObj{nullptr};
 };
