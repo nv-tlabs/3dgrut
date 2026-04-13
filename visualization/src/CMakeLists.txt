@@ -162,51 +162,26 @@ if(BUILD_PYTHON_BINDINGS)
   target_link_libraries(_gaussian_renderer_core PRIVATE gaussian_renderer_core)
 endif()
 
-# ── runtime shared libraries ──────────────────────────────────────────────
-# Glob all shared libraries from the dependency install prefix.  By the time
-# this project configures (as an ExternalProject), ANARI-SDK and VisRTX are
-# already built and installed to CMAKE_PREFIX_PATH.  The prefix is private
-# to this superbuild, so every shared library in it is ours to bundle.
-
-set(_runtime_libs "")
-set(_runtime_dirs "${CMAKE_PREFIX_PATH}/bin" "${CMAKE_PREFIX_PATH}/lib" "${CMAKE_PREFIX_PATH}/lib64")
-foreach(_dir IN LISTS _runtime_dirs)
-  if(NOT IS_DIRECTORY "${_dir}")
-    continue()
-  endif()
-
-  if(WIN32)
-    file(GLOB _found "${_dir}/*${CMAKE_SHARED_LIBRARY_SUFFIX}")
-  else()
-    file(GLOB _found "${_dir}/*${CMAKE_SHARED_LIBRARY_SUFFIX}*")
-  endif()
-  list(APPEND _runtime_libs ${_found})
-endforeach()
-list(REMOVE_DUPLICATES _runtime_libs)
-
 set(_all_targets commandline_viewer interactive_viewer)
 if(BUILD_PYTHON_BINDINGS)
   list(APPEND _all_targets _gaussian_renderer_core)
 endif()
 
-foreach(_tgt IN LISTS _all_targets)
-  foreach(_lib IN LISTS _runtime_libs)
-    add_custom_command(TARGET ${_tgt} POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_lib}" $<TARGET_FILE_DIR:${_tgt}>
-    )
-  endforeach()
-endforeach()
-
-# Load bundled .so/.dylib from the same directory as executables and the Python
-# extension (wheel layout: all under site-packages/gaussian_viewer/).
+# Load bundled shared libs from package-local runtime directories.
 if(APPLE)
-  set(_bundle_rpath "@loader_path")
+  set(_bundle_origin "@loader_path")
 else()
-  set(_bundle_rpath "$ORIGIN")
+  set(_bundle_origin "$ORIGIN")
 endif()
+set(_bundle_rpaths
+  "${_bundle_origin}"
+  "${_bundle_origin}/lib"
+  "${_bundle_origin}/lib64"
+  "${_bundle_origin}/bin"
+)
 set_target_properties(${_all_targets} PROPERTIES
-  BUILD_RPATH "${_bundle_rpath}"
-  INSTALL_RPATH "${_bundle_rpath}"
+  BUILD_RPATH "${_bundle_rpaths}"
+  INSTALL_RPATH "${_bundle_rpaths}"
 )
 
 # ── install rules ─────────────────────────────────────────────────────────
@@ -229,7 +204,3 @@ if(BUILD_PYTHON_BINDINGS)
     RUNTIME DESTINATION "${_pkg_dest}"
   )
 endif()
-
-foreach(_lib IN LISTS _runtime_libs)
-  install(FILES "${_lib}" DESTINATION "${_pkg_dest}")
-endforeach()
