@@ -249,20 +249,8 @@ Assert-ExitCode "Superbuild build"
 # ═════════════════════════════════════════════════════════════════════════════
 
 $pythonDir = $Root
-
-# ExternalProject places gaussian_viewer output under this path.
-$viewerBuild = Join-Path $BuildDir "gaussian_viewer-prefix\src\gaussian_viewer-build"
-
-# Multi-config generators (Visual Studio) place outputs in a $BuildType/ subdir;
-# single-config generators (Ninja, Makefiles) place them directly in the build dir.
-$isMultiConfig = -not ($generatorArgs -contains "Ninja" -or $generatorArgs -contains "NMake Makefiles" -or $generatorArgs -contains "Unix Makefiles")
-if ($generatorArgs.Count -eq 0) { $isMultiConfig = $true }  # default on Windows is VS
-
-if ($isMultiConfig) {
-    $viewerOutputDir = Join-Path $viewerBuild $BuildType
-} else {
-    $viewerOutputDir = $viewerBuild
-}
+$standaloneBin = Join-Path $InstallDir "bin"
+$standaloneLib = Join-Path $InstallDir "lib"
 
 Write-Host ""
 Write-Host "=========================================" -ForegroundColor Green
@@ -270,8 +258,8 @@ Write-Host "  BUILD COMPLETE"                          -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Install prefix:    $InstallDir"
-Write-Host "  GaussianViewer:    $(Join-Path $viewerOutputDir 'GaussianViewer.exe')"
-Write-Host "  InteractiveViewer: $(Join-Path $viewerOutputDir 'InteractiveViewer.exe')"
+Write-Host "  commandline_viewer: $(Join-Path $standaloneBin 'commandline_viewer.exe')"
+Write-Host "  interactive_viewer: $(Join-Path $standaloneBin 'interactive_viewer.exe')"
 Write-Host ""
 Write-Host "  To use in your own CMake project:" -ForegroundColor Cyan
 Write-Host "    cmake -DCMAKE_PREFIX_PATH=`"$InstallDir`" .."
@@ -279,6 +267,7 @@ Write-Host ""
 Write-Host "  To use at runtime, add the bin/lib dirs to PATH:" -ForegroundColor Cyan
 Write-Host "    `$env:PATH = `"$InstallDir\bin;$InstallDir\lib;`$env:PATH`""
 Write-Host ""
-Write-Host "  To use the Python bindings:" -ForegroundColor Cyan
-Write-Host "    `$env:PYTHONPATH = `"$viewerOutputDir;$pythonDir;`$env:PYTHONPATH`""
+Write-Host "  To use the Python bindings (both variables are required):" -ForegroundColor Cyan
+Write-Host "    `$env:PATH = `"$standaloneBin;$standaloneLib;`$env:PATH`""
+Write-Host "    `$env:PYTHONPATH = `"$pythonDir;$standaloneLib;`$env:PYTHONPATH`""
 Write-Host ""

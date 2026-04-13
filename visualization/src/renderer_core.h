@@ -49,6 +49,7 @@ struct CameraState {
   vec3 dir{0.f, 0.f, 1.f};  // forward direction (unit vector)
   vec3 up{0.f, -1.f, 0.f};  // up vector (Y-down convention)
   float aspect{16.f / 9.f}; // viewport width / height
+  float fovy{3.14159265358979323846f / 3.f}; // vertical FOV in radians (ANARI default)
 };
 
 // Everything needed to bootstrap the renderer.

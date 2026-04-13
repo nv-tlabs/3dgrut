@@ -29,7 +29,7 @@ set(OPTIX_ROOT "" CACHE PATH
 option(BUILD_PYTHON_BINDINGS
     "Build pybind11 Python bindings for GaussianRendererCore" OFF)
 
-option(BUILD_HELIDE "Build the ANARI helide reference device" ON)
+option(BUILD_HELIDE "Build the ANARI helide reference device" OFF)
 option(BUILD_VISRTX "Build the VisRTX RTX device (requires OptiX)" ON)
 option(BUILD_VISGL  "Build the VisRTX OpenGL device" ON)
 

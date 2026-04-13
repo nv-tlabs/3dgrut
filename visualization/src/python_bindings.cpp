@@ -79,7 +79,8 @@ PYBIND11_MODULE(_gaussian_renderer_core, m) {
       .def_readwrite("eye", &CameraState::eye)
       .def_readwrite("dir", &CameraState::dir)
       .def_readwrite("up", &CameraState::up)
-      .def_readwrite("aspect", &CameraState::aspect);
+      .def_readwrite("aspect", &CameraState::aspect)
+      .def_readwrite("fovy", &CameraState::fovy);
 
   // --- InitOptions -------------------------------------------------------
 

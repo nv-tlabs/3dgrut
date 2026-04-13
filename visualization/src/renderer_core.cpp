@@ -449,6 +449,7 @@ bool GaussianRendererCore::applyPendingUpdates(std::string *errorMessage) {
     anari::setParameter(m_device, m_cameraObj, "direction", m_camera.dir);
     anari::setParameter(m_device, m_cameraObj, "up", m_camera.up);
     anari::setParameter(m_device, m_cameraObj, "aspect", m_camera.aspect);
+    anari::setParameter(m_device, m_cameraObj, "fovy", m_camera.fovy);
     anari::commitParameters(m_device, m_cameraObj);
 
     if (m_headlightObj && m_world) {

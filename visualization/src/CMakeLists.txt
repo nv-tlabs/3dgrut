@@ -167,17 +167,40 @@ if(BUILD_PYTHON_BINDINGS)
   list(APPEND _all_targets _gaussian_renderer_core)
 endif()
 
-# Load bundled shared libs from package-local runtime directories.
+# ── runtime library search paths (RPATH) ──────────────────────────────────
+# Our executables and the pybind11 extension link against shared libraries
+# (VisRTX, ANARI, …) that may live in different relative locations depending
+# on how the project was packaged:
+#
+#   Layout A – pip wheel (`gaussian_viewer` Python package):
+#     gaussian_viewer/
+#       _gaussian_renderer_core.pyd   ← the pybind11 module
+#       lib/  or  bin/                ← bundled .so/.dll copied by install()
+#
+#   Layout B – standalone CMake install:
+#     bin/
+#       commandline_viewer            ← the executables
+#       interactive_viewer
+#     lib/  or  lib64/                ← shared libraries
+#
+# The dynamic linker resolves $ORIGIN (Linux) / @loader_path (macOS) to the
+# directory containing the binary itself.  We add both "same directory" and
+# "sibling directory" patterns so that the loader finds the bundled shared
+# libs in either layout without requiring LD_LIBRARY_PATH or install_name_tool
+# fixups.
 if(APPLE)
   set(_bundle_origin "@loader_path")
 else()
   set(_bundle_origin "$ORIGIN")
 endif()
 set(_bundle_rpaths
-  "${_bundle_origin}"
-  "${_bundle_origin}/lib"
-  "${_bundle_origin}/lib64"
-  "${_bundle_origin}/bin"
+  "${_bundle_origin}"            # same dir as the binary  (wheel flat layout)
+  "${_bundle_origin}/lib"        # child lib/   (wheel with sub-directory)
+  "${_bundle_origin}/lib64"      # child lib64/ (RPM-style 64-bit convention)
+  "${_bundle_origin}/bin"        # child bin/   (Windows-style DLL location)
+  "${_bundle_origin}/../lib"     # sibling lib/ (standalone: bin/../lib)
+  "${_bundle_origin}/../lib64"   # sibling lib64/
+  "${_bundle_origin}/../bin"     # sibling bin/
 )
 set_target_properties(${_all_targets} PROPERTIES
   BUILD_RPATH "${_bundle_rpaths}"
@@ -192,15 +215,19 @@ set_target_properties(${_all_targets} PROPERTIES
 
 if(DEFINED SKBUILD_PLATLIB_DIR)
   set(_pkg_dest "${SKBUILD_PLATLIB_DIR}/gaussian_viewer")
+  set(_runtime_dest "${_pkg_dest}")
+  set(_library_dest "${_pkg_dest}")
 else()
-  set(_pkg_dest "lib")
+  # Conventional standalone install layout.
+  set(_runtime_dest "bin")
+  set(_library_dest "lib")
 endif()
 
-install(TARGETS commandline_viewer interactive_viewer RUNTIME DESTINATION "${_pkg_dest}")
+install(TARGETS commandline_viewer interactive_viewer RUNTIME DESTINATION "${_runtime_dest}")
 
 if(BUILD_PYTHON_BINDINGS)
   install(TARGETS _gaussian_renderer_core
-    LIBRARY DESTINATION "${_pkg_dest}"
-    RUNTIME DESTINATION "${_pkg_dest}"
+    LIBRARY DESTINATION "${_library_dest}"
+    RUNTIME DESTINATION "${_library_dest}"
   )
 endif()

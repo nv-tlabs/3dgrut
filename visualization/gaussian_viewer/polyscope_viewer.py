@@ -331,6 +331,7 @@ def run_viewer(args: argparse.Namespace, available: list[str]) -> None:
         cam.dir = tuple(view.get_look_dir())
         cam.up = tuple(ps_up)
         cam.aspect = w / max(h, 1)
+        cam.fovy = math.radians(view.get_fov_vertical_deg())
         anari_renderer.set_camera(cam)
 
         anari_renderer.run()
