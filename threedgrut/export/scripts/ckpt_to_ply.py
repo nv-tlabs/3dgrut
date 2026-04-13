@@ -42,7 +42,7 @@ def main(object_path: str, config_name: str = "apps/colmap_3dgrt.yaml", output_f
             since they do not contain their own configuration. Defaults to "apps/colmap_3dgrt.yaml".
         output_filename (str, optional): The desired output filename. If None, it will automatically
             append '_exported.ply' to the object name. Defaults to None.
-    
+
     Raises:
         ValueError: If the `object_path` does not end with one of the supported extensions.
     """
@@ -65,14 +65,14 @@ def main(object_path: str, config_name: str = "apps/colmap_3dgrt.yaml", output_f
         model = MixtureOfGaussians(conf)
         model.init_from_checkpoint(checkpoint, setup_optimizer=False)
         object_name = conf.experiment_name
-        
+
     # Load from Instant-NGP format (.ingp)
     elif object_path.endswith(".ingp"):
         conf = load_default_config()
         model = MixtureOfGaussians(conf)
         model.init_from_ingp(object_path, init_model=False)
         object_name = Path(object_path).stem
-        
+
     # Load from PLY format (.ply)
     elif object_path.endswith(".ply"):
         conf = load_default_config()
