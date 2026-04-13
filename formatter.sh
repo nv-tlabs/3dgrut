@@ -30,19 +30,29 @@ if command -v clang-format &> /dev/null; then
     CLANG_FORMAT_VERSION=$(clang-format --version | grep -oP '\d+' | head -1)
     if [ "$CLANG_FORMAT_VERSION" -ne "$CLANG_FORMAT_REQUIRED_VERSION" ]; then
         echo "clang-format version $CLANG_FORMAT_VERSION detected, but version $CLANG_FORMAT_REQUIRED_VERSION is required."
-        echo "Install with: pip3 install 'clang-format==18.*'"
+        echo "Install with: pip3 install clang-format==$CLANG_FORMAT_REQUIRED_VERSION.*"
         FAILED=1
     else
-        CLANG_FILES=$(find . \
-            \( -path './thirdparty/tiny-cuda-nn' -o -path './thirdparty/kaolin' -o -path './threedgrt_tracer/dependencies/optix-dev' -o -path './.venv' \) -prune -o \
-            -type f \( -iname "*.cpp" -o -iname "*.cuh" -o -iname "*.cu" -o -iname "*.h" \) -print)
+        mapfile -d '' CLANG_FILES < <(
+            git ls-files -z --cached --others --exclude-standard -- '*.cpp' '*.cuh' '*.cu' '*.h' |
+                while IFS= read -r -d '' file; do
+                    case "$file" in
+                        thirdparty/tiny-cuda-nn/* | thirdparty/kaolin/* | threedgrt_tracer/dependencies/optix-dev/* | .venv/*) continue ;;
+                    esac
+                    printf '%s\0' "$file"
+                done
+        )
 
         if [ "$CHECK_MODE" = true ]; then
             echo "Checking C/C++/CUDA code with clang-format (version: $(clang-format --version))..."
-            echo "$CLANG_FILES" | xargs -r clang-format --dry-run --Werror || FAILED=1
+            if [ "${#CLANG_FILES[@]}" -gt 0 ]; then
+                clang-format --dry-run --Werror "${CLANG_FILES[@]}" || FAILED=1
+            fi
         else
             echo "Formatting C/C++/CUDA code with clang-format (version: $(clang-format --version))..."
-            echo "$CLANG_FILES" | xargs -r clang-format -i
+            if [ "${#CLANG_FILES[@]}" -gt 0 ]; then
+                clang-format -i "${CLANG_FILES[@]}"
+            fi
         fi
     fi
     echo ""
