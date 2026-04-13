@@ -3,6 +3,7 @@
 CLAUDE.md
 .polyscope.ini
 .venv/
+.cursor/
 
 external/
 runs/
@@ -21,6 +22,8 @@ imgui.ini
 data
 
 thirdparty/kaolin/
+thirdparty/polyscope/
+thirdparty/polyscope-py/
 
 threedgrt_tracer/.ninja_log
 threedgrt_tracer/include/3dgrt/kernels/slang/*.cuh*

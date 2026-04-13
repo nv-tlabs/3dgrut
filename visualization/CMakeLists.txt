@@ -4,8 +4,15 @@ project(VisualizationSuperbuild LANGUAGES NONE)
 include(ExternalProject)
 
 # ── shared install prefix ────────────────────────────────────────────────────
+# For wheel builds, install the full superbuild payload into the Python package
+# directory so dependencies, plugins, binaries, and metadata are shipped
+# together. For standalone builds, keep the local install/ fallback.
 
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+if(DEFINED SKBUILD_PLATLIB_DIR)
+  set(_wheel_prefix "${SKBUILD_PLATLIB_DIR}/gaussian_viewer")
+  set(CMAKE_INSTALL_PREFIX "${_wheel_prefix}" CACHE PATH
+      "Shared install prefix for all dependencies" FORCE)
+elseif(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   get_filename_component(_default_prefix "${CMAKE_SOURCE_DIR}/install" ABSOLUTE)
   set(CMAKE_INSTALL_PREFIX "${_default_prefix}" CACHE PATH
       "Shared install prefix for all dependencies" FORCE)
@@ -135,8 +142,8 @@ set(_gv_cmake_args
 
 # When driven by scikit-build-core these variables point to the wheel staging
 # directories.  Forward them so the inner project's install() rules can place
-# executables and Python modules in the right locations.
-foreach(_var SKBUILD_PLATLIB_DIR SKBUILD_SCRIPTS_DIR)
+# native binaries and Python modules under the package directory.
+foreach(_var SKBUILD_PLATLIB_DIR)
   if(DEFINED ${_var})
     list(APPEND _gv_cmake_args "-D${_var}=${${_var}}")
   endif()

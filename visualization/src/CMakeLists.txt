@@ -169,8 +169,17 @@ endif()
 # to this superbuild, so every shared library in it is ours to bundle.
 
 set(_runtime_libs "")
-foreach(_dir "${CMAKE_PREFIX_PATH}/bin" "${CMAKE_PREFIX_PATH}/lib")
-  file(GLOB _found "${_dir}/*${CMAKE_SHARED_LIBRARY_SUFFIX}")
+set(_runtime_dirs "${CMAKE_PREFIX_PATH}/bin" "${CMAKE_PREFIX_PATH}/lib" "${CMAKE_PREFIX_PATH}/lib64")
+foreach(_dir IN LISTS _runtime_dirs)
+  if(NOT IS_DIRECTORY "${_dir}")
+    continue()
+  endif()
+
+  if(WIN32)
+    file(GLOB _found "${_dir}/*${CMAKE_SHARED_LIBRARY_SUFFIX}")
+  else()
+    file(GLOB _found "${_dir}/*${CMAKE_SHARED_LIBRARY_SUFFIX}*")
+  endif()
   list(APPEND _runtime_libs ${_found})
 endforeach()
 list(REMOVE_DUPLICATES _runtime_libs)
@@ -188,15 +197,23 @@ foreach(_tgt IN LISTS _all_targets)
   endforeach()
 endforeach()
 
-# ── install rules ─────────────────────────────────────────────────────────
-# When built via scikit-build-core the SKBUILD_* variables point to wheel
-# staging directories; otherwise fall back to a conventional layout.
-
-if(DEFINED SKBUILD_SCRIPTS_DIR)
-  set(_bin_dest "${SKBUILD_SCRIPTS_DIR}")
+# Load bundled .so/.dylib from the same directory as executables and the Python
+# extension (wheel layout: all under site-packages/gaussian_viewer/).
+if(APPLE)
+  set(_bundle_rpath "@loader_path")
 else()
-  set(_bin_dest "bin")
+  set(_bundle_rpath "$ORIGIN")
 endif()
+set_target_properties(${_all_targets} PROPERTIES
+  BUILD_RPATH "${_bundle_rpath}"
+  INSTALL_RPATH "${_bundle_rpath}"
+)
+
+# ── install rules ─────────────────────────────────────────────────────────
+# When built via scikit-build-core, SKBUILD_PLATLIB_DIR is the wheel platlib
+# root. Install native binaries and bundled shared libs under the Python
+# package directory — not SKBUILD_SCRIPTS_DIR (scikit-build-core assumes that
+# directory contains only text console scripts).
 
 if(DEFINED SKBUILD_PLATLIB_DIR)
   set(_pkg_dest "${SKBUILD_PLATLIB_DIR}/gaussian_viewer")
@@ -204,13 +221,15 @@ else()
   set(_pkg_dest "lib")
 endif()
 
-install(TARGETS commandline_viewer interactive_viewer RUNTIME DESTINATION "${_bin_dest}")
+install(TARGETS commandline_viewer interactive_viewer RUNTIME DESTINATION "${_pkg_dest}")
 
 if(BUILD_PYTHON_BINDINGS)
-  install(TARGETS _gaussian_renderer_core LIBRARY DESTINATION "${_pkg_dest}")
+  install(TARGETS _gaussian_renderer_core
+    LIBRARY DESTINATION "${_pkg_dest}"
+    RUNTIME DESTINATION "${_pkg_dest}"
+  )
 endif()
 
 foreach(_lib IN LISTS _runtime_libs)
   install(FILES "${_lib}" DESTINATION "${_pkg_dest}")
-  install(FILES "${_lib}" DESTINATION "${_bin_dest}")
 endforeach()
