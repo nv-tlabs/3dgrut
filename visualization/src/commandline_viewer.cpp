@@ -79,8 +79,7 @@ int main(int argc, char *argv[]) {
       if (std::sscanf(argv[++i], "%ux%u", &w, &h) == 2 && w > 0 && h > 0)
         imageSize = {w, h};
       else {
-        fprintf(stderr,
-                "Invalid resolution format, use WxH (e.g. 1920x1080)\n");
+        fprintf(stderr, "Invalid resolution format, use WxH (e.g. 1920x1080)\n");
         return 1;
       }
     } else {
@@ -105,8 +104,7 @@ int main(int argc, char *argv[]) {
   }
 
   const auto &center = renderer.sceneCenter();
-  printf("Scene center: (%.3f, %.3f, %.3f)  diagonal: %.3f\n", center[0],
-         center[1], center[2], renderer.sceneDiagonal());
+  printf("Scene center: (%.3f, %.3f, %.3f)  diagonal: %.3f\n", center[0], center[1], center[2], renderer.sceneDiagonal());
   printf("Scale factor: %.3f\n", scaleFactor);
   printf("Rendering %zu Gaussians...\n", renderer.gaussianCount());
 
@@ -123,8 +121,7 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Framebuffer map failed: %s\n", errorMessage.c_str());
     return 1;
   }
-  stbi_write_png(outputPath.c_str(), fb.width, fb.height, 4, fb.data,
-                 4 * fb.width);
+  stbi_write_png(outputPath.c_str(), fb.width, fb.height, 4, fb.data, 4 * fb.width);
   renderer.unmapColorHost();
   printf("Saved: %s\n", outputPath.c_str());
 

@@ -21,8 +21,7 @@ struct MappedCUDAFrame {
     py::dict d;
     d["shape"] = py::make_tuple(height, width, 4);
     d["typestr"] = isFloat ? "<f4" : "|u1";
-    d["data"] =
-        py::make_tuple(reinterpret_cast<uintptr_t>(data), true /* read-only */);
+    d["data"] = py::make_tuple(reinterpret_cast<uintptr_t>(data), true /* read-only */);
     d["version"] = 3;
     d["strides"] = py::none();
     return d;
@@ -50,9 +49,7 @@ struct CUDAFrameContext {
     return frame;
   }
 
-  void exit(const py::object &, const py::object &, const py::object &) {
-    renderer.unmapColorCUDA();
-  }
+  void exit(const py::object &, const py::object &, const py::object &) { renderer.unmapColorCUDA(); }
 };
 
 static void throw_on_error(bool ok, const std::string &msg) {
@@ -73,8 +70,7 @@ PYBIND11_MODULE(_gaussian_renderer_core, m) {
       .def_readwrite("light_direction", &RendererConfig::lightDirection)
       .def_readwrite("light_intensity", &RendererConfig::lightIntensity)
       .def_readwrite("headlight_enabled", &RendererConfig::headlightEnabled)
-      .def_readwrite("headlight_intensity",
-                     &RendererConfig::headlightIntensity);
+      .def_readwrite("headlight_intensity", &RendererConfig::headlightIntensity);
 
   // --- CameraState -------------------------------------------------------
 
@@ -103,18 +99,12 @@ PYBIND11_MODULE(_gaussian_renderer_core, m) {
       .def_readonly("width", &MappedCUDAFrame::width)
       .def_readonly("height", &MappedCUDAFrame::height)
       .def_readonly("is_float", &MappedCUDAFrame::isFloat)
-      .def_property_readonly("__cuda_array_interface__",
-                             &MappedCUDAFrame::cuda_array_interface)
-      .def("data_ptr", [](const MappedCUDAFrame &self) {
-        return reinterpret_cast<uintptr_t>(self.data);
-      });
+      .def_property_readonly("__cuda_array_interface__", &MappedCUDAFrame::cuda_array_interface)
+      .def("data_ptr", [](const MappedCUDAFrame &self) { return reinterpret_cast<uintptr_t>(self.data); });
 
   // --- CUDAFrameContext (context manager) --------------------------------
 
-  py::class_<CUDAFrameContext>(m, "CUDAFrameContext")
-      .def("__enter__", &CUDAFrameContext::enter,
-           py::return_value_policy::reference_internal)
-      .def("__exit__", &CUDAFrameContext::exit);
+  py::class_<CUDAFrameContext>(m, "CUDAFrameContext").def("__enter__", &CUDAFrameContext::enter, py::return_value_policy::reference_internal).def("__exit__", &CUDAFrameContext::exit);
 
   // --- GaussianRendererCore ----------------------------------------------
 
@@ -136,11 +126,9 @@ PYBIND11_MODULE(_gaussian_renderer_core, m) {
            })
 
       // Setters
-      .def("set_frame_size", &GaussianRendererCore::setFrameSize,
-           py::arg("size"))
+      .def("set_frame_size", &GaussianRendererCore::setFrameSize, py::arg("size"))
       .def("set_camera", &GaussianRendererCore::setCamera, py::arg("camera"))
-      .def("set_renderer_config", &GaussianRendererCore::setRendererConfig,
-           py::arg("config"))
+      .def("set_renderer_config", &GaussianRendererCore::setRendererConfig, py::arg("config"))
       .def(
           "set_scale_factor",
           [](GaussianRendererCore &self, float sf) {
@@ -150,8 +138,7 @@ PYBIND11_MODULE(_gaussian_renderer_core, m) {
           py::arg("scale_factor"))
 
       // CUDA framebuffer access (context manager)
-      .def("map_color_cuda",
-           [](GaussianRendererCore &self) { return CUDAFrameContext(self); })
+      .def("map_color_cuda", [](GaussianRendererCore &self) { return CUDAFrameContext(self); })
 
       // Direct map/unmap for advanced use
       .def("map_color_cuda_info",
@@ -171,16 +158,11 @@ PYBIND11_MODULE(_gaussian_renderer_core, m) {
 
       // Read-only accessors
       .def_property_readonly("scene_center", &GaussianRendererCore::sceneCenter)
-      .def_property_readonly("scene_diagonal",
-                             &GaussianRendererCore::sceneDiagonal)
+      .def_property_readonly("scene_diagonal", &GaussianRendererCore::sceneDiagonal)
       .def_property_readonly("focus_center", &GaussianRendererCore::focusCenter)
-      .def_property_readonly("focus_distance",
-                             &GaussianRendererCore::focusDistance)
-      .def_property_readonly("gaussian_count",
-                             &GaussianRendererCore::gaussianCount)
-      .def_property_readonly("last_duration_seconds",
-                             &GaussianRendererCore::lastDurationSeconds)
-      .def_property_readonly("supports_cuda_frame_buffers",
-                             &GaussianRendererCore::supportsCudaFrameBuffers)
+      .def_property_readonly("focus_distance", &GaussianRendererCore::focusDistance)
+      .def_property_readonly("gaussian_count", &GaussianRendererCore::gaussianCount)
+      .def_property_readonly("last_duration_seconds", &GaussianRendererCore::lastDurationSeconds)
+      .def_property_readonly("supports_cuda_frame_buffers", &GaussianRendererCore::supportsCudaFrameBuffers)
       .def_property_readonly("frame_size", &GaussianRendererCore::frameSize);
 }

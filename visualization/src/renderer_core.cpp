@@ -22,8 +22,7 @@ float percentileValue(std::vector<float> values, float percentile) {
   if (values.empty())
     return 0.f;
   percentile = std::clamp(percentile, 0.f, 1.f);
-  const size_t idx =
-      static_cast<size_t>(percentile * static_cast<float>(values.size() - 1));
+  const size_t idx = static_cast<size_t>(percentile * static_cast<float>(values.size() - 1));
   std::nth_element(values.begin(), values.begin() + idx, values.end());
   return values[idx];
 }
@@ -57,8 +56,7 @@ size_t bytesPerPixel(ANARIDataType pixelType) {
 // that it can be updated without a full world rebuild.  Each Gaussian's
 // position, orientation, and anisotropic scale (times the global scaleFactor)
 // are baked into its instance transform via buildTransform().
-anari::World buildScene(anari::Device device, const GaussianData &data,
-                        float scaleFactor) {
+anari::World buildScene(anari::Device device, const GaussianData &data, float scaleFactor) {
   uint32_t N = static_cast<uint32_t>(data.positions.size());
 
   // Prototype geometry: a single unit sphere at the origin.  Every Gaussian
@@ -91,8 +89,7 @@ anari::World buildScene(anari::Device device, const GaussianData &data,
     auto *xfms = anari::map<mat4>(device, xfmArray);
     auto *cols = anari::map<vec3>(device, colArray);
     for (uint32_t i = 0; i < N; i++) {
-      xfms[i] = buildTransform(data.positions[i], data.quats[i], data.scales[i],
-                               scaleFactor);
+      xfms[i] = buildTransform(data.positions[i], data.quats[i], data.scales[i], scaleFactor);
       cols[i] = data.colors[i];
     }
     anari::unmap(device, xfmArray);
@@ -149,8 +146,7 @@ GaussianRendererCore::~GaussianRendererCore() {
 //     the frame's output channels (sRGB colour + float depth).
 //  5. Mark everything dirty and flush via applyPendingUpdates(), which builds
 //     the world and commits all objects for the first time.
-bool GaussianRendererCore::init(const InitOptions &options,
-                                std::string *errorMessage) {
+bool GaussianRendererCore::init(const InitOptions &options, std::string *errorMessage) {
   if (m_initialized) {
     if (errorMessage)
       *errorMessage = "Renderer core is already initialized.";
@@ -184,26 +180,22 @@ bool GaussianRendererCore::init(const InitOptions &options,
 
   // Default camera: look toward +Z from a point offset by focusDistance along
   // -Z, with Y-down convention matching typical 3DGS training data.
-  m_camera.eye = {m_focusCenter[0], m_focusCenter[1],
-                  m_focusCenter[2] - m_focusDistance};
+  m_camera.eye = {m_focusCenter[0], m_focusCenter[1], m_focusCenter[2] - m_focusDistance};
   m_camera.dir = {0.f, 0.f, 1.f};
   m_camera.up = {0.f, -1.f, 0.f};
   m_camera.aspect = float(m_frameSize[0]) / float(m_frameSize[1]);
 
-  m_library =
-      anariLoadLibrary(options.libraryName.c_str(), statusCallback, this);
+  m_library = anariLoadLibrary(options.libraryName.c_str(), statusCallback, this);
   if (!m_library) {
     if (errorMessage)
-      *errorMessage =
-          "Failed to load ANARI library '" + options.libraryName + "'.";
+      *errorMessage = "Failed to load ANARI library '" + options.libraryName + "'.";
     return false;
   }
 
   m_device = anariNewDevice(m_library, "default");
   if (!m_device) {
     if (errorMessage)
-      *errorMessage = "Failed to create ANARI device from library '" +
-                      options.libraryName + "'.";
+      *errorMessage = "Failed to create ANARI device from library '" + options.libraryName + "'.";
     return false;
   }
 
@@ -220,11 +212,9 @@ bool GaussianRendererCore::init(const InitOptions &options,
   m_headlightObj = anari::newObject<anari::Light>(m_device, "directional");
   m_frameObj = anari::newObject<anari::Frame>(m_device);
 
-  if (!m_cameraObj || !m_rendererObj || !m_lightObj || !m_headlightObj ||
-      !m_frameObj) {
+  if (!m_cameraObj || !m_rendererObj || !m_lightObj || !m_headlightObj || !m_frameObj) {
     if (errorMessage)
-      *errorMessage =
-          "Failed to create ANARI camera/renderer/light/frame objects.";
+      *errorMessage = "Failed to create ANARI camera/renderer/light/frame objects.";
     return false;
   }
 
@@ -233,9 +223,7 @@ bool GaussianRendererCore::init(const InitOptions &options,
   m_cameraDirty = true;
   m_rendererDirty = true;
 
-  anari::setParameter(m_device, m_frameObj, kChannelColor,
-                      m_useFloat32Color ? ANARI_FLOAT32_VEC4
-                                        : ANARI_UFIXED8_RGBA_SRGB);
+  anari::setParameter(m_device, m_frameObj, kChannelColor, m_useFloat32Color ? ANARI_FLOAT32_VEC4 : ANARI_UFIXED8_RGBA_SRGB);
   anari::setParameter(m_device, m_frameObj, kChannelDepth, ANARI_FLOAT32);
   anari::setParameter(m_device, m_frameObj, "camera", m_cameraObj);
   anari::setParameter(m_device, m_frameObj, "renderer", m_rendererObj);
@@ -265,8 +253,7 @@ bool GaussianRendererCore::run(std::string *errorMessage) {
   anari::wait(m_device, m_frameObj);
 
   m_lastDurationSeconds = 0.f;
-  anari::getProperty(m_device, m_frameObj, "duration", m_lastDurationSeconds,
-                     ANARI_NO_WAIT);
+  anari::getProperty(m_device, m_frameObj, "duration", m_lastDurationSeconds, ANARI_NO_WAIT);
   return true;
 }
 
@@ -291,8 +278,7 @@ void GaussianRendererCore::setRendererConfig(const RendererConfig &config) {
 
 // Unlike the other setters, setScaleFactor flushes immediately because it
 // triggers a full world rebuild (every instance transform changes).
-bool GaussianRendererCore::setScaleFactor(float scaleFactor,
-                                          std::string *errorMessage) {
+bool GaussianRendererCore::setScaleFactor(float scaleFactor, std::string *errorMessage) {
   if (!m_initialized) {
     if (errorMessage)
       *errorMessage = "Renderer core is not initialized.";
@@ -305,8 +291,7 @@ bool GaussianRendererCore::setScaleFactor(float scaleFactor,
 
 // Map the host-accessible colour channel.  Returns pixel data as packed
 // uint32_t (RGBA sRGB).  Auto-unmaps any previous mapping to prevent leaks.
-anari::MappedFrameData<uint32_t>
-GaussianRendererCore::mapColorHost(std::string *errorMessage) {
+anari::MappedFrameData<uint32_t> GaussianRendererCore::mapColorHost(std::string *errorMessage) {
   anari::MappedFrameData<uint32_t> mapped{};
   if (!m_initialized) {
     if (errorMessage)
@@ -339,8 +324,7 @@ void GaussianRendererCore::unmapColorHost() {
 // ANARI_NV_FRAME_BUFFERS_CUDA extension).  The returned void* points to GPU
 // memory; callers can use it with cudaMemcpy or pass it directly to a
 // downstream CUDA kernel.
-anari::MappedFrameData<void>
-GaussianRendererCore::mapColorCUDA(std::string *errorMessage) {
+anari::MappedFrameData<void> GaussianRendererCore::mapColorCUDA(std::string *errorMessage) {
   anari::MappedFrameData<void> mapped{};
   if (!m_initialized) {
     if (errorMessage)
@@ -374,8 +358,7 @@ void GaussianRendererCore::unmapColorCUDA() {
   m_cudaMapped = false;
 }
 
-MappedFrameInfo
-GaussianRendererCore::mapColorCUDAInfo(std::string *errorMessage) {
+MappedFrameInfo GaussianRendererCore::mapColorCUDAInfo(std::string *errorMessage) {
   MappedFrameInfo info{};
   auto mapped = mapColorCUDA(errorMessage);
   if (!mapped.data)
@@ -394,10 +377,7 @@ GaussianRendererCore::mapColorCUDAInfo(std::string *errorMessage) {
 // Handles both synchronous (stream == nullptr) and asynchronous paths.
 // The 2D copy accommodates destination pitch that may differ from the source
 // row stride (e.g. textures with alignment padding).
-bool GaussianRendererCore::copyColorCUDAToDevice(void *dstPtr,
-                                                 size_t dstPitchBytes,
-                                                 cudaStream_t stream,
-                                                 std::string *errorMessage) {
+bool GaussianRendererCore::copyColorCUDAToDevice(void *dstPtr, size_t dstPitchBytes, cudaStream_t stream, std::string *errorMessage) {
   if (!dstPtr) {
     if (errorMessage)
       *errorMessage = "Destination device pointer is null.";
@@ -424,27 +404,22 @@ bool GaussianRendererCore::copyColorCUDAToDevice(void *dstPtr,
 
   cudaError_t err = cudaSuccess;
   if (stream) {
-    err = cudaMemcpy2DAsync(dstPtr, dstPitchBytes, mapped.data, rowBytes,
-                            rowBytes, mapped.height, cudaMemcpyDeviceToDevice,
-                            stream);
+    err = cudaMemcpy2DAsync(dstPtr, dstPitchBytes, mapped.data, rowBytes, rowBytes, mapped.height, cudaMemcpyDeviceToDevice, stream);
   } else {
-    err = cudaMemcpy2D(dstPtr, dstPitchBytes, mapped.data, rowBytes, rowBytes,
-                       mapped.height, cudaMemcpyDeviceToDevice);
+    err = cudaMemcpy2D(dstPtr, dstPitchBytes, mapped.data, rowBytes, rowBytes, mapped.height, cudaMemcpyDeviceToDevice);
   }
   unmapColorCUDA();
 
   if (err != cudaSuccess) {
     if (errorMessage)
-      *errorMessage =
-          std::string("cudaMemcpy2D failed: ") + cudaGetErrorString(err);
+      *errorMessage = std::string("cudaMemcpy2D failed: ") + cudaGetErrorString(err);
     return false;
   }
 
   return true;
 }
 #else
-bool GaussianRendererCore::copyColorCUDAToDevice(void *, size_t, cudaStream_t,
-                                                 std::string *errorMessage) {
+bool GaussianRendererCore::copyColorCUDAToDevice(void *, size_t, cudaStream_t, std::string *errorMessage) {
   if (errorMessage)
     *errorMessage = "CUDA support not compiled (GRUT_HAS_CUDA not defined).";
   return false;
@@ -477,9 +452,7 @@ bool GaussianRendererCore::applyPendingUpdates(std::string *errorMessage) {
     anari::commitParameters(m_device, m_cameraObj);
 
     if (m_headlightObj && m_world) {
-      const float irr = m_rendererConfig.headlightEnabled
-                            ? m_rendererConfig.headlightIntensity
-                            : 0.f;
+      const float irr = m_rendererConfig.headlightEnabled ? m_rendererConfig.headlightIntensity : 0.f;
       anari::setParameter(m_device, m_headlightObj, "direction", m_camera.dir);
       anari::setParameter(m_device, m_headlightObj, "irradiance", irr);
       anari::commitParameters(m_device, m_headlightObj);
@@ -490,28 +463,20 @@ bool GaussianRendererCore::applyPendingUpdates(std::string *errorMessage) {
   }
 
   if (m_rendererDirty) {
-    anari::setParameter(m_device, m_rendererObj, "background",
-                        m_rendererConfig.bgColor);
-    anari::setParameter(m_device, m_rendererObj, "ambientRadiance",
-                        m_rendererConfig.ambientRadiance);
-    anari::setParameter(m_device, m_rendererObj, "pixelSamples",
-                        m_rendererConfig.spp);
+    anari::setParameter(m_device, m_rendererObj, "background", m_rendererConfig.bgColor);
+    anari::setParameter(m_device, m_rendererObj, "ambientRadiance", m_rendererConfig.ambientRadiance);
+    anari::setParameter(m_device, m_rendererObj, "pixelSamples", m_rendererConfig.spp);
     anari::commitParameters(m_device, m_rendererObj);
 
     if (m_world) {
       if (m_lightObj) {
-        anari::setParameter(m_device, m_lightObj, "direction",
-                            m_rendererConfig.lightDirection);
-        anari::setParameter(m_device, m_lightObj, "irradiance",
-                            m_rendererConfig.lightIntensity);
+        anari::setParameter(m_device, m_lightObj, "direction", m_rendererConfig.lightDirection);
+        anari::setParameter(m_device, m_lightObj, "irradiance", m_rendererConfig.lightIntensity);
         anari::commitParameters(m_device, m_lightObj);
       }
       if (m_headlightObj) {
-        const float irr = m_rendererConfig.headlightEnabled
-                              ? m_rendererConfig.headlightIntensity
-                              : 0.f;
-        anari::setParameter(m_device, m_headlightObj, "direction",
-                            m_camera.dir);
+        const float irr = m_rendererConfig.headlightEnabled ? m_rendererConfig.headlightIntensity : 0.f;
+        anari::setParameter(m_device, m_headlightObj, "direction", m_camera.dir);
         anari::setParameter(m_device, m_headlightObj, "irradiance", irr);
         anari::commitParameters(m_device, m_headlightObj);
       }
@@ -543,16 +508,12 @@ bool GaussianRendererCore::rebuildWorld(std::string *errorMessage) {
   m_world = newWorld;
 
   if (m_lightObj) {
-    anari::setParameter(m_device, m_lightObj, "direction",
-                        m_rendererConfig.lightDirection);
-    anari::setParameter(m_device, m_lightObj, "irradiance",
-                        m_rendererConfig.lightIntensity);
+    anari::setParameter(m_device, m_lightObj, "direction", m_rendererConfig.lightDirection);
+    anari::setParameter(m_device, m_lightObj, "irradiance", m_rendererConfig.lightIntensity);
     anari::commitParameters(m_device, m_lightObj);
   }
   if (m_headlightObj) {
-    const float irr = m_rendererConfig.headlightEnabled
-                          ? m_rendererConfig.headlightIntensity
-                          : 0.f;
+    const float irr = m_rendererConfig.headlightEnabled ? m_rendererConfig.headlightIntensity : 0.f;
     anari::setParameter(m_device, m_headlightObj, "direction", m_camera.dir);
     anari::setParameter(m_device, m_headlightObj, "irradiance", irr);
     anari::commitParameters(m_device, m_headlightObj);
@@ -580,8 +541,7 @@ bool GaussianRendererCore::rebuildWorld(std::string *errorMessage) {
 // which allows mapping the framebuffer as a CUDA device pointer instead of
 // copying to host.  This is required for the zero-copy GPU display path.
 bool GaussianRendererCore::checkCudaFrameExtension() {
-  const auto *list = (const char *const *)anariGetObjectInfo(
-      m_device, ANARI_DEVICE, "default", "extension", ANARI_STRING_LIST);
+  const auto *list = (const char *const *)anariGetObjectInfo(m_device, ANARI_DEVICE, "default", "extension", ANARI_STRING_LIST);
   if (!list)
     return false;
   for (const char *const *it = list; *it != nullptr; ++it) {
@@ -649,8 +609,7 @@ void GaussianRendererCore::computeCameraHeuristics() {
     zs.push_back(p[2]);
   }
 
-  vec3 robustCenter = {percentileValue(xs, 0.5f), percentileValue(ys, 0.5f),
-                       percentileValue(zs, 0.5f)};
+  vec3 robustCenter = {percentileValue(xs, 0.5f), percentileValue(ys, 0.5f), percentileValue(zs, 0.5f)};
 
   // Step 3 -- Effective radius per Gaussian: distance to robust center + largest
   // scale axis (the Gaussian's visual extent along its dominant direction).
@@ -662,8 +621,7 @@ void GaussianRendererCore::computeCameraHeuristics() {
     const float dy = p[1] - robustCenter[1];
     const float dz = p[2] - robustCenter[2];
     const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-    const float maxScale = std::max(
-        {m_data.scales[i][0], m_data.scales[i][1], m_data.scales[i][2]});
+    const float maxScale = std::max({m_data.scales[i][0], m_data.scales[i][1], m_data.scales[i][2]});
     radii.push_back(dist + maxScale * m_scaleFactor);
   }
 
@@ -676,8 +634,7 @@ void GaussianRendererCore::computeCameraHeuristics() {
   // Step 5 -- Convert to viewing distance and clamp to the scene's AABB.
   float distance = 2.4f * r90;
   if (m_sceneBounds.diagonal > 0.f) {
-    distance =
-        std::max(distance, 0.02f * std::max(1e-3f, m_sceneBounds.diagonal));
+    distance = std::max(distance, 0.02f * std::max(1e-3f, m_sceneBounds.diagonal));
     distance = std::min(distance, 0.6f * m_sceneBounds.diagonal);
   }
 
@@ -696,11 +653,7 @@ void GaussianRendererCore::clearFrameMappings() {
 // ANARI status callback registered at device creation.  Forwards warnings and
 // errors to stderr; informational and debug messages are silently dropped to
 // keep the console clean during normal operation.
-void GaussianRendererCore::statusCallback(const void *userData, ANARIDevice,
-                                          ANARIObject source, ANARIDataType,
-                                          ANARIStatusSeverity severity,
-                                          ANARIStatusCode,
-                                          const char *message) {
+void GaussianRendererCore::statusCallback(const void *userData, ANARIDevice, ANARIObject source, ANARIDataType, ANARIStatusSeverity severity, ANARIStatusCode, const char *message) {
   (void)userData;
   if (severity == ANARI_SEVERITY_FATAL_ERROR)
     std::fprintf(stderr, "[FATAL][%p] %s\n", source, message);

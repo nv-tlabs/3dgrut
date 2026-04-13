@@ -74,11 +74,10 @@ inline float sigmoid(float x) { return 1.0f / (1.0f + std::exp(-x)); }
 struct GaussianData {
   std::vector<vec3> positions; // world-space centres
   std::vector<vec3> colors;    // linear RGB in [0, 1], decoded from SH DC band
-  std::vector<vec3>
-      scales; // per-axis radii in world units (exp of stored log-scale)
-  std::vector<vec4> quats; // orientation as unit quaternion (w, x, y, z)
-  vec3 bboxMin;            // AABB lower corner (position - max scale)
-  vec3 bboxMax;            // AABB upper corner (position + max scale)
+  std::vector<vec3> scales;    // per-axis radii in world units (exp of stored log-scale)
+  std::vector<vec4> quats;     // orientation as unit quaternion (w, x, y, z)
+  vec3 bboxMin;                // AABB lower corner (position - max scale)
+  vec3 bboxMax;                // AABB upper corner (position + max scale)
 };
 
 // Compact summary of the scene's spatial extent, derived from GaussianData's
@@ -174,8 +173,7 @@ inline GaussianData loadPLY(const std::string &path, float opacityThreshold) {
     }
   }
 
-  printf("After opacity filter (threshold=%.3f): %zu / %zu Gaussians kept\n",
-         opacityThreshold, data.positions.size(), total);
+  printf("After opacity filter (threshold=%.3f): %zu / %zu Gaussians kept\n", opacityThreshold, data.positions.size(), total);
 
   return data;
 }
@@ -192,8 +190,7 @@ inline GaussianData loadPLY(const std::string &path, float opacityThreshold) {
 // columns so that only one 4x4 matrix is needed per Gaussian instance.
 //
 // Storage layout: m[col*4 + row]  (OpenGL / ANARI column-major convention).
-inline mat4 buildTransform(const vec3 &pos, const vec4 &q, const vec3 &s,
-                           float sf) {
+inline mat4 buildTransform(const vec3 &pos, const vec4 &q, const vec3 &s, float sf) {
   float w = q[0], x = q[1], y = q[2], z = q[3];
   float s0 = s[0] * sf, s1 = s[1] * sf, s2 = s[2] * sf;
 

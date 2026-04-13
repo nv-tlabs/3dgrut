@@ -53,13 +53,13 @@ struct CameraState {
 
 // Everything needed to bootstrap the renderer.
 struct InitOptions {
-  std::string plyPath;             // path to a 3DGS .ply file
+  std::string plyPath;               // path to a 3DGS .ply file
   std::string libraryName{"visrtx"}; // ANARI library to load (e.g. "visrtx", "helide")
-  float scaleFactor{1.0f};         // global multiplier on Gaussian scales
-  float opacityThreshold{0.05f};   // discard Gaussians below this opacity
-  uvec2 frameSize{1920, 1080};     // initial framebuffer resolution
-  RendererConfig rendererConfig{}; // initial renderer settings
-  bool useFloat32Color{false}; // true = FLOAT32_VEC4, false = UFIXED8_RGBA_SRGB
+  float scaleFactor{1.0f};           // global multiplier on Gaussian scales
+  float opacityThreshold{0.05f};     // discard Gaussians below this opacity
+  uvec2 frameSize{1920, 1080};       // initial framebuffer resolution
+  RendererConfig rendererConfig{};   // initial renderer settings
+  bool useFloat32Color{false};       // true = FLOAT32_VEC4, false = UFIXED8_RGBA_SRGB
 };
 
 // Binding-friendly description of a mapped CUDA framebuffer, free of ANARI
@@ -106,15 +106,13 @@ public:
   /// Map the rendered colour buffer to host (CPU) memory.  The caller must
   /// call unmapColorHost() when done.  Repeated calls auto-unmap the previous
   /// mapping.
-  anari::MappedFrameData<uint32_t>
-  mapColorHost(std::string *errorMessage = nullptr);
+  anari::MappedFrameData<uint32_t> mapColorHost(std::string *errorMessage = nullptr);
   void unmapColorHost();
 
   /// Map the rendered colour buffer as a CUDA device pointer (requires the
   /// ANARI_NV_FRAME_BUFFERS_CUDA extension).  Must be followed by
   /// unmapColorCUDA().
-  anari::MappedFrameData<void>
-  mapColorCUDA(std::string *errorMessage = nullptr);
+  anari::MappedFrameData<void> mapColorCUDA(std::string *errorMessage = nullptr);
   void unmapColorCUDA();
 
   /// Map the CUDA colour buffer and return a MappedFrameInfo describing the
@@ -126,9 +124,7 @@ public:
   /// Convenience: map the CUDA colour buffer, perform a device-to-device 2D
   /// memcpy into |dstPtr| (pitched), and unmap.  Supports both synchronous
   /// (stream == nullptr) and async copies.
-  bool copyColorCUDAToDevice(void *dstPtr, size_t dstPitchBytes,
-                             cudaStream_t stream = nullptr,
-                             std::string *errorMessage = nullptr);
+  bool copyColorCUDAToDevice(void *dstPtr, size_t dstPitchBytes, cudaStream_t stream = nullptr, std::string *errorMessage = nullptr);
 
   // --- Read-only accessors ------------------------------------------------
 
@@ -165,10 +161,7 @@ private:
 
   /// ANARI status callback -- routes device messages to stderr, filtered by
   /// severity (warnings and above).
-  static void statusCallback(const void *userData, ANARIDevice,
-                             ANARIObject source, ANARIDataType,
-                             ANARIStatusSeverity severity, ANARIStatusCode,
-                             const char *message);
+  static void statusCallback(const void *userData, ANARIDevice, ANARIObject source, ANARIDataType, ANARIStatusSeverity severity, ANARIStatusCode, const char *message);
 
 private:
   // --- State flags --------------------------------------------------------
