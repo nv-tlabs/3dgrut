@@ -32,10 +32,10 @@ import numpy as np
 import polyscope as ps
 import polyscope.imgui as psim
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
@@ -123,9 +123,7 @@ def _grut_batch_from_polyscope(window_w: int, window_h: int, device):
     u, v = interp_x, interp_y
     xs = ((u + 0.5) - 0.5 * window_w) / focal
     ys = ((v + 0.5) - 0.5 * window_h) / focal
-    rays_dir = torch.nn.functional.normalize(
-        torch.stack((xs, ys, torch.ones_like(xs)), dim=-1), dim=-1
-    ).unsqueeze(0)
+    rays_dir = torch.nn.functional.normalize(torch.stack((xs, ys, torch.ones_like(xs)), dim=-1), dim=-1).unsqueeze(0)
 
     w2c = view_params.get_view_mat()
     c2w = np.linalg.inv(w2c)
@@ -149,16 +147,19 @@ def blit_to_polyscope_buffer(renderer, ps_buffer) -> None:
 # Backend probing
 # ---------------------------------------------------------------------------
 
+
 def _probe_backends() -> list[str]:
     """Return list of renderer names whose dependencies are importable."""
     available: list[str] = []
     try:
         import gaussian_viewer  # noqa: F401
+
         available.append("anari")
     except ImportError:
         pass
     try:
         import threedgrut.model.model  # noqa: F401
+
         available.append("3dgrt")
         available.append("3dgut")
     except ImportError:
@@ -169,6 +170,7 @@ def _probe_backends() -> list[str]:
 # ---------------------------------------------------------------------------
 # Unified viewer
 # ---------------------------------------------------------------------------
+
 
 def run_viewer(args: argparse.Namespace, available: list[str]) -> None:
     """Initialise all available backends and run polyscope with a runtime renderer selector."""
@@ -240,9 +242,11 @@ def run_viewer(args: argparse.Namespace, available: list[str]) -> None:
             conf_other = _load_grut_config(other_method, args.config_name)
             if other_method == "3dgrt":
                 from threedgrt_tracer.tracer import Tracer as Tracer3DGRT
+
                 grut_tracers[other_method] = Tracer3DGRT(conf_other)
             else:
                 from threedgut_tracer.tracer import Tracer as Tracer3DGUT
+
                 grut_tracers[other_method] = Tracer3DGUT(conf_other)
 
         # Activate whichever tracer the user requested and build BVH.
@@ -296,11 +300,7 @@ def run_viewer(args: argparse.Namespace, available: list[str]) -> None:
                 new_name = available[active_idx]
                 _switch_renderer(new_name)
                 active_name = new_name
-                if (
-                    _image_origin_for_renderer(active_name) != current_image_origin
-                    and w > 0
-                    and h > 0
-                ):
+                if _image_origin_for_renderer(active_name) != current_image_origin and w > 0 and h > 0:
                     _recreate_render_quantity(w, h)
             psim.TreePop()
 
@@ -358,6 +358,7 @@ def run_viewer(args: argparse.Namespace, available: list[str]) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="3D Gaussian splat viewer + polyscope")
     parser.add_argument("ply_path", help="Path to a 3DGS .ply file")
@@ -366,7 +367,7 @@ def main() -> None:
         choices=("anari", "3dgrt", "3dgut"),
         default="anari",
         help="Initial active renderer (default: anari). All available backends are loaded; "
-             "switch at runtime via the GUI.",
+        "switch at runtime via the GUI.",
     )
     parser.add_argument(
         "--config-name",
@@ -382,8 +383,7 @@ def main() -> None:
     available = _probe_backends()
     if not available:
         raise RuntimeError(
-            "No rendering backends found. Install gaussian-viewer (for anari) "
-            "or threedgrut (for 3dgrt/3dgut)."
+            "No rendering backends found. Install gaussian-viewer (for anari) " "or threedgrut (for 3dgrt/3dgut)."
         )
     print(f"Available backends: {available}")
 
