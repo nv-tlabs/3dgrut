@@ -70,6 +70,9 @@ playground = [
     "pygltflib",
     "kaolin>=0.17.0",
 ]
+visualization = [
+    "gaussian-viewer @ git+https://github.com/wilsonCernWq/3dgrut-visualization.git",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
