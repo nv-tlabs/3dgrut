@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Build the visualization stack (ANARI-SDK, VisRTX, GaussianViewer) via the
-    CMake superbuild in visualization/.
+    CMake superbuild in this directory.
 
 .DESCRIPTION
     Configures and builds the superbuild CMakeLists.txt that automatically
@@ -19,7 +19,7 @@
     OptiX SDK is downloaded automatically unless -OptiXDir is given.
 
 .PARAMETER Root
-    Base directory for the entire tree (default: visualization/ next to this script).
+    Base directory for the entire tree (default: this script's directory).
 
 .PARAMETER OptiXDir
     Path to a local OptiX SDK.  When omitted the superbuild downloads the
@@ -71,7 +71,7 @@ function Assert-ExitCode {
 
 # ── resolve paths ────────────────────────────────────────────────────────────
 
-if ($Root -eq "") { $Root = Join-Path $ScriptDir "visualization" }
+if ($Root -eq "") { $Root = $ScriptDir }
 $SrcDir     = $Root
 $BuildDir   = Join-Path $Root "build"
 $InstallDir = Join-Path $Root "install"

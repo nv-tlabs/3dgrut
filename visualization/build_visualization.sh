@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Build the visualization stack (ANARI-SDK, VisRTX, GaussianViewer) via the
-# CMake superbuild in visualization/.
+# CMake superbuild in this directory.
 #
 # The superbuild automatically downloads ANARI-SDK, VisRTX, and (optionally)
 # OptiX headers, then builds gaussian_viewer against them.
@@ -23,7 +23,7 @@ usage() {
 Usage: build_visualization.sh [options]
 
 Options:
-  --root PATH          Base directory for visualization tree (default: ./visualization)
+  --root PATH          Base directory for visualization tree (default: this script's directory)
   --optix-dir PATH     Use local OptiX headers directory (must contain include/).
                        When omitted, headers are downloaded from GitHub automatically.
   --build-type TYPE    CMake build type (default: Release)
@@ -168,7 +168,7 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ -z "${ROOT}" ]]; then
-  ROOT="${SCRIPT_DIR}/visualization"
+  ROOT="${SCRIPT_DIR}"
 fi
 
 if [[ "${JOBS}" -le 0 ]]; then

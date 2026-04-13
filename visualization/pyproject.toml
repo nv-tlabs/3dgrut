@@ -24,6 +24,9 @@ wheel.packages = ["gaussian_viewer"]
 
 [tool.scikit-build.cmake.define]
 BUILD_PYTHON_BINDINGS = "ON"
+BUILD_HELIDE = "OFF"
+BUILD_VISRTX = "ON"
+BUILD_VISGL = "OFF"
 ANARI_VERSION = "v0.15.0"
 VISRTX_VERSION = "v0.13.0"
 OPTIX_VERSION = "v9.1.0"
