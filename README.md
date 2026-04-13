@@ -128,7 +128,7 @@ source .venv/bin/activate
 2. **CUDA Toolkit** installed from [NVIDIA CUDA Downloads](https://developer.nvidia.com/cuda-downloads)
 3. **Visual Studio Build Tools** (2019 or later) with the **Desktop development with C++** workload.
    The script auto-detects `cl.exe`, `cmake`, and `ninja` from the VS installation.
-   If both a CUDA-compatible VS (2019–2022) and a newer one are installed, the script prefers the compatible version.
+   If both a CUDA-compatible VS (2019--2022) and a newer one are installed, the script prefers the compatible version.
    For VS 2025+ (not yet officially supported by CUDA), the script automatically adds `--allow-unsupported-compiler` to nvcc.
 
 From a PowerShell terminal in the project root:

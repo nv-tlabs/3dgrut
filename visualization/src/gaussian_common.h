@@ -183,9 +183,9 @@ inline GaussianData loadPLY(const std::string &path, float opacityThreshold) {
 // Build a column-major 4x4 affine transform (TRS) for a single Gaussian.
 //
 // The resulting matrix encodes:  M = T * R * S
-//   T  – translation to world-space position |pos|
-//   R  – rotation from unit quaternion |q| (w, x, y, z)
-//   S  – anisotropic scale |s| multiplied by the global |sf| (scale factor)
+//   T  -- translation to world-space position |pos|
+//   R  -- rotation from unit quaternion |q| (w, x, y, z)
+//   S  -- anisotropic scale |s| multiplied by the global |sf| (scale factor)
 //
 // The rotation matrix is derived directly from the quaternion via the standard
 // formula (no intermediate Euler angles), and scale is baked into the rotation
