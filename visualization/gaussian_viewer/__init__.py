@@ -71,10 +71,12 @@ except ImportError as e1:
             ref = f"$env:{var}" if _win else f"${var}"
             return f'  $env:{var} = "{val}{_sep}{ref}"' if _win else f'  export {var}="{val}{_sep}{ref}"'
 
-        _hint = "\n".join([
-            _env_hint("PATH", f"{_ib}{_sep}{_il}"),
-            _env_hint("PYTHONPATH", f"{_pp}{_sep}{_il}"),
-        ])
+        _hint = "\n".join(
+            [
+                _env_hint("PATH", f"{_ib}{_sep}{_il}"),
+                _env_hint("PYTHONPATH", f"{_pp}{_sep}{_il}"),
+            ]
+        )
         raise ImportError(
             "Cannot find _gaussian_renderer_core native module.\n"
             f"  Package-relative import failed: {e1}\n"

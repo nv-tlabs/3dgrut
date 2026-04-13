@@ -45,10 +45,10 @@ struct RendererConfig {
 
 // Minimal perspective-camera description passed into the ANARI camera.
 struct CameraState {
-  vec3 eye{0.f, 0.f, 0.f};  // camera world-space position
-  vec3 dir{0.f, 0.f, 1.f};  // forward direction (unit vector)
-  vec3 up{0.f, -1.f, 0.f};  // up vector (Y-down convention)
-  float aspect{16.f / 9.f}; // viewport width / height
+  vec3 eye{0.f, 0.f, 0.f};                   // camera world-space position
+  vec3 dir{0.f, 0.f, 1.f};                   // forward direction (unit vector)
+  vec3 up{0.f, -1.f, 0.f};                   // up vector (Y-down convention)
+  float aspect{16.f / 9.f};                  // viewport width / height
   float fovy{3.14159265358979323846f / 3.f}; // vertical FOV in radians (ANARI default)
 };
 
