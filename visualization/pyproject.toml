@@ -13,7 +13,7 @@ dependencies = ["numpy"]
 polyscope = ["polyscope>=2.6.0"]
 
 [project.scripts]
-example-polyscope = "gaussian_viewer.example_polyscope:main"
+polyscope-viewer = "gaussian_viewer.polyscope_viewer:main"
 gaussian-viewer = "gaussian_viewer._launchers:gaussian_viewer"
 interactive-viewer = "gaussian_viewer._launchers:interactive_viewer"
 
