@@ -7,9 +7,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ── dependencies (shared) ────────────────────────────────────────────────────
 
 find_package(anari REQUIRED)
-find_package(VisRTX REQUIRED)
 find_package(OpenGL REQUIRED)
-find_package(CUDAToolkit REQUIRED)
+find_package(VisRTX QUIET)
+find_package(CUDAToolkit QUIET)
+
+if(VisRTX_FOUND)
+  message(STATUS "VisRTX found -- will link anari_library_visrtx for runtime discovery")
+else()
+  message(STATUS "VisRTX not found -- VisRTX device will not be bundled (can still be loaded at runtime)")
+endif()
+
+if(CUDAToolkit_FOUND)
+  message(STATUS "CUDA toolkit found -- enabling CUDA framebuffer support")
+else()
+  message(STATUS "CUDA toolkit not found -- CUDA framebuffer path disabled")
+endif()
 
 include(FetchContent)
 
@@ -44,7 +56,10 @@ FetchContent_Declare(imgui
 
 FetchContent_MakeAvailable(stb happly glfw imgui)
 
-# ── glad (generated OpenGL 3.3 core loader) ──────────────────────────────────
+# ── glad (generated OpenGL 3.3 compatibility loader) ─────────────────────────
+# Pre-generated via glad2 (https://glad.sh).  To regenerate:
+#   pip install glad2
+#   glad --api gl:compatibility=3.3 --out-path visualization/src/glad c
 
 set(GLAD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/glad)
 add_library(glad STATIC ${GLAD_DIR}/src/gl.c)
@@ -67,7 +82,7 @@ target_include_directories(imgui_lib PUBLIC
 )
 target_link_libraries(imgui_lib PUBLIC glfw glad OpenGL::GL)
 
-# ── offline renderer (GaussianViewer) ────────────────────────────────────────
+# ── offline renderer (commandline_viewer) ────────────────────────────────────
 
 add_library(gaussian_renderer_core STATIC renderer_core.cpp)
 set_target_properties(gaussian_renderer_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -76,53 +91,48 @@ target_include_directories(gaussian_renderer_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 target_link_libraries(gaussian_renderer_core PUBLIC
-  VisRTX::anari_library_visrtx
-  anari::anari_static
-  CUDA::cudart
+  anari::anari
 )
+if(VisRTX_FOUND)
+  target_link_libraries(gaussian_renderer_core PUBLIC VisRTX::anari_library_visrtx)
+endif()
+if(CUDAToolkit_FOUND)
+  target_link_libraries(gaussian_renderer_core PUBLIC CUDA::cudart)
+  target_compile_definitions(gaussian_renderer_core PUBLIC GRUT_HAS_CUDA)
+endif()
 
-add_executable(GaussianViewer GaussianViewer.cpp)
+add_executable(commandline_viewer commandline_viewer.cpp)
 
-target_include_directories(GaussianViewer PRIVATE
+target_include_directories(commandline_viewer PRIVATE
   ${stb_SOURCE_DIR}
   ${happly_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(GaussianViewer PRIVATE
+target_link_libraries(commandline_viewer PRIVATE
   gaussian_renderer_core
-)
-
-add_custom_command(TARGET GaussianViewer POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    $<TARGET_FILE:VisRTX::anari_library_visrtx>
-    $<TARGET_FILE_DIR:GaussianViewer>
 )
 
 # ── interactive viewer ───────────────────────────────────────────────────────
 
-add_executable(InteractiveViewer InteractiveViewer.cpp)
+add_executable(interactive_viewer interactive_viewer.cpp)
 
-target_include_directories(InteractiveViewer PRIVATE
+target_include_directories(interactive_viewer PRIVATE
   ${stb_SOURCE_DIR}
   ${happly_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(InteractiveViewer PRIVATE
+target_link_libraries(interactive_viewer PRIVATE
   gaussian_renderer_core
   imgui_lib
   glad
   glfw
   OpenGL::GL
-  CUDA::cudart
 )
-
-add_custom_command(TARGET InteractiveViewer POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    $<TARGET_FILE:VisRTX::anari_library_visrtx>
-    $<TARGET_FILE_DIR:InteractiveViewer>
-)
+if(CUDAToolkit_FOUND)
+  target_link_libraries(interactive_viewer PRIVATE CUDA::cudart)
+endif()
 
 # ── Python bindings (optional) ───────────────────────────────────────────
 
@@ -150,13 +160,33 @@ if(BUILD_PYTHON_BINDINGS)
 
   pybind11_add_module(_gaussian_renderer_core python_bindings.cpp)
   target_link_libraries(_gaussian_renderer_core PRIVATE gaussian_renderer_core)
-
-  add_custom_command(TARGET _gaussian_renderer_core POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      $<TARGET_FILE:VisRTX::anari_library_visrtx>
-      $<TARGET_FILE_DIR:_gaussian_renderer_core>
-  )
 endif()
+
+# ── runtime shared libraries ──────────────────────────────────────────────
+# Glob all shared libraries from the dependency install prefix.  By the time
+# this project configures (as an ExternalProject), ANARI-SDK and VisRTX are
+# already built and installed to CMAKE_PREFIX_PATH.  The prefix is private
+# to this superbuild, so every shared library in it is ours to bundle.
+
+set(_runtime_libs "")
+foreach(_dir "${CMAKE_PREFIX_PATH}/bin" "${CMAKE_PREFIX_PATH}/lib")
+  file(GLOB _found "${_dir}/*${CMAKE_SHARED_LIBRARY_SUFFIX}")
+  list(APPEND _runtime_libs ${_found})
+endforeach()
+list(REMOVE_DUPLICATES _runtime_libs)
+
+set(_all_targets commandline_viewer interactive_viewer)
+if(BUILD_PYTHON_BINDINGS)
+  list(APPEND _all_targets _gaussian_renderer_core)
+endif()
+
+foreach(_tgt IN LISTS _all_targets)
+  foreach(_lib IN LISTS _runtime_libs)
+    add_custom_command(TARGET ${_tgt} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_lib}" $<TARGET_FILE_DIR:${_tgt}>
+    )
+  endforeach()
+endforeach()
 
 # ── install rules ─────────────────────────────────────────────────────────
 # When built via scikit-build-core the SKBUILD_* variables point to wheel
@@ -174,11 +204,13 @@ else()
   set(_pkg_dest "lib")
 endif()
 
-install(TARGETS GaussianViewer InteractiveViewer RUNTIME DESTINATION "${_bin_dest}")
+install(TARGETS commandline_viewer interactive_viewer RUNTIME DESTINATION "${_bin_dest}")
 
 if(BUILD_PYTHON_BINDINGS)
   install(TARGETS _gaussian_renderer_core LIBRARY DESTINATION "${_pkg_dest}")
 endif()
 
-install(FILES $<TARGET_FILE:VisRTX::anari_library_visrtx> DESTINATION "${_pkg_dest}")
-install(FILES $<TARGET_FILE:VisRTX::anari_library_visrtx> DESTINATION "${_bin_dest}")
+foreach(_lib IN LISTS _runtime_libs)
+  install(FILES "${_lib}" DESTINATION "${_pkg_dest}")
+  install(FILES "${_lib}" DESTINATION "${_bin_dest}")
+endforeach()

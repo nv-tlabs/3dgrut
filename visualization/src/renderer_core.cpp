@@ -1,6 +1,3 @@
-#define ANARI_EXTENSION_UTILITY_IMPL
-#include <anari/ext/visrtx/makeVisRTXDevice.h>
-
 #include "renderer_core.h"
 
 #include <anari/anari.h>
@@ -50,10 +47,10 @@ size_t bytesPerPixel(ANARIDataType pixelType) {
 //   ├── Instance (transform array)
 //   │   ├── Group
 //   │   │   └── Surface
-//   │   │       ├── Geometry  — single unit sphere at the origin
-//   │   │       └── Material  — "matte", colour sourced from per-instance array
-//   │   ├── transform[]       — N column-major 4x4 TRS matrices (one per
-//   Gaussian) │   └── color[]           — N RGB colours
+//   │   │       ├── Geometry  -- single unit sphere at the origin
+//   │   │       └── Material  -- "matte", colour sourced from per-instance array
+//   │   ├── transform[]       -- N column-major 4x4 TRS matrices (one per
+//   Gaussian) │   └── color[]           -- N RGB colours
 //
 // Lighting is not included in the world returned by this function; the caller
 // (GaussianRendererCore) attaches a persistent directional light separately so
@@ -137,6 +134,8 @@ GaussianRendererCore::~GaussianRendererCore() {
       anari::release(m_device, m_world);
     anari::release(m_device, m_device);
   }
+  if (m_library)
+    anariUnloadLibrary(m_library);
 }
 
 // One-time initialisation sequence:
@@ -144,7 +143,8 @@ GaussianRendererCore::~GaussianRendererCore() {
 //  1. Validate inputs and load + filter the PLY.
 //  2. Compute scene bounds and camera heuristics so that the default camera
 //     looks at the centre of the scene from a reasonable distance.
-//  3. Create the VisRTX ANARI device and verify CUDA framebuffer support.
+//  3. Load the requested ANARI library, create a device, and probe for
+//     optional CUDA framebuffer support.
 //  4. Allocate the core ANARI objects (camera, renderer, frame) and configure
 //     the frame's output channels (sRGB colour + float depth).
 //  5. Mark everything dirty and flush via applyPendingUpdates(), which builds
@@ -190,20 +190,29 @@ bool GaussianRendererCore::init(const InitOptions &options,
   m_camera.up = {0.f, -1.f, 0.f};
   m_camera.aspect = float(m_frameSize[0]) / float(m_frameSize[1]);
 
-  m_device = makeVisRTXDevice(statusCallback, this);
+  m_library =
+      anariLoadLibrary(options.libraryName.c_str(), statusCallback, this);
+  if (!m_library) {
+    if (errorMessage)
+      *errorMessage =
+          "Failed to load ANARI library '" + options.libraryName + "'.";
+    return false;
+  }
+
+  m_device = anariNewDevice(m_library, "default");
   if (!m_device) {
     if (errorMessage)
-      *errorMessage = "Failed to create VisRTX device.";
+      *errorMessage = "Failed to create ANARI device from library '" +
+                      options.libraryName + "'.";
     return false;
   }
 
   m_supportsCudaFrameBuffers = checkCudaFrameExtension();
-  if (!m_supportsCudaFrameBuffers) {
-    if (errorMessage)
-      *errorMessage =
-          "VisRTX device does not expose ANARI_NV_FRAME_BUFFERS_CUDA.";
-    return false;
-  }
+  if (!m_supportsCudaFrameBuffers)
+    std::fprintf(stderr,
+                 "[INFO] ANARI device does not expose %s -- "
+                 "CUDA framebuffer path disabled, using host readback.\n",
+                 kCudaFrameExtension);
 
   m_cameraObj = anari::newObject<anari::Camera>(m_device, "perspective");
   m_rendererObj = anari::newObject<anari::Renderer>(m_device, "default");
@@ -338,6 +347,11 @@ GaussianRendererCore::mapColorCUDA(std::string *errorMessage) {
       *errorMessage = "Renderer core is not initialized.";
     return mapped;
   }
+  if (!m_supportsCudaFrameBuffers) {
+    if (errorMessage)
+      *errorMessage = "CUDA framebuffer not supported by this ANARI device.";
+    return mapped;
+  }
 
   if (m_cudaMapped)
     unmapColorCUDA();
@@ -374,8 +388,9 @@ GaussianRendererCore::mapColorCUDAInfo(std::string *errorMessage) {
   return info;
 }
 
+#ifdef GRUT_HAS_CUDA
 // High-level helper: map the CUDA colour buffer, 2D-copy it into a
-// caller-supplied pitched device buffer, and unmap — all in one call.
+// caller-supplied pitched device buffer, and unmap -- all in one call.
 // Handles both synchronous (stream == nullptr) and asynchronous paths.
 // The 2D copy accommodates destination pitch that may differ from the source
 // row stride (e.g. textures with alignment padding).
@@ -427,6 +442,14 @@ bool GaussianRendererCore::copyColorCUDAToDevice(void *dstPtr,
 
   return true;
 }
+#else
+bool GaussianRendererCore::copyColorCUDAToDevice(void *, size_t, cudaStream_t,
+                                                 std::string *errorMessage) {
+  if (errorMessage)
+    *errorMessage = "CUDA support not compiled (GRUT_HAS_CUDA not defined).";
+  return false;
+}
+#endif
 
 // Commit any ANARI objects whose parameters have changed since the last
 // render.  Each dirty flag gates a specific object commit so we only pay for
@@ -572,7 +595,7 @@ bool GaussianRendererCore::checkCudaFrameExtension() {
 // (m_focusDistance) that frame the loaded Gaussian splat scene well, without
 // requiring any camera metadata from the training data.
 //
-// The approach is deliberately robust to outliers — Gaussian splat PLY files
+// The approach is deliberately robust to outliers -- Gaussian splat PLY files
 // commonly contain a long tail of far-flung or oversized splats that would
 // badly skew a naive bounding-box strategy.
 //
@@ -585,7 +608,7 @@ bool GaussianRendererCore::checkCudaFrameExtension() {
 //    Gaussian positions.  The median is insensitive to outlier splats that sit
 //    far from the bulk of the scene.
 //
-// 3. Effective radii:  For each Gaussian compute an "effective radius" —
+// 3. Effective radii:  For each Gaussian compute an "effective radius" --
 //    the distance from the robust center plus the largest scale axis of that
 //    Gaussian (scaled by m_scaleFactor).  This captures both how far away and
 //    how large each splat is, giving a single measure of how much viewing
@@ -605,7 +628,7 @@ bool GaussianRendererCore::checkCudaFrameExtension() {
 // 6. Validation:  The heuristic values are adopted only when they are finite
 //    and positive; otherwise the AABB-based fallback from step 1 is kept.
 void GaussianRendererCore::computeCameraHeuristics() {
-  // Step 1 — AABB-based fallback.
+  // Step 1 -- AABB-based fallback.
   m_focusCenter = m_sceneBounds.center;
   m_focusDistance = std::max(0.1f, m_sceneBounds.diagonal * 0.3f);
 
@@ -613,7 +636,7 @@ void GaussianRendererCore::computeCameraHeuristics() {
   if (n == 0)
     return;
 
-  // Step 2 — Robust (median) center via per-axis 50th percentile.
+  // Step 2 -- Robust (median) center via per-axis 50th percentile.
   std::vector<float> xs;
   std::vector<float> ys;
   std::vector<float> zs;
@@ -629,7 +652,7 @@ void GaussianRendererCore::computeCameraHeuristics() {
   vec3 robustCenter = {percentileValue(xs, 0.5f), percentileValue(ys, 0.5f),
                        percentileValue(zs, 0.5f)};
 
-  // Step 3 — Effective radius per Gaussian: distance to robust center + largest
+  // Step 3 -- Effective radius per Gaussian: distance to robust center + largest
   // scale axis (the Gaussian's visual extent along its dominant direction).
   std::vector<float> radii;
   radii.reserve(n);
@@ -644,13 +667,13 @@ void GaussianRendererCore::computeCameraHeuristics() {
     radii.push_back(dist + maxScale * m_scaleFactor);
   }
 
-  // Step 4 — 90th-percentile radius: covers the vast majority of Gaussians
+  // Step 4 -- 90th-percentile radius: covers the vast majority of Gaussians
   // while discarding the most extreme outliers.
   const float r90 = percentileValue(radii, 0.90f);
   if (!(r90 > 0.f) || !std::isfinite(r90))
     return;
 
-  // Step 5 — Convert to viewing distance and clamp to the scene's AABB.
+  // Step 5 -- Convert to viewing distance and clamp to the scene's AABB.
   float distance = 2.4f * r90;
   if (m_sceneBounds.diagonal > 0.f) {
     distance =
@@ -658,7 +681,7 @@ void GaussianRendererCore::computeCameraHeuristics() {
     distance = std::min(distance, 0.6f * m_sceneBounds.diagonal);
   }
 
-  // Step 6 — Adopt heuristic values only if they are valid.
+  // Step 6 -- Adopt heuristic values only if they are valid.
   if (std::isfinite(distance) && distance > 0.f) {
     m_focusCenter = robustCenter;
     m_focusDistance = distance;

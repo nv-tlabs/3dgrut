@@ -40,6 +40,7 @@
 
 static void printUsage(const char *argv0) {
   printf("Usage: %s <path.ply> [options]\n", argv0);
+  printf("  --library NAME          ANARI library (default: visrtx)\n");
   printf("  --scale-factor F        Multiply Gaussian scales (default: 1.0)\n");
   printf("  --opacity-threshold T   Min opacity to keep (default: 0.05)\n");
   printf("  --output FILE           Output PNG path (default: "
@@ -55,6 +56,7 @@ int main(int argc, char *argv[]) {
   }
 
   std::string plyPath = argv[1];
+  std::string libraryName = "visrtx";
   float scaleFactor = 1.0f;
   float opacityThreshold = 0.05f;
   std::string outputPath = "gaussian_viewer.png";
@@ -62,7 +64,9 @@ int main(int argc, char *argv[]) {
   uvec2 imageSize = {3840, 2160};
 
   for (int i = 2; i < argc; i++) {
-    if (std::strcmp(argv[i], "--scale-factor") == 0 && i + 1 < argc)
+    if (std::strcmp(argv[i], "--library") == 0 && i + 1 < argc)
+      libraryName = argv[++i];
+    else if (std::strcmp(argv[i], "--scale-factor") == 0 && i + 1 < argc)
       scaleFactor = std::strtof(argv[++i], nullptr);
     else if (std::strcmp(argv[i], "--opacity-threshold") == 0 && i + 1 < argc)
       opacityThreshold = std::strtof(argv[++i], nullptr);
@@ -87,6 +91,7 @@ int main(int argc, char *argv[]) {
 
   InitOptions options;
   options.plyPath = plyPath;
+  options.libraryName = libraryName;
   options.scaleFactor = scaleFactor;
   options.opacityThreshold = opacityThreshold;
   options.frameSize = imageSize;

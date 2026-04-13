@@ -29,7 +29,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-// Interactive Gaussian Viewer -- GLFW + Dear ImGui + ANARI/VisRTX
+// Interactive Gaussian Viewer -- GLFW + Dear ImGui + ANARI
 // Architecture modeled after VIDILabs/open-volume-renderer main_app.cpp:
 // async double-buffered rendering with TransactionalValue handoff.
 
@@ -37,8 +37,10 @@
 #define GLFW_INCLUDE_NONE
 #include <glad/gl.h>          // must precede cuda_gl_interop.h / GLFW
 #include <GLFW/glfw3.h>
+#ifdef GRUT_HAS_CUDA
 #include <cuda_gl_interop.h>
 #include <cuda_runtime_api.h>
+#endif
 // clang-format on
 
 #include "imgui.h"
@@ -214,8 +216,6 @@ private:
 //  Camera
 // ═══════════════════════════════════════════════════════════════════════════════
 
-enum class CameraMode { Orbit, Fly };
-
 struct OrbitCamera {
   vec3 center{0.f, 0.f, 0.f};
   float distance{1.f};
@@ -236,7 +236,6 @@ struct OrbitCamera {
   }
 
   void orbit(float dx, float dy) {
-    // Drag-to-rotate behavior: scene follows mouse motion.
     yaw -= dx;
     pitch = std::clamp(pitch - dy, -1.5f, 1.5f);
   }
@@ -250,41 +249,25 @@ struct OrbitCamera {
           right[i] * dx * distance * 0.002f + camUp[i] * dy * distance * 0.002f;
   }
 
+  void dolly(float amount) {
+    float cy = std::cos(yaw), sy = std::sin(yaw);
+    float cp = std::cos(pitch), sp = std::sin(pitch);
+    vec3 dir = {-cy * cp, -sp, -sy * cp};
+    for (int i = 0; i < 3; i++)
+      center[i] += dir[i] * amount * distance * 0.05f;
+  }
+
+  void strafe(float amount) {
+    float sy = std::sin(yaw), cy = std::cos(yaw);
+    vec3 right = {-sy, 0.f, cy};
+    for (int i = 0; i < 3; i++)
+      center[i] += right[i] * amount * distance * 0.05f;
+  }
+
   void zoom(float delta) {
     distance *= (1.f - delta * 0.1f);
     if (distance < 0.01f)
       distance = 0.01f;
-  }
-};
-
-struct FlyCamera {
-  vec3 eye{0.f, 0.f, 0.f};
-  float yaw{0.f};
-  float pitch{0.f};
-  float speed{1.f};
-  vec3 up{0.f, -1.f, 0.f};
-
-  CameraState state(float aspect) const {
-    float cy = std::cos(yaw), sy = std::sin(yaw);
-    float cp = std::cos(pitch), sp = std::sin(pitch);
-    vec3 dir = {cy * cp, sp, sy * cp};
-    return {eye, dir, up, aspect};
-  }
-
-  void look(float dx, float dy) {
-    yaw += dx;
-    pitch = std::clamp(pitch + dy, -1.5f, 1.5f);
-  }
-
-  void move(float forward, float right, float upAmount, float dt) {
-    float cy = std::cos(yaw), sy = std::sin(yaw);
-    float cp = std::cos(pitch), sp = std::sin(pitch);
-    vec3 fwd = {cy * cp, sp, sy * cp};
-    vec3 r = {-sy, 0.f, cy};
-    float s = speed * dt;
-    for (int i = 0; i < 3; i++)
-      eye[i] += (fwd[i] * forward + r[i] * right) * s;
-    eye[1] += upAmount * s;
   }
 };
 
@@ -321,13 +304,13 @@ struct App {
   // GUI-thread local state
   GLFWwindow *window{nullptr};
   GLuint frame_texture{0};
+#ifdef GRUT_HAS_CUDA
   cudaGraphicsResource_t frame_texture_cuda{nullptr};
   bool cuda_gl_interop{false};
+#endif
   uvec2 fb_size{0, 0};
 
-  CameraMode cam_mode{CameraMode::Orbit};
   OrbitCamera orbit_cam;
-  FlyCamera fly_cam;
   bool camera_modified{true};
 
   bool gui_enabled{true};
@@ -419,13 +402,7 @@ struct App {
     camera_modified = false;
 
     float aspect = fb_size[1] > 0 ? float(fb_size[0]) / float(fb_size[1]) : 1.f;
-    CameraState cs;
-    if (cam_mode == CameraMode::Orbit)
-      cs = orbit_cam.state(aspect);
-    else
-      cs = fly_cam.state(aspect);
-
-    camera_shared = cs;
+    camera_shared = orbit_cam.state(aspect);
 
     if (!async_enabled)
       render_background();
@@ -433,13 +410,14 @@ struct App {
 
   // ─── GUI thread: draw ────────────────────────────────────────────────────
 
+#ifdef GRUT_HAS_CUDA
   bool check_cuda_gl_interop() const {
     unsigned int num_devices = 0;
     int cuda_devices[8] = {0};
     cudaError_t err =
         cudaGLGetDevices(&num_devices, cuda_devices, 8, cudaGLDeviceListAll);
     if (err != cudaSuccess) {
-      cudaGetLastError(); // clear sticky error for subsequent CUDA calls
+      cudaGetLastError();
       return false;
     }
 
@@ -527,10 +505,41 @@ struct App {
     }
     return true;
   }
+#endif // GRUT_HAS_CUDA
+
+  bool upload_host_frame_to_texture() {
+    std::lock_guard<std::mutex> guard(renderer_mutex);
+    std::string error_message;
+    auto fb = renderer_core.mapColorHost(&error_message);
+    if (!fb.data) {
+      fprintf(stderr, "Failed to map host framebuffer: %s\n",
+              error_message.c_str());
+      return false;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, frame_texture);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, fb.width, fb.height, GL_RGBA,
+                    GL_UNSIGNED_BYTE, fb.data);
+    renderer_core.unmapColorHost();
+    return true;
+  }
+
+  bool use_cuda_display_path() const {
+#ifdef GRUT_HAS_CUDA
+    return cuda_gl_interop && renderer_core.supportsCudaFrameBuffers();
+#else
+    return false;
+#endif
+  }
 
   void draw() {
     if (frame_ready.exchange(false, std::memory_order_acq_rel)) {
-      upload_cuda_frame_to_texture();
+#ifdef GRUT_HAS_CUDA
+      if (use_cuda_display_path())
+        upload_cuda_frame_to_texture();
+      else
+#endif
+        upload_host_frame_to_texture();
       {
         std::lock_guard<std::mutex> lk(frame_handoff_mtx_);
         frame_consumed_ = true;
@@ -573,8 +582,6 @@ struct App {
       ImGui::SetNextWindowSizeConstraints(ImVec2(360, 300),
                                           ImVec2(FLT_MAX, FLT_MAX));
       if (ImGui::Begin("Control Panel", nullptr)) {
-        ImGui::Text("Mode: %s",
-                    cam_mode == CameraMode::Orbit ? "Orbit (I)" : "Fly (F)");
         ImGui::Checkbox("Invert Orbit Y", &invert_orbit_y);
         ImGui::Separator();
 
@@ -670,8 +677,10 @@ struct App {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    if (cuda_gl_interop)
+#ifdef GRUT_HAS_CUDA
+    if (use_cuda_display_path())
       register_frame_texture_cuda();
+#endif
 
     frame_size_shared = fb_size;
     camera_modified = true;
@@ -679,7 +688,7 @@ struct App {
 
   // ─── Key handling ────────────────────────────────────────────────────────
 
-  void onKey(int key, int /*scancode*/, int action, int mods) {
+  void onKey(int key, int /*scancode*/, int action, int /*mods*/) {
     if (action != GLFW_PRESS)
       return;
     switch (key) {
@@ -690,8 +699,6 @@ struct App {
       gui_enabled = !gui_enabled;
       break;
     case GLFW_KEY_S: {
-      if (cam_mode == CameraMode::Fly && !(mods & GLFW_MOD_CONTROL))
-        break;
       std::lock_guard<std::mutex> guard(renderer_mutex);
       std::string error_message;
       auto fb = renderer_core.mapColorHost(&error_message);
@@ -706,24 +713,6 @@ struct App {
       }
       break;
     }
-    case GLFW_KEY_I:
-      printf("Entering orbit (inspect) mode\n");
-      cam_mode = CameraMode::Orbit;
-      break;
-    case GLFW_KEY_F:
-      printf("Entering fly mode\n");
-      if (cam_mode != CameraMode::Fly) {
-        float aspect =
-            fb_size[1] > 0 ? float(fb_size[0]) / float(fb_size[1]) : 1.f;
-        auto cs = orbit_cam.state(aspect);
-        fly_cam.eye = cs.eye;
-        fly_cam.yaw = orbit_cam.yaw + 3.14159265f;
-        fly_cam.pitch = -orbit_cam.pitch;
-        fly_cam.speed = orbit_cam.distance;
-        fly_cam.up = orbit_cam.up;
-      }
-      cam_mode = CameraMode::Fly;
-      break;
     default:
       break;
     }
@@ -748,55 +737,58 @@ struct App {
     lastMouseX = xpos;
     lastMouseY = ypos;
 
-    if (cam_mode == CameraMode::Orbit) {
-      if (lmbDown) {
-        const float orbit_dy = invert_orbit_y ? -dy : dy;
-        orbit_cam.orbit(dx * 0.005f, orbit_dy * 0.005f);
-        camera_modified = true;
-      }
-      if (rmbDown) {
-        orbit_cam.pan(dx, dy);
-        camera_modified = true;
-      }
-    } else {
-      if (rmbDown) {
-        fly_cam.look(dx * 0.003f, -dy * 0.003f);
-        camera_modified = true;
-      }
+    if (lmbDown) {
+      const float orbit_dy = invert_orbit_y ? -dy : dy;
+      orbit_cam.orbit(dx * 0.005f, orbit_dy * 0.005f);
+      camera_modified = true;
+    }
+    if (rmbDown) {
+      orbit_cam.pan(dx, dy);
+      camera_modified = true;
     }
   }
 
   void onScroll(double /*xoffset*/, double yoffset) {
     if (ImGui::GetIO().WantCaptureMouse)
       return;
-    if (cam_mode == CameraMode::Orbit) {
-      orbit_cam.zoom(float(yoffset));
-      camera_modified = true;
-    }
+    orbit_cam.zoom(float(yoffset));
+    camera_modified = true;
   }
 
-  // ─── Fly-mode per-frame movement ────────────────────────────────────────
+  // ─── Keyboard-driven camera movement ──────────────────────────────────
 
-  void updateFlyMovement(float dt) {
-    if (cam_mode != CameraMode::Fly)
-      return;
-    float fwd = 0.f, right = 0.f, up = 0.f;
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-      fwd += 1.f;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-      fwd -= 1.f;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-      right += 1.f;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-      right -= 1.f;
-    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
-      up += 1.f;
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
-      up -= 1.f;
-    if (fwd != 0.f || right != 0.f || up != 0.f) {
-      fly_cam.move(fwd, right, up, dt);
-      camera_modified = true;
+  void updateKeyboardMovement(float dt) {
+    constexpr float kOrbitRate = 1.5f; // rad/s
+    constexpr float kMoveRate = 1.5f;
+    bool moved = false;
+
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+      orbit_cam.dolly(kMoveRate * dt);
+      moved = true;
     }
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+      orbit_cam.dolly(-kMoveRate * dt);
+      moved = true;
+    }
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+      orbit_cam.strafe(-kMoveRate * dt);
+      moved = true;
+    }
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+      orbit_cam.strafe(kMoveRate * dt);
+      moved = true;
+    }
+    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
+      orbit_cam.orbit(0.f, -kOrbitRate * dt);
+      moved = true;
+    }
+    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
+      orbit_cam.orbit(0.f, kOrbitRate * dt);
+      moved = true;
+    }
+
+    if (moved)
+      camera_modified = true;
   }
 };
 
@@ -834,16 +826,17 @@ static void glfwCharCb(GLFWwindow *window, unsigned int c) {
 
 static void printUsage(const char *argv0) {
   printf("Usage: %s <path.ply> [options]\n", argv0);
+  printf("  --library NAME          ANARI library (default: visrtx)\n");
   printf("  --scale-factor F        Multiply Gaussian scales (default: 1.0)\n");
   printf("  --opacity-threshold T   Min opacity to keep (default: 0.05)\n");
   printf("  --resolution WxH        Window resolution (default: 1920x1080)\n");
   printf("\nControls:\n");
   printf("  LMB drag    Orbit\n");
-  printf("  RMB drag    Pan (orbit) / Look (fly)\n");
+  printf("  RMB drag    Pan\n");
   printf("  Scroll      Zoom\n");
-  printf("  WASD/QE     Move (fly mode)\n");
-  printf("  I           Orbit mode\n");
-  printf("  F           Fly mode\n");
+  printf("  W/S         Dolly forward/backward\n");
+  printf("  A/D         Strafe left/right\n");
+  printf("  Q/E         Orbit pitch (up/down)\n");
   printf("  G           Toggle GUI\n");
   printf("  S           Screenshot\n");
   printf("  Escape      Quit\n");
@@ -856,12 +849,15 @@ int main(int argc, char *argv[]) {
   }
 
   std::string plyPath = argv[1];
+  std::string libraryName = "visrtx";
   float scaleFactor = 1.0f;
   float opacityThreshold = 0.05f;
   uvec2 winSize = {1920, 1080};
 
   for (int i = 2; i < argc; i++) {
-    if (std::strcmp(argv[i], "--scale-factor") == 0 && i + 1 < argc)
+    if (std::strcmp(argv[i], "--library") == 0 && i + 1 < argc)
+      libraryName = argv[++i];
+    else if (std::strcmp(argv[i], "--scale-factor") == 0 && i + 1 < argc)
       scaleFactor = std::strtof(argv[++i], nullptr);
     else if (std::strcmp(argv[i], "--opacity-threshold") == 0 && i + 1 < argc)
       opacityThreshold = std::strtof(argv[++i], nullptr);
@@ -914,6 +910,7 @@ int main(int argc, char *argv[]) {
 
   InitOptions options;
   options.plyPath = plyPath;
+  options.libraryName = libraryName;
   options.scaleFactor = scaleFactor;
   options.opacityThreshold = opacityThreshold;
   options.frameSize = winSize;
@@ -937,20 +934,20 @@ int main(int argc, char *argv[]) {
 
   app.orbit_cam.center = app.sceneCenter;
   app.orbit_cam.distance = std::max(0.05f, initial_distance);
-  // Face the scene from -Z by default (matches CLI view direction).
   app.orbit_cam.yaw = -1.5707963f;
   app.orbit_cam.pitch = 0.f;
-  app.fly_cam.speed = std::max(0.05f, app.orbit_cam.distance * 0.75f);
 
-  app.cuda_gl_interop = app.check_cuda_gl_interop();
-  if (!app.cuda_gl_interop) {
-    fprintf(stderr,
-            "CUDA-GL interop unavailable. Zero-copy interactive path requires "
-            "matching CUDA and GL devices.\n");
-    glfwDestroyWindow(window);
-    glfwTerminate();
-    return 1;
-  }
+#ifdef GRUT_HAS_CUDA
+  app.cuda_gl_interop =
+      app.renderer_core.supportsCudaFrameBuffers() &&
+      app.check_cuda_gl_interop();
+  if (app.cuda_gl_interop)
+    printf("CUDA-GL interop enabled (zero-copy display path).\n");
+  else
+    printf("CUDA-GL interop unavailable -- using host readback display path.\n");
+#else
+  printf("Built without CUDA -- using host readback display path.\n");
+#endif
 
   // ── Dear ImGui ────────────────────────────────────────────────────────────
 
@@ -980,16 +977,6 @@ int main(int argc, char *argv[]) {
     glfwGetFramebufferSize(window, &fw, &fh);
     app.resize(fw, fh);
   }
-  if (!app.frame_texture_cuda) {
-    fprintf(stderr, "Failed to enable CUDA-GL interop texture path.\n");
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-    glDeleteTextures(1, &app.frame_texture);
-    glfwDestroyWindow(window);
-    glfwTerminate();
-    return 1;
-  }
 
   // Warm up + start async loop (same as reference constructor)
   app.push_camera();
@@ -1007,7 +994,7 @@ int main(int argc, char *argv[]) {
     float dt = std::chrono::duration<float>(now - lastTime).count();
     lastTime = now;
 
-    app.updateFlyMovement(dt);
+    app.updateKeyboardMovement(dt);
     app.push_camera();
     app.draw();
 
@@ -1023,7 +1010,9 @@ int main(int argc, char *argv[]) {
   }
   app.frame_consumed_cv_.notify_one();
   app.async_loop.stop();
+#ifdef GRUT_HAS_CUDA
   app.unregister_frame_texture_cuda();
+#endif
 
   glDeleteTextures(1, &app.frame_texture);
 

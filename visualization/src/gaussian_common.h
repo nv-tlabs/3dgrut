@@ -66,7 +66,7 @@ static constexpr float SH_C0 = 0.28209479177387814f;
 inline float sigmoid(float x) { return 1.0f / (1.0f + std::exp(-x)); }
 
 // Per-Gaussian attributes loaded from a .ply file after opacity filtering and
-// parameter decoding.  All parallel vectors share the same indexing — element i
+// parameter decoding.  All parallel vectors share the same indexing -- element i
 // across positions/colors/scales/quats describes one Gaussian splat.  bboxMin
 // and bboxMax form an axis-aligned bounding box that accounts for each
 // Gaussian's position *plus* its largest scale axis, so they represent the

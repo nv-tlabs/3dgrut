@@ -1,23 +1,32 @@
-// GaussianRendererCore — headless ANARI/VisRTX renderer for 3D Gaussian Splats.
+// GaussianRendererCore -- headless ANARI renderer for 3D Gaussian Splats.
 //
-// This class owns the full ANARI pipeline (device, world, camera, renderer,
-// frame) and exposes a small public API that lets a front-end (e.g. an
-// interactive GLFW viewer or an offline batch tool) drive rendering without
+// This class owns the full ANARI pipeline (library, device, world, camera,
+// renderer, frame) and exposes a small public API that lets a front-end (e.g.
+// an interactive GLFW viewer or an offline batch tool) drive rendering without
 // knowing ANARI internals.
+//
+// The renderer is device-agnostic: any ANARI library (e.g. "visrtx", "helide")
+// can be selected at runtime via InitOptions::libraryName.  CUDA framebuffer
+// support is detected and exposed opportunistically but is not required.
 //
 // Typical usage:
 //   1.  Create a GaussianRendererCore and call init() with a PLY path.
 //   2.  On each frame: call setCamera() / setRendererConfig() / setFrameSize()
 //       as needed, then run() to render.
-//   3.  Retrieve the result via mapColorHost() (CPU readback) or
-//       copyColorCUDAToDevice() (zero-copy GPU path).
+//   3.  Retrieve the result via mapColorHost() (CPU readback) or, when
+//       available, copyColorCUDAToDevice() (zero-copy GPU path).
 //
-// Thread safety: none — all calls must be serialised by the caller.
+// Thread safety: none -- all calls must be serialised by the caller.
 #pragma once
 
 #include <anari/anari_cpp.hpp>
 #include <anari/anari_cpp/ext/std.h>
+
+#ifdef GRUT_HAS_CUDA
 #include <cuda_runtime_api.h>
+#else
+using cudaStream_t = void *;
+#endif
 
 #include <string>
 
@@ -45,6 +54,7 @@ struct CameraState {
 // Everything needed to bootstrap the renderer.
 struct InitOptions {
   std::string plyPath;             // path to a 3DGS .ply file
+  std::string libraryName{"visrtx"}; // ANARI library to load (e.g. "visrtx", "helide")
   float scaleFactor{1.0f};         // global multiplier on Gaussian scales
   float opacityThreshold{0.05f};   // discard Gaussians below this opacity
   uvec2 frameSize{1920, 1080};     // initial framebuffer resolution
@@ -69,9 +79,10 @@ public:
 
   // --- Lifecycle ----------------------------------------------------------
 
-  /// Load a .ply, create the VisRTX device and ANARI objects, and perform the
-  /// first render-ready commit.  Must be called exactly once; returns false
-  /// (with a message) on any failure.
+  /// Load a .ply, create the ANARI device (via the library named in
+  /// options.libraryName) and ANARI objects, and perform the first
+  /// render-ready commit.  Must be called exactly once; returns false (with
+  /// a message) on any failure.
   bool init(const InitOptions &options, std::string *errorMessage = nullptr);
 
   /// Render one frame synchronously (blocks until complete).  Dirty state set
@@ -141,7 +152,7 @@ private:
   /// m_scaleFactor.  This is expensive (re-creates all instance transforms).
   bool rebuildWorld(std::string *errorMessage);
 
-  /// Query the VisRTX device for the ANARI_NV_FRAME_BUFFERS_CUDA extension.
+  /// Query the device for the ANARI_NV_FRAME_BUFFERS_CUDA extension.
   bool checkCudaFrameExtension();
 
   /// Derive m_focusCenter and m_focusDistance from the loaded Gaussian data
@@ -152,7 +163,7 @@ private:
   /// Release any outstanding host or CUDA framebuffer mappings.
   void clearFrameMappings();
 
-  /// ANARI status callback — routes device messages to stderr, filtered by
+  /// ANARI status callback -- routes device messages to stderr, filtered by
   /// severity (warnings and above).
   static void statusCallback(const void *userData, ANARIDevice,
                              ANARIObject source, ANARIDataType,
@@ -191,6 +202,7 @@ private:
   float m_lastDurationSeconds{0.f};
 
   // --- ANARI object handles (owned; released in destructor) ---------------
+  anari::Library m_library{nullptr};
   anari::Device m_device{nullptr};
   anari::World m_world{nullptr};
   anari::Camera m_cameraObj{nullptr};

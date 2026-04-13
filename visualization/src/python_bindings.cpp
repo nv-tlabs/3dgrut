@@ -61,7 +61,7 @@ static void throw_on_error(bool ok, const std::string &msg) {
 }
 
 PYBIND11_MODULE(_gaussian_renderer_core, m) {
-  m.doc() = "Python bindings for GaussianRendererCore (ANARI/VisRTX)";
+  m.doc() = "Python bindings for GaussianRendererCore (ANARI)";
 
   // --- RendererConfig ----------------------------------------------------
 
@@ -90,6 +90,7 @@ PYBIND11_MODULE(_gaussian_renderer_core, m) {
   py::class_<InitOptions>(m, "InitOptions")
       .def(py::init<>())
       .def_readwrite("ply_path", &InitOptions::plyPath)
+      .def_readwrite("library_name", &InitOptions::libraryName)
       .def_readwrite("scale_factor", &InitOptions::scaleFactor)
       .def_readwrite("opacity_threshold", &InitOptions::opacityThreshold)
       .def_readwrite("frame_size", &InitOptions::frameSize)

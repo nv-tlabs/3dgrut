@@ -22,26 +22,27 @@ set(OPTIX_ROOT "" CACHE PATH
 option(BUILD_PYTHON_BINDINGS
     "Build pybind11 Python bindings for GaussianRendererCore" OFF)
 
-# ── resolve OptiX SDK headers ────────────────────────────────────────────────
-# Priority: explicit -DOPTIX_ROOT > Windows auto-detect > GitHub download.
+option(BUILD_HELIDE "Build the ANARI helide reference device" ON)
+option(BUILD_VISRTX "Build the VisRTX RTX device (requires OptiX)" ON)
+option(BUILD_VISGL  "Build the VisRTX OpenGL device" ON)
 
-if(NOT OPTIX_ROOT)
-  if(WIN32)
-    file(GLOB _optix_candidates "C:/ProgramData/NVIDIA Corporation/OptiX SDK*")
-    if(_optix_candidates)
-      list(SORT _optix_candidates)
-      list(GET _optix_candidates -1 OPTIX_ROOT)
-      message(STATUS "Auto-detected local OptiX SDK: ${OPTIX_ROOT}")
-    endif()
-  endif()
+set(ANARI_VERSION  "v0.15.0" CACHE STRING "ANARI-SDK git tag")
+set(VISRTX_VERSION "v0.13.0" CACHE STRING "VisRTX git tag")
+set(OPTIX_VERSION  "v9.1.0"  CACHE STRING "OptiX SDK git tag to download")
+
+if(BUILD_VISRTX OR BUILD_VISGL)
+  set(_need_visrtx TRUE)
+else()
+  set(_need_visrtx FALSE)
 endif()
 
+# ── resolve OptiX SDK headers ────────────────────────────────────────────────
+
 if(NOT OPTIX_ROOT OR NOT EXISTS "${OPTIX_ROOT}/include")
-  message(STATUS "No local OptiX SDK found – downloading headers from GitHub …")
   include(FetchContent)
   FetchContent_Declare(optix_headers
     GIT_REPOSITORY https://github.com/NVIDIA/optix-dev.git
-    GIT_TAG        v9.1.0
+    GIT_TAG        ${OPTIX_VERSION}
     GIT_SHALLOW    ON
   )
   FetchContent_GetProperties(optix_headers)
@@ -63,8 +64,14 @@ set(_bt "${CMAKE_BUILD_TYPE}")
 
 message(STATUS "Build type:      ${_bt}")
 message(STATUS "Install prefix:  ${_ip}")
+message(STATUS "ANARI version:   ${ANARI_VERSION}")
+message(STATUS "VisRTX version:  ${VISRTX_VERSION}")
+message(STATUS "OptiX version:   ${OPTIX_VERSION}")
 message(STATUS "OptiX SDK:       ${OPTIX_ROOT}")
 message(STATUS "Python bindings: ${BUILD_PYTHON_BINDINGS}")
+message(STATUS "Helide device:   ${BUILD_HELIDE}")
+message(STATUS "VisRTX RTX dev:  ${BUILD_VISRTX}")
+message(STATUS "VisRTX GL dev:   ${BUILD_VISGL}")
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  1. ANARI-SDK
@@ -73,12 +80,12 @@ message(STATUS "Python bindings: ${BUILD_PYTHON_BINDINGS}")
 ExternalProject_Add(anari_sdk
   GIT_REPOSITORY  https://github.com/KhronosGroup/ANARI-SDK.git
   GIT_SHALLOW     ON
-  GIT_TAG         v0.15.0
+  GIT_TAG         ${ANARI_VERSION}
   CMAKE_ARGS
     -DCMAKE_BUILD_TYPE=${_bt}
     -DCMAKE_INSTALL_PREFIX:PATH=${_ip}
     -DBUILD_SHARED_LIBS=ON
-    -DBUILD_HELIDE_DEVICE=OFF
+    -DBUILD_HELIDE_DEVICE=${BUILD_HELIDE}
     -DBUILD_EXAMPLES=OFF
     -DBUILD_TESTING=OFF
     -DBUILD_CTS=OFF
@@ -93,25 +100,27 @@ ExternalProject_Add(anari_sdk
 #  2. VisRTX  (depends on installed ANARI-SDK)
 # ═════════════════════════════════════════════════════════════════════════════
 
-ExternalProject_Add(visrtx
-  GIT_REPOSITORY  https://github.com/NVIDIA/VisRTX.git
-  GIT_TAG         v0.13.0
-  GIT_SHALLOW     ON
-  LIST_SEPARATOR  "|"
-  CMAKE_ARGS
-    -DCMAKE_BUILD_TYPE=${_bt}
-    -DCMAKE_INSTALL_PREFIX:PATH=${_ip}
-    "-DCMAKE_PREFIX_PATH:STRING=${_ip}|${OPTIX_ROOT}"
-    -DOptiX_ROOT:PATH=${OPTIX_ROOT}
-    -DVISRTX_BUILD_RTX_DEVICE=ON
-    -DVISRTX_BUILD_GL_DEVICE=OFF
-    -DVISRTX_BUILD_TESTS=ON
-  BUILD_COMMAND
-    ${CMAKE_COMMAND} --build <BINARY_DIR> --config ${_bt} --parallel
-  INSTALL_COMMAND
-    ${CMAKE_COMMAND} --install <BINARY_DIR> --config ${_bt}
-  DEPENDS anari_sdk
-)
+if(_need_visrtx)
+  ExternalProject_Add(visrtx
+    GIT_REPOSITORY  https://github.com/NVIDIA/VisRTX.git
+    GIT_TAG         ${VISRTX_VERSION}
+    GIT_SHALLOW     ON
+    LIST_SEPARATOR  "|"
+    CMAKE_ARGS
+      -DCMAKE_BUILD_TYPE=${_bt}
+      -DCMAKE_INSTALL_PREFIX:PATH=${_ip}
+      "-DCMAKE_PREFIX_PATH:STRING=${_ip}|${OPTIX_ROOT}"
+      -DOptiX_ROOT:PATH=${OPTIX_ROOT}
+      -DVISRTX_BUILD_RTX_DEVICE=${BUILD_VISRTX}
+      -DVISRTX_BUILD_GL_DEVICE=${BUILD_VISGL}
+      -DVISRTX_BUILD_TESTS=ON
+    BUILD_COMMAND
+      ${CMAKE_COMMAND} --build <BINARY_DIR> --config ${_bt} --parallel
+    INSTALL_COMMAND
+      ${CMAKE_COMMAND} --install <BINARY_DIR> --config ${_bt}
+    DEPENDS anari_sdk
+  )
+endif()
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  3. gaussian_viewer  (local subfolder, depends on both)
@@ -133,6 +142,11 @@ foreach(_var SKBUILD_PLATLIB_DIR SKBUILD_SCRIPTS_DIR)
   endif()
 endforeach()
 
+set(_gv_deps anari_sdk)
+if(_need_visrtx)
+  list(APPEND _gv_deps visrtx)
+endif()
+
 ExternalProject_Add(gaussian_viewer
   SOURCE_DIR        ${CMAKE_CURRENT_SOURCE_DIR}/src
   DOWNLOAD_COMMAND  ""
@@ -142,5 +156,5 @@ ExternalProject_Add(gaussian_viewer
   INSTALL_COMMAND
     ${CMAKE_COMMAND} --install <BINARY_DIR> --config ${_bt}
   BUILD_ALWAYS      ON
-  DEPENDS anari_sdk visrtx
+  DEPENDS ${_gv_deps}
 )

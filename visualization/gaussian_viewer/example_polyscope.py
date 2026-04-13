@@ -6,7 +6,7 @@ Usage::
     example-polyscope /path/to/scene.ply [--scale-factor 1.0]
 
 The ANARI renderer produces a float32 RGBA CUDA framebuffer which is copied
-device-to-device into polyscope's OpenGL texture every frame — no CPU
+device-to-device into polyscope's OpenGL texture every frame -- no CPU
 roundtrip.
 
 Prerequisites:
