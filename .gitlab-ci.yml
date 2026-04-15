@@ -141,10 +141,10 @@ build-conda:
     - *download_dataset
     - |
       echo "Test training 3DGRT and 3DGUT"
-      conda run -n 3dgrut python train.py --config-name apps/nerf_synthetic_3dgrt.yaml \
-        path=${CI_BUILDS_DIR}/data/nerf_synthetic/lego out_dir=runs experiment_name=lego_3dgrt n_iterations=100
       conda run -n 3dgrut python train.py --config-name apps/nerf_synthetic_3dgut.yaml \
         path=${CI_BUILDS_DIR}/data/nerf_synthetic/lego out_dir=runs experiment_name=lego_3dgut n_iterations=100
+      conda run -n 3dgrut python train.py --config-name apps/nerf_synthetic_3dgrt.yaml \
+        path=${CI_BUILDS_DIR}/data/nerf_synthetic/lego out_dir=runs experiment_name=lego_3dgrt n_iterations=100
 
 build-uv:
   <<: *gpu_job
@@ -177,10 +177,10 @@ build-uv:
     - *download_dataset
     - |
       echo "Test training 3DGRT and 3DGUT"
-      python train.py --config-name apps/nerf_synthetic_3dgrt.yaml \
-        path=${CI_BUILDS_DIR}/data/nerf_synthetic/lego out_dir=runs experiment_name=lego_3dgrt n_iterations=100
       python train.py --config-name apps/nerf_synthetic_3dgut.yaml \
         path=${CI_BUILDS_DIR}/data/nerf_synthetic/lego out_dir=runs experiment_name=lego_3dgut n_iterations=100
+      python train.py --config-name apps/nerf_synthetic_3dgrt.yaml \
+        path=${CI_BUILDS_DIR}/data/nerf_synthetic/lego out_dir=runs experiment_name=lego_3dgrt n_iterations=100
 
 # benchmark-3dgut:    # This job runs in the deploy stage.
 #   stage: benchmark  # It only runs when *both* jobs in the test stage complete successfully.
