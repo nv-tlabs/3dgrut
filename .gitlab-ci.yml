@@ -19,9 +19,10 @@
 variables:
   PYTHON_VERSION: "3.11"
   FF_TIMESTAMPS: true # Enable timestamps in job logs
-  GIT_CLEAN_FLAGS: -ffdx -e .venv
-  TEST_CONDA_PREFIX: "${CI_BUILDS_DIR}/.venv"
-  TEST_CUDA_VERSION: "11.8.0"
+  GIT_CLEAN_FLAGS: -ffdx -e .keep
+  CACHED_ZIP: "${CI_BUILDS_DIR}/.keep/nerf_example_data.zip"
+  REMOTE_ZIP: "http://cseweb.ucsd.edu/~viscomp/projects/LF/papers/ECCV20/nerf/nerf_example_data.zip"
+  TARGET_SHA: "ce4e94e031c099a19ef04cfb6c71f1e47225d97d365be610b476e379a386c25f"
 
 workflow:
   auto_cancel:
@@ -46,13 +47,22 @@ workflow:
         on_new_commit: none
 
 stages:
+  - setup
   - build
-  - test
   - benchmark
 
+.download_dataset: &download_dataset
+  - |
+    echo "Downloading NeRF Synthetic Lego"
+    mkdir -p "${CI_BUILDS_DIR}/.keep"
+    echo "${TARGET_SHA}  ${CACHED_ZIP}" | sha256sum -c --quiet 2>/dev/null \
+      || wget ${REMOTE_ZIP} -O "${CACHED_ZIP}"
+    unzip -o "${CACHED_ZIP}" "nerf_synthetic/lego/*" -d "${CI_BUILDS_DIR}/data"
+
 .gpu_job: &gpu_job
-  image: ubuntu:24.04
   interruptible: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
   tags:
     - 1_gpu
     - arch/x86_64
@@ -63,69 +73,122 @@ stages:
     - os/linux
     - type/docker
 
-build-environment:
+nightly:
   <<: *gpu_job
+  image: ubuntu:24.04
+  stage: setup
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $NIGHTLY_JOB == "1"
+  script:
+    - echo "Running nightly build..."
+
+lint-code:
+  <<: *gpu_job
+  image: ubuntu:24.04
+  stage: setup
+  before_script:
+    - |
+      echo "Install prerequisites ..."
+      apt-get update
+      apt-get install -y --no-install-recommends build-essential \
+        ca-certificates curl wget git python3-pip
+    - |
+      echo "Install black and isort ..."
+      pip install --break-system-packages "black==25.9.0" "isort==5.13.0"
+  script:
+    - |
+      echo "Checking code formatting..."
+      bash formatter.sh --check
+      echo "Done."
+
+build-conda:
+  <<: *gpu_job
+  image: ubuntu:24.04
   stage: build
   parallel:
     matrix:
       - CONDA_CUDA_VERSION:
-        - "11.8.0"
-        - "12.8.1"
+        - "11.8"
+        - "12.8"
   before_script:
     - nvidia-smi -L
     - |
       echo "Install prerequisites ..."
       apt-get update
-      apt-get install -y --no-install-recommends \
-        build-essential ca-certificates curl git \
-        gcc-11 g++-11 libglib2.0-0
+      apt-get install -y --no-install-recommends build-essential ca-certificates \
+        curl wget git unzip libglib2.0-0 libgl1 libxcb1 gcc-11 g++-11
     - |
       echo "Install conda ..."
       curl -sSL -o /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-$(uname -m).sh
-      if [ $CONDA_CUDA_VERSION == $TEST_CUDA_VERSION ]; then
-        rm -rf $TEST_CONDA_PREFIX
-        PREFIX=$TEST_CONDA_PREFIX
-      else
-        PREFIX=/opt/conda
-      fi
-      export PATH=$PREFIX/bin:$PATH
-      bash /tmp/miniconda.sh -b -p $PREFIX && rm -f /tmp/miniconda.sh
+      export PATH=/opt/conda/bin:$PATH
+      export NVCC_PREPEND_FLAGS=""
+      bash /tmp/miniconda.sh -b -p /opt/conda && rm -f /tmp/miniconda.sh
       conda install -y python=${PYTHON_VERSION}
       conda clean -ya
+      conda config --append channels conda-forge
+    - |
+      echo "Install UV"
+      curl -LsSf https://astral.sh/uv/install.sh | sh
+      source $HOME/.local/bin/env
+  script:
+    - |
+      echo "Install CONDA environment"
+      git config --global --add safe.directory "/builds/nrs/3dgrut-internal"
+      CUDA_VERSION=${CONDA_CUDA_VERSION} bash ./scripts/create_conda.sh 3dgrut
+    - |
+      echo "Install 3DGRUT"
+      conda run -n 3dgrut ./install_env_uv.sh 3dgrut
+    - *download_dataset
+    - |
+      echo "Test training 3DGRT and 3DGUT"
+      conda run -n 3dgrut python train.py --config-name apps/nerf_synthetic_3dgrt.yaml \
+        path=${CI_BUILDS_DIR}/data/nerf_synthetic/lego out_dir=runs experiment_name=lego_3dgrt n_iterations=100
+      conda run -n 3dgrut python train.py --config-name apps/nerf_synthetic_3dgut.yaml \
+        path=${CI_BUILDS_DIR}/data/nerf_synthetic/lego out_dir=runs experiment_name=lego_3dgut n_iterations=100
+
+build-uv:
+  <<: *gpu_job
+  stage: build
+  image: nvidia/cuda:${UV_CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+  parallel:
+    matrix:
+      - UV_CUDA_VERSION: "11.8.0"
+        UBUNTU_VERSION: "22.04"
+      - UV_CUDA_VERSION: "12.8.1"
+        UBUNTU_VERSION: "24.04"
+      - UV_CUDA_VERSION: "13.0.2"
+        UBUNTU_VERSION: "24.04"
+  before_script:
+    - nvidia-smi -L
+    - |
+      echo "Install prerequisites ..."
+      apt-get update
+      apt-get install -y --no-install-recommends build-essential ca-certificates \
+        curl wget git unzip libglib2.0-0 libgl1 libxcb1 
+    - |
+      echo "Install UV"
+      curl -LsSf https://astral.sh/uv/install.sh | sh
+      source $HOME/.local/bin/env
   script:
     - |
       echo "Install 3DGRUT"
-      git config --global --add safe.directory "/builds/nrs/nre"
-      CUDA_VERSION=${CONDA_CUDA_VERSION} ./install_env.sh 3dgrut WITH_GCC11
+      bash ./install_env_uv.sh
+      source .venv/bin/activate
+    - *download_dataset
     - |
-      echo "Test environment"
-      conda run -n 3dgrut python train.py --help
+      echo "Test training 3DGRT and 3DGUT"
+      python train.py --config-name apps/nerf_synthetic_3dgrt.yaml \
+        path=${CI_BUILDS_DIR}/data/nerf_synthetic/lego out_dir=runs experiment_name=lego_3dgrt n_iterations=100
+      python train.py --config-name apps/nerf_synthetic_3dgut.yaml \
+        path=${CI_BUILDS_DIR}/data/nerf_synthetic/lego out_dir=runs experiment_name=lego_3dgut n_iterations=100
 
-# lint-test-job:
-#   <<: *gpu_job
-#   stage: test
-#   before_script:
-#     - export PATH="$TEST_CONDA_PREFIX/bin:$PATH"
+# benchmark-3dgut:    # This job runs in the deploy stage.
+#   stage: benchmark  # It only runs when *both* jobs in the test stage complete successfully.
 #   script:
-#     - echo "Checking code formatting..."
-#     - ls -la $TEST_CONDA_PREFIX/envs
-#     - conda run -n 3dgrut pip install "black==25.9.0" "isort==5.13.0"
-#     - conda run -n 3dgrut black . --check --target-version=py311 --line-length=120 --exclude=thirdparty/tiny-cuda-nn
-#     - conda run -n 3dgrut isort . --check-only --diff --skip=thirdparty/tiny-cuda-nn --profile=black
-#     - echo "Done."
+#     - echo "Running benchmarks..."
+#     - echo "Benchmarks successfully completed."
 
-# unit-test-job:
-#   <<: *gpu_job
-#   stage: test
-#   before_script:
-#     - export PATH="$TEST_CONDA_PREFIX/bin:$PATH"
-#   script:
-#     - echo "Running unit tests... "
-#     - ls -la $TEST_CONDA_PREFIX/envs
-#     - conda run -n 3dgrut python train.py --help
-#     - echo "Code coverage is 90%"
-
-# benchmark-job:      # This job runs in the deploy stage.
+# benchmark-3dgrt:    # This job runs in the deploy stage.
 #   stage: benchmark  # It only runs when *both* jobs in the test stage complete successfully.
 #   script:
 #     - echo "Running benchmarks..."
