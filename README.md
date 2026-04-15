@@ -198,16 +198,11 @@ source .venv/bin/activate
 
 ### Building and Running with Docker
 
-To build the Docker image:
-```sh
-docker build --build-arg CUDA_VERSION=12.8.1 -t 3dgrut:cuda128 .
-```
-
 Build the Docker image:
-```bash
-git clone --recursive https://github.com/nv-tlabs/3dgrut.git
-cd 3dgrut
-docker build . -t 3dgrut
+```sh
+docker build --build-arg CUDA_VERSION=12.8.1 -t 3dgrut:cuda12 .
+docker build --build-arg CUDA_VERSION=11.8.0 --build-arg UBUNTU_VERSION=22.04 -t 3dgrut:cuda11 .
+docker buildx build --platform linux/amd64,linux/arm64 --build-arg CUDA_VERSION=13.0.2 -t 3dgrut:cuda13 .
 ```
 
 Run it:
