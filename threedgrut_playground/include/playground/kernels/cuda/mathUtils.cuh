@@ -357,8 +357,8 @@ __device__ static inline void bwdCross3(const float3 &v0, const float3 &v1,
                                         const float3 &v2, const float3 &grad,
                                         float3 &g_v0, float3 &g_v1,
                                         float3 &g_v2) {
-  float3 a = v2 - v0;
-  float3 b = v1 - v0;
+  float3 a = make_float3(v2.x - v0.x, v2.y - v0.y, v2.z - v0.z);
+  float3 b = make_float3(v1.x - v0.x, v1.y - v0.y, v1.z - v0.z);
   float3 dn_dax = make_float3(0, -b.z, b.y);
   float3 dn_day = make_float3(b.z, 0, -b.x);
   float3 dn_daz = make_float3(-b.y, b.x, 0);
@@ -367,14 +367,23 @@ __device__ static inline void bwdCross3(const float3 &v0, const float3 &v1,
   float3 dn_dby = make_float3(-a.z, 0, a.x);
   float3 dn_dbz = make_float3(a.y, -a.x, 0);
 
-  g_v0 += make_float3(dot(-dn_dax - dn_dbx, grad), dot(-dn_day - dn_dby, grad),
-                      dot(-dn_daz - dn_dbz, grad));
+  g_v0 +=
+      make_float3(dot(make_float3(-dn_dax.x - dn_dbx.x, -dn_dax.y - dn_dbx.y,
+                                  -dn_dax.z - dn_dbx.z),
+                      grad),
+                  dot(make_float3(-dn_day.x - dn_dby.x, -dn_day.y - dn_dby.y,
+                                  -dn_day.z - dn_dby.z),
+                      grad),
+                  dot(make_float3(-dn_daz.x - dn_dbz.x, -dn_daz.y - dn_dbz.y,
+                                  -dn_daz.z - dn_dbz.z),
+                      grad));
   g_v1 += make_float3(dot(dn_dbx, grad), dot(dn_dby, grad), dot(dn_dbz, grad));
   g_v2 += make_float3(dot(dn_dax, grad), dot(dn_day, grad), dot(dn_daz, grad));
 }
 
 static __device__ inline float3 reflect(float3 x, float3 n) {
-  return n * 2.0f * dot(n, x) - x;
+  float3 r = n * 2.0f * dot(n, x);
+  return make_float3(r.x - x.x, r.y - x.y, r.z - x.z);
 }
 
 static __device__ inline void bwd_reflect(float3 x, float3 n, float3 &d_x,
@@ -446,15 +455,17 @@ static __device__ inline float3 safe_normalize_bw(const float3 &v,
   if (l > 0.0f) {
     const float il = rsqrtf(l);
     const float il3 = (il * il * il);
-    return il * d_out -
-           il3 * make_float3(d_out.x * (v.x * v.x) + d_out.y * (v.y * v.x) +
-                                 d_out.z * (v.z * v.x),
-                             d_out.x * (v.x * v.y) + d_out.y * (v.y * v.y) +
-                                 d_out.z * (v.z * v.y),
-                             d_out.x * (v.x * v.z) + d_out.y * (v.y * v.z) +
-                                 d_out.z * (v.z * v.z));
+    float3 term1 = il * d_out;
+    float3 term2 =
+        il3 * make_float3(d_out.x * (v.x * v.x) + d_out.y * (v.y * v.x) +
+                              d_out.z * (v.z * v.x),
+                          d_out.x * (v.x * v.y) + d_out.y * (v.y * v.y) +
+                              d_out.z * (v.z * v.y),
+                          d_out.x * (v.x * v.z) + d_out.y * (v.y * v.z) +
+                              d_out.z * (v.z * v.z));
+    return make_float3(term1.x - term2.x, term1.y - term2.y, term1.z - term2.z);
   }
-  return make_float3(0);
+  return make_float3(0.0f, 0.0f, 0.0f);
 }
 
 static __device__ __inline__ float sqr(const float x) { return x * x; }
@@ -599,7 +610,8 @@ __forceinline__ __device__ void atomicMaxFloat(float *addr, float value) {
 static __device__ inline float pi() { return 3.141592654f; }
 
 static __device__ inline float3 lerp(float3 a, float3 b, float t) {
-  return a + t * (b - a);
+  return make_float3(a.x + t * (b.x - a.x), a.y + t * (b.y - a.y),
+                     a.z + t * (b.z - a.z));
 }
 
 #endif

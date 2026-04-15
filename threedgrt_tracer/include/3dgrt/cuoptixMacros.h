@@ -67,5 +67,5 @@
 
 // NVRTC compiler options
 #define CUDA_NVRTC_OPTIONS                                                                                                                 \
-    "-std=c++14", "-arch", "compute_75", "-use_fast_math", "-lineinfo", "--extra-device-vectorization", "-default-device", "-rdc", "true", \
+    "-std=c++17", "-arch", "compute_75", "-use_fast_math", "-lineinfo", "--extra-device-vectorization", "-default-device", "-rdc", "true", \
         "-D__OPTIX__"

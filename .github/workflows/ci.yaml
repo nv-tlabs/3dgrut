@@ -22,32 +22,41 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Black and isort
-        run: pip install "black==26.3.1" "isort==5.13.0"
+      - name: Install formatter dependencies
+        run: pip install black==26.3.1 isort==5.13.0
 
-      - name: Check code style (black)
-        run: black . --check --target-version=py311 --line-length=120 --exclude=thirdparty/tiny-cuda-nn
+      - name: Check code style
+        run: bash formatter.sh --check
 
-      - name: Check import sorting (isort)
-        run: isort . --check-only --diff --skip=thirdparty/tiny-cuda-nn --profile=black
-
-  ci:
-    name: ci (CUDA ${{ matrix.cuda_version }})
-    runs-on: ubuntu-latest
+  ci-legacy:
+    name: ci-legacy (CUDA ${{ matrix.cuda_version }})
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        cuda_version: ["11.8.0", "12.8.1"]
-    container:
-      image: ubuntu:24.04
-    env:
-      CUDA_VERSION: ${{ matrix.cuda_version }}
-      PYTHON_VERSION: "3.11"
+        cuda_version:
+          - "11.8.0"
+          - "12.8.1"
+
     steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          # this might remove tools that are actually needed,
+          # when set to "true" but frees about 6 GB
+          tool-cache: true
+          # all of these default to true, but feel free to set to
+          # "false" if necessary for your workflow
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
       - name: Install prerequisites
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
             build-essential \
             ca-certificates \
             curl \
@@ -63,6 +72,8 @@ jobs:
           /opt/conda/bin/conda install -y python=${PYTHON_VERSION}
           /opt/conda/bin/conda clean -ya
           echo "/opt/conda/bin" >> $GITHUB_PATH
+        env:
+          PYTHON_VERSION: "3.11"
 
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -73,7 +84,110 @@ jobs:
         run: |
           git config --global --add safe.directory "$(pwd)"
           ./install_env.sh 3dgrut WITH_GCC11
+        env:
+          CUDA_VERSION: ${{ matrix.cuda_version }}
 
       - name: Smoketest - python train.py --help # better (smoke) testing requires a GPU
         run: |
           conda run -n 3dgrut python train.py --help
+
+  ci-uv:
+    name: ci-uv (CUDA ${{ matrix.cuda_version }} Ubuntu ${{ matrix.ubuntu_version }})
+    runs-on: ubuntu-${{ matrix.ubuntu_version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda_version: "11.8.0"
+            ubuntu_version: "22.04"
+          - cuda_version: "12.8.1"
+            ubuntu_version: "24.04"
+          - cuda_version: "13.0.2"
+            ubuntu_version: "24.04"
+          - cuda_version: "13.0.2"
+            ubuntu_version: "24.04-arm"
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          # this might remove tools that are actually needed,
+          # when set to "true" but frees about 6 GB
+          tool-cache: true
+          # all of these default to true, but feel free to set to
+          # "false" if necessary for your workflow
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.34
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.cuda_version }}
+          method: network
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+        with:
+          python-version: "3.11"
+          enable-cache: "true"
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install 3DGRUT including all dependencies
+        run: |
+          git config --global --add safe.directory "$(pwd)"
+          ./install_env_uv.sh
+        env:
+          TORCH_CUDA_ARCH_LIST: "9.0" # random arch for testing install
+          CUDA_VERSION: ${{ matrix.cuda_version }}
+
+      - name: Smoketest - python train.py --help # better (smoke) testing requires a GPU
+        run: |
+          .venv/bin/python train.py --help
+
+  ci-uv-windows:
+    name: ci-uv-windows (CUDA ${{ matrix.cuda_version }})
+    runs-on: windows-latest
+ 
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda_version:
+          - "12.8.1"
+    env:
+      CUDA_VERSION: ${{ matrix.cuda_version }}
+
+    steps:
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64  # Options: x86, x64, arm64
+
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.34
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.cuda_version }}
+          method: network
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+        with:
+          python-version: "3.11"
+          enable-cache: "true"
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+ 
+      - name: Install 3DGRUT including all dependencies
+        shell: pwsh
+        run: |
+          .\install_env_uv.ps1

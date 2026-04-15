@@ -335,7 +335,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     @torch.no_grad()
     def compute_spatial_extents(self):
-        camera_origins = torch.FloatTensor(self.poses[:, :, 3])
+        camera_origins = torch.FloatTensor(self.poses[:, :3, 3])
         center = camera_origins.mean(dim=0)
         dists = torch.linalg.norm(camera_origins - center[None, :], dim=-1)
         mean_dist = torch.mean(dists)  # mean distance between of cameras from center
@@ -519,7 +519,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
             # Get camera ID and corresponding intrinsics
             camera_id = self.get_intrinsics_idx(i_cam)
-            intr, _, _, _ = self.intrinsics[camera_id]
+            intr, _, _, _, _ = self.intrinsics[camera_id]
 
             # Load actual image to get dimensions
             image_data = np.asarray(Image.open(self.image_paths[i_cam]))

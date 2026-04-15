@@ -55,20 +55,6 @@ from threedgrut.export.formats.ply import PLYExporter
 # Format importers
 from threedgrut.export.importers.base import FormatImporter
 from threedgrut.export.importers.ply import PLYImporter
-from threedgrut.export.importers.usd import USDImporter
-
-# Visibility filtering
-from threedgrut.export.scripts.filter_visibility import (
-    compute_average_visibility,
-    compute_visibility_and_filter,
-)
-
-# Transform utilities
-from threedgrut.export.transforms import estimate_normalizing_transform
-
-# USD exporters
-from threedgrut.export.usd.exporter import USDExporter
-from threedgrut.export.usd.nurec.exporter import NuRecExporter
 
 __all__ = [
     # Core interfaces
@@ -80,19 +66,54 @@ __all__ = [
     "ModelCapabilities",
     "ExportFilterSettings",
     "filter_gaussians",
-    # Transforms
-    "estimate_normalizing_transform",
     # Format exporters
     "PLYExporter",
-    "USDExporter",  # ParticleField3DGaussianSplat schema
-    "NuRecExporter",  # Omniverse-compatible format
     # Format importers
     "FormatImporter",
     "PLYImporter",
-    "USDImporter",
     # Transcoding adapter
     "AttributesExportAdapter",
-    # Visibility filtering
-    "compute_average_visibility",
-    "compute_visibility_and_filter",
 ]
+
+try:
+    from threedgrut.export.scripts.filter_visibility import (
+        compute_average_visibility,
+        compute_visibility_and_filter,
+    )
+    from threedgrut.export.transforms import estimate_normalizing_transform
+
+    __all__ += [
+        "estimate_normalizing_transform",
+        "compute_average_visibility",
+        "compute_visibility_and_filter",
+    ]
+except ModuleNotFoundError as e:
+    # Only suppress when an optional dependency is absent: pxr (usd-core) for
+    # transforms.py, or torch for filter_visibility.py.  ModuleNotFoundError won't
+    # be raised by bugs inside an already-imported module, so genuine regressions
+    # in these modules propagate as normal errors.
+    if e.name is None or not e.name.startswith("pxr"):
+        raise
+    import warnings
+
+    warnings.warn(f"Transform/visibility utilities unavailable: {e}", ImportWarning, stacklevel=2)
+
+try:
+    from threedgrut.export.importers.usd import USDImporter
+    from threedgrut.export.usd.exporter import USDExporter
+    from threedgrut.export.usd.nurec.exporter import NuRecExporter
+
+    __all__ += [
+        "USDExporter",  # ParticleField3DGaussianSplat schema
+        "NuRecExporter",  # Omniverse-compatible format
+        "USDImporter",
+    ]
+except ModuleNotFoundError as e:
+    # Only suppress when pxr (usd-core) is absent — the sole optional dep for
+    # all three USD modules.  ModuleNotFoundError won't be raised by bugs inside
+    # an already-imported module, so genuine regressions propagate as normal errors.
+    if e.name is None or not e.name.startswith("pxr"):
+        raise
+    import warnings
+
+    warnings.warn(f"USD exporters/importers unavailable: {e}", ImportWarning, stacklevel=2)

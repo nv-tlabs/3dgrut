@@ -17,6 +17,8 @@
 
 #include <3dgut/sensors/sensors.h>
 
+#include <cfloat>
+
 namespace threedgut {
 
 // Computes 2-norm of a [x,y] vector in a numerically stable way
@@ -122,7 +124,7 @@ static inline __device__ bool projectPoint(const OpenCVFisheyeProjectionParamete
                                            tcnn::vec2& projected) {
     float rho = stableNorm2(position);
     if (rho <= 0.f) {
-        rho = __FLT_EPSILON__;
+        rho = FLT_EPSILON;
     }
 
     const float thetaFull = atan2f(rho, position.z);
@@ -151,7 +153,7 @@ static inline __device__ bool projectPoint(const FThetaProjectionParameters& sen
                                            tcnn::vec2& projected) {
     float rho = stableNorm2(position);
     if (rho <= 0.f) {
-        rho = __FLT_EPSILON__;
+        rho = FLT_EPSILON;
     }
 
     const float thetaFull = atan2f(rho, position.z);

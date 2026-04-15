@@ -61,60 +61,147 @@ For projects that require a fast, modular, and production-ready Gaussian Splatti
 - [🙏 8. Acknowledgements](#-8-acknowledgements)
 
 ## 🔧 1 Dependencies and Installation
-- CUDA 11.8+ Compatible System
+- Supported CUDA versions: 11.8, 12.4, 12.6, 12.8 (default), 13.0 (experimental)
 - For good performance with 3DGRT, we recommend using an NVIDIA GPU with Ray Tracing (RT) cores.
-- Currently, only Linux environments are supported by the included install script (Windows support coming soon!)
+- Both Linux and Windows are supported via UV install scripts.
 
-<details>
-<summary> NOTE: gcc versions >11 (expand for details)</summary>
-</br>
-Currently the codebase requires gcc <= 11.  If your machine uses the compiler gcc-12 or newer (i.e., in Ubuntu 24.04), you may need to install and use gcc-11.
+### Option A: Using UV (Recommended)
 
-First, install gcc 11:
-```sh
-sudo apt-get install gcc-11 g++-11
-```
+(Kindly contributed by [@MasahiroOgawa](https://github.com/MasahiroOgawa))
 
-Then run the install script with the optional `WITH_GCC11` flag, which additionally configures the conda environment to use gcc-11:
-```sh
-./install_env.sh 3dgrut WITH_GCC11
-```
-</details>
-
-<details>
-<summary> NOTE: Blackwell GPU support</summary>
-</br>
-The current codebase uses CUDA 11.8, which is not compatible with the new Blackwell GPUs (e.g., RTX 5090) or GPUs with compute capability 10.0+.
-An experimental build script has been kindly implemented by <a href="https://www.github.com/johnnynunez">@johnnynunez</a> to support Blackwell GPUs. To enable it:
-
-Run the install script with both the `WITH_GCC11` flag and a CUDA version. Currently, only CUDA 12.8.1 is supported:
-```sh
-CUDA_VERSION=12.8.1 ./install_env.sh 3dgrut_cuda12 WITH_GCC11
-```
-
-To build the docker image, you can use the following command:
-```sh
-docker build --build-arg CUDA_VERSION=12.8.1 -t 3dgrut:cuda128 .
-```
-</details>
-
-</br>
-
-To set up the environment using conda, first clone the repository and run the `./install_env.sh` script as follows:
+[UV](https://docs.astral.sh/uv/) provides faster installation and better dependency resolution.
 
 ```bash
 git clone --recursive https://github.com/nv-tlabs/3dgrut.git
 cd 3dgrut
+```
 
-# You can install each component step by step following install_env.sh
+<details open>
+<summary><strong>Linux</strong></summary>
+
+The install scripts automatically find or install a GCC version compatible with your chosen CUDA toolkit.
+
+**Prerequisites:**
+1. **uv** installed: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+2. A CUDA toolkit — choose one of the sub-options below.
+3. **OpenGL headers** for playground: `sudo apt-get install libgl1-mesa-dev`
+
+**Sub-option A1 — System CUDA** (use an existing `nvcc` in `PATH` or `CUDA_HOME`):
+
+```bash
+./install_env_uv.sh          # venv name defaults to "3dgrut"
+source .venv/bin/activate
+```
+
+**Sub-option A2 — conda-managed CUDA** (let conda install the CUDA toolkit):
+
+```bash
+# Step 1: create a conda environment with the CUDA toolkit
+CUDA_VERSION=12 ./scripts/create_conda.sh 3dgrut
+conda activate 3dgrut
+# Step 2: install Python dependencies
+./install_env_uv.sh  # or conda run -n 3dgrut ./install_env_uv.sh
+```
+
+**Sub-option A3 — Local venv CUDA** (download CUDA into `.venv/`, no system-wide install needed):
+
+```bash
+# Supported CUDA_VERSION values: 11.8 (or 11), 12.4, 12.6, 12.8 (or 12), 13.0 (or 13)
+CUDA_VERSION=12 ./scripts/create_venv_cuda.sh   # ~4 GB download on first run
+./install_env_uv.sh
+source .venv/bin/activate
+```
+
+> [!NOTE]
+> Requires **wget**: `sudo apt-get install wget`
+> The CUDA toolkit runfile (~4GB) is cached at `/tmp/cuda_<version>_linux.run` and reused on subsequent runs.
+> The downloaded CUDA toolkit is installed locally to `.venv/cuda-{version}/`. You can force a local install
+> even with system CUDA available by setting `FORCE_LOCAL_CUDA=1` in the environment variables.
+
+</details>
+
+<details>
+<summary><strong>Windows</strong></summary>
+
+**Prerequisites:**
+1. **uv** installed: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+2. **CUDA Toolkit** installed from [NVIDIA CUDA Downloads](https://developer.nvidia.com/cuda-downloads)
+3. **Visual Studio Build Tools** (2019 or later) with the **Desktop development with C++** workload.
+   The script auto-detects `cl.exe`, `cmake`, and `ninja` from the VS installation.
+   If both a CUDA-compatible VS (2019–2022) and a newer one are installed, the script prefers the compatible version.
+   For VS 2025+ (not yet officially supported by CUDA), the script automatically adds `--allow-unsupported-compiler` to nvcc.
+
+From a PowerShell terminal in the project root:
+
+```powershell
+.\install_env_uv.ps1                     # auto-detects CUDA, venv name defaults to "3dgrut"
+```
+
+To override `CUDA_HOME`:
+
+```powershell
+$env:CUDA_HOME = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8"
+.\install_env_uv.ps1
+```
+
+After installation, **activate the virtual environment** (required for every new terminal session):
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+This also sets the build environment variables (`TORCH_CUDA_ARCH_LIST`, `CUDA_HOME`, VS Build Tools paths, etc.) that were persisted during installation.
+
+</details>
+
+### Option B: Using Legacy Conda Script
+
+<details>
+<summary>Legacy Conda Installation via <code>install_env.sh</code> (CUDA 11.8.0 / 12.8.1 only)</summary>
+</br>
+
+> [!NOTE]
+> `install_env.sh` is a legacy script that only supports CUDA 11.8.0 and 12.8.1 and requires
+> manual GCC management. For new setups, prefer **Sub-option A1** above, which supports more
+> CUDA versions and handles GCC compatibility automatically.
+
+```bash
+git clone --recursive https://github.com/nv-tlabs/3dgrut.git
+cd 3dgrut
 chmod +x install_env.sh
 ./install_env.sh 3dgrut
 conda activate 3dgrut
 ```
 
-On Windows, you can use the `install_env.ps1` script to install the environment.
+If your system GCC is newer than 11, install `gcc-11` first and pass the `WITH_GCC11` flag:
+```sh
+sudo apt-get install gcc-11 g++-11
+./install_env.sh 3dgrut WITH_GCC11
+```
+</details>
 
-### Running with Docker
+### Blackwell / RTX 50 series Support
+
+We support CUDA 12.8 (Blackwell / RTX 50 series) — kindly contributed by <a href="https://www.github.com/johnnynunez">@johnnynunez</a>:
+
+Using the legacy script:
+```sh
+CUDA_VERSION=12.8.1 ./install_env.sh 3dgrut_cuda12 WITH_GCC11
+```
+
+Or using the UV script:
+```sh
+CUDA_VERSION=12 ./scripts/create_venv_cuda.sh 3dgrut_cuda12
+./install_env_uv.sh
+source .venv/bin/activate
+```
+
+### Building and Running with Docker
+
+To build the Docker image:
+```sh
+docker build --build-arg CUDA_VERSION=12.8.1 -t 3dgrut:cuda128 .
+```
 
 Build the Docker image:
 ```bash

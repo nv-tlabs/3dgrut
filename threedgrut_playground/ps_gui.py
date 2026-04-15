@@ -328,7 +328,7 @@ class Playground:
                 ps.reset_camera_to_home_view()
             if psim.IsItemHovered():
                 psim.SetNextWindowPos([window_w - psim.GetWindowWidth() - 120, 20])
-                psim.Begin("Reset View", None, psim.ImGuiWindowFlags_NoTitleBar)
+                psim.Begin("Reset View", psim.ImGuiWindowFlags_NoTitleBar)
                 psim.TextUnformatted("View Navigation:")
                 psim.TextUnformatted("      Rotate: [left click drag]")
                 psim.TextUnformatted("   Translate: [shift] + [left click drag] OR [right click drag]")
@@ -445,7 +445,6 @@ class Playground:
                     v_min=0.1,
                     v_max=10.0,
                     format="%.3f",
-                    power=1.0,
                 )
                 if ibl_intensity_changed:
                     self.is_force_canvas_dirty = True
@@ -454,7 +453,12 @@ class Playground:
 
                 # Exposure control
                 exposure_changed, self.engine.environment.exposure = psim.SliderFloat(
-                    "Exposure", self.engine.environment.exposure, v_min=-10.0, v_max=10.0, format="%.3f", power=2.0
+                    "Exposure",
+                    self.engine.environment.exposure,
+                    v_min=-10.0,
+                    v_max=10.0,
+                    format="%.3f",
+                    flags=psim.ImGuiSliderFlags_Logarithmic,
                 )
                 if exposure_changed:
                     self.is_force_canvas_dirty = True
@@ -562,7 +566,6 @@ class Playground:
                     v_min=-10.0,
                     v_max=10.0,
                     format="%.2f",
-                    power=1.0,
                 )
                 any_plane_changed |= changed
                 if changed:
@@ -579,7 +582,6 @@ class Playground:
                     v_min=-180.0,
                     v_max=180.0,
                     format="%.2f",
-                    power=1.0,
                 )
                 any_plane_changed |= changed
                 if changed:
@@ -685,7 +687,11 @@ class Playground:
 
             psim.SameLine()
             settings_changed, self.engine.depth_of_field.aperture_size = psim.SliderFloat(
-                "Aperture Size", self.engine.depth_of_field.aperture_size, v_min=1e-5, v_max=1e-1, power=10
+                "Aperture Size",
+                self.engine.depth_of_field.aperture_size,
+                v_min=1e-5,
+                v_max=1e-1,
+                flags=psim.ImGuiSliderFlags_Logarithmic,
             )
             self.is_force_canvas_dirty = self.is_force_canvas_dirty or settings_changed
 
@@ -758,7 +764,6 @@ class Playground:
                         v_min=0.0,
                         v_max=1.4,
                         format="%.3f",
-                        power=1.0,
                     )
                     if changed:
                         material.diffuse_factor[0] = values[0]
@@ -772,7 +777,6 @@ class Playground:
                         v_min=0.0,
                         v_max=1.0,
                         format="%.3f",
-                        power=1.0,
                     )
                     if changed:
                         material.emissive_factor[0] = values[0]
@@ -780,28 +784,26 @@ class Playground:
                         material.emissive_factor[2] = values[2]
                         material_changed = True
 
-                    changed, value = psim.SliderFloat(
-                        "Metallic Factor", material.metallic_factor, v_min=0.0, v_max=1.0, power=1
-                    )
+                    changed, value = psim.SliderFloat("Metallic Factor", material.metallic_factor, v_min=0.0, v_max=1.0)
                     if changed:
                         material.metallic_factor = value
                         material_changed = True
 
                     changed, value = psim.SliderFloat(
-                        "Roughness Factor", material.roughness_factor, v_min=0.0, v_max=1.0, power=1
+                        "Roughness Factor", material.roughness_factor, v_min=0.0, v_max=1.0
                     )
                     if changed:
                         material.roughness_factor = value
                         material_changed = True
 
                     changed, value = psim.SliderFloat(
-                        "Transmission Factor", material.transmission_factor, v_min=0.0, v_max=1.0, power=1
+                        "Transmission Factor", material.transmission_factor, v_min=0.0, v_max=1.0
                     )
                     if changed:
                         material.transmission_factor = value
                         material_changed = True
 
-                    changed, value = psim.SliderFloat("IOR", material.ior, v_min=0.2, v_max=2.0, power=1)
+                    changed, value = psim.SliderFloat("IOR", material.ior, v_min=0.2, v_max=2.0)
                     if changed:
                         material.ior = value
                         material_changed = True
@@ -962,7 +964,6 @@ class Playground:
                 v_min=-5.0,
                 v_max=5.0,
                 format="%.4f",
-                power=1.0,
             )
             if changed:
                 object_transform.tx = values[0]
@@ -976,7 +977,6 @@ class Playground:
                 v_min=-180.0,
                 v_max=180.0,
                 format="%.3f",
-                power=1.0,
             )
             if changed:
                 object_transform.rx = values[0]
@@ -990,7 +990,6 @@ class Playground:
                 v_min=-5.0,
                 v_max=5.0,
                 format="%.4f",
-                power=1.0,
             )
             if changed:
                 object_transform.sx = values[0]
@@ -1026,7 +1025,7 @@ class Playground:
 
     def _draw_glass_settings_widget(self, obj):
         settings_changed, obj.refractive_index = psim.SliderFloat(
-            "Refractive Index", obj.refractive_index, v_min=0.5, v_max=2.0, power=1
+            "Refractive Index", obj.refractive_index, v_min=0.5, v_max=2.0
         )
         if settings_changed:
             self.primitives.recompute_stacked_buffers()
