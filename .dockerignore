@@ -1,6 +1,8 @@
 **__pycache__
 .vscode
+CLAUDE.md
 .polyscope.ini
+.venv/
 
 external/
 runs/
@@ -18,9 +20,7 @@ utils/ngc/grid_search_configs
 imgui.ini
 data
 
-thirdparty/simple-knn/build
-thirdparty/simple-knn/dist
-thirdparty/simple-knn/simple_knn.egg-info
+thirdparty/kaolin/
 
 threedgrt_tracer/.ninja_log
 threedgrt_tracer/include/3dgrt/kernels/slang/*.cuh*
@@ -34,3 +34,8 @@ results/
 thirdparty/ncore/
 
 playground/assets/
+
+assets/nvidia-hq.gif
+assets/playground_glass.gif
+
+uv.lock
