@@ -26,7 +26,7 @@ jobs:
         run: pip install black==26.3.1 isort==5.13.0
 
       - name: Check code style
-        run: bash formatter.sh --check
+        run: bash scripts/formatter.sh --check
 
   ci-uv:
     name: ci-uv (CUDA ${{ matrix.cuda_version }} Ubuntu ${{ matrix.ubuntu_version }})
