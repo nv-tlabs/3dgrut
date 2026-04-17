@@ -575,50 +575,36 @@ class NCoreDataset(torch.utils.data.Dataset, BoundedMultiViewDataset, DatasetVis
         return self._get_camera_centers(camera_id, frame_indices)
 
     def get_poses(self) -> np.ndarray:
+        """Get camera poses as (N, 4, 4) C2W matrices in world-global frame.
+
+        Batches frame retrieval per camera (one RPC call per camera, not per frame)
+        to avoid O(N_frames) overhead on long sequences.
+        """
         self._init_worker()
 
         assert len(self.camera_ids), "NCoreDataset: no camera sensors loaded"
-        sequence_id = self.sequence_id
+
         all_poses = []
         for camera_id in self.camera_ids:
-            frame_indices = (
-                self.camera_train_frame_indices[camera_id]
-                if self.split.startswith("train")
-                else self.camera_val_frame_indices[camera_id]
-            )
+            frame_indices = self.camera_train_frame_indices[camera_id]
             if len(frame_indices) == 0:
                 continue
-            camera_sensor = self.sequence_camera_sensors[sequence_id][camera_id]
-            for frame_idx in frame_indices:
-                try:
-                    T_sensor_to_world_flat = camera_sensor.get_frames_T_source_target(
+            try:
+                camera_sensor = self.sequence_camera_sensors[self.sequence_id][camera_id]
+                poses = self._transform_poses_to_world_global(
+                    camera_sensor.get_frames_T_source_target(
                         source_node=camera_sensor.sensor_id,
                         target_node="world",
-                        frame_indices=np.array(frame_idx),
+                        frame_indices=frame_indices,
                         frame_timepoint=ncore.data.FrameTimepoint.START,
-                    )
-                    if T_sensor_to_world_flat.ndim == 1:
-                        T_sensor_to_world = T_sensor_to_world_flat.reshape(4, 4)
-                    else:
-                        T_sensor_to_world = T_sensor_to_world_flat
+                    ),
+                    self.T_world_to_world_global,
+                ).reshape(-1, 4, 4)
+                all_poses.append(poses)
+            except Exception as e:
+                logger.warning(f"NCoreDataset.get_poses: failed to retrieve poses for camera '{camera_id}': {e}")
 
-                    T_c2w_batch = self._transform_poses_to_world_global(
-                        T_sensor_to_world[None, :, :], self.T_world_to_world_global
-                    )
-                    if T_c2w_batch.ndim == 3:
-                        T_c2w = T_c2w_batch[0]
-                    elif T_c2w_batch.ndim == 2:
-                        T_c2w = T_c2w_batch.reshape(4, 4)
-                    else:
-                        T_c2w = T_c2w_batch
-
-                    all_poses.append(np.asarray(T_c2w, dtype=np.float32).reshape(4, 4))
-                except Exception:
-                    continue
-
-        if not all_poses:
-            return np.empty((0, 4, 4), dtype=np.float32)
-        return np.stack(all_poses, axis=0)
+        return np.concatenate(all_poses, axis=0) if all_poses else np.empty((0, 4, 4), dtype=np.float32)
 
     def get_scene_extent(self):
         """Compute scene extent from ALL camera centers (both train and val).
