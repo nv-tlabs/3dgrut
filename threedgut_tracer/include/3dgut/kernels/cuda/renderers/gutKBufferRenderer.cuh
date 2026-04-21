@@ -18,17 +18,52 @@
 #include <3dgut/kernels/cuda/common/rayPayloadBackward.cuh>
 #include <3dgut/renderer/gutRendererParameters.h>
 
-struct HitParticle {
+// HitParticle stores per-ray hit state inside the k-buffer. The
+// `canonicalIntersection` is only consumed by the NHT feature path; for the
+// SH path (`PerRayParticleFeatures=false`) we drop it from the struct so the
+// k-buffer pays no storage cost in registers / shared memory per hit.
+template <bool HasCanonical>
+struct HitParticleT;
+
+// Base / SH case: common per-hit state only.
+template <>
+struct HitParticleT<false> {
     static constexpr float InvalidHitT = -1.0f;
     int idx                            = -1;
     float hitT                         = InvalidHitT;
     float alpha                        = 0.0f;
-    float3 canonicalIntersection       = make_float3(0.f, 0.f, 0.f);
 };
 
-template <int K>
-struct HitParticleKBuffer {
-    __device__ HitParticleKBuffer() {
+// NHT case extends with the per-ray canonical intersection point used by the
+// feature evaluation. Plain (non-virtual) inheritance: layout is base fields
+// then the extra `float3`, matching the pre-refactor combined struct exactly.
+template <>
+struct HitParticleT<true> : HitParticleT<false> {
+    float3 canonicalIntersection = make_float3(0.f, 0.f, 0.f);
+};
+
+// Helper returning a writable `float3&` slot usable as the `densityHit`
+// canonical-intersection out-parameter. Routes to the struct field when
+// present, otherwise to a caller-provided stack scratch (which the compiler
+// elides when unused downstream).
+template <bool HasCanonical>
+__forceinline__ __device__ float3& canonicalIntersectionSlot(HitParticleT<HasCanonical>& hit, float3& scratch);
+
+template <>
+__forceinline__ __device__ float3& canonicalIntersectionSlot<true>(HitParticleT<true>& hit, float3& /*scratch*/) {
+    return hit.canonicalIntersection;
+}
+
+template <>
+__forceinline__ __device__ float3& canonicalIntersectionSlot<false>(HitParticleT<false>& /*hit*/, float3& scratch) {
+    return scratch;
+}
+
+template <int K, bool HasCanonical>
+struct HitParticleKBufferT {
+    using HitParticle = HitParticleT<HasCanonical>;
+
+    __device__ HitParticleKBufferT() {
         m_numHits = 0;
 #pragma unroll
         for (int i = 0; i < K; ++i) {
@@ -76,8 +111,9 @@ private:
     uint32_t m_numHits;
 };
 
-template <>
-struct HitParticleKBuffer<0> {
+template <bool HasCanonical>
+struct HitParticleKBufferT<0, HasCanonical> {
+    using HitParticle = HitParticleT<HasCanonical>;
     constexpr inline __device__ void insert(HitParticle& hitParticle) const {}
     constexpr inline __device__ HitParticle operator[](int) const { return HitParticle(); }
     constexpr inline __device__ uint32_t numHits() const { return 0; }
@@ -94,6 +130,11 @@ struct GUTKBufferRenderer : Params {
 
     using TRayPayload         = RayPayload<Particles::RayFeatureDim>;
     using TRayPayloadBackward = RayPayloadBackward<Particles::RayFeatureDim>;
+
+    // Storage-optimized hit types: the per-ray canonical intersection is kept
+    // only when the feature model needs it (NHT / PerRayParticleFeatures).
+    using HitParticle        = HitParticleT<Params::PerRayParticleFeatures>;
+    using HitParticleKBuffer = HitParticleKBufferT<Params::KHitBufferSize, Params::PerRayParticleFeatures>;
 
     struct PrefetchedParticleData {
         uint32_t idx;
@@ -162,9 +203,18 @@ struct GUTKBufferRenderer : Params {
                                               hitParticle.hitT,
                                               ray.hitT);
 
-            particles.featureIntegrateFwd(hitWeight,
-                                          Params::PerRayParticleFeatures ? particles.featuresFromBuffer(hitParticle.idx, ray.direction, hitParticle.canonicalIntersection) : tcnn::max(particleFeatures[hitParticle.idx], 0.f),
-                                          ray.features);
+            // `if constexpr` branches so the SH specialization of Hit (which
+            // has no `canonicalIntersection` member) is not instantiated with
+            // a missing field reference.
+            if constexpr (Params::PerRayParticleFeatures) {
+                particles.featureIntegrateFwd(hitWeight,
+                                              particles.featuresFromBuffer(hitParticle.idx, ray.direction, hitParticle.canonicalIntersection),
+                                              ray.features);
+            } else {
+                particles.featureIntegrateFwd(hitWeight,
+                                              tcnn::max(particleFeatures[hitParticle.idx], 0.f),
+                                              ray.features);
+            }
 
             if (hitWeight > 0.0f) ray.countHit();
         }
@@ -232,7 +282,7 @@ struct GUTKBufferRenderer : Params {
         using namespace threedgut;
         __shared__ PrefetchedParticleData prefetchedParticlesData[GUTParameters::Tiling::BlockSize];
 
-        HitParticleKBuffer<Params::KHitBufferSize> hitParticleKBuffer;
+        HitParticleKBuffer hitParticleKBuffer;
 
         for (uint32_t i = 0; i < tileNumBlocksToProcess; i++, tileNumParticlesToProcess -= GUTParameters::Tiling::BlockSize) {
 
@@ -265,12 +315,15 @@ struct GUTKBufferRenderer : Params {
 
                 HitParticle hitParticle;
                 hitParticle.idx = particleData.idx;
+                // `canonicalScratch` is only written when the SH specialization
+                // of Hit has no canonicalIntersection field; compiler elides it.
+                float3 canonicalScratch = make_float3(0.f, 0.f, 0.f);
                 if (particles.densityHit(ray.origin,
                                          ray.direction,
                                          particleData.densityParameters,
                                          hitParticle.alpha,
                                          hitParticle.hitT,
-                                         hitParticle.canonicalIntersection) &&
+                                         canonicalIntersectionSlot<Params::PerRayParticleFeatures>(hitParticle, canonicalScratch)) &&
                     (hitParticle.hitT > ray.tMinMax.x) &&
                     (hitParticle.hitT < ray.tMinMax.y)) {
 
