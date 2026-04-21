@@ -134,7 +134,7 @@ extern "C" __global__ void __raygen__rg() {
                     float3 sphCoefficients[SPH_MAX_NUM_COEFFS];
                     fetchParticleSphCoefficients(
                         rayHit.particleId,
-                        params.particleRadiance,
+                        params.particleFeatures,
                         &sphCoefficients[0]);
                     const float3 rayParticleRadiance = radianceFromSpH(params.sphDegree, &sphCoefficients[0], rayDirection);
 
@@ -161,9 +161,9 @@ extern "C" __global__ void __raygen__rg() {
         }
     }
 
-    params.rayRadiance[idx.z][idx.y][idx.x][0]    = rayRadiance.x;
-    params.rayRadiance[idx.z][idx.y][idx.x][1]    = rayRadiance.y;
-    params.rayRadiance[idx.z][idx.y][idx.x][2]    = rayRadiance.z;
+    params.rayFeatures[idx.z][idx.y][idx.x][0]    = rayRadiance.x;
+    params.rayFeatures[idx.z][idx.y][idx.x][1]    = rayRadiance.y;
+    params.rayFeatures[idx.z][idx.y][idx.x][2]    = rayRadiance.z;
     params.rayDensity[idx.z][idx.y][idx.x][0]     = 1 - rayTransmittance;
     params.rayHitDistance[idx.z][idx.y][idx.x][0] = rayHitDistance;
     params.rayHitDistance[idx.z][idx.y][idx.x][1] = rayLastHitDistance;

@@ -119,9 +119,9 @@ static __device__ __forceinline__ void clearOutputBuffers() {
   const int ry =
       fminf(idx.y, params.frameBounds.y); // Ray coordinates in pixels
 
-  params.rayRadiance[idx.z][ry][rx][0] = 0.0f;
-  params.rayRadiance[idx.z][ry][rx][1] = 0.0f;
-  params.rayRadiance[idx.z][ry][rx][2] = 0.0f;
+  params.rayFeatures[idx.z][ry][rx][0] = 0.0f;
+  params.rayFeatures[idx.z][ry][rx][1] = 0.0f;
+  params.rayFeatures[idx.z][ry][rx][2] = 0.0f;
   params.rayDensity[idx.z][ry][rx][0] = 0.0f;
 }
 
@@ -133,9 +133,9 @@ writeRadianceDensityToOutputBuffer(float4 radiance) {
   const int ry =
       fminf(idx.y, params.frameBounds.y); // Ray coordinates in pixels
 
-  params.rayRadiance[idx.z][ry][rx][0] = radiance.x;
-  params.rayRadiance[idx.z][ry][rx][1] = radiance.y;
-  params.rayRadiance[idx.z][ry][rx][2] = radiance.z;
+  params.rayFeatures[idx.z][ry][rx][0] = radiance.x;
+  params.rayFeatures[idx.z][ry][rx][1] = radiance.y;
+  params.rayFeatures[idx.z][ry][rx][2] = radiance.z;
   params.rayDensity[idx.z][ry][rx][0] = radiance.w;
 }
 
@@ -147,9 +147,9 @@ accumulateRadianceToOutputBuffer(float3 radiance) {
   const int ry =
       fminf(idx.y, params.frameBounds.y); // Ray coordinates in pixels
 
-  params.rayRadiance[idx.z][ry][rx][0] += radiance.x;
-  params.rayRadiance[idx.z][ry][rx][1] += radiance.y;
-  params.rayRadiance[idx.z][ry][rx][2] += radiance.z;
+  params.rayFeatures[idx.z][ry][rx][0] += radiance.x;
+  params.rayFeatures[idx.z][ry][rx][1] += radiance.y;
+  params.rayFeatures[idx.z][ry][rx][2] += radiance.z;
 }
 
 static __device__ __forceinline__ void
@@ -160,9 +160,9 @@ accumulateRadianceDensityToOutputBuffer(float4 radiance) {
   const int ry =
       fminf(idx.y, params.frameBounds.y); // Ray coordinates in pixels
 
-  params.rayRadiance[idx.z][ry][rx][0] += radiance.x;
-  params.rayRadiance[idx.z][ry][rx][1] += radiance.y;
-  params.rayRadiance[idx.z][ry][rx][2] += radiance.z;
+  params.rayFeatures[idx.z][ry][rx][0] += radiance.x;
+  params.rayFeatures[idx.z][ry][rx][1] += radiance.y;
+  params.rayFeatures[idx.z][ry][rx][2] += radiance.z;
   params.rayDensity[idx.z][ry][rx][0] += radiance.w;
 }
 

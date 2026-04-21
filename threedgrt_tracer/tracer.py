@@ -231,7 +231,11 @@ class Tracer:
                 gaussians.get_rotation().contiguous(),
                 gaussians.get_scale().contiguous(),
                 gaussians.get_density().contiguous(),
-                gaussians.get_features().contiguous(),  # TODO: cast to .half() when conf.render.particle_feature_half
+                (
+                    gaussians.get_features().half().contiguous()
+                    if self.conf.render.particle_feature_half
+                    else gaussians.get_features().contiguous()
+                ),
                 Tracer.RenderOpts.DEFAULT,
                 gaussians.n_active_features,
                 self.conf.render.min_transmittance,
