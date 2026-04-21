@@ -109,9 +109,14 @@ extern "C" __global__ void __raygen__rg() {
     float3 rayOrigin    = params.rayWorldOrigin(idx);
     float3 rayDirection = params.rayWorldDirection(idx);
 
-    float3 rayRadiance     = make_float3(0.0f);
-    float rayTransmittance = 1.0f;
-    float rayHitDistance   = 0.f;
+    FixedArray<float, RAY_FEATURE_DIM> rayRadiance;
+#pragma unroll
+    for (int i = 0; i < RAY_FEATURE_DIM; i++) {
+        rayRadiance[i] = 0.0f;
+    }
+    float rayTransmittance       = 1.0f;
+    float rayHitDistance         = 0.f;
+    float3 canonicalIntersection = make_float3(0.f);
 #ifdef ENABLE_NORMALS
     float3 rayNormal = make_float3(0.f);
 #endif
@@ -143,6 +148,7 @@ extern "C" __global__ void __raygen__rg() {
                     {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr, true}},
                     &rayTransmittance,
                     &rayHitDistance,
+                    &canonicalIntersection,
 #ifdef ENABLE_NORMALS
                     true, &rayNormal
 #else
@@ -151,9 +157,11 @@ extern "C" __global__ void __raygen__rg() {
                 );
 
                 particleFeaturesIntegrateFwdFromBuffer(rayDirection,
+                                                       canonicalIntersection,
                                                        hitWeight,
                                                        rayHit.particleId,
-                                                       {{(float3*)params.particleRadiance, nullptr, true}, params.sphDegree},
+                                                       const_cast<float*>(params.particleRadiance),
+                                                       params.sphDegree,
                                                        &rayRadiance);
 
                 // NOTE(qi): Race condition here, but as we are writing the same value, it seems it is safe.
@@ -170,9 +178,10 @@ extern "C" __global__ void __raygen__rg() {
         }
     }
 
-    params.rayRadiance[idx.z][idx.y][idx.x][0]    = rayRadiance.x;
-    params.rayRadiance[idx.z][idx.y][idx.x][1]    = rayRadiance.y;
-    params.rayRadiance[idx.z][idx.y][idx.x][2]    = rayRadiance.z;
+#pragma unroll
+    for (int i = 0; i < RAY_FEATURE_DIM; i++) {
+        params.rayRadiance[idx.z][idx.y][idx.x][i] = rayRadiance[i];
+    }
     params.rayDensity[idx.z][idx.y][idx.x][0]     = 1 - rayTransmittance;
     params.rayHitDistance[idx.z][idx.y][idx.x][0] = rayHitDistance;
     params.rayHitDistance[idx.z][idx.y][idx.x][1] = rayLastHitDistance;

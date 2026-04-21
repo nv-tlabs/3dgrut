@@ -1,0 +1,18 @@
+# @package _global_
+# NHT (Neural Harmonic Textures) variant for nerf_synthetic with 3DGUT and MCMC
+
+defaults:
+  - /base_mcmc
+  - /dataset: nerf
+  - /initialization: random
+  - /render: 3dgut
+  - _self_
+
+model:
+  feature_type: "nht"
+
+loss:
+  use_opacity: true
+  lambda_opacity: 0.02
+  use_scale: true
+  lambda_scale: 0.005

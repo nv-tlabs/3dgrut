@@ -19,6 +19,7 @@ import os
 import torch
 
 from threedgrut.utils import jit
+from threedgrut.model.features import Features
 
 
 # ----------------------------------------------------------------------------
@@ -32,9 +33,6 @@ def setup_3dgut(conf):
     include_paths.append(os.path.join(prefix, "..", "thirdparty", "tiny-cuda-nn", "include"))
     include_paths.append(os.path.join(prefix, "..", "thirdparty", "tiny-cuda-nn", "dependencies"))
     include_paths.append(os.path.join(prefix, "..", "thirdparty", "tiny-cuda-nn", "dependencies", "fmt", "include"))
-    include_paths.append(build_dir)
-
-    # Compiler options.
 
     def to_cpp_bool(value):
         return "true" if value else "false"
@@ -44,6 +42,24 @@ def setup_3dgut(conf):
     ut_beta = conf.render.splat.ut_beta
     ut_kappa = conf.render.splat.ut_kappa
     ut_delta = math.sqrt(ut_alpha * ut_alpha * (ut_d + ut_kappa))
+
+    feat = Features(conf)
+    transform_defines = [
+        f"-DPARTICLE_FEATURE_DIM={feat.particle_feature_dim}",
+        f"-DRAY_FEATURE_DIM={feat.ray_feature_dim}",
+        f"-DFEATURE_TRANSFORM_TYPE={feat.transform_type}",
+    ]
+    nht_defines = [
+        f"-DFEATURE_INTERPOLATION_TYPE={feat.interpolation_type}",
+        f"-DFEATURE_INTERPOLATION_SUPPORT={feat.interpolation_support}",
+        f"-DFEATURE_ACTIVATION_TYPE={feat.activation_type}",
+        f"-DFEATURE_ACTIVATION_NUM_FREQUENCIES={feat.activation_num_frequencies}",
+        f"-DINTERP_POINT_FEATURE_DIM={feat.interp_point_feature_dim}",
+    ]
+    half_defines = [
+        f"-DPARTICLE_FEATURE_HALF={1 if conf.render.particle_feature_half else 0}",
+        f"-DFEATURE_OUTPUT_HALF={1 if conf.render.feature_output_half else 0}",
+    ]
 
     defines = [
         f"-DPARTICLE_RADIANCE_NUM_COEFFS={(conf.render.particle_radiance_sph_degree + 1) ** 2}",
@@ -55,6 +71,11 @@ def setup_3dgut(conf):
         f"-DGAUSSIAN_PARTICLE_SURFEL={to_cpp_bool(conf.render.primitive_type=='trisurfel')}",
         f"-DGAUSSIAN_MIN_TRANSMITTANCE_THRESHOLD={conf.render.min_transmittance}",
         f"-DGAUSSIAN_ENABLE_HIT_COUNT={to_cpp_bool(conf.render.enable_hitcounts)}",
+        # Feature-based radiance dimensions
+        *transform_defines,
+        *nht_defines,
+        # Feature buffer memory layout
+        *half_defines,
         # Specific to the 3DGUT renderer
         f"-DGAUSSIAN_N_ROLLING_SHUTTER_ITERATIONS={conf.render.splat.n_rolling_shutter_iterations}",
         f"-DGAUSSIAN_K_BUFFER_SIZE={conf.render.splat.k_buffer_size}",
@@ -88,6 +109,11 @@ def setup_3dgut(conf):
         "-O3",
         *defines,
     ]
+    # When PARTICLE_FEATURE_HALF=1 the Slang-generated header uses __half types;
+    # the Slang prelude only pulls in <cuda_fp16.h> and defines __half when
+    # SLANG_CUDA_ENABLE_HALF is set.
+    if conf.render.particle_feature_half or conf.render.feature_output_half:
+        cuda_cflags.append("-DSLANG_CUDA_ENABLE_HALF=1")
 
     # List of sources.
     source_files = [
@@ -99,9 +125,11 @@ def setup_3dgut(conf):
 
     # Compile slang kernels
     slang_build_inc_dir = os.path.join(os.path.dirname(__file__), "include", "3dgut")
+    slang_output_file = os.path.join(os.path.dirname(__file__), "include", "threedgutSlang.cuh")
+
     jit.compile_slang_kernel(
         kernel_files=[f"{os.path.join(slang_build_inc_dir, 'threedgut.slang')}"],
-        output_file=f"{os.path.join(build_dir, 'threedgutSlang.cuh')}",
+        output_file=slang_output_file,
         include_paths=[
             os.path.join(os.path.dirname(__file__), "include"),
             os.path.join(os.path.dirname(__file__), "..", "threedgrt_tracer", "include"),

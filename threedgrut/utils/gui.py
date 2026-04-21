@@ -187,7 +187,7 @@ class GUI:
             self.render_height = window_h
 
         return (
-            outputs["pred_rgb"],
+            outputs["pred_features"],
             outputs["pred_opacity"],
             outputs["pred_dist"],
             outputs["pred_normals"],

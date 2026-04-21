@@ -46,6 +46,11 @@ struct PipelineParameters {
     float alphaMinThreshold;
     unsigned int sphDegree;
 
+    // Feature-based radiance dimensions
+    static constexpr unsigned int ParticleFeatureDim   = PARTICLE_FEATURE_DIM;   ///< Total feature dim per particle (buffer stride K)
+    static constexpr unsigned int RayFeatureDim        = RAY_FEATURE_DIM;       ///< Per-ray (decoder input N)
+    static constexpr unsigned int FeatureTransformType = FEATURE_TRANSFORM_TYPE; ///< 0=SH, 1=learned
+
     uint2 frameBounds;
     unsigned int frameNumber;
     int gPrimNumTri;
