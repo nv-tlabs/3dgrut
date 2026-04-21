@@ -88,7 +88,7 @@ __global__ void render(threedgut::RenderParameters params,
                        tcnn::mat4x3 sensorToWorldTransform,
                        float* __restrict__ worldHitCountPtr,
                        float* __restrict__ worldHitDistancePtr,
-                       tcnn::vec4* __restrict__ radianceDensityPtr,
+                       TFeatureDensityElem* __restrict__ featureDensityPtr,
                        const tcnn::vec2* __restrict__ particlesProjectedPositionPtr,
                        const tcnn::vec4* __restrict__ particlesProjectedConicOpacityPtr,
                        const float* __restrict__ particlesGlobalDepthPtr,
@@ -111,7 +111,7 @@ __global__ void render(threedgut::RenderParameters params,
     // TGUTModel::eval(params, ray, {parameterMemoryHandles});
 
     // NB : finalize ray is not differentiable (has to be no-op when used in a differentiable renderer)
-    finalizeRay(ray, params, sensorRayOriginPtr, worldHitCountPtr, worldHitDistancePtr, radianceDensityPtr, sensorToWorldTransform);
+    finalizeRay(ray, params, sensorRayOriginPtr, worldHitCountPtr, worldHitDistancePtr, featureDensityPtr, sensorToWorldTransform);
 }
 
 #if FINE_GRAINED_LOAD_BALANCING
@@ -124,7 +124,7 @@ __global__ void renderBalanced(threedgut::RenderParameters params,
                                tcnn::mat4x3 sensorToWorldTransform,
                                float* __restrict__ worldHitCountPtr,
                                float* __restrict__ worldHitDistancePtr,
-                               tcnn::vec4* __restrict__ radianceDensityPtr,
+                               TFeatureDensityElem* __restrict__ featureDensityPtr,
                                const tcnn::vec2* __restrict__ particlesProjectedPositionPtr,
                                const tcnn::vec4* __restrict__ particlesProjectedConicOpacityPtr,
                                const float* __restrict__ particlesGlobalDepthPtr,
@@ -210,7 +210,7 @@ __global__ void renderBalanced(threedgut::RenderParameters params,
         // Only lane 0 should write, as only it has accumulated the correct values
         if (laneId == 0) {
             finalizeRay(ray, params, sensorRayOriginPtr, worldHitCountPtr,
-                        worldHitDistancePtr, radianceDensityPtr, sensorToWorldTransform);
+                        worldHitDistancePtr, featureDensityPtr, sensorToWorldTransform);
         }
     }
 }
@@ -224,8 +224,8 @@ __global__ void renderBackward(threedgut::RenderParameters params,
                                tcnn::mat4x3 sensorToWorldTransform,
                                const float* __restrict__ worldHitDistancePtr,
                                const float* __restrict__ worldHitDistanceGradientPtr,
-                               const tcnn::vec4* __restrict__ radianceDensityPtr,
-                               const tcnn::vec4* __restrict__ radianceDensityGradientPtr,
+                               const TFeatureDensityElem* __restrict__ featureDensityPtr,
+                               const float* __restrict__ featureDensityGradientPtr,
                                tcnn::vec3* __restrict__ /*worldRayOriginGradientPtr*/,
                                tcnn::vec3* __restrict__ /*worldRayDirectionGradientPtr*/,
                                const tcnn::vec2* __restrict__ particlesProjectedPositionPtr,
@@ -244,8 +244,8 @@ __global__ void renderBackward(threedgut::RenderParameters params,
                                                                         sensorRayDirectionPtr,
                                                                         worldHitDistancePtr,
                                                                         worldHitDistanceGradientPtr,
-                                                                        radianceDensityPtr,
-                                                                        radianceDensityGradientPtr,
+                                                                        featureDensityPtr,
+                                                                        featureDensityGradientPtr,
                                                                         sensorToWorldTransform);
 
     // TGUTModel::evalBackward(params, ray, {parameterMemoryHandles}, {parameterGradientMemoryHandles});

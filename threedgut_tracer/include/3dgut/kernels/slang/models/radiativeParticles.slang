@@ -13,15 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-namespace gaussianParticle
-{
-    static const int KernelDegree = GAUSSIAN_PARTICLE_KERNEL_DEGREE;
-    static const float MinParticleKernelDensity = GAUSSIAN_PARTICLE_MIN_KERNEL_DENSITY;
-    static const float MaxParticleAlpha = GAUSSIAN_PARTICLE_MAX_ALPHA;
-    static const float MinParticleAlpha = GAUSSIAN_PARTICLE_MIN_ALPHA;
-    static const bool EnableNormal = false;
-    static const bool Surfel = false;
-};
+// Radiative Particles Wrapper
+// Conditionally includes the appropriate feature implementation based on FEATURE_TRANSFORM_TYPE
 
-#include <3dgut/kernels/slang/models/gaussianParticles.slang>
-#include <3dgut/kernels/slang/models/radiativeParticles.slang>
+#if FEATURE_TRANSFORM_TYPE == 0
+    // Spherical Harmonics mode
+    #include <3dgut/kernels/slang/models/shRadiativeParticles.slang>
+#elif FEATURE_TRANSFORM_TYPE == 1
+    // Post-MLP radiance mode
+    #include <3dgut/kernels/slang/models/neuralHarmonicFeaturesParticle.slang>
+#else
+    #error "Unknown FEATURE_TRANSFORM_TYPE. Must be 0 (SH) or 1 (neural_harmonic_features)"
+#endif

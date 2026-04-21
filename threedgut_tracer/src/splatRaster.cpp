@@ -192,8 +192,14 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
     const uint32_t numParticles = particleDensity.size(0);
 
     const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
+    // Feature output dtype: fp16 halves memory bandwidth for NHT feature buffers
+#if FEATURE_OUTPUT_HALF
+    const torch::TensorOptions featureOpts = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA);
+#else
+    const torch::TensorOptions featureOpts = opts;
+#endif
 
-    torch::Tensor rayRadianceDensity = torch::zeros({height, width, 4}, opts);
+    torch::Tensor rayRadianceDensity = torch::zeros({height, width, static_cast<int64_t>(RAY_FEATURE_DIM + 1)}, featureOpts);
     torch::Tensor rayHitDistance     = torch::ones({height, width, 1}, opts).multiply(1e06f);
     torch::Tensor rayHitCount        = torch::zeros({height, width, 1}, opts);
     torch::Tensor particleVisibility = torch::zeros({numParticles, 1}, opts);
@@ -228,7 +234,7 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
         reinterpret_cast<const tcnn::vec3*>(voidDataPtr(rayDirection)),
         reinterpret_cast<float*>(voidDataPtr(rayHitCount)),
         reinterpret_cast<float*>(voidDataPtr(rayHitDistance)),
-        reinterpret_cast<tcnn::vec4*>(voidDataPtr(rayRadianceDensity)),
+        reinterpret_cast<TFeatureDensityElem*>(voidDataPtr(rayRadianceDensity)),
         reinterpret_cast<int*>(voidDataPtr(particleVisibility)),
         m_parameters,
         cudaDeviceIndex,
@@ -316,8 +322,8 @@ SplatRaster::traceBwd(uint32_t frameNumber, int numActiveFeatures,
         reinterpret_cast<const tcnn::vec3*>(voidDataPtr(rayDirection)),
         reinterpret_cast<float*>(voidDataPtr(rayHitDistance)),
         reinterpret_cast<float*>(voidDataPtr(rayHitDistanceGradient)),
-        reinterpret_cast<tcnn::vec4*>(voidDataPtr(rayRadianceDensity)),
-        reinterpret_cast<tcnn::vec4*>(voidDataPtr(rayRadianceDensityGradient)),
+        reinterpret_cast<const TFeatureDensityElem*>(voidDataPtr(rayRadianceDensity)),
+        reinterpret_cast<const float*>(voidDataPtr(rayRadianceDensityGradient)),
         rayBackpropagation ? reinterpret_cast<tcnn::vec3*>(voidDataPtr(rayOriginGradient)) : nullptr,
         rayBackpropagation ? reinterpret_cast<tcnn::vec3*>(voidDataPtr(rayDirectionGradient)) : nullptr,
         m_parameters, cudaDeviceIndex, cudaStream);

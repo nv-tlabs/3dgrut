@@ -33,8 +33,8 @@ __device__ __inline__ RayPayloadT initializeBackwardRay(const threedgut::RenderP
                                                         const tcnn::vec3* __restrict__ sensorRayDirectionPtr,
                                                         const float* __restrict__ worldHitDistancePtr,
                                                         const float* __restrict__ worldHitDistanceGradientPtr,
-                                                        const tcnn::vec<RayPayloadT::FeatDim + 1>* __restrict__ featuresDensityPtr,
-                                                        const tcnn::vec<RayPayloadT::FeatDim + 1>* __restrict__ featuresDensityGradientPtr,
+                                                        const TFeatureDensityElem* __restrict__ featuresDensityPtr,
+                                                        const float* __restrict__ featuresDensityGradientPtr,
                                                         const tcnn::mat4x3& sensorToWorldTransform) {
 
     // NB : no backpropagation through the forward ray initialization / finalization
@@ -44,14 +44,29 @@ __device__ __inline__ RayPayloadT initializeBackwardRay(const threedgut::RenderP
                                                  sensorToWorldTransform);
 
     if (ray.isAlive()) {
-        const tcnn::vec<RayPayloadT::FeatDim + 1> featuresDensity         = featuresDensityPtr[ray.idx];
-        const tcnn::vec<RayPayloadT::FeatDim + 1> featuresDensityGradient = featuresDensityGradientPtr[ray.idx];
-        ray.transmittanceBackward                                         = 1.f - featuresDensity[RayPayloadT::FeatDim];
-        ray.transmittanceGradient                                         = -1.f * featuresDensityGradient[RayPayloadT::FeatDim];
-        ray.hitTBackward                                                  = worldHitDistancePtr[ray.idx];
-        ray.hitTGradient                                                  = worldHitDistanceGradientPtr[ray.idx];
-        ray.featuresBackward                                              = threedgut::sliceVec<0, RayPayloadT::FeatDim>(featuresDensity);
-        ray.featuresGradient                                              = threedgut::sliceVec<0, RayPayloadT::FeatDim>(featuresDensityGradient);
+        constexpr uint32_t stride = RayPayloadT::FeatDim + 1;
+        const uint32_t base = ray.idx * stride;
+        // Forward features: fp16 when FEATURE_OUTPUT_HALF=1, fp32 otherwise.
+        // Gradient buffer: always fp32 — keeps backward numerically stable regardless of forward dtype.
+#if FEATURE_OUTPUT_HALF
+        #pragma unroll
+        for (int i = 0; i < RayPayloadT::FeatDim; ++i) {
+            ray.featuresBackward[i] = __half2float(featuresDensityPtr[base + i]);
+            ray.featuresGradient[i] = featuresDensityGradientPtr[base + i];
+        }
+        ray.transmittanceBackward = 1.f - __half2float(featuresDensityPtr[base + RayPayloadT::FeatDim]);
+        ray.transmittanceGradient = -1.f * featuresDensityGradientPtr[base + RayPayloadT::FeatDim];
+#else
+        #pragma unroll
+        for (int i = 0; i < RayPayloadT::FeatDim; ++i) {
+            ray.featuresBackward[i] = featuresDensityPtr[base + i];
+            ray.featuresGradient[i] = featuresDensityGradientPtr[base + i];
+        }
+        ray.transmittanceBackward = 1.f - featuresDensityPtr[base + RayPayloadT::FeatDim];
+        ray.transmittanceGradient = -1.f * featuresDensityGradientPtr[base + RayPayloadT::FeatDim];
+#endif
+        ray.hitTBackward = worldHitDistancePtr[ray.idx];
+        ray.hitTGradient = worldHitDistanceGradientPtr[ray.idx];
     }
 
     return ray;
