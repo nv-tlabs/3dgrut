@@ -50,6 +50,7 @@ def setup_3dgrt(conf):
     # Compiler options. Same -D for feature dims so pipelineParameters.h and JIT OptiX pipeline (generateDefines) stay in sync.
     cflags = [
         *transform_defines,
+        *half_defines,
     ]
     cuda_flags = [
         # Feature-based radiance dimensions (must match Slang compilation)

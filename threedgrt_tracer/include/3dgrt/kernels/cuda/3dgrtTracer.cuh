@@ -186,7 +186,7 @@ static __device__ __inline__ void traceVolumetricGS(
                     rayDirection,
                     hitWeight,
                     rayHit.particleId,
-                    params.particleRadiance,     // void* - generic buffer pointer
+                    params.particleFeatures,      // void* - generic buffer pointer
                     params.sphDegree,             // auxiliary parameter (sphDegree for SH, unused for learned)
                     rayData.features);            // float* - generic output array
 

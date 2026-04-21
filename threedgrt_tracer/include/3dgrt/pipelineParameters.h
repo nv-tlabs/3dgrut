@@ -21,17 +21,41 @@
 #include <3dgrt/pipelineDefinitions.h>
 #include <3dgrt/tensorAccessor.h>
 
+// Per-particle feature storage element type. fp16 when PARTICLE_FEATURE_HALF=1, else fp32.
+// Gradient buffer for per-particle features is always fp32.
+#ifndef PARTICLE_FEATURE_HALF
+#define PARTICLE_FEATURE_HALF 0
+#endif
+// Per-ray integrated feature output element type. fp16 when FEATURE_OUTPUT_HALF=1, else fp32.
+// Gradient buffer for the integrated feature output is always fp32.
+#ifndef FEATURE_OUTPUT_HALF
+#define FEATURE_OUTPUT_HALF 0
+#endif
+#if PARTICLE_FEATURE_HALF || FEATURE_OUTPUT_HALF
+#include <cuda_fp16.h>
+#endif
+#if PARTICLE_FEATURE_HALF
+using TParticleFeatureElem = __half;
+#else
+using TParticleFeatureElem = float;
+#endif
+#if FEATURE_OUTPUT_HALF
+using TRayFeatureElem = __half;
+#else
+using TRayFeatureElem = float;
+#endif
+
 struct PipelineParameters {
     float4 rayToWorld[3];                          ///< float3x4 ray to world transformation (row-major)
     PackedTensorAccessor32<float, 4> rayOrigin;    ///< ray origin
     PackedTensorAccessor32<float, 4> rayDirection; ///< ray direction
 
-    const ParticleDensity* particleDensity; ///< position, scale, quaternions, density
-    const float* particleRadiance;          ///< spherical harmonics coefficients
-    const void* particleExtendedData;       ///< pipeline specific particle data
-    int32_t* particleVisibility;            ///< pipeline specific particle data
+    const ParticleDensity* particleDensity;         ///< position, scale, quaternions, density
+    const TParticleFeatureElem* particleFeatures;   ///< per-particle features (fp16 when PARTICLE_FEATURE_HALF)
+    const void* particleExtendedData;               ///< pipeline specific particle data
+    int32_t* particleVisibility;                    ///< pipeline specific particle data
 
-    PackedTensorAccessor32<float, 4> rayRadiance;    ///< output integrated ray radiance
+    PackedTensorAccessor32<TRayFeatureElem, 4> rayFeatures; ///< integrated ray features (fp16 when FEATURE_OUTPUT_HALF)
     PackedTensorAccessor32<float, 4> rayDensity;     ///< output integrated ray density
     PackedTensorAccessor32<float, 4> rayHitDistance; ///< output integrated ray hit distance
     PackedTensorAccessor32<float, 4> rayNormal;      ///< output integrated ray normal
@@ -92,11 +116,11 @@ struct PipelineParameters {
 };
 
 struct PipelineBackwardParameters : PipelineParameters {
-    PackedTensorAccessor32<float, 4> rayRadianceGrad;    ///< integrated ray radiance gradient
+    PackedTensorAccessor32<float, 4> rayFeaturesGrad;    ///< integrated ray features gradient (fp32)
     PackedTensorAccessor32<float, 4> rayDensityGrad;     ///< integrated ray density gradient
     PackedTensorAccessor32<float, 4> rayHitDistanceGrad; ///< integrated ray hit distance gradient
     PackedTensorAccessor32<float, 4> rayNormalGrad;      ///< integrated ray hit distance gradient
 
     ParticleDensity* particleDensityGrad; ///< output position, scale, quaternions, density gradient
-    float* particleRadianceGrad;          ///< output spherical harmonics coefficients gradient
+    float* particleFeaturesGrad;          ///< per-particle features gradient (fp32)
 };

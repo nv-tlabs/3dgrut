@@ -314,7 +314,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
 HybridOptixTracer::traceHybrid(
     uint32_t frameNumber, torch::Tensor rayToWorld, torch::Tensor rayOri,
     torch::Tensor rayDir, torch::Tensor particleDensity,
-    torch::Tensor particleRadiance, int sphDegree, float minTransmittance,
+    torch::Tensor particleFeatures, int sphDegree, float minTransmittance,
     torch::Tensor rayMaxT, uint32_t playgroundOpts, torch::Tensor triangles,
     torch::Tensor vNormals, torch::Tensor vTangents, torch::Tensor vHasTangents,
     torch::Tensor primType, torch::Tensor matUV, torch::Tensor matID,
@@ -360,11 +360,11 @@ HybridOptixTracer::traceHybrid(
   paramsHost.rayDirection = packed_accessor32<float, 4>(rayDir);
 
   paramsHost.particleDensity = getPtr<const ParticleDensity>(particleDensity);
-  paramsHost.particleRadiance = getPtr<const float>(particleRadiance);
+  paramsHost.particleFeatures = getPtr<const TParticleFeatureElem>(particleFeatures);
   paramsHost.particleExtendedData =
       reinterpret_cast<const void *>(_state->gPipelineParticleData);
 
-  paramsHost.rayRadiance = packed_accessor32<float, 4>(rayRad);
+  paramsHost.rayFeatures = packed_accessor32<TRayFeatureElem, 4>(rayRad);
   paramsHost.rayDensity = packed_accessor32<float, 4>(rayDns);
   paramsHost.rayHitDistance = packed_accessor32<float, 4>(rayHit);
   paramsHost.rayNormal = packed_accessor32<float, 4>(rayNrm);
