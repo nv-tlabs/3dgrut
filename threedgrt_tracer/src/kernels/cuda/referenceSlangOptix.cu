@@ -109,10 +109,10 @@ extern "C" __global__ void __raygen__rg() {
     float3 rayOrigin    = params.rayWorldOrigin(idx);
     float3 rayDirection = params.rayWorldDirection(idx);
 
-    FixedArray<float, RAY_FEATURE_DIM> rayRadiance;
+    FixedArray<float, RAY_FEATURE_DIM> rayFeatures;
 #pragma unroll
     for (int i = 0; i < RAY_FEATURE_DIM; i++) {
-        rayRadiance[i] = 0.0f;
+        rayFeatures[i] = 0.0f;
     }
     float rayTransmittance       = 1.0f;
     float rayHitDistance         = 0.f;
@@ -160,9 +160,9 @@ extern "C" __global__ void __raygen__rg() {
                                                        canonicalIntersection,
                                                        hitWeight,
                                                        rayHit.particleId,
-                                                       const_cast<float*>(params.particleRadiance),
+                                                       const_cast<TParticleFeatureElem*>(params.particleFeatures),
                                                        params.sphDegree,
-                                                       &rayRadiance);
+                                                       &rayFeatures);
 
                 // NOTE(qi): Race condition here, but as we are writing the same value, it seems it is safe.
                 if (hitWeight > 0.f) {
@@ -180,7 +180,11 @@ extern "C" __global__ void __raygen__rg() {
 
 #pragma unroll
     for (int i = 0; i < RAY_FEATURE_DIM; i++) {
-        params.rayRadiance[idx.z][idx.y][idx.x][i] = rayRadiance[i];
+#if FEATURE_OUTPUT_HALF
+        params.rayFeatures[idx.z][idx.y][idx.x][i] = __float2half(rayFeatures[i]);
+#else
+        params.rayFeatures[idx.z][idx.y][idx.x][i] = rayFeatures[i];
+#endif
     }
     params.rayDensity[idx.z][idx.y][idx.x][0]     = 1 - rayTransmittance;
     params.rayHitDistance[idx.z][idx.y][idx.x][0] = rayHitDistance;

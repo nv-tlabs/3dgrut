@@ -129,7 +129,7 @@ public:
              torch::Tensor>
   traceHybrid(uint32_t frameNumber, torch::Tensor rayToWorld,
               torch::Tensor rayOri, torch::Tensor rayDir,
-              torch::Tensor particleDensity, torch::Tensor particleRadiance,
+              torch::Tensor particleDensity, torch::Tensor particleFeatures,
               int sphDegree, float minTransmittance, torch::Tensor rayMaxT,
               uint32_t playgroundOpts, torch::Tensor triangles,
               torch::Tensor vNormals, torch::Tensor vTangents,

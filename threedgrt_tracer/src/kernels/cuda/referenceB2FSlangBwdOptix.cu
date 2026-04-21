@@ -101,7 +101,7 @@ extern "C" __global__ void __raygen__rg() {
     const float3 rayOrigin    = params.rayWorldOrigin(idx);
     const float3 rayDirection = params.rayWorldDirection(idx);
 
-    float3 rayRadiance     = make_float3(params.rayRadiance[idx.z][idx.y][idx.x][0], params.rayRadiance[idx.z][idx.y][idx.x][1], params.rayRadiance[idx.z][idx.y][idx.x][2]);
+    float3 rayRadiance     = make_float3(params.rayFeatures[idx.z][idx.y][idx.x][0], params.rayFeatures[idx.z][idx.y][idx.x][1], params.rayFeatures[idx.z][idx.y][idx.x][2]);
     float rayTransmittance = 1.0f - params.rayDensity[idx.z][idx.y][idx.x][0];
     float rayHitDistance   = params.rayHitDistance[idx.z][idx.y][idx.x][0];
 #ifdef ENABLE_NORMALS
@@ -110,7 +110,7 @@ extern "C" __global__ void __raygen__rg() {
 
     float rayMaxHitDistance = params.rayHitDistance[idx.z][idx.y][idx.x][1];
 
-    float3 rayRadianceGrad     = make_float3(params.rayRadianceGrad[idx.z][idx.y][idx.x][0], params.rayRadianceGrad[idx.z][idx.y][idx.x][1], params.rayRadianceGrad[idx.z][idx.y][idx.x][2]);
+    float3 rayRadianceGrad     = make_float3(params.rayFeaturesGrad[idx.z][idx.y][idx.x][0], params.rayFeaturesGrad[idx.z][idx.y][idx.x][1], params.rayFeaturesGrad[idx.z][idx.y][idx.x][2]);
     float rayTransmittanceGrad = -1.0f * params.rayDensityGrad[idx.z][idx.y][idx.x][0];
     float rayHitDistanceGrad   = params.rayHitDistanceGrad[idx.z][idx.y][idx.x][0];
 #ifdef ENABLE_NORMALS
@@ -148,8 +148,8 @@ extern "C" __global__ void __raygen__rg() {
                 //                     rayHit.particleId,
                 //                     (ParticleDensity_0*)params.particleDensity,
                 //                     (ParticleDensity_0*)params.particleDensityGrad,
-                //                     (float*)params.particleRadiance,
-                //                     (float*)params.particleRadianceGrad,
+                //                     (float*)params.particleFeatures,
+                //                     (float*)params.particleFeaturesGrad,
                 //                     params.hitMinGaussianResponse,
                 //                     params.alphaMinThreshold,
                 //                     PipelineParameters::ParticleKernelDegree,

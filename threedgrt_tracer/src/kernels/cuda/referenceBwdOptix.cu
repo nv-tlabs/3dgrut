@@ -109,12 +109,12 @@ extern "C" __global__ void __raygen__rg() {
     const float3 rayOrigin    = params.rayWorldOrigin(idx);
     const float3 rayDirection = params.rayWorldDirection(idx);
 
-    float3 rayIntegratedRadiance     = make_float3(params.rayRadiance[idx.z][idx.y][idx.x][0], params.rayRadiance[idx.z][idx.y][idx.x][1], params.rayRadiance[idx.z][idx.y][idx.x][2]);
+    float3 rayIntegratedRadiance     = make_float3(params.rayFeatures[idx.z][idx.y][idx.x][0], params.rayFeatures[idx.z][idx.y][idx.x][1], params.rayFeatures[idx.z][idx.y][idx.x][2]);
     float rayIntegratedTransmittance = 1.0f - params.rayDensity[idx.z][idx.y][idx.x][0];
     float rayIntegratedHitDistance   = params.rayHitDistance[idx.z][idx.y][idx.x][0];
     float rayMaxHitDistance          = params.rayHitDistance[idx.z][idx.y][idx.x][1];
 
-    float3 rayRadianceGrad     = make_float3(params.rayRadianceGrad[idx.z][idx.y][idx.x][0], params.rayRadianceGrad[idx.z][idx.y][idx.x][1], params.rayRadianceGrad[idx.z][idx.y][idx.x][2]);
+    float3 rayRadianceGrad     = make_float3(params.rayFeaturesGrad[idx.z][idx.y][idx.x][0], params.rayFeaturesGrad[idx.z][idx.y][idx.x][1], params.rayFeaturesGrad[idx.z][idx.y][idx.x][2]);
     float rayTransmittanceGrad = -1.0f * params.rayDensityGrad[idx.z][idx.y][idx.x][0];
     float rayHitDistanceGrad   = params.rayHitDistanceGrad[idx.z][idx.y][idx.x][0];
 
@@ -147,8 +147,8 @@ extern "C" __global__ void __raygen__rg() {
                     rayHit.particleId,
                     params.particleDensity,
                     params.particleDensityGrad,
-                    params.particleRadiance,
-                    params.particleRadianceGrad,
+                    params.particleFeatures,
+                    params.particleFeaturesGrad,
                     params.hitMinGaussianResponse,
                     params.alphaMinThreshold,
                     params.minTransmittance,
