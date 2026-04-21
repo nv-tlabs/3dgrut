@@ -110,7 +110,11 @@ extern "C" __global__ void __raygen__rg() {
     const float3 rayOrigin    = params.rayWorldOrigin(idx);
     const float3 rayDirection = params.rayWorldDirection(idx);
 
-    float3 rayRadiance     = make_float3(params.rayRadiance[idx.z][idx.y][idx.x][0], params.rayRadiance[idx.z][idx.y][idx.x][1], params.rayRadiance[idx.z][idx.y][idx.x][2]);
+    FixedArray<float, RAY_FEATURE_DIM> rayRadiance;
+#pragma unroll
+    for (int i = 0; i < RAY_FEATURE_DIM; i++) {
+        rayRadiance[i] = params.rayRadiance[idx.z][idx.y][idx.x][i];
+    }
     float rayTransmittance = 1.0f - params.rayDensity[idx.z][idx.y][idx.x][0];
     float rayHitDistance   = params.rayHitDistance[idx.z][idx.y][idx.x][0];
 #ifdef ENABLE_NORMALS
@@ -119,7 +123,11 @@ extern "C" __global__ void __raygen__rg() {
 
     float rayMaxHitDistance = params.rayHitDistance[idx.z][idx.y][idx.x][1];
 
-    float3 rayRadianceGrad     = make_float3(params.rayRadianceGrad[idx.z][idx.y][idx.x][0], params.rayRadianceGrad[idx.z][idx.y][idx.x][1], params.rayRadianceGrad[idx.z][idx.y][idx.x][2]);
+    FixedArray<float, RAY_FEATURE_DIM> rayRadianceGrad;
+#pragma unroll
+    for (int i = 0; i < RAY_FEATURE_DIM; i++) {
+        rayRadianceGrad[i] = params.rayRadianceGrad[idx.z][idx.y][idx.x][i];
+    }
     float rayTransmittanceGrad = -1.0f * params.rayDensityGrad[idx.z][idx.y][idx.x][0];
     float rayHitDistanceGrad   = params.rayHitDistanceGrad[idx.z][idx.y][idx.x][0];
 #ifdef ENABLE_NORMALS
@@ -149,12 +157,13 @@ extern "C" __global__ void __raygen__rg() {
 
                 // NB : processing front-to-back backToFrontBwd is equivalent processing back-to-front frontToBackBwd !!
                 float hitAlpha, hitDistance;
-                float3 hitNormal;
+                float3 canonicalIntersection, hitNormal;
                 if (particleDensityHit(
                         rayOrigin, rayDirection,
                         particleDensityParameters(rayHit.particleId,
                                                   {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr, true}}),
                         &hitAlpha, &hitDistance,
+                        &canonicalIntersection,
 #ifdef ENABLE_NORMALS
                         true, &hitNormal
 #else
@@ -163,17 +172,27 @@ extern "C" __global__ void __raygen__rg() {
                         )
 
                 ) {
-                    const float3 hitRadiance = particleFeaturesFromBuffer(
+                    FixedArray<float, RAY_FEATURE_DIM> hitRadiance;
+                    particleFeaturesFromBuffer(
                         rayHit.particleId,
-                        {{(float3*)params.particleRadiance, (float3*)params.particleRadianceGrad, false}, (int)params.sphDegree},
-                        rayDirection);
+                        const_cast<float*>(params.particleRadiance),
+                        (int)params.sphDegree,
+                        rayDirection,
+                        canonicalIntersection,
+                        &hitRadiance);
 
                     float hitAlphaGrad = 0.f;
+                    float3 canonicalIntersectionGrad = make_float3(0.f);
                     particleFeaturesIntegrateBwdToBuffer(rayDirection,
+                                                         canonicalIntersection,
+                                                         &canonicalIntersectionGrad,
                                                          hitAlpha,
                                                          &hitAlphaGrad,
                                                          rayHit.particleId,
-                                                         {{(float3*)params.particleRadiance, (float3*)params.particleRadianceGrad, false}, params.sphDegree},
+                                                         const_cast<float*>(params.particleRadiance),
+                                                         const_cast<float*>(params.particleRadianceGrad),
+                                                         (int)params.sphDegree,
+                                                         false,  // exclusiveGradient: multiple rays can hit same particle
                                                          hitRadiance,
                                                          &rayRadiance,
                                                          &rayRadianceGrad);
@@ -182,7 +201,8 @@ extern "C" __global__ void __raygen__rg() {
                                                          rayDirection,
                                                          rayHit.particleId,
                                                          {{(gaussianParticle_RawParameters_0*)params.particleDensity,
-                                                           (gaussianParticle_RawParameters_0*)params.particleDensityGrad, false}},
+                                                           (gaussianParticle_RawParameters_0*)params.particleDensityGrad,
+                                                           false}},
                                                          hitAlpha,
                                                          hitAlphaGrad,
                                                          &rayTransmittance,
@@ -190,10 +210,11 @@ extern "C" __global__ void __raygen__rg() {
                                                          hitDistance,
                                                          &rayHitDistance,
                                                          &rayHitDistanceGrad,
+                                                         canonicalIntersectionGrad,
 #ifdef ENABLE_NORMALS
                                                          true, hitNormal, &rayNormal, &rayNormalGrad
 #else
-                                                         false, hitNormal, nullptr, nullptr
+                                                         false, make_float3(0.f, 0.f, 0.f), nullptr, nullptr
 #endif
                     );
                 }

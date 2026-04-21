@@ -115,7 +115,7 @@ class Tracer:
             mog_scl = gaussians.get_scale().contiguous()
             particle_density = torch.concat([mog_pos, mog_dns, mog_rot, mog_scl, torch.zeros_like(mog_dns)], dim=1)
 
-            pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count = self.tracer_wrapper.trace(
+            pred_features, pred_opacity, pred_dist, pred_normals, hits_count = self.tracer_wrapper.trace(
                 frame_id,
                 gpu_batch["poses"].contiguous(),
                 gpu_batch["rays_o_cam"].contiguous(),
@@ -127,12 +127,12 @@ class Tracer:
             )
 
             # NOTE: disable background
-            pred_rgb, pred_opacity = gaussians.background(
-                gpu_batch["poses"].contiguous(), gpu_batch["rays_d_cam"].contiguous(), pred_rgb, pred_opacity, train
+            pred_features, pred_opacity = gaussians.background(
+                gpu_batch["poses"].contiguous(), gpu_batch["rays_d_cam"].contiguous(), pred_features, pred_opacity, train
             )
 
         return {
-            "pred_rgb": pred_rgb,
+            "pred_features": pred_features,
             "pred_opacity": pred_opacity,
             "pred_dist": pred_dist,
             "pred_normals": torch.nn.functional.normalize(pred_normals, dim=3),
@@ -224,7 +224,7 @@ class Tracer:
             min_transmittance = self.conf.render.min_transmittance
             envmap_offset = envmap_offset.contiguous()
 
-            pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count = self.tracer_wrapper.trace_hybrid(
+            pred_features, pred_opacity, pred_dist, pred_normals, hits_count = self.tracer_wrapper.trace_hybrid(
                 frame_id,
                 poses,
                 ray_o,
@@ -253,7 +253,7 @@ class Tracer:
             pred_dist = pred_dist[:, :, :, 0:1]  # return only the hit distance
 
         return {
-            "pred_rgb": pred_rgb,
+            "pred_features": pred_features,
             "pred_opacity": pred_opacity,
             "pred_dist": pred_dist,
             "pred_normals": torch.nn.functional.normalize(pred_normals, dim=3),

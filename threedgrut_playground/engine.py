@@ -882,7 +882,7 @@ class Engine3DGRUT:
             if not self.primitives.enabled or not self.primitives.has_visible_objects():
                 if self.disable_gaussian_tracing:
                     dof_rb = dict(
-                        pred_rgb=torch.zeros_like(rays.rays_ori),
+                        pred_features=torch.zeros_like(rays.rays_ori),
                         pred_opacity=torch.zeros_like(rays.rays_ori[:, :, 0:1]),
                     )
                 else:
@@ -890,7 +890,7 @@ class Engine3DGRUT:
             else:
                 dof_rb = self._render_playground_hybrid(dof_rays_ori, dof_rays_dir)
 
-            rb["rgb"] = self._accumulate_to_buffer(rb["rgb"], dof_rb["pred_rgb"], i, self.gamma_correction)
+            rb["rgb"] = self._accumulate_to_buffer(rb["rgb"], dof_rb["pred_features"], i, self.gamma_correction)
             rb["opacity"] = (rb["opacity"] * i + dof_rb["pred_opacity"]) / (i + 1)
 
     def _render_spp_buffer(self, rb, rays):
@@ -902,14 +902,14 @@ class Engine3DGRUT:
             if not self.primitives.enabled or not self.primitives.has_visible_objects():
                 if self.disable_gaussian_tracing:
                     spp_rb = dict(
-                        pred_rgb=torch.zeros_like(rays.rays_ori),
+                        pred_features=torch.zeros_like(rays.rays_ori),
                         pred_opacity=torch.zeros_like(rays.rays_ori[:, :, 0:1]),
                     )
                 else:
                     spp_rb = self.scene_mog.trace(rays_o=rays.rays_ori, rays_d=rays.rays_dir)
             else:
                 spp_rb = self._render_playground_hybrid(rays.rays_ori, rays.rays_dir)
-            batch_rgb = spp_rb["pred_rgb"].sum(dim=0).unsqueeze(0)
+            batch_rgb = spp_rb["pred_features"].sum(dim=0).unsqueeze(0)
             rb["rgb"] = self._accumulate_to_buffer(
                 rb["rgb"], batch_rgb, i, self.gamma_correction, batch_size=self.spp.batch_size
             )
@@ -928,7 +928,7 @@ class Engine3DGRUT:
 
         Returns:
             Dict[str, torch.Tensor]: Rendering results containing:
-                - 'pred_rgb': RGB colors of shape (B, H, W, 3), range [0, 1]
+                - 'pred_features': RGB colors of shape (B, H, W, 3), range [0, 1]
                 - 'pred_opacity': Opacity values of shape (B, H, W, 1), range [0, 1]
                 - 'last_ray_d': Final ray directions for background computation
                 - Additional buffers from tracer.render_playground()
@@ -979,14 +979,14 @@ class Engine3DGRUT:
             max_pbr_bounces=self.max_pbr_bounces,
         )
 
-        pred_rgb = rendered_results["pred_rgb"]
+        pred_features = rendered_results["pred_features"]
         pred_opacity = rendered_results["pred_opacity"]
 
         # If no envmap is used for background, saturate the color channels by blending the mog background
         if envmap is None or not self.environment.is_ignore_envmap():
             poses = torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]], dtype=torch.float32)
-            pred_rgb, pred_opacity = mog.background(
-                poses.contiguous(), rendered_results["last_ray_d"].contiguous(), pred_rgb, pred_opacity, False
+            pred_features, pred_opacity = mog.background(
+                poses.contiguous(), rendered_results["last_ray_d"].contiguous(), pred_features, pred_opacity, False
             )
 
         # Mark materials as uploaded
@@ -995,9 +995,9 @@ class Engine3DGRUT:
         # Advance frame id (for i.e., random number generator) and avoid int32 overflow
         self.frame_id = self.frame_id + self.spp.batch_size if self.frame_id <= (2**31 - 1) else 0
 
-        pred_rgb = torch.clamp(pred_rgb, 0.0, 1.0)  # Make sure image pixels are in valid range
+        pred_features = torch.clamp(pred_features, 0.0, 1.0)  # Make sure image pixels are in valid range
 
-        rendered_results["pred_rgb"] = pred_rgb
+        rendered_results["pred_features"] = pred_features
         return rendered_results
 
     @torch.cuda.nvtx.range("render_pass")
@@ -1065,7 +1065,7 @@ class Engine3DGRUT:
             if not self.primitives.enabled or not self.primitives.has_visible_objects():
                 if self.disable_gaussian_tracing:
                     rb = dict(
-                        pred_rgb=torch.zeros_like(rays.rays_ori),
+                        pred_features=torch.zeros_like(rays.rays_ori),
                         pred_opacity=torch.zeros_like(rays.rays_ori[:, :, 0:1]),
                     )
                 else:
@@ -1073,7 +1073,7 @@ class Engine3DGRUT:
             else:
                 rb = self._render_playground_hybrid(rays.rays_ori, rays.rays_dir)
 
-            rb = dict(rgb=rb["pred_rgb"], opacity=rb["pred_opacity"])
+            rb = dict(rgb=rb["pred_features"], opacity=rb["pred_opacity"])
             rb["rgb"] = self.environment.tonemap(rb["rgb"])
             rb["rgb"] = torch.pow(rb["rgb"], 1.0 / self.gamma_correction)
             rb["rgb"] = rb["rgb"].mean(dim=0).unsqueeze(0)

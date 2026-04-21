@@ -107,6 +107,20 @@ __device__ __inline__ RayPayloadT initializeRay(const threedgut::RenderParameter
     return ray;
 }
 
+// Output element type for the feature+density buffer.
+// FEATURE_OUTPUT_HALF=1: write __half (fp16) to halve memory bandwidth.
+// FEATURE_OUTPUT_HALF=0: write float (fp32, default).
+#ifndef FEATURE_OUTPUT_HALF
+#define FEATURE_OUTPUT_HALF 0
+#endif
+
+#if FEATURE_OUTPUT_HALF
+#include <cuda_fp16.h>
+using TFeatureDensityElem = __half;
+#else
+using TFeatureDensityElem = float;
+#endif
+
 // Initialize ray based on given pixel coordinates (load-balanced mode)
 template <typename RayPayloadT>
 __device__ __inline__ RayPayloadT initializeRayPerPixel(const threedgut::RenderParameters& params,
@@ -149,13 +163,27 @@ __device__ __inline__ void finalizeRay(const TRayPayload& ray,
                                        const tcnn::vec3* __restrict__ sensorRayOriginPtr,
                                        float* __restrict__ worldCountPtr,
                                        float* __restrict__ worldHitDistancePtr,
-                                       tcnn::vec4* __restrict__ radianceDensityPtr,
+                                       TFeatureDensityElem* __restrict__ featureDensityPtr,
                                        const tcnn::mat4x3& sensorToWorldTransform) {
     if (!ray.isValid()) {
         return;
     }
 
-    radianceDensityPtr[ray.idx] = {ray.features[0], ray.features[1], ray.features[2], (1.0f - ray.transmittance)};
+    static_assert(RAY_FEATURE_DIM == TRayPayload::FeatDim, "RAY_FEATURE_DIM must equal TRayPayload::FeatDim");
+    const uint32_t base = ray.idx * (RAY_FEATURE_DIM + 1);
+#if FEATURE_OUTPUT_HALF
+    #pragma unroll
+    for (int i = 0; i < TRayPayload::FeatDim; ++i) {
+        featureDensityPtr[base + i] = __float2half(ray.features[i]);
+    }
+    featureDensityPtr[base + RAY_FEATURE_DIM] = __float2half(1.0f - ray.transmittance);
+#else
+    #pragma unroll
+    for (int i = 0; i < TRayPayload::FeatDim; ++i) {
+        featureDensityPtr[base + i] = ray.features[i];
+    }
+    featureDensityPtr[base + RAY_FEATURE_DIM] = (1.0f - ray.transmittance);
+#endif
 
     worldHitDistancePtr[ray.idx] = ray.hitT;
 
