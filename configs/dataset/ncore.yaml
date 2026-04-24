@@ -1,12 +1,15 @@
 type: ncore
 
-# Camera and lidar sensors to use
-# Leave null to auto-detect single available cameras/lidars - needs to be specified explicitly
-# in case of multiple camera/lidar sensors:
+# Camera sensors to use
+# Leave null to auto-detect single available camera - needs to be specified explicitly
+# in case of multiple camera sensors:
 #   camera_ids: [camera_front_wide_120fov, camera_cross_left_120fov, camera_cross_right_120fov]
-#   lidar_ids: [lidar_gt_top_p128_v4p5]
 camera_ids: null  # Null = auto-select single camera sensor
-lidar_ids: null   # Null = auto-detect single lidar sensor
+
+# Point-cloud source IDs for initialization.
+# Accepts lidar IDs, radar IDs, or native point cloud IDs (e.g., "sfm_points").
+# null = auto-detect all available sources.
+lidar_ids: null
 
 # V4 component group names (only used when loading NCore V4 datasets)
 poses_component_group: default

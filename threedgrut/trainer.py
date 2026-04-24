@@ -287,7 +287,9 @@ class Trainer3DGRUT:
                     checkpoint = torch.load(conf.initialization.path, weights_only=False)
                     model.init_from_checkpoint(checkpoint, setup_optimizer=False)
                 case "lidar":
-                    assert conf.dataset.type in ["ncore"], "can only initialize from lidar with NCoreDataset"
+                    assert isinstance(
+                        train_dataset, datasets.NCoreDataset
+                    ), "can only initialize from lidar with NCoreDataset"
                     pc = PointCloud.from_sequence(
                         list(train_dataset.get_point_clouds(step_frame=1, non_dynamic_points_only=True)),
                         device="cpu",
