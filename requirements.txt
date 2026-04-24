@@ -31,7 +31,7 @@ pygltflib
 usd-core>=26.3
 ppisp @ git+https://github.com/nv-tlabs/ppisp@v1.0.1
 # NCore dataset support (https://github.com/NVIDIA/ncore)
-nvidia-ncore==18.6.0
+nvidia-ncore>=19.0.0a1
 simplejpeg
 # formatter
 black==26.3.1
