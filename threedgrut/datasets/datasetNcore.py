@@ -29,6 +29,7 @@ import numpy.typing as npt
 import simplejpeg
 import torch
 import torch.utils.data
+from ncore.data import PointCloudsSourceProtocol
 from ncore.impl.common.transformations import HalfClosedInterval
 from scipy import ndimage
 
@@ -227,6 +228,9 @@ class NCoreDataset(torch.utils.data.Dataset, BoundedMultiViewDataset, DatasetVis
         self.sequence_lidar_sensors: dict[str, dict[str, ncore.data.LidarSensorProtocol]] = {}
         self.sequence_lidar_unique_ids: dict[str, dict[str, UniqueSensorId]] = {}
 
+        self.sequence_point_clouds_source_ids: dict[str, list[str]] = {}
+        self.sequence_point_clouds_sources: dict[str, dict[str, PointCloudsSourceProtocol]] = {}
+
         sequence_id = self.sequence_id
 
         # Construct V4 sequence loader — SequenceComponentGroupsReader handles
@@ -395,6 +399,24 @@ class NCoreDataset(torch.utils.data.Dataset, BoundedMultiViewDataset, DatasetVis
         self.n_unique_lidars += len(self.lidar_ids)
         for lidar_id in self.lidar_ids:
             self.lidar_unique_ids[lidar_id].append(self.sequence_lidar_unique_ids[sequence_id][lidar_id])
+
+        # Auto-detect all available point cloud sources (lidar + native point clouds)
+        if self.init_lidar_ids is None:
+            self.sequence_point_clouds_source_ids[sequence_id] = list(sequence_loader.lidar_ids) + list(
+                sequence_loader.point_clouds_ids
+            )
+            logger.info(f"Auto-detected point cloud sources: {self.sequence_point_clouds_source_ids[sequence_id]}")
+        else:
+            self.sequence_point_clouds_source_ids[sequence_id] = self.init_lidar_ids
+            assert all(
+                isinstance(sid, str) for sid in self.sequence_point_clouds_source_ids[sequence_id]
+            ), f"NCoreDataset: lidar_ids should be a list of strings, got {self.sequence_point_clouds_source_ids[sequence_id]}"
+            logger.info(f"Using point cloud sources: {self.sequence_point_clouds_source_ids[sequence_id]}")
+
+        self.sequence_point_clouds_sources[sequence_id] = {
+            source_id: sequence_loader.get_point_clouds_source(source_id)
+            for source_id in self.sequence_point_clouds_source_ids[sequence_id]
+        }
 
         # Determine linear per-sensor-frame index ranges depending on dataset time restrictions,
         # making sure *both* frame start and end-times are fully covered
@@ -875,91 +897,87 @@ class NCoreDataset(torch.utils.data.Dataset, BoundedMultiViewDataset, DatasetVis
 
     def get_point_clouds(
         self,
-        lidar_ids: Optional[list[str]] = None,
-        camera_ids: Optional[list[str]] = None,
+        point_clouds_source_ids: Optional[list[str]] = None,
         non_dynamic_points_only: bool = True,
         step_frame: int = 1,
     ) -> Generator[PointCloud, None, None]:
-        """Returns a generator for all point-clouds available for point-cloud sensor (lidar / camera), transformed into world-global frame.
+        """Returns a generator for all point-clouds available from point-cloud sources, transformed into world-global frame.
 
-        Point-cloud sensor are specified by either logical or unique sensor IDs.
+        Point-cloud sources are specified by either logical or unique sensor IDs via ``point_clouds_source_ids``
+        (which now accepts any point-cloud source ID: lidar, radar, or native point clouds).
 
-        Defaults to first logical data-set specific point-cloud sensor if no dedicated sensors are specified
-        (raises error if unsupported sensors are specified).
+        Defaults to first logical data-set specific point-cloud source if no dedicated sources are specified
+        (raises error if unsupported sources are specified).
 
         Can be parameterized to only return non-dynamic points (default).
 
-        Default point-cloud sensor: *first* logical lidar
+        Default point-cloud source: *first* available source
         """
-
-        # we only support point clouds from lidar sensors
-        if camera_ids is not None and len(camera_ids):
-            raise ValueError(
-                "NCoreDataset: camera-based point clouds requested, but only lidar-based point clouds supported"
-            )
 
         # make sure we are initialized
         self._init_worker()
 
-        # default to first lidar instance if not provided explicitly
+        # default to first source instance if not provided explicitly
+        sequence_point_clouds_source_ids = self.sequence_point_clouds_source_ids[self.sequence_id]
         assert len(
-            self.lidar_ids
-        ), f"NCoreDataset: At least a single lidar needs to be available for point-cloud generation"
-        lidar_ids = [self.lidar_ids[0]] if lidar_ids is None else lidar_ids
+            sequence_point_clouds_source_ids
+        ), f"NCoreDataset: At least a single point cloud source needs to be available for point-cloud generation"
+        if point_clouds_source_ids is None:
+            point_clouds_source_ids = [sequence_point_clouds_source_ids[0]]
 
-        sequence_id = self.sequence_id
-        for lidar_id in lidar_ids:
-            lidar_sensor = self.sequence_lidar_sensors[sequence_id][lidar_id]
+        time_range = self.time_range_us
+        pose_graph = self.sequence_loaders[self.sequence_id].pose_graph
+        sequence_point_clouds_sources = self.sequence_point_clouds_sources[self.sequence_id]
+        for source_id in point_clouds_source_ids:
+            source = sequence_point_clouds_sources[source_id]
 
-            for lidar_frame_index in self.time_range_us.cover_range(lidar_sensor.get_frames_timestamps_us())[
-                ::step_frame
-            ]:
-                # Load point cloud via compat API
-                pc = lidar_sensor.get_frame_point_cloud(
-                    frame_index=lidar_frame_index,
-                    motion_compensation=True,
-                    with_start_points=True,
-                    return_index=0,
+            cover = time_range.cover_range(source.pc_timestamps_us)
+            for pc_idx in cover[::step_frame]:
+                pc = source.get_pc(pc_idx)
+
+                # Transform to world frame via pose graph
+                pc_world = pc.transform("world", pc.reference_frame_timestamp_us, pose_graph)
+                xyz_world = pc_world.xyz
+
+                # Apply world-to-world_global scene-level transform
+                xyz_world_global = (
+                    self.T_world_to_world_global[:3, :3] @ xyz_world.T + self.T_world_to_world_global[:3, 3:4]
+                ).T
+
+                # RGB color: try PointCloud attribute first, then generic_data fallback
+                color = None
+                if pc.has_attribute(self.lidar_color_generic_data_name):
+                    color = pc.get_attribute(self.lidar_color_generic_data_name)
+                elif source.has_pc_generic_data(pc_idx, self.lidar_color_generic_data_name):
+                    color = source.get_pc_generic_data(pc_idx, self.lidar_color_generic_data_name)
+
+                # Dynamic flag filtering
+                if non_dynamic_points_only and source.has_pc_generic_data(pc_idx, "dynamic_flag"):
+                    dynamic_flags = source.get_pc_generic_data(pc_idx, "dynamic_flag")
+                    non_dynamic_mask = dynamic_flags != 1  # 1 ~ DYNAMIC
+                    xyz_world_global = xyz_world_global[non_dynamic_mask]
+                    if color is not None:
+                        color = color[non_dynamic_mask]
+
+                # xyz_start = ray origin = sensor position in world_global frame.
+                # For sensor-adapted sources, the reference frame IS the sensor frame,
+                # so the origin of that frame in world is the sensor position.
+                # For native point clouds (e.g., SfM in "world" frame), this is the
+                # world origin in world_global, broadcast to all points.
+                T_ref_world = pose_graph.evaluate_poses(
+                    pc.reference_frame_id,
+                    "world",
+                    np.array(pc.reference_frame_timestamp_us, dtype=np.uint64),
                 )
-                assert pc.xyz_m_start is not None, "Expected start points from motion-compensated point cloud"
-                xyz_s = pc.xyz_m_start
-                xyz_e = pc.xyz_m_end
-
-                # load point color, if available
-                if lidar_sensor.has_frame_generic_data(lidar_frame_index, self.lidar_color_generic_data_name):
-                    color = lidar_sensor.get_frame_generic_data(lidar_frame_index, self.lidar_color_generic_data_name)
-                    assert (
-                        color.shape == xyz_s.shape
-                    ), "Color data length does not match point cloud length (expecting 3-channel RGB color per point)"
-                    assert color.dtype == np.uint8, "Expected color data in uint8 format"
-                else:
-                    color = None
-
-                # determine point subset to load
-                point_filter = ...
-                if non_dynamic_points_only:
-                    # filter out dynamic points if dynamic_flag is available via generic data
-                    if lidar_sensor.has_frame_generic_data(lidar_frame_index, "dynamic_flag"):
-                        dynamic_flags = lidar_sensor.get_frame_generic_data(lidar_frame_index, "dynamic_flag")
-                        point_filter = dynamic_flags != 1  # 1 ~ DYNAMIC
-
-                xyz_s = xyz_s[point_filter]
-                xyz_e = xyz_e[point_filter]
-                if color is not None:
-                    color = color[point_filter]
-
-                # transform points from sensor to world-global frame
-                T_sensor_world_global = self._transform_poses_to_world_global(
-                    lidar_sensor.get_frames_T_sensor_target("world", lidar_frame_index),
-                    self.T_world_to_world_global,
+                sensor_origin_world = T_ref_world[:3, 3]
+                sensor_origin_wg = (
+                    self.T_world_to_world_global[:3, :3] @ sensor_origin_world + self.T_world_to_world_global[:3, 3]
                 )
-
-                xyz_s = (T_sensor_world_global[:3, :3] @ xyz_s.transpose() + T_sensor_world_global[:3, 3:4]).transpose()
-                xyz_e = (T_sensor_world_global[:3, :3] @ xyz_e.transpose() + T_sensor_world_global[:3, 3:4]).transpose()
+                xyz_start = np.broadcast_to(sensor_origin_wg[np.newaxis, :], xyz_world_global.shape).copy()
 
                 yield PointCloud(
-                    xyz_start=to_torch(xyz_s, device="cpu"),
-                    xyz_end=to_torch(xyz_e, device="cpu"),
+                    xyz_start=to_torch(xyz_start, device="cpu"),
+                    xyz_end=to_torch(xyz_world_global, device="cpu"),
                     color=to_torch(color, device="cpu") if color is not None else None,
                     device="cpu",
                 )
