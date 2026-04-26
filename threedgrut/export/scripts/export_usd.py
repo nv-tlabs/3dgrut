@@ -138,6 +138,11 @@ Examples:
         action="store_true",
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--no-usd-validate",
+        action="store_true",
+        help="Skip OpenUSD stage validation after standard (ParticleField) export",
+    )
 
     return parser.parse_args()
 
@@ -243,12 +248,16 @@ def main():
 
     # Export
     try:
+        export_kw = {}
+        if args.format == "standard":
+            export_kw["validate_usd"] = not args.no_usd_validate
         exporter.export(
             model=model,
             output_path=output_path,
             dataset=dataset,
             conf=conf,
             background=background,
+            **export_kw,
         )
         logger.info(f"Export successful: {output_path}")
     except Exception as e:

@@ -26,24 +26,12 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
-from pxr import Usd, UsdValidation
+from pxr import Usd
 
 from threedgrut.export.base import ExportableModel
 from threedgrut.export.formats import PLYExporter
 from threedgrut.export.importers import PLYImporter, USDImporter
 from threedgrut.export.usd.exporter import USDExporter
-
-
-def _validate_stage(stage: Usd.Stage) -> list:
-    """Run usd-core stage validators (StageMetadataChecker, CompositionErrorTest). Returns list of ValidationError."""
-    validators = UsdValidation.ValidationRegistry().GetOrLoadValidatorsByName(
-        ["usdValidation:StageMetadataChecker", "usdValidation:CompositionErrorTest"]
-    )
-    if not validators:
-        return []
-    ctx = UsdValidation.ValidationContext(validators)
-    result = ctx.Validate(stage)
-    return list(result) if result else []
 
 
 class MockGaussianModel(ExportableModel):
@@ -404,7 +392,7 @@ class TestExportImportConsistency:
             )
 
     def test_usd_export_passes_usd_validation(self):
-        """Exported USD stage passes usd-core schema/stage validators."""
+        """Exported USD stage passes OpenUSD stage validators (run inside USDExporter.export)."""
         model = MockGaussianModel(num_gaussians=5, sh_degree=0)
         with tempfile.TemporaryDirectory() as tmpdir:
             usd_path = Path(tmpdir) / "test.usdz"
@@ -414,10 +402,6 @@ class TestExportImportConsistency:
                 export_background=False,
                 apply_normalizing_transform=False,
             ).export(model, usd_path)
-            stage = Usd.Stage.Open(str(usd_path))
-            assert stage, "Failed to open exported stage"
-            errors = _validate_stage(stage)
-            assert not errors, "USD validation failed:\n" + "\n".join(e.GetMessage() for e in errors)
 
 
 def _find_prim_with_color_space_api(stage: Usd.Stage):
