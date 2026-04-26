@@ -56,6 +56,9 @@ def apply_post_processing(
 ) -> dict:
     """Apply post-processing to rendered output.
 
+    ``post_processing`` is typically PPISP or :class:`~threedgrut.utils.post_processing_linear_to_srgb.LinearToSrgbPostProcessing`;
+    both follow the same ``__call__`` contract (flat RGB plus metadata).
+
     Args:
         post_processing: Post-processing module
         outputs: Model outputs including pred_rgb
