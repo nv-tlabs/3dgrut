@@ -49,13 +49,14 @@ from threedgrut.export.usd.stage_utils import (
 from threedgrut.export.usd.writers.background import export_background_to_usd
 from threedgrut.export.usd.writers.base import create_gaussian_writer
 from threedgrut.export.usd.camera_copy import (
-    collect_transitive_sidecars_for_world_subtree,
+    collect_transitive_sidecars_for_subtree,
     copy_authored_time_settings_from_source,
+    merge_source_prim_at_same_path,
     merge_source_world_at_same_paths,
 )
 from threedgrut.export.usd.writers.ov_post_processing import (
-    MODE_NONE,
-    MODE_PPISP_HYBRID_WAR,
+    MODE_PPISP_OMNI_FALLBACK_NONE,
+    MODE_PPISP_OMNI_FALLBACK_SPG_PLUS_FITTED_POST_PROCESSING,
     normalize_ov_post_processing_mode,
 )
 from threedgrut.export.usd.writers.camera import export_cameras_to_usd
@@ -231,7 +232,7 @@ class USDExporter(ModelExporter):
     - Optional PPISP SPG shader on per-camera RenderProducts
     - USDZ packaging (default output)
 
-    For Omniverse/NuRec compatibility, use NuRecExporter instead.
+    For NuRec compatibility, use NuRecExporter instead.
     """
 
     def __init__(
@@ -245,7 +246,7 @@ class USDExporter(ModelExporter):
         sorting_mode_hint: str = "cameraDistance",
         linear_srgb: bool = False,
         export_ppisp: bool = False,
-        ov_post_processing: str = MODE_NONE,
+        ov_post_processing: str = MODE_PPISP_OMNI_FALLBACK_NONE,
         frames_per_second: float = 1.0,
     ):
         """
@@ -260,9 +261,11 @@ class USDExporter(ModelExporter):
             apply_normalizing_transform: Apply transform to normalize scene orientation.
             sorting_mode_hint: Sorting hint for rendering ("cameraDistance", "zDepth").
             linear_srgb: If True, set prim color space to lin_rec709_scene.
-            export_ppisp: If True, add PPISP SPG shaders on per-camera RenderProducts.
-                Requires post_processing kwarg to be a ppisp.PPISP instance.
-            ov_post_processing: Omniverse RTX post-processing workaround mode.
+            export_ppisp: If True, export PPISP using SPG or the selected
+                Omniverse USD fallback mode. Requires post_processing kwarg to
+                be a ppisp.PPISP instance.
+            ov_post_processing: PPISP export implementation selector. "none"
+                uses the full SPG path when export_ppisp is enabled.
             frames_per_second: Sets stage.timeCodesPerSecond. Time codes are always
                 bare frame indices (float(frame_idx)), so this controls playback speed.
                 Default 1.0 means 1 frame per second of real time.
@@ -279,6 +282,12 @@ class USDExporter(ModelExporter):
         self.linear_srgb = linear_srgb
         self.export_ppisp = export_ppisp
         self.ov_post_processing = normalize_ov_post_processing_mode(ov_post_processing)
+        if not self.export_ppisp and self.ov_post_processing != MODE_PPISP_OMNI_FALLBACK_NONE:
+            raise ValueError(
+                "export_usd.ov-post-processing requires export_usd.export_ppisp=true. "
+                "Set export_ppisp=true to export PPISP through an Omniverse USD fallback, "
+                "or set ov-post-processing=none."
+            )
         self.frames_per_second = frames_per_second
 
     def _create_default_stage(self, referenced_stages: List[NamedUSDStage]) -> NamedUSDStage:
@@ -398,17 +407,19 @@ class USDExporter(ModelExporter):
                     skip = kwargs.get("copy_source_skip_subtrees")
                     merge_target = default_stage_wrapped.stage if default_stage_wrapped is not None else stage
                     merge_source_world_at_same_paths(merge_target, src_stage, skip_source_subtrees=skip)
+                    merge_source_prim_at_same_path(merge_target, src_stage, "/Render")
                     copy_authored_time_settings_from_source(src_stage, merge_target)
                     if package_as_usdz and res_root is not None and res_root.is_dir():
-                        sidecars = collect_transitive_sidecars_for_world_subtree(
-                            merge_target.GetRootLayer(),
-                            res_root,
-                            world_prefix="/World",
-                            extra_skip_names={Path(stage_path).name},
-                        )
-                        for entry in sidecars:
-                            if not any(f.filename == entry.filename for f in files):
-                                files.append(entry)
+                        for path_prefix in ("/World", "/Render"):
+                            sidecars = collect_transitive_sidecars_for_subtree(
+                                merge_target.GetRootLayer(),
+                                res_root,
+                                path_prefix=path_prefix,
+                                extra_skip_names={Path(stage_path).name},
+                            )
+                            for entry in sidecars:
+                                if not any(f.filename == entry.filename for f in files):
+                                    files.append(entry)
             except Exception as e:
                 logger.warning("Failed to merge source USD prims: %s", e)
 
@@ -466,8 +477,14 @@ class USDExporter(ModelExporter):
                 logger.warning(f"Failed to export background: {e}")
 
         render_product_entries = None
-        export_spg_ppisp = self.export_ppisp or self.ov_post_processing == MODE_PPISP_HYBRID_WAR
-        needs_ppisp_render_products = export_spg_ppisp or self.ov_post_processing != MODE_NONE
+        export_spg_ppisp = self.export_ppisp and (
+            self.ov_post_processing == MODE_PPISP_OMNI_FALLBACK_NONE
+            or self.ov_post_processing == MODE_PPISP_OMNI_FALLBACK_SPG_PLUS_FITTED_POST_PROCESSING
+        )
+        export_omni_ppisp_fallback = (
+            self.export_ppisp and self.ov_post_processing != MODE_PPISP_OMNI_FALLBACK_NONE
+        )
+        needs_ppisp_render_products = self.export_ppisp
         if needs_ppisp_render_products:
             render_product_entries = self._create_ppisp_render_products(
                 stage=stage,
@@ -488,8 +505,8 @@ class USDExporter(ModelExporter):
                 files=files,
             )
 
-        # Export PPISP approximation as Omniverse RTX post-processing settings
-        if self.ov_post_processing != MODE_NONE and render_product_entries is not None:
+        # Export fitted PPISP approximation as Omniverse USD post-processing settings
+        if export_omni_ppisp_fallback and render_product_entries is not None:
             self._export_ov_post_processing(
                 stage=stage,
                 camera_names=camera_names,
@@ -614,7 +631,7 @@ class USDExporter(ModelExporter):
         dataset,
         post_processing,
     ) -> None:
-        """Attach Omniverse RTX post-processing WAR attributes to RenderProducts."""
+        """Attach Omniverse USD post-processing fallback attributes to RenderProducts."""
         try:
             from ppisp import PPISP  # type: ignore[import-not-found]
         except ImportError:
@@ -643,7 +660,7 @@ class USDExporter(ModelExporter):
                 mode=self.ov_post_processing,
             )
         except Exception as e:
-            logger.warning(f"Failed to add OV post-processing workaround: {e}")
+            logger.warning(f"Failed to add OV post-processing fallback: {e}")
 
     @classmethod
     def from_config(cls, conf) -> "USDExporter":
@@ -666,8 +683,8 @@ class USDExporter(ModelExporter):
             sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", "cameraDistance"),
             linear_srgb=getattr(export_conf, "linear_srgb", False),
             export_ppisp=getattr(export_conf, "export_ppisp", False),
-            ov_post_processing=export_conf.get("ov-post-processing", MODE_NONE)
+            ov_post_processing=export_conf.get("ov-post-processing", MODE_PPISP_OMNI_FALLBACK_NONE)
             if hasattr(export_conf, "get")
-            else getattr(export_conf, "ov_post_processing", MODE_NONE),
+            else getattr(export_conf, "ov_post_processing", MODE_PPISP_OMNI_FALLBACK_NONE),
             frames_per_second=getattr(export_conf, "frames_per_second", 1.0),
         )

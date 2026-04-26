@@ -42,17 +42,18 @@ export_usd:
   enabled: false
   path: ""
   apply_normalizing_transform: true
-  format: standard  # "nurec" for Omniverse USDVol internal format, "standard" for USDVol ParticleField3DGaussianSplat
+  format: standard  # "nurec" for internal USDVol format, "standard" for USDVol ParticleField3DGaussianSplat
   half_precision: false
   export_cameras: true
   export_background: true
   sorting_mode_hint: cameraDistance
   # If true, Gaussian prim ColorSpaceAPI uses lin_rec709_scene; else srgb_rec709_display
   linear_srgb: false
-  # PPISP post-processing export as SPG shader on per-camera RenderProducts
+  # Enable PPISP post-processing export. ov-post-processing selects the implementation.
   export_ppisp: false
-  # Omniverse RTX post-processing workaround for Kit versions without reliable SPG.
-  # none | ppisp-exposure-war | ppisp-approx-war | ppisp-hybrid-war
+  # none uses the full SPG path when export_ppisp is true.
+  # Other values use Omniverse USD post-processing fallback modes.
+  # none | ppisp-exposure-fallback | ppisp-fitted-post-processing-fallback | ppisp-spg-plus-fitted-post-processing-fallback
   ov-post-processing: none
   # USD timeCodesPerSecond; time codes are bare frame indices so this sets playback speed
   frames_per_second: 1.0

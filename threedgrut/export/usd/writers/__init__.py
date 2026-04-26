@@ -21,7 +21,7 @@ Provides schema-agnostic interface for writing Gaussian data to USD:
 - export_cameras_to_usd: one Camera prim per physical camera, animated xforms
 - create_render_products: /Render scope with per-camera RenderProducts
 - add_ppisp_to_all_render_products: PPISP SPG shader on RenderProducts
-- add_ov_post_processing: Omniverse RTX post-processing PPISP workaround
+- add_ov_post_processing: Omniverse USD post-processing PPISP fallback
 """
 
 from threedgrut.export.usd.writers.background import export_background_to_usd

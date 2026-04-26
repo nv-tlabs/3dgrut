@@ -112,6 +112,29 @@ def merge_source_world_at_same_paths(
     return total
 
 
+def merge_source_prim_at_same_path(dest_stage, source_stage, prim_path: str) -> int:
+    """
+    Copy one source root-layer prim subtree to the destination at the same path.
+
+    This preserves non-geometry export data, such as `/Render`, during USD to
+    USD transcode without regenerating renderer state from Python objects.
+    """
+    src_layer = source_stage.GetRootLayer()
+    dst_layer = dest_stage.GetRootLayer()
+    path = Sdf.Path(prim_path)
+
+    if not src_layer.GetPrimAtPath(path):
+        logger.info("Source USD has no %s prim; nothing to merge", prim_path)
+        return 0
+    if dst_layer.GetPrimAtPath(path):
+        logger.info("Keeping destination prim %s; not overwriting with source", prim_path)
+        return 0
+
+    count = _copy_prim_spec_recursive(src_layer, dst_layer, path, path)
+    logger.info("Merged source %s subtree with %d prim(s)", prim_path, count)
+    return count
+
+
 def copy_authored_time_settings_from_source(source_stage, dest_stage) -> None:
     """Copy authored time code range and FPS from source to destination stage when set."""
     try:
@@ -154,7 +177,25 @@ def _gather_ref_payload_basenames_from_prim_spec(spec: Sdf.PrimSpec) -> Set[str]
             bn = _basename_packaged_ref(getattr(item, "assetPath", "") or "")
             if bn:
                 out.add(bn)
+    for prop in spec.properties:
+        default_value = getattr(prop, "default", None)
+        asset_path = getattr(default_value, "path", None) or getattr(
+            default_value,
+            "assetPath",
+            None,
+        )
+        if asset_path:
+            bn = _basename_packaged_ref(asset_path)
+            if bn:
+                out.add(bn)
     return out
+
+
+def _companion_sidecar_basenames(basename: str) -> Set[str]:
+    """Additional package files implied by a referenced asset."""
+    if basename.endswith(".slang"):
+        return {f"{basename}.lua"}
+    return set()
 
 
 def _walk_prim_subtree(layer: Sdf.Layer, root_path: Sdf.Path):
@@ -189,23 +230,25 @@ def _walk_entire_layer(layer: Sdf.Layer):
         yield from _walk_prim_subtree(layer, root.AppendChild(child_spec.name))
 
 
-def collect_transitive_sidecars_for_world_subtree(
+def collect_transitive_sidecars_for_subtree(
     dest_layer: Sdf.Layer,
     res_root: Path,
-    world_prefix: str = "/World",
+    path_prefix: str,
     extra_skip_names: Optional[Collection[str]] = None,
 ) -> List[NamedSerialized]:
     """
-    Resolve layer/asset references under ``world_prefix`` and bundle files from ``res_root`` into the
-    output USDZ (flat layout). Follows references/payloads transitively through USD layers.
+    Resolve layer/asset references under ``path_prefix`` and bundle files from
+    ``res_root`` into the output USDZ (flat layout).
 
-    Skips names in ``_OUTPUT_AUTHORED_NAMES`` and ``extra_skip_names`` (e.g. source root default file).
+    Follows references/payloads transitively through USD layers. Skips names in
+    ``_OUTPUT_AUTHORED_NAMES`` and ``extra_skip_names`` (e.g. source root default
+    file).
     """
     skip: Set[str] = set(_OUTPUT_AUTHORED_NAMES)
     if extra_skip_names:
         skip.update(extra_skip_names)
 
-    seed = _gather_refs_from_layer_subtree(dest_layer, world_prefix)
+    seed = _gather_refs_from_layer_subtree(dest_layer, path_prefix)
     queue: Set[str] = {n for n in seed if n not in skip}
     done: Set[str] = set(skip)
     result: List[NamedSerialized] = []
@@ -225,6 +268,9 @@ def collect_transitive_sidecars_for_world_subtree(
             logger.warning("Could not read sidecar %s: %s", path, e)
             continue
         result.append(NamedSerialized(filename=name, serialized=data))
+        for companion in _companion_sidecar_basenames(name):
+            if companion not in done:
+                queue.add(companion)
 
         suf = path.suffix.lower()
         if suf not in (".usd", ".usda", ".usdc"):
@@ -240,8 +286,27 @@ def collect_transitive_sidecars_for_world_subtree(
                     queue.add(bn)
 
     if result:
-        logger.info("Bundled %d sidecar file(s) from %s for /World references", len(result), res_root)
+        logger.info(
+            "Bundled %d sidecar file(s) from %s for %s references",
+            len(result),
+            res_root,
+            path_prefix,
+        )
     return result
+
+
+def collect_transitive_sidecars_for_world_subtree(
+    dest_layer: Sdf.Layer,
+    res_root: Path,
+    world_prefix: str = "/World",
+    extra_skip_names: Optional[Collection[str]] = None,
+) -> List[NamedSerialized]:
+    return collect_transitive_sidecars_for_subtree(
+        dest_layer,
+        res_root,
+        path_prefix=world_prefix,
+        extra_skip_names=extra_skip_names,
+    )
 
 
 @contextmanager
