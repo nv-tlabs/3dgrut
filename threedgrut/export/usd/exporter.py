@@ -253,7 +253,9 @@ class USDExporter(ModelExporter):
             dataset: Optional dataset for camera poses
             conf: Configuration parameters
             background: Optional background model for environment export
-            **kwargs: Additional parameters
+            **kwargs: Additional parameters. ``validate_usd`` (default True): run OpenUSD
+                stage validators on the written file (ParticleField / LightField only; no-op if
+                ``UsdValidation`` is unavailable).
         """
         output_path = Path(output_path)
         logger.info(f"Exporting USD file to {output_path}...")
@@ -399,17 +401,25 @@ class USDExporter(ModelExporter):
             if default_stage_wrapped is None:
                 default_stage_wrapped = self._create_default_stage([gaussians_stage])
             write_to_usdz(output_path, [default_stage_wrapped, gaussians_stage], files if files else None)
+            written_path = output_path
         elif suffix in [".usda", ".usd", ".usdc"]:
             stage.Export(str(output_path))
             if envmap_bytes is not None:
                 envmap_path = output_path.parent / "envmap.png"
                 with open(envmap_path, "wb") as f:
                     f.write(envmap_bytes)
+            written_path = output_path
         else:
             usdz_path = output_path.with_suffix(".usdz")
             if default_stage_wrapped is None:
                 default_stage_wrapped = self._create_default_stage([gaussians_stage])
             write_to_usdz(usdz_path, [default_stage_wrapped, gaussians_stage], files if files else None)
+            written_path = usdz_path
+
+        if kwargs.get("validate_usd", True):
+            from threedgrut.export.usd.validation import validate_exported_usd_stage
+
+            validate_exported_usd_stage(written_path)
 
         logger.info(f"USD export complete: {output_path}")
 

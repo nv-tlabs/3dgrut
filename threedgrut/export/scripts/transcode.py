@@ -214,6 +214,7 @@ def transcode(
     linear_srgb: bool = False,
     copy_cameras_source: Optional[Tuple[Path, Path]] = None,
     copy_source_skip_subtrees: Optional[Tuple] = None,
+    validate_usd: bool = True,
 ) -> None:
     """Transcode between Gaussian splatting formats.
 
@@ -230,6 +231,7 @@ def transcode(
         linear_srgb: If True, set prim color space to lin_rec709_scene (lightfield only).
         copy_cameras_source: If set, (root_usd_path, asset_resolution_dir) to copy source /World prims from.
         copy_source_skip_subtrees: Optional tuple of Sdf.Path roots to skip under /World (None = default skip Gaussians).
+        validate_usd: If True and output is lightfield, run OpenUSD stage validation after export.
     """
     if render_order_hint is not None and output_format != "lightfield":
         logger.warning(
@@ -281,6 +283,7 @@ def transcode(
         apply_coordinate_transform=apply_coordinate_transform,
         copy_cameras_source=copy_cameras_source,
         copy_source_skip_subtrees=copy_source_skip_subtrees,
+        validate_usd=validate_usd if output_format == "lightfield" else False,
     )
 
     logger.info(f"Transcode complete: {input_path} -> {output_path}")
@@ -392,6 +395,11 @@ Examples:
         action="store_true",
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--no-usd-validate",
+        action="store_true",
+        help="Skip OpenUSD stage validation after lightfield (.usd/.usdz) export",
+    )
 
     return parser.parse_args()
 
@@ -450,6 +458,7 @@ def main():
                 linear_srgb=args.linear_srgb,
                 copy_cameras_source=copy_cameras_source,
                 copy_source_skip_subtrees=skip_subtrees,
+                validate_usd=not args.no_usd_validate,
             )
     except Exception as e:
         logger.error(f"Transcode failed: {e}")
