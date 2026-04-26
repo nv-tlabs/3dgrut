@@ -607,7 +607,7 @@ Rationale:
 
 - Which Kit versions need the USD fallback because SPG is unavailable?
 - Which known SPG bugs should trigger or recommend the USD fallback path?
-- What error threshold is acceptable for a degraded workaround export?
+- What error threshold is acceptable for a degraded fallback export?
 - Should the approximation target linear floating-point `LdrColor`, gamma
   output, or Kit viewport screenshots?
 - Are time-sampled `RenderProduct` post-processing attributes supported and

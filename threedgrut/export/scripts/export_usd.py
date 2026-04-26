@@ -21,10 +21,12 @@ Usage:
     python -m threedgrut.export.scripts.export_usd --checkpoint path/to/checkpoint.pt --output output.usdz
 
     # Export with NuRec format (Omniverse compatibility)
-    python -m threedgrut.export.scripts.export_usd --checkpoint path/to/checkpoint.pt --output output.usdz --format nurec
+    python -m threedgrut.export.scripts.export_usd --checkpoint path/to/checkpoint.pt \
+        --output output.usdz --format nurec
 
     # Export without cameras/background
-    python -m threedgrut.export.scripts.export_usd --checkpoint path/to/checkpoint.pt --output output.usdz --no-cameras --no-background
+    python -m threedgrut.export.scripts.export_usd --checkpoint path/to/checkpoint.pt \
+        --output output.usdz --no-cameras --no-background
 """
 
 import argparse
@@ -147,6 +149,48 @@ Examples:
     return parser.parse_args()
 
 
+def _load_ppisp_from_checkpoint(checkpoint, conf):
+    """Load trained PPISP state for USD export when available."""
+    post_conf = getattr(conf, "post_processing", None)
+    if "post_processing" not in checkpoint or post_conf is None or getattr(post_conf, "method", None) != "ppisp":
+        return None
+
+    try:
+        from ppisp import PPISP, PPISPConfig
+    except ImportError:
+        logger.warning("Checkpoint contains PPISP state, but ppisp is not available; skipping PPISP USD export")
+        return None
+
+    use_controller = post_conf.get("use_controller", True)
+    n_distillation_steps = post_conf.get("n_distillation_steps", 5000)
+    if use_controller and n_distillation_steps > 0:
+        main_training_steps = conf.n_iterations - n_distillation_steps
+        controller_activation_ratio = main_training_steps / conf.n_iterations
+        controller_distillation = True
+    elif use_controller:
+        controller_activation_ratio = 0.8
+        controller_distillation = False
+    else:
+        controller_activation_ratio = 0.0
+        controller_distillation = False
+
+    ppisp_config = PPISPConfig(
+        use_controller=use_controller,
+        controller_distillation=controller_distillation,
+        controller_activation_ratio=controller_activation_ratio,
+    )
+    post_processing = PPISP.from_state_dict(checkpoint["post_processing"]["module"], config=ppisp_config)
+    post_processing = post_processing.to("cpu")
+    logger.info("Loaded PPISP post-processing state for USD export")
+    return post_processing
+
+
+def _get_export_conf_value(export_conf, dashed_name: str, attr_name: str, default):
+    if hasattr(export_conf, "get"):
+        return export_conf.get(dashed_name, getattr(export_conf, attr_name, default))
+    return getattr(export_conf, attr_name, default)
+
+
 def load_model_from_checkpoint(checkpoint_path: str):
     """Load a 3DGRUT model from checkpoint."""
     from threedgrut.model.model import MixtureOfGaussians
@@ -169,7 +213,8 @@ def load_model_from_checkpoint(checkpoint_path: str):
     model.init_from_checkpoint(checkpoint, setup_optimizer=False)
     model.eval()
 
-    return model, conf, model.background
+    post_processing = _load_ppisp_from_checkpoint(checkpoint, conf)
+    return model, conf, model.background, post_processing
 
 
 def main():
@@ -189,7 +234,7 @@ def main():
 
     # Load model from checkpoint
     try:
-        model, conf, background = load_model_from_checkpoint(str(checkpoint_path))
+        model, conf, background, post_processing = load_model_from_checkpoint(str(checkpoint_path))
         logger.info(f"Loaded model with {model.get_positions().shape[0]} Gaussians")
     except ImportError:
         logger.error("Failed to import model class. Is 3DGRUT properly installed?")
@@ -236,13 +281,18 @@ def main():
     else:
         half_geometry = args.half_geometry or args.half
         half_features = args.half_features or args.half
+        export_conf = getattr(conf, "export_usd", None) or conf
         exporter = USDExporter(
             half_geometry=half_geometry,
             half_features=half_features,
             export_cameras=not args.no_cameras,
             export_background=not args.no_background,
             apply_normalizing_transform=not args.no_transform,
-            linear_srgb=args.linear_srgb,
+            sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", "cameraDistance"),
+            linear_srgb=args.linear_srgb or getattr(export_conf, "linear_srgb", False),
+            export_ppisp=getattr(export_conf, "export_ppisp", False),
+            ov_post_processing=_get_export_conf_value(export_conf, "ov-post-processing", "ov_post_processing", "none"),
+            frames_per_second=getattr(export_conf, "frames_per_second", 1.0),
         )
         logger.info("Using ParticleField3DGaussianSplat schema (standard)")
 
@@ -257,6 +307,7 @@ def main():
             dataset=dataset,
             conf=conf,
             background=background,
+            post_processing=post_processing,
             **export_kw,
         )
         logger.info(f"Export successful: {output_path}")

@@ -111,6 +111,24 @@ class MockGaussianModel(ExportableModel):
         return self._specular
 
 
+class MockCameraDataset:
+    """Minimal dataset exposing camera poses for USD camera export tests."""
+
+    def __len__(self) -> int:
+        return 2
+
+    def get_poses(self) -> np.ndarray:
+        poses = np.repeat(np.eye(4, dtype=np.float64)[None, :, :], len(self), axis=0)
+        poses[1, 0, 3] = 1.0
+        return poses
+
+    def get_camera_names(self):
+        return ["camera_0000"]
+
+    def get_camera_idx(self, frame_idx: int) -> int:
+        return 0
+
+
 class TestPLYExportImport:
     """Test PLY export from ExportableModel and import back."""
 
@@ -471,6 +489,23 @@ class TestUSDExportColorSpace:
             assert prim is not None, "No prim with ColorSpaceAPI found"
             api = Usd.ColorSpaceAPI(prim)
             assert api.GetColorSpaceNameAttr().Get() == "lin_rec709_scene"
+
+    def test_usdz_export_camera_is_composed_from_root_stage(self):
+        """USDZ camera prims are authored where the package root composes them."""
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        dataset = MockCameraDataset()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usdz"
+            USDExporter(
+                half_precision=False,
+                export_cameras=True,
+                export_background=False,
+                apply_normalizing_transform=False,
+            ).export(model, usd_path, dataset=dataset)
+            stage = Usd.Stage.Open(str(usd_path))
+            assert stage
+            assert stage.GetPrimAtPath("/World/Cameras/camera_0000").IsValid()
+            assert not stage.GetPrimAtPath("/World/gaussians/Cameras/camera_0000").IsValid()
 
 
 if __name__ == "__main__":
