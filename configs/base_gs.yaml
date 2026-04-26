@@ -124,7 +124,10 @@ loss:
 
 # Post-processing configuration
 post_processing:
-  method: null # Possible values: null, "ppisp"
+  # null | "ppisp" | "linear-to-srgb"
+  # - linear-to-srgb: IEC piecewise linear-to-sRGB on pred_rgb (same as tiny-cuda-nn common.linear_to_srgb).
+  #   No extra deps; no trainable weights. See threedgrut/utils/post_processing_linear_to_srgb.py.
+  method: null
   # Enable the controller for predicting per-frame corrections for novel views.
   # When false, zero corrections are used for novel views.
   use_controller: true
