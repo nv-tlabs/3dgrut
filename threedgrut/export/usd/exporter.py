@@ -295,6 +295,7 @@ class USDExporter(ModelExporter):
         Create a default.usda that references the data stages.
         """
         stage = initialize_usd_stage(up_axis="Y")
+        stage.SetTimeCodesPerSecond(self.frames_per_second)
 
         for ref_stage in referenced_stages:
             filename_stem = Path(ref_stage.filename).stem
@@ -391,6 +392,7 @@ class USDExporter(ModelExporter):
         default_stage_wrapped: Optional[NamedUSDStage] = None
         if package_as_usdz:
             default_stage_wrapped = self._create_default_stage([gaussians_stage])
+        scene_stage = default_stage_wrapped.stage if default_stage_wrapped is not None else stage
 
         files: List[NamedSerialized] = []
 
@@ -405,7 +407,7 @@ class USDExporter(ModelExporter):
                     logger.warning("Could not open source USD for prim merge: %s", stage_path)
                 else:
                     skip = kwargs.get("copy_source_skip_subtrees")
-                    merge_target = default_stage_wrapped.stage if default_stage_wrapped is not None else stage
+                    merge_target = scene_stage
                     merge_source_world_at_same_paths(merge_target, src_stage, skip_source_subtrees=skip)
                     merge_source_prim_at_same_path(merge_target, src_stage, "/Render")
                     copy_authored_time_settings_from_source(src_stage, merge_target)
@@ -447,7 +449,7 @@ class USDExporter(ModelExporter):
                     logger.warning("Could not extract camera intrinsics from dataset, using default")
 
                 camera_prim_paths = export_cameras_to_usd(
-                    stage=stage,
+                    stage=scene_stage,
                     poses=poses,
                     camera_names=camera_names,
                     frame_to_camera=frame_to_camera,
@@ -464,7 +466,7 @@ class USDExporter(ModelExporter):
         if self.export_background and background is not None:
             try:
                 _, envmap_bytes = export_background_to_usd(
-                    stage=stage,
+                    stage=scene_stage,
                     background=background,
                     conf=conf,
                     root_path="/World/Environment",
@@ -487,7 +489,7 @@ class USDExporter(ModelExporter):
         needs_ppisp_render_products = self.export_ppisp
         if needs_ppisp_render_products:
             render_product_entries = self._create_ppisp_render_products(
-                stage=stage,
+                stage=scene_stage,
                 dataset=dataset,
                 camera_names=camera_names,
                 frame_to_camera=frame_to_camera,
@@ -498,17 +500,17 @@ class USDExporter(ModelExporter):
         # Export PPISP as SPG shaders on RenderProducts
         if export_spg_ppisp and render_product_entries is not None:
             self._export_ppisp(
-                stage=stage,
+                stage=scene_stage,
                 dataset=dataset,
                 camera_names=camera_names,
                 post_processing=kwargs.get("post_processing"),
                 files=files,
             )
 
-        # Export fitted PPISP approximation as Omniverse USD post-processing settings
+        # Export PPISP through fitted Omniverse USD post-processing settings.
         if export_omni_ppisp_fallback and render_product_entries is not None:
             self._export_ov_post_processing(
-                stage=stage,
+                stage=scene_stage,
                 camera_names=camera_names,
                 camera_prim_paths=camera_prim_paths,
                 render_product_entries=render_product_entries,
@@ -552,7 +554,7 @@ class USDExporter(ModelExporter):
         camera_prim_paths: Dict[str, str],
         camera_params,
     ):
-        """Create /Render RenderProducts shared by SPG and OV PPISP exports."""
+        """Create /Render RenderProducts shared by SPG and Omniverse fallback PPISP exports."""
         if dataset is None or not camera_prim_paths:
             logger.warning("No camera prims available for PPISP RenderProduct wiring, skipping")
             return None
@@ -635,7 +637,7 @@ class USDExporter(ModelExporter):
         try:
             from ppisp import PPISP  # type: ignore[import-not-found]
         except ImportError:
-            logger.warning("ppisp package not available, skipping OV post-processing export")
+            logger.warning("ppisp package not available, skipping Omniverse post-processing fallback export")
             return
 
         if not isinstance(post_processing, PPISP):
@@ -660,7 +662,7 @@ class USDExporter(ModelExporter):
                 mode=self.ov_post_processing,
             )
         except Exception as e:
-            logger.warning(f"Failed to add OV post-processing fallback: {e}")
+            logger.warning(f"Failed to add Omniverse post-processing fallback: {e}")
 
     @classmethod
     def from_config(cls, conf) -> "USDExporter":

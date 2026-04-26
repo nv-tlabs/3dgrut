@@ -263,7 +263,7 @@ def _author_camera_exposure(
 ) -> None:
     camera_prim = stage.GetPrimAtPath(camera_path)
     if not camera_prim.IsValid():
-        log.warning("Cannot author OV exposure: missing camera prim %s", camera_path)
+        log.warning("Cannot author Omniverse fallback exposure: missing camera prim %s", camera_path)
         return
 
     _prepend_api_schemas(camera_prim, _CAMERA_EXPOSURE_APIS)
@@ -354,7 +354,7 @@ def add_ov_post_processing(
         frame_indices = camera_frame_mapping.get(camera_name, [])
         camera_path = camera_prim_paths.get(camera_name)
         if camera_path is None:
-            log.warning("Skipping OV post-processing for %s: missing camera prim", camera_name)
+            log.warning("Skipping Omniverse post-processing fallback for %s: missing camera prim", camera_name)
             continue
 
         _author_camera_exposure(stage, camera_path, frame_indices, exposure_params)
@@ -367,7 +367,7 @@ def add_ov_post_processing(
         render_product_path = f"{render_scope_path}/{render_product_name}"
         render_product = stage.GetPrimAtPath(render_product_path)
         if not render_product.IsValid():
-            log.warning("Skipping OV post-processing for %s: missing RenderProduct", camera_name)
+            log.warning("Skipping Omniverse post-processing fallback for %s: missing RenderProduct", camera_name)
             continue
 
         _prepend_api_schemas(render_product, _RENDER_PRODUCT_APIS)
