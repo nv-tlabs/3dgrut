@@ -808,6 +808,7 @@ class Trainer3DGRUT:
                 dataset=self.train_dataset,
                 conf=conf,
                 background=getattr(self, "background", None),
+                post_processing=getattr(self, "post_processing", None),
             )
 
         # Export post-processing report (PPISP-based)

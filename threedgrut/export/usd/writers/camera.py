@@ -16,53 +16,57 @@
 """
 Camera USD writer for exporting camera poses and intrinsics.
 
-Exports camera poses with full intrinsics support for OpenCVPinhole and OpenCVFisheye
-camera models, following the pattern established in NRE's rig_trajectories.py.
+Exports one Camera prim per physical camera with time-sampled transforms
+and static intrinsics, following the pattern established in NRE's
+rig_trajectories.py.
 """
 
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 from ncore.data import (
     OpenCVFisheyeCameraModelParameters,
     OpenCVPinholeCameraModelParameters,
 )
-from pxr import Gf, Sdf, Usd, UsdGeom, Vt
+from pxr import Gf, Sdf, Tf, Usd, UsdGeom
 
 from threedgrut.export.transforms import column_vector_4x4_to_usd_matrix
 
 logger = logging.getLogger(__name__)
 
-# Default clipping range for cameras
 DEFAULT_NEAR_CLIP = 0.001
 DEFAULT_FAR_CLIP = 10000000.0
+
+# Coordinate transform from 3DGRUT (right-down-front) to USD camera (right-up-back)
+_CAMERA_COORD_FLIP = np.array(
+    [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]], dtype=np.float64
+)
+
+
+def _make_usd_prim_name(name: str) -> str:
+    """Convert an arbitrary string to a valid USD prim identifier."""
+    return Tf.MakeValidIdentifier(name)
 
 
 def _add_opencv_pinhole_camera_intrinsics(
     camera_prim: Usd.Prim,
     params: OpenCVPinholeCameraModelParameters,
 ) -> None:
-    """Add OpenCV pinhole camera intrinsics to USD camera prim."""
-    # Camera projection type
-    camera_prim.CreateAttribute("cameraProjectionType", Sdf.ValueTypeNames.Token).Set(Vt.Token("pinholeOpenCV"))
+    camera_prim.CreateAttribute("cameraProjectionType", Sdf.ValueTypeNames.Token).Set("pinholeOpenCV")
 
-    # Resolution
     resolution_list = params.resolution.tolist()
     camera_prim.CreateAttribute("fthetaWidth", Sdf.ValueTypeNames.Float).Set(float(resolution_list[0]))
     camera_prim.CreateAttribute("fthetaHeight", Sdf.ValueTypeNames.Float).Set(float(resolution_list[1]))
 
-    # Principal point
     principal_point_list = params.principal_point.tolist()
     camera_prim.CreateAttribute("fthetaCx", Sdf.ValueTypeNames.Float).Set(float(principal_point_list[0]))
     camera_prim.CreateAttribute("fthetaCy", Sdf.ValueTypeNames.Float).Set(float(principal_point_list[1]))
 
-    # Focal length
     focal_length_list = params.focal_length.tolist()
     camera_prim.CreateAttribute("openCVFx", Sdf.ValueTypeNames.Float).Set(float(focal_length_list[0]))
     camera_prim.CreateAttribute("openCVFy", Sdf.ValueTypeNames.Float).Set(float(focal_length_list[1]))
 
-    # Radial distortion coefficients [k1,k2,k3,k4,k5,k6]
     radial_coeffs_list = params.radial_coeffs.tolist()
     camera_prim.CreateAttribute("fthetaPolyA", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[0]))
     camera_prim.CreateAttribute("fthetaPolyB", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[1]))
@@ -71,12 +75,10 @@ def _add_opencv_pinhole_camera_intrinsics(
     camera_prim.CreateAttribute("fthetaPolyE", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[4]))
     camera_prim.CreateAttribute("fthetaPolyF", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[5]))
 
-    # Tangential distortion coefficients [p1,p2]
     tangential_coeffs_list = params.tangential_coeffs.tolist()
     camera_prim.CreateAttribute("p0", Sdf.ValueTypeNames.Float).Set(float(tangential_coeffs_list[0]))
     camera_prim.CreateAttribute("p1", Sdf.ValueTypeNames.Float).Set(float(tangential_coeffs_list[1]))
 
-    # Thin prism distortion coefficients [s1,s2,s3,s4]
     thin_prism_coeffs_list = params.thin_prism_coeffs.tolist()
     camera_prim.CreateAttribute("s0", Sdf.ValueTypeNames.Float).Set(float(thin_prism_coeffs_list[0]))
     camera_prim.CreateAttribute("s1", Sdf.ValueTypeNames.Float).Set(float(thin_prism_coeffs_list[1]))
@@ -88,152 +90,116 @@ def _add_opencv_fisheye_camera_intrinsics(
     camera_prim: Usd.Prim,
     params: OpenCVFisheyeCameraModelParameters,
 ) -> None:
-    """Add OpenCV fisheye camera intrinsics to USD camera prim."""
-    # Camera projection type
-    camera_prim.CreateAttribute("cameraProjectionType", Sdf.ValueTypeNames.Token).Set(Vt.Token("fisheyeOpenCV"))
+    camera_prim.CreateAttribute("cameraProjectionType", Sdf.ValueTypeNames.Token).Set("fisheyeOpenCV")
 
-    # Resolution
     resolution_list = params.resolution.tolist()
     camera_prim.CreateAttribute("fthetaWidth", Sdf.ValueTypeNames.Float).Set(float(resolution_list[0]))
     camera_prim.CreateAttribute("fthetaHeight", Sdf.ValueTypeNames.Float).Set(float(resolution_list[1]))
 
-    # Principal point
     principal_point_list = params.principal_point.tolist()
     camera_prim.CreateAttribute("fthetaCx", Sdf.ValueTypeNames.Float).Set(float(principal_point_list[0]))
     camera_prim.CreateAttribute("fthetaCy", Sdf.ValueTypeNames.Float).Set(float(principal_point_list[1]))
 
-    # Focal length
     focal_length_list = params.focal_length.tolist()
     camera_prim.CreateAttribute("openCVFx", Sdf.ValueTypeNames.Float).Set(float(focal_length_list[0]))
     camera_prim.CreateAttribute("openCVFy", Sdf.ValueTypeNames.Float).Set(float(focal_length_list[1]))
 
-    # Radial distortion coefficients [k1,k2,k3,k4]
     radial_coeffs_list = params.radial_coeffs.tolist()
     camera_prim.CreateAttribute("fthetaPolyA", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[0]))
     camera_prim.CreateAttribute("fthetaPolyB", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[1]))
     camera_prim.CreateAttribute("fthetaPolyC", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[2]))
     camera_prim.CreateAttribute("fthetaPolyD", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[3]))
 
-    # Max FoV (convert from radians to degrees, x2 for full FoV)
-    camera_prim.CreateAttribute("fthetaMaxFov", Sdf.ValueTypeNames.Float).Set(float(2.0 * np.rad2deg(params.max_angle)))
-
-
-def _add_simple_pinhole_intrinsics(
-    camera_prim: Usd.Prim,
-    intrinsics: List[float],
-    resolution: List[int],
-) -> None:
-    """Add simple pinhole intrinsics [fx, fy, cx, cy] without distortion."""
-    fx, fy, cx, cy = intrinsics
-
-    # Use standard USD pinhole camera attributes
-    # Compute horizontal aperture from resolution and focal length
-    # USD uses mm for aperture, assuming sensor is 36mm (full-frame)
-    sensor_width_mm = 36.0
-    focal_length_mm = (fx / resolution[0]) * sensor_width_mm
-
-    camera_prim.GetFocalLengthAttr().Set(focal_length_mm)
-    camera_prim.GetHorizontalApertureAttr().Set(sensor_width_mm)
-    camera_prim.GetVerticalApertureAttr().Set(sensor_width_mm * resolution[1] / resolution[0])
-
-    # Principal point offset from center
-    horizontal_offset = ((cx / resolution[0]) - 0.5) * sensor_width_mm
-    vertical_offset = ((cy / resolution[1]) - 0.5) * (sensor_width_mm * resolution[1] / resolution[0])
-    camera_prim.GetHorizontalApertureOffsetAttr().Set(horizontal_offset)
-    camera_prim.GetVerticalApertureOffsetAttr().Set(vertical_offset)
+    camera_prim.CreateAttribute("fthetaMaxFov", Sdf.ValueTypeNames.Float).Set(
+        float(2.0 * np.rad2deg(params.max_angle))
+    )
 
 
 def export_cameras_to_usd(
     stage: Usd.Stage,
     poses: np.ndarray,
-    intrinsics: Optional[List] = None,
+    camera_names: List[str],
+    frame_to_camera: List[int],
     camera_params: Optional[List] = None,
-    resolutions: Optional[List[np.ndarray]] = None,
     root_path: str = "/World/Cameras",
-    camera_prefix: str = "camera",
     visible: bool = False,
-) -> str:
+) -> Dict[str, str]:
     """
-    Export camera poses with intrinsics to USD stage.
+    Export camera poses with intrinsics to a USD stage.
 
-    Supports multiple camera model types:
-    - OpenCVPinholeCameraModelParameters: Full pinhole with distortion
-    - OpenCVFisheyeCameraModelParameters: Fisheye with distortion
-    - Simple intrinsics: [fx, fy, cx, cy] list for basic pinhole
+    Creates one Camera prim per physical camera with time-sampled transforms
+    and static intrinsics. The time code for frame i is float(i), so
+    stage.GetTimeCodesPerSecond() controls real-time playback speed.
 
     Args:
-        stage: USD stage to export to
-        poses: Camera poses [N, 4, 4] in 3DGRUT convention (right-down-front)
-        intrinsics: Optional list of [fx, fy, cx, cy] for simple pinhole
-        camera_params: Optional list of camera model parameters (OpenCVPinhole/Fisheye)
-        resolutions: Optional list of resolutions [[w, h], ...] for simple intrinsics
-        root_path: USD path for camera root xform
-        camera_prefix: Prefix for camera names
-        visible: Whether cameras should be visible in viewport
+        stage: USD stage to export to.
+        poses: Camera-to-world transforms [N_frames, 4, 4] in 3DGRUT convention
+            (right-down-front).
+        camera_names: Logical name for each physical camera, indexed by camera_idx.
+        frame_to_camera: Per-frame camera index mapping, length N_frames.
+        camera_params: Per-frame CameraModelParameters (OpenCVPinhole / Fisheye).
+            Intrinsics are taken from the first frame of each camera.
+        root_path: USD path for the camera root Xform.
+        visible: Whether camera prims should be visible in the viewport.
 
     Returns:
-        Root path of the cameras
+        Mapping {camera_name: usd_prim_path} for every exported camera.
     """
-    num_cameras = poses.shape[0]
+    num_cameras = len(camera_names)
 
-    # Create root xform for cameras
+    # Group frame indices by camera
+    camera_frames: Dict[int, List[int]] = {i: [] for i in range(num_cameras)}
+    for frame_idx, cam_idx in enumerate(frame_to_camera):
+        if 0 <= cam_idx < num_cameras:
+            camera_frames[cam_idx].append(frame_idx)
+
     UsdGeom.Xform.Define(stage, root_path)
 
-    # Coordinate transform from 3DGRUT (right-down-front) to USD camera (right-up-back)
-    # 3DGRUT: X=right, Y=down, Z=front
-    # USD:    X=right, Y=up, Z=back
-    camera_coord_flip = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]], dtype=np.float64)
+    result: Dict[str, str] = {}
 
-    for i in range(num_cameras):
-        camera_name = f"{camera_prefix}_{i:04d}"
-        camera_path = f"{root_path}/{camera_name}"
+    for cam_idx, cam_name in enumerate(camera_names):
+        frame_indices = camera_frames[cam_idx]
+        if not frame_indices:
+            logger.warning(f"Camera '{cam_name}' (idx {cam_idx}) has no frames, skipping")
+            continue
 
-        # Define camera prim
+        prim_name = _make_usd_prim_name(cam_name)
+        camera_path = f"{root_path}/{prim_name}"
+
         camera_prim = stage.DefinePrim(camera_path, "Camera")
         camera = UsdGeom.Camera(camera_prim)
-
-        # Set clipping range
         camera.GetClippingRangeAttr().Set(Gf.Vec2f(DEFAULT_NEAR_CLIP, DEFAULT_FAR_CLIP))
 
-        # Add intrinsics based on available data
-        if camera_params is not None and i < len(camera_params) and camera_params[i] is not None:
-            params = camera_params[i]
+        # Static intrinsics from first frame of this camera
+        first_frame = frame_indices[0]
+        if camera_params is not None and first_frame < len(camera_params) and camera_params[first_frame] is not None:
+            params = camera_params[first_frame]
             if isinstance(params, OpenCVPinholeCameraModelParameters):
                 _add_opencv_pinhole_camera_intrinsics(camera_prim, params)
             elif isinstance(params, OpenCVFisheyeCameraModelParameters):
                 _add_opencv_fisheye_camera_intrinsics(camera_prim, params)
             else:
-                # Fallback to default focal length
                 camera.GetFocalLengthAttr().Set(24.0)
-                logger.warning(f"Unsupported camera model for camera {i}, using default intrinsics")
-        elif intrinsics is not None and resolutions is not None:
-            # Simple pinhole from intrinsics list
-            if i < len(resolutions):
-                resolution = resolutions[i].tolist() if isinstance(resolutions[i], np.ndarray) else resolutions[i]
-            else:
-                resolution = resolutions[0].tolist() if isinstance(resolutions[0], np.ndarray) else resolutions[0]
-            _add_simple_pinhole_intrinsics(camera_prim, intrinsics, resolution)
+                logger.warning(f"Unsupported camera model for '{cam_name}', using default focal length")
         else:
-            # Fallback to default focal length
             camera.GetFocalLengthAttr().Set(24.0)
 
-        # Set camera transform (pose)
-        # Apply coordinate system transform: 3DGRUT -> USD camera, then build USD matrix via Gf API
-        pose = poses[i]
-        usd_pose = pose @ camera_coord_flip
-        usd_matrix = column_vector_4x4_to_usd_matrix(usd_pose)
-
+        # Time-sampled transforms — one sample per frame belonging to this camera
         xformable = UsdGeom.Xformable(camera_prim)
         transform_op = xformable.AddTransformOp()
-        transform_op.Set(usd_matrix)
+        for frame_idx in frame_indices:
+            usd_pose = poses[frame_idx] @ _CAMERA_COORD_FLIP
+            transform_op.Set(column_vector_4x4_to_usd_matrix(usd_pose), float(frame_idx))
 
-        # Set visibility
         imageable = UsdGeom.Imageable(camera_prim)
-        visibility = "inherited" if visible else "invisible"
-        imageable.CreateVisibilityAttr().Set(visibility)
+        imageable.CreateVisibilityAttr().Set("inherited" if visible else "invisible")
 
-    logger.info(f"Exported {num_cameras} cameras to {root_path}")
-    return root_path
+        result[cam_name] = camera_path
+
+    logger.info(
+        f"Exported {len(result)} camera(s) ({len(poses)} total frames) to {root_path}"
+    )
+    return result
 
 
 def export_camera_rig_with_timestamps(
@@ -267,42 +233,30 @@ def export_camera_rig_with_timestamps(
     """
     num_frames = poses.shape[0]
 
-    # Create rig xform
     rig_prim = stage.DefinePrim(root_path, "Xform")
     rig_xform = UsdGeom.Xformable(rig_prim)
 
-    # Coordinate transform
-    camera_coord_flip = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]], dtype=np.float64)
-
-    # USD time code setup
     usd_time_code_per_second = stage.GetTimeCodesPerSecond()
-    usd_timestamp_scale = usd_time_code_per_second * 1e-06  # microseconds to time codes
+    usd_timestamp_scale = usd_time_code_per_second * 1e-06
 
-    # Create transform op for rig
     rig_transform_op = rig_xform.AddTransformOp()
 
     usd_start_time_code = float("inf")
     usd_end_time_code = 0.0
 
-    # Add time-sampled transforms
     for i in range(num_frames):
-        pose = poses[i]
-        usd_pose = pose @ camera_coord_flip
+        usd_pose = poses[i] @ _CAMERA_COORD_FLIP
         usd_matrix = column_vector_4x4_to_usd_matrix(usd_pose)
 
         if timestamps_us is not None:
-            timestamp = timestamps_us[i]
-            usd_time_code = usd_timestamp_scale * (timestamp - timestamp_offset_us)
-            usd_start_time_code = min(usd_start_time_code, usd_time_code)
-            usd_end_time_code = max(usd_end_time_code, usd_time_code)
+            usd_time_code = usd_timestamp_scale * (timestamps_us[i] - timestamp_offset_us)
         else:
             usd_time_code = float(i)
-            usd_start_time_code = min(usd_start_time_code, usd_time_code)
-            usd_end_time_code = max(usd_end_time_code, usd_time_code)
 
+        usd_start_time_code = min(usd_start_time_code, usd_time_code)
+        usd_end_time_code = max(usd_end_time_code, usd_time_code)
         rig_transform_op.Set(usd_matrix, usd_time_code)
 
-    # Set time metadata
     if usd_start_time_code <= usd_end_time_code:
         stage.SetMetadata("startTimeCode", usd_start_time_code)
         stage.SetMetadata("endTimeCode", usd_end_time_code)
@@ -310,15 +264,11 @@ def export_camera_rig_with_timestamps(
     if timestamps_us is not None:
         stage.SetMetadataByDictKey("customLayerData", "absoluteTimeOffsetMicroSec", timestamp_offset_us)
 
-    # Create camera prim under rig (static relative to rig)
     camera_path = f"{root_path}/{camera_name}"
     camera_prim = stage.DefinePrim(camera_path, "Camera")
     camera = UsdGeom.Camera(camera_prim)
-
-    # Set default clipping range
     camera.GetClippingRangeAttr().Set(Gf.Vec2f(DEFAULT_NEAR_CLIP, DEFAULT_FAR_CLIP))
 
-    # Add intrinsics if provided
     if camera_params is not None and len(camera_params) > 0:
         params = camera_params[0]
         if isinstance(params, OpenCVPinholeCameraModelParameters):
@@ -330,15 +280,12 @@ def export_camera_rig_with_timestamps(
     else:
         camera.GetFocalLengthAttr().Set(24.0)
 
-    # Camera is at identity transform relative to rig (transform is on rig itself)
     xformable = UsdGeom.Xformable(camera_prim)
     transform_op = xformable.AddTransformOp()
     transform_op.Set(Gf.Matrix4d(1.0))
 
-    # Set visibility
     imageable = UsdGeom.Imageable(camera_prim)
-    visibility = "inherited" if visible else "invisible"
-    imageable.CreateVisibilityAttr().Set(visibility)
+    imageable.CreateVisibilityAttr().Set("inherited" if visible else "invisible")
 
     logger.info(f"Exported camera rig with {num_frames} frames to {root_path}")
     return root_path

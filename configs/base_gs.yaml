@@ -49,6 +49,10 @@ export_usd:
   sorting_mode_hint: cameraDistance
   # If true, Gaussian prim ColorSpaceAPI uses lin_rec709_scene; else srgb_rec709_display
   linear_srgb: false
+  # PPISP post-processing export as SPG shader on per-camera RenderProducts
+  export_ppisp: false
+  # USD timeCodesPerSecond; time codes are bare frame indices so this sets playback speed
+  frames_per_second: 1.0
 
 model:
   density_activation: sigmoid
