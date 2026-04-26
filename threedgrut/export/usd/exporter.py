@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
+from pxr import Usd
 from ncore.data import (
     OpenCVFisheyeCameraModelParameters,
     OpenCVPinholeCameraModelParameters,
@@ -47,6 +48,11 @@ from threedgrut.export.usd.stage_utils import (
 )
 from threedgrut.export.usd.writers.background import export_background_to_usd
 from threedgrut.export.usd.writers.base import create_gaussian_writer
+from threedgrut.export.usd.camera_copy import (
+    collect_transitive_sidecars_for_world_subtree,
+    copy_authored_time_settings_from_source,
+    merge_source_world_at_same_paths,
+)
 from threedgrut.export.usd.writers.camera import export_cameras_to_usd
 
 logger = logging.getLogger(__name__)
@@ -305,9 +311,42 @@ class USDExporter(ModelExporter):
         writer.write_attributes(attrs)
         writer.finalize(attrs.positions)
 
-        # Collect stages and files for USDZ
-        stages: List[NamedUSDStage] = []
+        suffix = output_path.suffix.lower()
+        package_as_usdz = suffix == ".usdz" or suffix not in (".usd", ".usda", ".usdc")
+
+        gaussians_stage = NamedUSDStage(filename="gaussians.usdc", stage=stage)
+        default_stage_wrapped: Optional[NamedUSDStage] = None
+        if package_as_usdz:
+            default_stage_wrapped = self._create_default_stage([gaussians_stage])
+
         files: List[NamedSerialized] = []
+
+        copy_source_usd = kwargs.get("copy_source_usd")
+        if copy_source_usd is None:
+            copy_source_usd = kwargs.get("copy_cameras_source")
+        if copy_source_usd is not None:
+            stage_path, res_root = copy_source_usd
+            try:
+                src_stage = Usd.Stage.Open(str(stage_path))
+                if not src_stage:
+                    logger.warning("Could not open source USD for prim merge: %s", stage_path)
+                else:
+                    skip = kwargs.get("copy_source_skip_subtrees")
+                    merge_target = default_stage_wrapped.stage if default_stage_wrapped is not None else stage
+                    merge_source_world_at_same_paths(merge_target, src_stage, skip_source_subtrees=skip)
+                    copy_authored_time_settings_from_source(src_stage, merge_target)
+                    if package_as_usdz and res_root is not None and res_root.is_dir():
+                        sidecars = collect_transitive_sidecars_for_world_subtree(
+                            merge_target.GetRootLayer(),
+                            res_root,
+                            world_prefix="/World",
+                            extra_skip_names={Path(stage_path).name},
+                        )
+                        for entry in sidecars:
+                            if not any(f.filename == entry.filename for f in files):
+                                files.append(entry)
+            except Exception as e:
+                logger.warning("Failed to merge source USD prims: %s", e)
 
         # Export cameras if requested and dataset available
         if self.export_cameras and dataset is not None:
@@ -355,29 +394,22 @@ class USDExporter(ModelExporter):
             except (AttributeError, ValueError, ImportError) as e:
                 logger.warning(f"Failed to export background: {e}")
 
-        # Determine output format
-        suffix = output_path.suffix.lower()
+        # Package: gaussians_stage / default_stage_wrapped were built before source merge.
         if suffix == ".usdz":
-            # Package as USDZ with composition:
-            # - default.usda (text) references gaussians.usdc (binary)
-            gaussians_stage = NamedUSDStage(filename="gaussians.usdc", stage=stage)
-            default_stage = self._create_default_stage([gaussians_stage])
-            # default.usda must be first in USDZ
-            write_to_usdz(output_path, [default_stage, gaussians_stage], files if files else None)
+            if default_stage_wrapped is None:
+                default_stage_wrapped = self._create_default_stage([gaussians_stage])
+            write_to_usdz(output_path, [default_stage_wrapped, gaussians_stage], files if files else None)
         elif suffix in [".usda", ".usd", ".usdc"]:
-            # Export as plain USD (format determined by extension)
             stage.Export(str(output_path))
-            # Also export envmap if present
             if envmap_bytes is not None:
                 envmap_path = output_path.parent / "envmap.png"
                 with open(envmap_path, "wb") as f:
                     f.write(envmap_bytes)
         else:
-            # Default to USDZ
             usdz_path = output_path.with_suffix(".usdz")
-            gaussians_stage = NamedUSDStage(filename="gaussians.usdc", stage=stage)
-            default_stage = self._create_default_stage([gaussians_stage])
-            write_to_usdz(usdz_path, [default_stage, gaussians_stage], files if files else None)
+            if default_stage_wrapped is None:
+                default_stage_wrapped = self._create_default_stage([gaussians_stage])
+            write_to_usdz(usdz_path, [default_stage_wrapped, gaussians_stage], files if files else None)
 
         logger.info(f"USD export complete: {output_path}")
 
