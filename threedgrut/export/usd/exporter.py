@@ -53,6 +53,11 @@ from threedgrut.export.usd.camera_copy import (
     copy_authored_time_settings_from_source,
     merge_source_world_at_same_paths,
 )
+from threedgrut.export.usd.writers.ov_post_processing import (
+    MODE_NONE,
+    MODE_PPISP_HYBRID_WAR,
+    normalize_ov_post_processing_mode,
+)
 from threedgrut.export.usd.writers.camera import export_cameras_to_usd
 
 logger = logging.getLogger(__name__)
@@ -240,6 +245,7 @@ class USDExporter(ModelExporter):
         sorting_mode_hint: str = "cameraDistance",
         linear_srgb: bool = False,
         export_ppisp: bool = False,
+        ov_post_processing: str = MODE_NONE,
         frames_per_second: float = 1.0,
     ):
         """
@@ -256,6 +262,7 @@ class USDExporter(ModelExporter):
             linear_srgb: If True, set prim color space to lin_rec709_scene.
             export_ppisp: If True, add PPISP SPG shaders on per-camera RenderProducts.
                 Requires post_processing kwarg to be a ppisp.PPISP instance.
+            ov_post_processing: Omniverse RTX post-processing workaround mode.
             frames_per_second: Sets stage.timeCodesPerSecond. Time codes are always
                 bare frame indices (float(frame_idx)), so this controls playback speed.
                 Default 1.0 means 1 frame per second of real time.
@@ -271,6 +278,7 @@ class USDExporter(ModelExporter):
         self.sorting_mode_hint = sorting_mode_hint
         self.linear_srgb = linear_srgb
         self.export_ppisp = export_ppisp
+        self.ov_post_processing = normalize_ov_post_processing_mode(ov_post_processing)
         self.frames_per_second = frames_per_second
 
     def _create_default_stage(self, referenced_stages: List[NamedUSDStage]) -> NamedUSDStage:
@@ -308,7 +316,7 @@ class USDExporter(ModelExporter):
             background: Optional background model for environment export.
             **kwargs:
                 post_processing: ppisp.PPISP instance for SPG export (used when
-                    export_ppisp=True).
+                    export_ppisp=True or ov-post-processing is enabled).
                 validate_usd (default True): run OpenUSD stage validators.
                 apply_coordinate_transform (bool): apply 3DGRUT→USDZ coordinate flip.
                 copy_source_usd: (stage_path, res_root) for prim merge.
@@ -408,6 +416,7 @@ class USDExporter(ModelExporter):
         camera_names = None
         frame_to_camera = None
         camera_prim_paths: Dict[str, str] = {}
+        camera_params = None
 
         if dataset is not None:
             camera_names, frame_to_camera = _extract_camera_grouping(dataset)
@@ -456,17 +465,38 @@ class USDExporter(ModelExporter):
             except (AttributeError, ValueError, ImportError) as e:
                 logger.warning(f"Failed to export background: {e}")
 
-        # Export PPISP as SPG shaders on RenderProducts
-        if self.export_ppisp:
-            self._export_ppisp(
+        render_product_entries = None
+        export_spg_ppisp = self.export_ppisp or self.ov_post_processing == MODE_PPISP_HYBRID_WAR
+        needs_ppisp_render_products = export_spg_ppisp or self.ov_post_processing != MODE_NONE
+        if needs_ppisp_render_products:
+            render_product_entries = self._create_ppisp_render_products(
                 stage=stage,
                 dataset=dataset,
                 camera_names=camera_names,
                 frame_to_camera=frame_to_camera,
                 camera_prim_paths=camera_prim_paths,
-                camera_params=_extract_camera_params_from_dataset(dataset) if dataset is not None else None,
+                camera_params=camera_params,
+            )
+
+        # Export PPISP as SPG shaders on RenderProducts
+        if export_spg_ppisp and render_product_entries is not None:
+            self._export_ppisp(
+                stage=stage,
+                dataset=dataset,
+                camera_names=camera_names,
                 post_processing=kwargs.get("post_processing"),
                 files=files,
+            )
+
+        # Export PPISP approximation as Omniverse RTX post-processing settings
+        if self.ov_post_processing != MODE_NONE and render_product_entries is not None:
+            self._export_ov_post_processing(
+                stage=stage,
+                camera_names=camera_names,
+                camera_prim_paths=camera_prim_paths,
+                render_product_entries=render_product_entries,
+                dataset=dataset,
+                post_processing=kwargs.get("post_processing"),
             )
 
         # Package
@@ -496,7 +526,7 @@ class USDExporter(ModelExporter):
 
         logger.info(f"USD export complete: {output_path}")
 
-    def _export_ppisp(
+    def _create_ppisp_render_products(
         self,
         stage,
         dataset,
@@ -504,10 +534,37 @@ class USDExporter(ModelExporter):
         frame_to_camera,
         camera_prim_paths: Dict[str, str],
         camera_params,
+    ):
+        """Create /Render RenderProducts shared by SPG and OV PPISP exports."""
+        if dataset is None or not camera_prim_paths:
+            logger.warning("No camera prims available for PPISP RenderProduct wiring, skipping")
+            return None
+
+        from threedgrut.export.usd.writers.render_product import create_render_products
+
+        resolutions = _extract_camera_resolutions(camera_params, camera_names, frame_to_camera)
+        camera_entries = {}
+        for cam_name, cam_path in camera_prim_paths.items():
+            w, h = resolutions.get(cam_name, (0, 0))
+            camera_entries[cam_name] = (cam_path, w, h)
+
+        try:
+            create_render_products(stage=stage, camera_entries=camera_entries)
+        except Exception as e:
+            logger.warning(f"Failed to create RenderProducts: {e}")
+            return None
+
+        return camera_entries
+
+    def _export_ppisp(
+        self,
+        stage,
+        dataset,
+        camera_names,
         post_processing,
         files: List[NamedSerialized],
     ) -> None:
-        """Create /Render RenderProducts and attach PPISP SPG shaders."""
+        """Attach PPISP SPG shaders to existing RenderProducts."""
         try:
             from ppisp import PPISP  # type: ignore[import-not-found]
         except ImportError:
@@ -521,31 +578,12 @@ class USDExporter(ModelExporter):
             )
             return
 
-        if dataset is None or not camera_prim_paths:
-            logger.warning("No camera prims available for PPISP RenderProduct wiring, skipping")
-            return
-
-        from threedgrut.export.usd.writers.render_product import create_render_products
         from threedgrut.export.usd.writers.ppisp_writer import (
             add_ppisp_to_all_render_products,
             build_camera_frame_mapping,
         )
         from threedgrut.export.usd.ppisp_spg import get_ppisp_spg_files
 
-        # Build camera_entries: camera_name → (usd_camera_path, width, height)
-        resolutions = _extract_camera_resolutions(camera_params, camera_names, frame_to_camera)
-        camera_entries = {}
-        for cam_name, cam_path in camera_prim_paths.items():
-            w, h = resolutions.get(cam_name, (0, 0))
-            camera_entries[cam_name] = (cam_path, w, h)
-
-        try:
-            create_render_products(stage=stage, camera_entries=camera_entries)
-        except Exception as e:
-            logger.warning(f"Failed to create RenderProducts: {e}")
-            return
-
-        # Build frame mapping from dataset
         _, camera_frame_mapping = build_camera_frame_mapping(dataset)
 
         try:
@@ -566,6 +604,46 @@ class USDExporter(ModelExporter):
                 files.append(spg_file)
 
         logger.info(f"PPISP SPG export complete: {len(spg_files)} sidecar(s) added")
+
+    def _export_ov_post_processing(
+        self,
+        stage,
+        camera_names,
+        camera_prim_paths,
+        render_product_entries,
+        dataset,
+        post_processing,
+    ) -> None:
+        """Attach Omniverse RTX post-processing WAR attributes to RenderProducts."""
+        try:
+            from ppisp import PPISP  # type: ignore[import-not-found]
+        except ImportError:
+            logger.warning("ppisp package not available, skipping OV post-processing export")
+            return
+
+        if not isinstance(post_processing, PPISP):
+            logger.warning(
+                f"ov-post-processing={self.ov_post_processing} but post_processing is "
+                f"{type(post_processing).__name__}, expected ppisp.PPISP — skipping"
+            )
+            return
+
+        from threedgrut.export.usd.writers.ov_post_processing import add_ov_post_processing
+        from threedgrut.export.usd.writers.ppisp_writer import build_camera_frame_mapping
+
+        _, camera_frame_mapping = build_camera_frame_mapping(dataset)
+        try:
+            add_ov_post_processing(
+                stage=stage,
+                camera_names=camera_names,
+                camera_prim_paths=camera_prim_paths,
+                camera_frame_mapping=camera_frame_mapping,
+                render_product_entries=render_product_entries,
+                post_processing=post_processing,
+                mode=self.ov_post_processing,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to add OV post-processing workaround: {e}")
 
     @classmethod
     def from_config(cls, conf) -> "USDExporter":
@@ -588,5 +666,8 @@ class USDExporter(ModelExporter):
             sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", "cameraDistance"),
             linear_srgb=getattr(export_conf, "linear_srgb", False),
             export_ppisp=getattr(export_conf, "export_ppisp", False),
+            ov_post_processing=export_conf.get("ov-post-processing", MODE_NONE)
+            if hasattr(export_conf, "get")
+            else getattr(export_conf, "ov_post_processing", MODE_NONE),
             frames_per_second=getattr(export_conf, "frames_per_second", 1.0),
         )
