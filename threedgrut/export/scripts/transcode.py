@@ -26,8 +26,9 @@ Usage:
     python -m threedgrut.export.scripts.transcode input.usdz -o output.ply
     python -m threedgrut.export.scripts.transcode nurec.usd -o lightfield.usdz --format lightfield
 
-USD/USDZ → LightField: source /World prims (e.g. rig_trajectories) merge into default.usda at the
-same paths; referenced layers are bundled unchanged (preserves camera animation curves).
+USD/USDZ → LightField: source /World prims (e.g. rig_trajectories) and /Render
+merge into default.usda at the same paths; referenced layers are bundled unchanged
+(preserves camera animation curves and authored render products).
 /World/Gaussians is skipped by default; use --copy-source-include-gaussians to merge it too.
 Use --no-copy-source-prims to disable.
 """

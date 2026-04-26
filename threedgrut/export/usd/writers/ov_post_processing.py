@@ -13,11 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Omniverse RTX post-processing workaround writer for PPISP exports.
+"""Omniverse USD post-processing fallback writer for PPISP exports.
 
 This writer is a degraded fallback for Kit versions where SPG is unavailable or
-unreliable. It authors standard Omniverse RTX render settings only; exact PPISP
-export remains the SPG path.
+unreliable. It authors Omniverse USD render settings only; exact PPISP export
+remains the SPG path.
 """
 
 from __future__ import annotations
@@ -32,16 +32,16 @@ from threedgrut.export.usd.writers.camera import _make_usd_prim_name
 
 log = logging.getLogger(__name__)
 
-MODE_NONE = "none"
-MODE_PPISP_EXPOSURE_WAR = "ppisp-exposure-war"
-MODE_PPISP_APPROX_WAR = "ppisp-approx-war"
-MODE_PPISP_HYBRID_WAR = "ppisp-hybrid-war"
+MODE_PPISP_OMNI_FALLBACK_NONE = "none"
+MODE_PPISP_OMNI_FALLBACK_EXPOSURE = "ppisp-exposure-fallback"
+MODE_PPISP_OMNI_FALLBACK_FITTED_POST_PROCESSING = "ppisp-fitted-post-processing-fallback"
+MODE_PPISP_OMNI_FALLBACK_SPG_PLUS_FITTED_POST_PROCESSING = "ppisp-spg-plus-fitted-post-processing-fallback"
 
-OV_POST_PROCESSING_MODES = {
-    MODE_NONE,
-    MODE_PPISP_EXPOSURE_WAR,
-    MODE_PPISP_APPROX_WAR,
-    MODE_PPISP_HYBRID_WAR,
+PPISP_OMNI_POST_PROCESSING_FALLBACK_MODES = {
+    MODE_PPISP_OMNI_FALLBACK_NONE,
+    MODE_PPISP_OMNI_FALLBACK_EXPOSURE,
+    MODE_PPISP_OMNI_FALLBACK_FITTED_POST_PROCESSING,
+    MODE_PPISP_OMNI_FALLBACK_SPG_PLUS_FITTED_POST_PROCESSING,
 }
 
 _BASE_EXPOSURE_TIME_SECONDS = 0.02
@@ -65,11 +65,11 @@ _ZCA_NEUTRAL = np.array([[0.0128369, -0.0034654], [-0.0034654, 0.0128158]], dtyp
 
 def normalize_ov_post_processing_mode(mode: str | None) -> str:
     """Normalize and validate the ``export_usd.ov-post-processing`` value."""
-    normalized = MODE_NONE if mode is None else str(mode).strip().lower()
-    if normalized not in OV_POST_PROCESSING_MODES:
+    normalized = MODE_PPISP_OMNI_FALLBACK_NONE if mode is None else str(mode).strip().lower()
+    if normalized not in PPISP_OMNI_POST_PROCESSING_FALLBACK_MODES:
         raise ValueError(
             f"Unsupported ov-post-processing mode '{mode}'. "
-            f"Expected one of: {sorted(OV_POST_PROCESSING_MODES)}"
+            f"Expected one of: {sorted(PPISP_OMNI_POST_PROCESSING_FALLBACK_MODES)}"
         )
     return normalized
 
@@ -160,7 +160,7 @@ def _apply_color_homography(rgb: np.ndarray, homography: np.ndarray) -> np.ndarr
 
 
 def _fit_grade_gain(color_latent: np.ndarray) -> np.ndarray:
-    """Fit RTX color grade gain to PPISP's cross-channel homography."""
+    """Fit USD color grade gain to PPISP's cross-channel homography."""
     homography = _compute_homography(color_latent)
     values = np.linspace(0.05, 1.0, 5, dtype=np.float64)
     rgb = np.array(np.meshgrid(values, values, values), dtype=np.float64).T.reshape(-1, 3)
@@ -195,7 +195,7 @@ def _apply_crf(x: np.ndarray, raw_params: np.ndarray) -> np.ndarray:
 
 
 def _fit_grade_gamma(crf_params: np.ndarray) -> np.ndarray:
-    """Fit RTX grade gamma to PPISP's per-channel CRF."""
+    """Fit USD grade gamma to PPISP's per-channel CRF."""
     x = np.linspace(0.02, 0.98, 96, dtype=np.float64)
     candidates = np.linspace(0.25, 4.0, 128, dtype=np.float64)
     result = []
@@ -334,9 +334,9 @@ def add_ov_post_processing(
     mode: str,
     render_scope_path: str = "/Render",
 ) -> None:
-    """Author Omniverse RTX post-processing settings for PPISP WAR export."""
+    """Author Omniverse USD post-processing settings for PPISP fallback export."""
     normalized_mode = normalize_ov_post_processing_mode(mode)
-    if normalized_mode == MODE_NONE:
+    if normalized_mode == MODE_PPISP_OMNI_FALLBACK_NONE:
         return
 
     exposure_params = _as_numpy(post_processing.exposure_params)
@@ -345,7 +345,10 @@ def add_ov_post_processing(
     crf_params = _as_numpy(post_processing.crf_params)
 
     camera_name_to_index = {name: idx for idx, name in enumerate(camera_names)}
-    approximate_full_ppisp = normalized_mode in {MODE_PPISP_APPROX_WAR, MODE_PPISP_HYBRID_WAR}
+    writes_fitted_post_processing = normalized_mode in {
+        MODE_PPISP_OMNI_FALLBACK_FITTED_POST_PROCESSING,
+        MODE_PPISP_OMNI_FALLBACK_SPG_PLUS_FITTED_POST_PROCESSING,
+    }
 
     for camera_name in camera_names:
         frame_indices = camera_frame_mapping.get(camera_name, [])
@@ -356,7 +359,7 @@ def add_ov_post_processing(
 
         _author_camera_exposure(stage, camera_path, frame_indices, exposure_params)
 
-        if not approximate_full_ppisp:
+        if not writes_fitted_post_processing:
             continue
 
         camera_index = camera_name_to_index[camera_name]
@@ -376,6 +379,7 @@ def add_ov_post_processing(
         _author_color_grade(render_product, frame_indices, color_params, crf_params[camera_index])
 
     log.warning(
-        "Authored OV RTX post-processing PPISP workaround mode '%s'. This is approximate and not SPG-fidelity.",
+        "Authored Omniverse USD post-processing PPISP fallback mode '%s'. "
+        "This is approximate and not SPG-fidelity.",
         normalized_mode,
     )
