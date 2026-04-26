@@ -161,6 +161,57 @@ def _extract_camera_params_from_dataset(dataset) -> Optional[List]:
     return None
 
 
+def _extract_camera_grouping(dataset):
+    """Extract camera grouping info from a dataset.
+
+    Returns:
+        (camera_names, frame_to_camera) where camera_names is a list of logical
+        camera names and frame_to_camera maps frame_idx → camera_idx.
+    """
+    camera_names = None
+    frame_to_camera = None
+
+    if hasattr(dataset, "get_camera_names"):
+        camera_names = dataset.get_camera_names()
+    if hasattr(dataset, "get_camera_idx"):
+        frame_to_camera = [dataset.get_camera_idx(i) for i in range(len(dataset))]
+
+    if camera_names is None:
+        camera_names = ["camera_0000"]
+    if frame_to_camera is None:
+        frame_to_camera = [0] * len(dataset)
+
+    return camera_names, frame_to_camera
+
+
+def _extract_camera_resolutions(camera_params: List, camera_names: List[str], frame_to_camera: List[int]):
+    """Extract per-camera resolution from the first valid frame of each camera.
+
+    Returns:
+        {camera_name: (width, height)} or empty dict on failure.
+    """
+    result = {}
+    num_cameras = len(camera_names)
+    # Build first-frame-per-camera map
+    first_frame: Dict[int, int] = {}
+    for frame_idx, cam_idx in enumerate(frame_to_camera):
+        if cam_idx not in first_frame and 0 <= cam_idx < num_cameras:
+            first_frame[cam_idx] = frame_idx
+
+    for cam_idx, cam_name in enumerate(camera_names):
+        frame_idx = first_frame.get(cam_idx)
+        if frame_idx is None or camera_params is None:
+            continue
+        params = camera_params[frame_idx] if frame_idx < len(camera_params) else None
+        if params is None:
+            continue
+        if hasattr(params, "resolution"):
+            w, h = int(params.resolution[0]), int(params.resolution[1])
+            result[cam_name] = (w, h)
+
+    return result
+
+
 class USDExporter(ModelExporter):
     """
     Exporter for OpenUSD format using ParticleField3DGaussianSplat schema.
@@ -170,8 +221,9 @@ class USDExporter(ModelExporter):
 
     Features:
     - ParticleField3DGaussianSplat schema (standard OpenUSD)
-    - Optional camera export with full intrinsics
+    - One Camera prim per physical camera with time-sampled transforms
     - Background/environment export as DomeLight
+    - Optional PPISP SPG shader on per-camera RenderProducts
     - USDZ packaging (default output)
 
     For Omniverse/NuRec compatibility, use NuRecExporter instead.
@@ -187,6 +239,8 @@ class USDExporter(ModelExporter):
         apply_normalizing_transform: bool = True,
         sorting_mode_hint: str = "cameraDistance",
         linear_srgb: bool = False,
+        export_ppisp: bool = False,
+        frames_per_second: float = 1.0,
     ):
         """
         Initialize the USD exporter.
@@ -195,11 +249,16 @@ class USDExporter(ModelExporter):
             half_precision: If True, use half for both geometry and features (backward compat).
             half_geometry: Use half precision for positions, orientations, scales (LightField).
             half_features: Use half precision for opacities and SH coefficients (LightField).
-            export_cameras: Include camera poses in export
-            export_background: Include background/environment in export
-            apply_normalizing_transform: Apply transform to normalize scene orientation
-            sorting_mode_hint: Sorting hint for rendering ("cameraDistance", "zDepth" per UsdVol schema)
-            linear_srgb: If True, set prim color space to lin_rec709_scene; else srgb_rec709_display
+            export_cameras: Include camera poses in export.
+            export_background: Include background/environment in export.
+            apply_normalizing_transform: Apply transform to normalize scene orientation.
+            sorting_mode_hint: Sorting hint for rendering ("cameraDistance", "zDepth").
+            linear_srgb: If True, set prim color space to lin_rec709_scene.
+            export_ppisp: If True, add PPISP SPG shaders on per-camera RenderProducts.
+                Requires post_processing kwarg to be a ppisp.PPISP instance.
+            frames_per_second: Sets stage.timeCodesPerSecond. Time codes are always
+                bare frame indices (float(frame_idx)), so this controls playback speed.
+                Default 1.0 means 1 frame per second of real time.
         """
         if half_precision:
             half_geometry = True
@@ -211,25 +270,19 @@ class USDExporter(ModelExporter):
         self.apply_normalizing_transform = apply_normalizing_transform
         self.sorting_mode_hint = sorting_mode_hint
         self.linear_srgb = linear_srgb
+        self.export_ppisp = export_ppisp
+        self.frames_per_second = frames_per_second
 
     def _create_default_stage(self, referenced_stages: List[NamedUSDStage]) -> NamedUSDStage:
         """
         Create a default.usda that references the data stages.
-
-        Args:
-            referenced_stages: List of stages to reference (e.g., gaussians.usdc)
-
-        Returns:
-            NamedUSDStage for default.usda
         """
         stage = initialize_usd_stage(up_axis="Y")
 
         for ref_stage in referenced_stages:
-            # Create a reference prim for each stage
             filename_stem = Path(ref_stage.filename).stem
             prim_path = f"/World/{filename_stem}"
             prim = stage.OverridePrim(prim_path)
-            # Reference the file (bare filename for in-package resolution; same as NuRec)
             prim.GetReferences().AddReference(ref_stage.filename)
 
         return NamedUSDStage(filename="default.usda", stage=stage)
@@ -248,26 +301,28 @@ class USDExporter(ModelExporter):
         Export the model to a USDZ file.
 
         Args:
-            model: The model to export (must implement ExportableModel)
-            output_path: Path where the USDZ file will be saved
-            dataset: Optional dataset for camera poses
-            conf: Configuration parameters
-            background: Optional background model for environment export
-            **kwargs: Additional parameters. ``validate_usd`` (default True): run OpenUSD
-                stage validators on the written file (ParticleField / LightField only; no-op if
-                ``UsdValidation`` is unavailable).
+            model: The model to export (must implement ExportableModel).
+            output_path: Path where the USDZ file will be saved.
+            dataset: Optional dataset for camera poses.
+            conf: Configuration parameters.
+            background: Optional background model for environment export.
+            **kwargs:
+                post_processing: ppisp.PPISP instance for SPG export (used when
+                    export_ppisp=True).
+                validate_usd (default True): run OpenUSD stage validators.
+                apply_coordinate_transform (bool): apply 3DGRUT→USDZ coordinate flip.
+                copy_source_usd: (stage_path, res_root) for prim merge.
+                copy_source_skip_subtrees: subtrees to skip during prim merge.
         """
         output_path = Path(output_path)
         logger.info(f"Exporting USD file to {output_path}...")
 
         # Get model data via accessor
-        # LightField expects post-activation values (opacity in [0,1], actual scales)
         accessor = GaussianExportAccessor(model, conf)
         attrs = accessor.get_attributes(preactivation=False)
         caps = accessor.get_capabilities()
 
         logger.info(f"Schema: LightField (post-activation)")
-
         logger.info(f"Exporting {attrs.num_gaussians} Gaussians, SH degree {caps.sh_degree}")
 
         # Compute normalizing transform if enabled
@@ -280,13 +335,14 @@ class USDExporter(ModelExporter):
             except (AttributeError, ValueError) as e:
                 logger.warning(f"Failed to compute normalizing transform: {e}")
 
-        # Create main USD stage
+        # Create main USD stage with the configured time code rate
         stage = initialize_usd_stage(up_axis="Y")
+        stage.SetTimeCodesPerSecond(self.frames_per_second)
 
         apply_coordinate_transform = kwargs.get("apply_coordinate_transform", False)
         coordinate_transform = get_3dgrut_to_usdz_coordinate_transform() if apply_coordinate_transform else None
 
-        # Create Gaussian content root with optional normalizing and coordinate transform
+        # Create Gaussian content root
         gaussians_root = create_gaussian_model_root(
             stage,
             flip_x_axis=False,
@@ -297,7 +353,7 @@ class USDExporter(ModelExporter):
             coordinate_transform=coordinate_transform,
         )
 
-        # Create Gaussian writer (LightField schema)
+        # Write Gaussians
         writer = create_gaussian_writer(
             stage=stage,
             capabilities=caps,
@@ -307,8 +363,6 @@ class USDExporter(ModelExporter):
             sorting_mode_hint=self.sorting_mode_hint,
             linear_srgb=self.linear_srgb,
         )
-
-        # Write Gaussians
         writer.create_prim(attrs.num_gaussians)
         writer.write_attributes(attrs)
         writer.finalize(attrs.positions)
@@ -350,32 +404,38 @@ class USDExporter(ModelExporter):
             except Exception as e:
                 logger.warning("Failed to merge source USD prims: %s", e)
 
-        # Export cameras if requested and dataset available
+        # Extract camera grouping from dataset (used by both camera export and PPISP)
+        camera_names = None
+        frame_to_camera = None
+        camera_prim_paths: Dict[str, str] = {}
+
+        if dataset is not None:
+            camera_names, frame_to_camera = _extract_camera_grouping(dataset)
+
+        # Export cameras — one prim per physical camera with time-sampled transforms
         if self.export_cameras and dataset is not None:
             try:
                 poses = dataset.get_poses()
 
-                # When we apply normalizing transform to the Gaussian root, cameras must be in the
-                # same coordinate system: apply normalizing transform to each c2w (world → normalized).
                 if self.apply_normalizing_transform:
                     poses = np.einsum("ij,njk->nik", normalizing_transform, poses)
 
-                # Extract per-frame camera parameters from dataset
                 camera_params = _extract_camera_params_from_dataset(dataset)
-
                 if camera_params is not None:
                     logger.info(f"Extracted camera params for {len(camera_params)} frames")
                 else:
                     logger.warning("Could not extract camera intrinsics from dataset, using default")
 
-                export_cameras_to_usd(
+                camera_prim_paths = export_cameras_to_usd(
                     stage=stage,
                     poses=poses,
+                    camera_names=camera_names,
+                    frame_to_camera=frame_to_camera,
                     camera_params=camera_params,
                     root_path="/World/Cameras",
                     visible=False,
                 )
-                logger.info(f"Exported {len(poses)} cameras")
+                logger.info(f"Exported {len(camera_prim_paths)} camera(s) from {len(poses)} frames")
             except (AttributeError, KeyError, ValueError) as e:
                 logger.warning(f"Failed to export cameras: {e}")
 
@@ -396,7 +456,20 @@ class USDExporter(ModelExporter):
             except (AttributeError, ValueError, ImportError) as e:
                 logger.warning(f"Failed to export background: {e}")
 
-        # Package: gaussians_stage / default_stage_wrapped were built before source merge.
+        # Export PPISP as SPG shaders on RenderProducts
+        if self.export_ppisp:
+            self._export_ppisp(
+                stage=stage,
+                dataset=dataset,
+                camera_names=camera_names,
+                frame_to_camera=frame_to_camera,
+                camera_prim_paths=camera_prim_paths,
+                camera_params=_extract_camera_params_from_dataset(dataset) if dataset is not None else None,
+                post_processing=kwargs.get("post_processing"),
+                files=files,
+            )
+
+        # Package
         if suffix == ".usdz":
             if default_stage_wrapped is None:
                 default_stage_wrapped = self._create_default_stage([gaussians_stage])
@@ -423,16 +496,81 @@ class USDExporter(ModelExporter):
 
         logger.info(f"USD export complete: {output_path}")
 
+    def _export_ppisp(
+        self,
+        stage,
+        dataset,
+        camera_names,
+        frame_to_camera,
+        camera_prim_paths: Dict[str, str],
+        camera_params,
+        post_processing,
+        files: List[NamedSerialized],
+    ) -> None:
+        """Create /Render RenderProducts and attach PPISP SPG shaders."""
+        try:
+            from ppisp import PPISP  # type: ignore[import-not-found]
+        except ImportError:
+            logger.warning("ppisp package not available, skipping PPISP export")
+            return
+
+        if not isinstance(post_processing, PPISP):
+            logger.warning(
+                f"export_ppisp=True but post_processing is {type(post_processing).__name__}, "
+                "expected ppisp.PPISP — skipping"
+            )
+            return
+
+        if dataset is None or not camera_prim_paths:
+            logger.warning("No camera prims available for PPISP RenderProduct wiring, skipping")
+            return
+
+        from threedgrut.export.usd.writers.render_product import create_render_products
+        from threedgrut.export.usd.writers.ppisp_writer import (
+            add_ppisp_to_all_render_products,
+            build_camera_frame_mapping,
+        )
+        from threedgrut.export.usd.ppisp_spg import get_ppisp_spg_files
+
+        # Build camera_entries: camera_name → (usd_camera_path, width, height)
+        resolutions = _extract_camera_resolutions(camera_params, camera_names, frame_to_camera)
+        camera_entries = {}
+        for cam_name, cam_path in camera_prim_paths.items():
+            w, h = resolutions.get(cam_name, (0, 0))
+            camera_entries[cam_name] = (cam_path, w, h)
+
+        try:
+            create_render_products(stage=stage, camera_entries=camera_entries)
+        except Exception as e:
+            logger.warning(f"Failed to create RenderProducts: {e}")
+            return
+
+        # Build frame mapping from dataset
+        _, camera_frame_mapping = build_camera_frame_mapping(dataset)
+
+        try:
+            add_ppisp_to_all_render_products(
+                stage=stage,
+                ppisp=post_processing,
+                camera_names=camera_names,
+                camera_frame_mapping=camera_frame_mapping,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to add PPISP shaders: {e}")
+            return
+
+        # Add SPG sidecars to the USDZ package
+        spg_files = get_ppisp_spg_files()
+        for spg_file in spg_files:
+            if not any(f.filename == spg_file.filename for f in files):
+                files.append(spg_file)
+
+        logger.info(f"PPISP SPG export complete: {len(spg_files)} sidecar(s) added")
+
     @classmethod
     def from_config(cls, conf) -> "USDExporter":
         """
         Create USDExporter from configuration.
-
-        Args:
-            conf: Configuration object with export_usd section
-
-        Returns:
-            Configured USDExporter instance
         """
         export_conf = getattr(conf, "export_usd", None) or conf
         half_precision = getattr(export_conf, "half_precision", False)
@@ -449,4 +587,6 @@ class USDExporter(ModelExporter):
             apply_normalizing_transform=getattr(export_conf, "apply_normalizing_transform", True),
             sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", "cameraDistance"),
             linear_srgb=getattr(export_conf, "linear_srgb", False),
+            export_ppisp=getattr(export_conf, "export_ppisp", False),
+            frames_per_second=getattr(export_conf, "frames_per_second", 1.0),
         )
