@@ -47,6 +47,8 @@ export_usd:
   export_cameras: true
   export_background: true
   sorting_mode_hint: cameraDistance
+  # If true, Gaussian prim ColorSpaceAPI uses lin_rec709_scene; else srgb_rec709_display
+  linear_srgb: false
 
 model:
   density_activation: sigmoid
