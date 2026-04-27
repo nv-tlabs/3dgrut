@@ -129,6 +129,20 @@ Examples:
         action="store_true",
         help="Enable Omniverse-specific USD authoring such as PPISP SPG and MDL material binding.",
     )
+    ppisp_group = parser.add_mutually_exclusive_group()
+    ppisp_group.add_argument(
+        "--export-ppisp",
+        dest="export_ppisp",
+        action="store_true",
+        default=None,
+        help="Export PPISP effects when the checkpoint contains a PPISP module.",
+    )
+    ppisp_group.add_argument(
+        "--no-export-ppisp",
+        dest="export_ppisp",
+        action="store_false",
+        help="Skip PPISP export even when the checkpoint contains a PPISP module.",
+    )
 
     # Dataset path (optional, overrides checkpoint's dataset path)
     parser.add_argument(
@@ -288,7 +302,12 @@ def main():
         half_geometry = args.half_geometry or args.half
         half_features = args.half_features or args.half
         export_conf = getattr(conf, "export_usd", None) or conf
-        export_ppisp = bool(getattr(export_conf, "export_ppisp", True))
+        if args.export_ppisp is not None:
+            export_ppisp = args.export_ppisp
+        elif post_processing is not None:
+            export_ppisp = True
+        else:
+            export_ppisp = bool(getattr(export_conf, "export_ppisp", True))
         omni_usd = bool(args.omni_usd or _get_export_conf_value(export_conf, "omni-usd", "omni_usd", False))
         exporter = USDExporter(
             half_geometry=half_geometry,

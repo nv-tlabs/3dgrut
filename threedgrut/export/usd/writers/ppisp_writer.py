@@ -51,7 +51,11 @@ PPISP_SPG_SLANG_FILE = "ppisp_usd_spg.slang"
 PPISP_INPUT_RENDER_VAR = "HdrColor"
 PPISP_OUTPUT_RENDER_VAR = "PPISPColor"
 LDR_COLOR_RENDER_VAR = "LdrColor"
-PPISP_CAMERA_EXPOSURE = 1.0
+PPISP_CAMERA_EXPOSURE = 0.0
+PPISP_CAMERA_EXPOSURE_FSTOP = 1.0
+PPISP_CAMERA_EXPOSURE_ISO = 100.0
+PPISP_CAMERA_EXPOSURE_RESPONSIVITY = 1.0
+PPISP_CAMERA_EXPOSURE_TIME = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -308,26 +312,39 @@ def add_ppisp_shader_to_render_product(
     return shader.GetPrim()
 
 
-def _force_ppisp_camera_exposure(stage: Usd.Stage, render_product: Usd.Prim) -> None:
+def _create_ppisp_camera(stage: Usd.Stage, render_product: Usd.Prim) -> None:
     camera_rel = render_product.GetRelationship("camera")
     camera_targets = camera_rel.GetTargets() if camera_rel else []
     if not camera_targets:
         log.warning(
-            "RenderProduct %s has no camera target; skipping PPISP camera exposure",
+            "RenderProduct %s has no camera target; skipping PPISP camera override",
             render_product.GetPath(),
         )
         return
 
-    camera_prim = stage.GetPrimAtPath(camera_targets[0])
-    if not camera_prim.IsValid():
+    source_camera_path = camera_targets[0]
+    source_camera_prim = stage.GetPrimAtPath(source_camera_path)
+    if not source_camera_prim.IsValid():
         log.warning(
-            "RenderProduct %s targets missing camera %s; skipping PPISP camera exposure",
+            "RenderProduct %s targets missing camera %s; skipping PPISP camera override",
             render_product.GetPath(),
-            camera_targets[0],
+            source_camera_path,
         )
         return
 
-    UsdGeom.Camera(camera_prim).CreateExposureAttr().Set(PPISP_CAMERA_EXPOSURE)
+    ppisp_camera_path = render_product.GetPath().AppendChild(f"{source_camera_path.name}_no_isp")
+    ppisp_camera_prim = stage.DefinePrim(ppisp_camera_path, "Camera")
+    ppisp_camera_prim.SetHidden(True)
+    UsdGeom.Imageable(ppisp_camera_prim).CreateVisibilityAttr().Set("invisible")
+    ppisp_camera_prim.GetInherits().AddInherit(source_camera_path)
+    ppisp_camera_prim.CreateAttribute("exposure", Sdf.ValueTypeNames.Float).Set(PPISP_CAMERA_EXPOSURE)
+    ppisp_camera_prim.CreateAttribute("exposure:fStop", Sdf.ValueTypeNames.Float).Set(PPISP_CAMERA_EXPOSURE_FSTOP)
+    ppisp_camera_prim.CreateAttribute("exposure:iso", Sdf.ValueTypeNames.Float).Set(PPISP_CAMERA_EXPOSURE_ISO)
+    ppisp_camera_prim.CreateAttribute("exposure:responsivity", Sdf.ValueTypeNames.Float).Set(
+        PPISP_CAMERA_EXPOSURE_RESPONSIVITY
+    )
+    ppisp_camera_prim.CreateAttribute("exposure:time", Sdf.ValueTypeNames.Float).Set(PPISP_CAMERA_EXPOSURE_TIME)
+    camera_rel.SetTargets([ppisp_camera_path])
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +403,7 @@ def add_ppisp_to_all_render_products(
             continue
 
         frame_indices = camera_frame_mapping.get(camera_name, [])
-        _force_ppisp_camera_exposure(stage, child)
+        _create_ppisp_camera(stage, child)
 
         shader_prim = add_ppisp_shader_to_render_product(
             stage=stage,

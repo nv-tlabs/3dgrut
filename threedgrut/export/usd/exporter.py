@@ -373,7 +373,8 @@ class USDExporter(ModelExporter):
             raise ValueError(
                 "PPISP USD export requires export_usd.omni-usd=true because the current PPISP "
                 "implementation uses Omniverse SPG. Re-run with export_usd.omni-usd=true, "
-                "or set export_usd.export_ppisp=false to export the model without PPISP effects."
+                "or set export_usd.export_ppisp=false / pass --no-export-ppisp to export the "
+                "model without PPISP effects."
             )
 
         # Get model data via accessor
