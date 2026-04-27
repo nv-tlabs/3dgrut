@@ -36,6 +36,7 @@ class FeatureDecoder(nn.Module):
         output_activation: str = "Sigmoid",
         ema_decay: float = 0.0,
         ema_start_step: int = 0,
+        unpremultiply_alpha: bool = False,
     ):
         """Initialize the feature decoder.
 
@@ -51,6 +52,7 @@ class FeatureDecoder(nn.Module):
             output_activation: Output layer activation ("Sigmoid" for [0,1] RGB, or "ReLU")
             ema_decay: If > 0, keep EMA shadow of parameters (decay factor). 0 = no EMA.
             ema_start_step: Global step at which to start updating EMA.
+            unpremultiply_alpha: If True, decode features / alpha then multiply RGB by alpha.
         """
         super().__init__()
         self.ray_feature_dim = ray_feature_dim
@@ -58,6 +60,7 @@ class FeatureDecoder(nn.Module):
         self.num_layers = num_layers
         self.sh_scale = sh_scale
         self.output_activation = output_activation
+        self.unpremultiply_alpha = unpremultiply_alpha
         self._ema_decay = ema_decay
         self._ema_start_step = ema_start_step
         self._ema_shadow: dict[str, torch.Tensor] = {}
@@ -146,8 +149,7 @@ class FeatureDecoder(nn.Module):
         Args:
             features: Input features of shape [H*W, N] or [B, H, W, N] (alpha-blended).
             ray_directions: Ray directions of shape [H*W, 3] or [B, H, W, 3].
-            alpha: Optional [H*W] or [B, H, W] opacity. If given, un-multiply (features/alpha),
-                   decode, then re-multiply (rgb*alpha) so the decoder sees unblended features.
+            alpha: Optional opacity used only when unpremultiply_alpha is enabled.
 
         Returns:
             RGB tensor of shape [H*W, 3] or [B, H, W, 3]
@@ -182,7 +184,7 @@ class FeatureDecoder(nn.Module):
         ray_directions: torch.Tensor,
         alpha: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        if alpha is not None:
+        if self.unpremultiply_alpha and alpha is not None:
             alpha_safe = alpha.clamp(min=1e-8)
             features = features / alpha_safe
 
@@ -191,7 +193,7 @@ class FeatureDecoder(nn.Module):
         full_input = torch.cat([features, dirs_unit_cube], dim=-1)
         rgb = self.network(full_input)
 
-        if alpha is not None:
+        if self.unpremultiply_alpha and alpha is not None:
             rgb = rgb * alpha_safe
 
         return rgb.float()
@@ -208,5 +210,6 @@ class FeatureDecoder(nn.Module):
             f"hidden_dim={self.hidden_dim}, "
             f"num_layers={self.num_layers}, "
             f"sh_scale={self.sh_scale}, "
-            f"output_activation={self.output_activation}"
+            f"output_activation={self.output_activation}, "
+            f"unpremultiply_alpha={self.unpremultiply_alpha}"
         )

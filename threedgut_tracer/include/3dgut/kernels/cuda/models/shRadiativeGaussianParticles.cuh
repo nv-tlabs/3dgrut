@@ -20,6 +20,15 @@
 #if PARTICLE_FEATURE_HALF
 #include <cuda_fp16.h>
 #endif
+
+// Select backend for the NHT-path feature integration local-grad backward.
+//   1 → handwritten CUDA (threedgut::nht::featuresIntegrateBwdToLocalGrad),
+//   0 → Slang autodiff (threedgutSlang.cuh particleFeaturesIntegrateBwdToBuffer).
+// Only effective when FEATURE_TRANSFORM_TYPE == 1 (NHT). A/B switch for perf work.
+#ifndef NHT_FEATURES_BWD_LOCAL_GRAD_CUDA
+#define NHT_FEATURES_BWD_LOCAL_GRAD_CUDA 1
+#endif
+
 template <typename TBuffer, bool TDifferentiable>
 struct ShRadiativeGaussianParticlesBuffer {
     TBuffer* ptr = nullptr;
@@ -394,6 +403,40 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
                                                                      TFeaturesVec& integratedFeatures,
                                                                      TFeaturesVec& integratedFeaturesGrad,
                                                                      float* featureLocalGrad) const {
+#if NHT_FEATURES_BWD_LOCAL_GRAD_CUDA
+        if constexpr (TDifferentiable) {
+            static_assert(ExtParams::FeatureTransformType == 1,
+                          "NHT CUDA backward is only valid on the NHT path (FEATURE_TRANSFORM_TYPE==1)");
+            static_assert(FEATURE_INTERPOLATION_TYPE == 0,
+                          "only barycentric interpolation supported");
+            static_assert(FEATURE_INTERPOLATION_SUPPORT == 1,
+                          "only tetrahedral interpolation support supported");
+            static_assert(4 * INTERP_POINT_FEATURE_DIM == ExtParams::ParticleFeatureDim,
+                          "NHT buffer layout must be 4 vertices * InterpPointFeatureDim");
+            static_assert(((FEATURE_ACTIVATION_TYPE == 0 || FEATURE_ACTIVATION_TYPE == 3) &&
+                           RAY_FEATURE_DIM == INTERP_POINT_FEATURE_DIM) ||
+                              (FEATURE_ACTIVATION_TYPE == 1 &&
+                               RAY_FEATURE_DIM == INTERP_POINT_FEATURE_DIM * FEATURE_ACTIVATION_NUM_FREQUENCIES) ||
+                              (FEATURE_ACTIVATION_TYPE == 2 &&
+                               RAY_FEATURE_DIM == INTERP_POINT_FEATURE_DIM * FEATURE_ACTIVATION_NUM_FREQUENCIES * 2),
+                          "RAY_FEATURE_DIM / INTERP_POINT_FEATURE_DIM / activation mismatch");
+
+            threedgut::nht::featuresIntegrateBwdToLocalGrad<
+                INTERP_POINT_FEATURE_DIM,
+                FEATURE_ACTIVATION_NUM_FREQUENCIES,
+                FEATURE_ACTIVATION_TYPE>(
+                canonicalIntersection,
+                canonicalIntersectionGrad,
+                alpha,
+                alphaGrad,
+                particleIdx,
+                reinterpret_cast<const float*>(&features),
+                reinterpret_cast<float*>(&integratedFeatures),
+                reinterpret_cast<float*>(&integratedFeaturesGrad),
+                reinterpret_cast<const TFeatureRawParamPtr*>(m_featureRawParameters.ptr),
+                featureLocalGrad);
+        }
+#else
         if constexpr (TDifferentiable) {
             // Pointer offset trick: shift featureLocalGrad back by particleOffset so Slang's
             // _gradPtr[interpPointOffset + i] writes land in featureLocalGrad[0..ParticleFeatureDim-1].
@@ -416,6 +459,7 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
                 reinterpret_cast<FixedArray<float, RAY_FEATURE_DIM>*>(&integratedFeatures),
                 reinterpret_cast<FixedArray<float, RAY_FEATURE_DIM>*>(&integratedFeaturesGrad));
         }
+#endif // NHT_FEATURES_BWD_LOCAL_GRAD_CUDA
     }
 
     // NHT warp reduction step 2: warp-reduce featureLocalGrad and atomicAdd to global gradient buffer.

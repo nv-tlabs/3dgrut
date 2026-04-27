@@ -549,15 +549,12 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
                 (num_gaussians, num_specular_features), dtype=dtype, device=self.device
             ).contiguous()
         elif self.feature_type == Features.Type.NHT:
-            # Initialize learned features with uniform [-pi/2, pi/2] for SIREN
-            act_type = Features(self.conf).activation_type
-            if act_type in (Features.ActivationType.SIREN, Features.ActivationType.SINCOS):
-                features = (
-                    torch.rand((num_gaussians, self.particle_feature_dim), dtype=dtype, device=self.device)
-                    * 3.141592653589793 - 1.5707963267948966
-                )
-            else:
-                features = torch.randn((num_gaussians, self.particle_feature_dim), dtype=dtype, device=self.device) * 0.1
+            init_min = float(getattr(self.conf.model.nht_features, "init_min", -5.0))
+            init_max = float(getattr(self.conf.model.nht_features, "init_max", 5.0))
+            features = (
+                torch.rand((num_gaussians, self.particle_feature_dim), dtype=dtype, device=self.device)
+                * (init_max - init_min) + init_min
+            )
 
         dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(fused_point_cloud), 1e-3)
         scales = torch.log(dist * self.conf.model.default_scale_factor)[..., None].repeat(1, 3)
@@ -725,24 +722,12 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
             num_specular_dims = sh_degree_to_specular_dim(self.max_n_features)
             features_specular = torch.zeros((N, num_specular_dims))
         elif self.feature_type == Features.Type.NHT:
-            act_type = Features(self.conf).activation_type
-            if act_type in (Features.ActivationType.SIREN, Features.ActivationType.SINCOS):
-                # Uniform [-pi/2, pi/2]: symmetric around 0 so sin activations start
-                # with zero mean and balanced positive/negative gradients.
-                features = (
-                    torch.rand((N, self.particle_feature_dim), dtype=dtype, device=self.device)
-                    * 3.141592653589793  # pi
-                    - 1.5707963267948966  # - pi/2
-                )
-            elif act_type == Features.ActivationType.RELU:
-                # Same as SH degree 0: init from RGB so relu(features)=radiance in [0,1].
-                rgb = (colors.float() / 255.0).to(dtype=dtype, device=self.device)
-                if self.particle_feature_dim == 3:
-                    features = rgb
-                else:
-                    features = rgb.repeat(1, (self.particle_feature_dim + 2) // 3)[:, : self.particle_feature_dim]
-            else:
-                features = torch.randn((N, self.particle_feature_dim), dtype=dtype, device=self.device) * 0.01
+            init_min = float(getattr(self.conf.model.nht_features, "init_min", -5.0))
+            init_max = float(getattr(self.conf.model.nht_features, "init_max", 5.0))
+            features = (
+                torch.rand((N, self.particle_feature_dim), dtype=dtype, device=self.device, generator=rng)
+                * (init_max - init_min) + init_min
+            )
 
         self.positions = torch.nn.Parameter(positions.to(dtype=dtype, device=self.device))
         self.rotation = torch.nn.Parameter(rots.to(dtype=dtype, device=self.device))
