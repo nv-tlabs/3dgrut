@@ -49,7 +49,10 @@ export_usd:
   sorting_mode_hint: cameraDistance
   # If true, Gaussian prim ColorSpaceAPI uses lin_rec709_scene; else srgb_rec709_display
   linear_srgb: false
+  # Enable Omniverse-specific USD authoring, including PPISP SPG and MDL material binding.
+  omni-usd: false
   # Enable PPISP post-processing export when post_processing.method is "ppisp".
+  # Requires omni-usd=true when the checkpoint contains a PPISP module.
   export_ppisp: true
   # none uses the full SPG path when export_ppisp is true.
   # Other values use Omniverse USD post-processing fallback modes.

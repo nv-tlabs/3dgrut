@@ -73,6 +73,20 @@ def _set_render_setting(stage: Usd.Stage, key: str, value: Any) -> None:
     stage.SetMetadataByDictKey("customLayerData", "renderSettings", render_settings)
 
 
+def _is_ppisp_post_processing(post_processing: Any) -> bool:
+    post_processing_type = type(post_processing)
+    return (
+        post_processing_type.__name__ == "PPISP"
+        and post_processing_type.__module__.split(".", maxsplit=1)[0] == "ppisp"
+    )
+
+
+def _get_export_config_value(export_conf, hyphen_name: str, attr_name: str, default: Any) -> Any:
+    if hasattr(export_conf, "get"):
+        return export_conf.get(hyphen_name, getattr(export_conf, attr_name, default))
+    return getattr(export_conf, attr_name, default)
+
+
 def _extract_camera_params_from_dataset(dataset) -> Optional[List]:
     """
     Extract per-frame camera parameters from a dataset.
@@ -254,7 +268,8 @@ class USDExporter(ModelExporter):
         apply_normalizing_transform: bool = True,
         sorting_mode_hint: str = "cameraDistance",
         linear_srgb: bool = False,
-        export_ppisp: bool = False,
+        omni_usd: bool = False,
+        export_ppisp: bool = True,
         ov_post_processing: str = MODE_PPISP_OMNI_FALLBACK_NONE,
         frames_per_second: float = 1.0,
     ):
@@ -270,6 +285,8 @@ class USDExporter(ModelExporter):
             apply_normalizing_transform: Apply transform to normalize scene orientation.
             sorting_mode_hint: Sorting hint for rendering ("cameraDistance", "zDepth").
             linear_srgb: If True, set prim color space to lin_rec709_scene.
+            omni_usd: If True, author Omniverse-specific USD features such as
+                ParticleFieldEmissive MDL binding and PPISP SPG graphs.
             export_ppisp: If True, export PPISP using SPG or the selected
                 Omniverse USD fallback mode. Requires post_processing kwarg to
                 be a ppisp.PPISP instance.
@@ -289,12 +306,19 @@ class USDExporter(ModelExporter):
         self.apply_normalizing_transform = apply_normalizing_transform
         self.sorting_mode_hint = sorting_mode_hint
         self.linear_srgb = linear_srgb
+        self.omni_usd = omni_usd
         self.export_ppisp = export_ppisp
         self.ov_post_processing = normalize_ov_post_processing_mode(ov_post_processing)
         if not self.export_ppisp and self.ov_post_processing != MODE_PPISP_OMNI_FALLBACK_NONE:
             raise ValueError(
                 "export_usd.ov-post-processing requires export_usd.export_ppisp=true. "
                 "Set export_ppisp=true to export PPISP through an Omniverse USD fallback, "
+                "or set ov-post-processing=none."
+            )
+        if not self.omni_usd and self.ov_post_processing != MODE_PPISP_OMNI_FALLBACK_NONE:
+            raise ValueError(
+                "export_usd.ov-post-processing requires export_usd.omni-usd=true. "
+                "Set omni-usd=true to author Omniverse USD post-processing fallback features, "
                 "or set ov-post-processing=none."
             )
         self.frames_per_second = frames_per_second
@@ -343,6 +367,14 @@ class USDExporter(ModelExporter):
         """
         output_path = Path(output_path)
         logger.info(f"Exporting USD file to {output_path}...")
+        post_processing = kwargs.get("post_processing")
+        has_ppisp_module = _is_ppisp_post_processing(post_processing)
+        if has_ppisp_module and self.export_ppisp and not self.omni_usd:
+            raise ValueError(
+                "PPISP USD export requires export_usd.omni-usd=true because the current PPISP "
+                "implementation uses Omniverse SPG. Re-run with export_usd.omni-usd=true, "
+                "or set export_usd.export_ppisp=false to export the model without PPISP effects."
+            )
 
         # Get model data via accessor
         accessor = GaussianExportAccessor(model, conf)
@@ -389,6 +421,8 @@ class USDExporter(ModelExporter):
             half_features=self.half_features,
             sorting_mode_hint=self.sorting_mode_hint,
             linear_srgb=self.linear_srgb,
+            omni_usd=self.omni_usd,
+            has_post_processing=has_ppisp_module and self.export_ppisp,
         )
         writer.create_prim(attrs.num_gaussians)
         writer.write_attributes(attrs)
@@ -488,7 +522,11 @@ class USDExporter(ModelExporter):
                 logger.warning(f"Failed to export background: {e}")
 
         render_product_entries = None
-        post_processing = kwargs.get("post_processing")
+        if not self.export_ppisp and _is_ppisp_post_processing(post_processing):
+            logger.warning(
+                "PPISP post-processing module is present but export_usd.export_ppisp=false; "
+                "PPISP effects will not be exported. Set export_usd.export_ppisp=true to export them."
+            )
         has_ppisp_export_source = self.export_ppisp and post_processing is not None
         export_spg_ppisp = has_ppisp_export_source and (
             self.ov_post_processing == MODE_PPISP_OMNI_FALLBACK_NONE
@@ -714,9 +752,13 @@ class USDExporter(ModelExporter):
             apply_normalizing_transform=getattr(export_conf, "apply_normalizing_transform", True),
             sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", "cameraDistance"),
             linear_srgb=getattr(export_conf, "linear_srgb", False),
-            export_ppisp=getattr(export_conf, "export_ppisp", False),
-            ov_post_processing=export_conf.get("ov-post-processing", MODE_PPISP_OMNI_FALLBACK_NONE)
-            if hasattr(export_conf, "get")
-            else getattr(export_conf, "ov_post_processing", MODE_PPISP_OMNI_FALLBACK_NONE),
+            omni_usd=_get_export_config_value(export_conf, "omni-usd", "omni_usd", False),
+            export_ppisp=getattr(export_conf, "export_ppisp", True),
+            ov_post_processing=_get_export_config_value(
+                export_conf,
+                "ov-post-processing",
+                "ov_post_processing",
+                MODE_PPISP_OMNI_FALLBACK_NONE,
+            ),
             frames_per_second=getattr(export_conf, "frames_per_second", 1.0),
         )
