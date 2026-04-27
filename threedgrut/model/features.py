@@ -145,12 +145,13 @@ class Features:
 
     @property
     def ray_feature_dim(self):
-        """Per-ray feature dim (decoder input): interp_point_dim * num_frequencies."""
+        """Per-ray feature dim after optional harmonic expansion."""
         feature_type = self._conf.model.feature_type.lower()
         if feature_type == "sh":
             return 3  # RGB output
         elif feature_type == "nht":
-            return self.interp_point_feature_dim * self.activation_num_frequencies
+            expansion = 2 if self.activation_type == Features.ActivationType.SINCOS else 1
+            return self.interp_point_feature_dim * self.activation_num_frequencies * expansion
         raise ValueError(f"Unknown feature_type: {feature_type}")
 
     @property

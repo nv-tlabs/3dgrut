@@ -216,7 +216,18 @@ __global__ void renderBalanced(threedgut::RenderParameters params,
 }
 #endif // FINE_GRAINED_LOAD_BALANCING
 
-__global__ void renderBackward(threedgut::RenderParameters params,
+// Optional register-cap on the backward kernel (plan T3).
+// Set at build time with both args, e.g.
+//   -DNHT_BWD_LB_THREADS=256 -DNHT_BWD_LB_MIN_BLOCKS=2
+// to force <=128 regs/thread at BlockSize=256. Default leaves the compiler
+// free, matching baseline behavior (regs/thread reported by ptxas).
+#if defined(NHT_BWD_LB_THREADS) && defined(NHT_BWD_LB_MIN_BLOCKS)
+#define NHT_BWD_LB __launch_bounds__(NHT_BWD_LB_THREADS, NHT_BWD_LB_MIN_BLOCKS)
+#else
+#define NHT_BWD_LB
+#endif
+
+__global__ NHT_BWD_LB void renderBackward(threedgut::RenderParameters params,
                                const tcnn::uvec2* __restrict__ sortedTileRangeIndicesPtr,
                                const uint32_t* __restrict__ sortedTileDataPtr,
                                const tcnn::vec3* __restrict__ sensorRayOriginPtr,

@@ -14,6 +14,7 @@ model:
 render:
   pipeline_type: referenceSlang
   backward_pipeline_type: referenceSlangBwd
+  particle_kernel_max_alpha: 0.999
 
 loss:
   use_opacity: true

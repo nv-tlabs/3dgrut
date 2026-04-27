@@ -163,7 +163,9 @@ class Renderer:
                 num_layers = getattr(dec, "num_layers", 4)
                 dir_encoding = getattr(dec, "dir_encoding", "SphericalHarmonics")
                 dir_encoding_degree = getattr(dec, "dir_encoding_degree", 3)
+                sh_scale = getattr(dec, "sh_scale", 1.0)
                 output_activation = getattr(dec, "output_activation", "Sigmoid")
+                unpremultiply_alpha = getattr(dec, "unpremultiply_alpha", False)
                 ema_decay = getattr(dec, "ema_decay", 0.0)
                 ema_start_step = getattr(dec, "ema_start_step", 0)
                 feature_decoder = FeatureDecoder(
@@ -172,9 +174,11 @@ class Renderer:
                     num_layers=num_layers,
                     dir_encoding=dir_encoding,
                     dir_encoding_degree=dir_encoding_degree,
+                    sh_scale=sh_scale,
                     output_activation=output_activation,
                     ema_decay=ema_decay,
                     ema_start_step=ema_start_step,
+                    unpremultiply_alpha=unpremultiply_alpha,
                 ).to("cuda")
                 feature_decoder.load_state_dict(checkpoint["feature_decoder"]["module"])
                 ema_state = checkpoint["feature_decoder"].get("ema")

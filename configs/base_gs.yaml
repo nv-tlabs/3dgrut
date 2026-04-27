@@ -70,8 +70,10 @@ model:
 
   nht_features:
     dim: 48
+    init_min: -1.5707963267948966
+    init_max: 1.5707963267948966
     activation:
-      type: "siren"
+      type: "sincos"
       num_frequencies: 1
     interpolation_type: "barycentric"
 
@@ -83,6 +85,7 @@ model:
     dir_encoding_degree: 3
     sh_scale: 3.0
     output_activation: "Sigmoid"
+    unpremultiply_alpha: false
     learning_rate: 0.00068
     reg_weight: 0.0
     scheduler:
@@ -91,6 +94,7 @@ model:
       max_steps: 30000
     ema_decay: 0.95
     ema_start_step: 0
+    color_refine_steps: 3000
 
   background:
     name: background-color # one of [skip-background, background-color]

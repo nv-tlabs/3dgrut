@@ -85,6 +85,9 @@ class Trainer3DGRUT:
     _distillation_start_step: int = -1
     """ Step at which distillation starts (-1 means disabled) """
 
+    _color_refine_frozen_param_names = frozenset(("positions", "scale", "rotation", "density"))
+    """ Gaussian optimizer parameter groups frozen during NHT color refinement """
+
     @staticmethod
     def create_from_checkpoint(resume: str, conf: DictConfig):
         """Create a new trainer from a checkpoint file"""
@@ -119,6 +122,10 @@ class Trainer3DGRUT:
         """ Total number of train epochs / passes, e.g. single pass over the dataset."""
         self.val_frequency = conf.val_frequency
         """ Validation frequency, in terms on global steps """
+        self._color_refine_start_step = self._get_color_refine_start_step(conf)
+        """ Step at which NHT color refinement starts """
+        self._in_color_refine = False
+        """ Whether NHT color refinement is active """
 
         # Setup the trainer and components
         logger.log_rule("Load Datasets")
@@ -135,6 +142,50 @@ class Trainer3DGRUT:
         self.setup_training(conf, self.model, self.train_dataset)
         self.init_experiments_tracking(conf)
         self.init_gui(conf, self.model, self.train_dataset, self.val_dataset, self.scene_bbox)
+
+    def _get_color_refine_start_step(self, conf: DictConfig) -> int:
+        """Return the first step of the NHT color-only refinement phase."""
+        feature_type = str(OmegaConf.select(conf, "model.feature_type", default="sh")).lower()
+        if feature_type != "nht":
+            return conf.n_iterations
+
+        color_refine_steps = int(OmegaConf.select(conf, "model.nht_decoder.color_refine_steps", default=0) or 0)
+        if color_refine_steps <= 0:
+            return conf.n_iterations
+
+        return max(0, conf.n_iterations - color_refine_steps)
+
+    def _is_color_refine_active(self, global_step: int) -> bool:
+        return global_step >= self._color_refine_start_step and self._color_refine_start_step < self.conf.n_iterations
+
+    def _apply_color_refine_freeze(self, global_step: int) -> None:
+        """Freeze Gaussian geometry/opacity optimizer groups while colors keep training."""
+        if not self._is_color_refine_active(global_step):
+            return
+
+        if not self._in_color_refine:
+            self._in_color_refine = True
+            self.strategy.suspend()
+            logger.info(
+                f"🎨 [step {global_step}] Entering NHT color refinement: "
+                "freezing geometry + opacity and disabling scale/opacity regularization."
+            )
+
+        if self.model.optimizer is None:
+            return
+
+        for param_group in self.model.optimizer.param_groups:
+            if param_group.get("name") in self._color_refine_frozen_param_names:
+                param_group["lr"] = 0.0
+
+    def _zero_color_refine_frozen_grads(self) -> None:
+        if not self._in_color_refine or self.model.optimizer is None:
+            return
+
+        for param_group in self.model.optimizer.param_groups:
+            if param_group.get("name") in self._color_refine_frozen_param_names:
+                for param in param_group["params"]:
+                    param.grad = None
 
     def init_dataloaders(self, conf: DictConfig):
         from threedgrut.datasets.utils import configure_dataloader_for_platform
@@ -467,6 +518,7 @@ class Trainer3DGRUT:
         dir_encoding_degree = getattr(dec, "dir_encoding_degree", 3)
         sh_scale = getattr(dec, "sh_scale", 1.0)
         output_activation = getattr(dec, "output_activation", "Sigmoid")
+        unpremultiply_alpha = getattr(dec, "unpremultiply_alpha", False)
         ema_decay = getattr(dec_conf, "ema_decay", 0.0)
         ema_start_step = getattr(dec_conf, "ema_start_step", 0)
         logger.info(f"Initializing FeatureDecoder: {ray_feature_dim} -> 3 RGB")
@@ -480,6 +532,7 @@ class Trainer3DGRUT:
             output_activation=output_activation,
             ema_decay=ema_decay,
             ema_start_step=ema_start_step,
+            unpremultiply_alpha=unpremultiply_alpha,
         ).to(self.device)
 
         lr = dec.learning_rate
@@ -637,7 +690,7 @@ class Trainer3DGRUT:
         # Opacity regularization
         loss_opacity = torch.zeros(1, device=self.device)
         lambda_opacity = 0.0
-        if self.conf.loss.use_opacity:
+        if self.conf.loss.use_opacity and not self._in_color_refine:
             with torch.cuda.nvtx.range(f"loss-opacity"):
                 loss_opacity = torch.abs(self.model.get_density()).mean()
                 lambda_opacity = self.conf.loss.lambda_opacity
@@ -645,7 +698,7 @@ class Trainer3DGRUT:
         # Scale regularization
         loss_scale = torch.zeros(1, device=self.device)
         lambda_scale = 0.0
-        if self.conf.loss.use_scale:
+        if self.conf.loss.use_scale and not self._in_color_refine:
             with torch.cuda.nvtx.range(f"loss-scale"):
                 loss_scale = torch.abs(self.model.get_scale()).mean()
                 lambda_scale = self.conf.loss.lambda_scale
@@ -805,6 +858,8 @@ class Trainer3DGRUT:
                     post_processing_reg_loss,
                     global_step,
                 )
+            if self._color_refine_start_step < self.conf.n_iterations:
+                writer.add_scalar("train/color_refine", float(self._in_color_refine), global_step)
             if "psnr" in batch_metrics:
                 writer.add_scalar("psnr/train", batch_metrics["psnr"], self.global_step)
             if "ssim" in batch_metrics:
@@ -964,7 +1019,9 @@ class Trainer3DGRUT:
                     "ray_feature_dim": dec.ray_feature_dim,
                     "hidden_dim": dec.hidden_dim,
                     "num_layers": dec.num_layers,
+                    "sh_scale": dec.sh_scale,
                     "output_activation": dec.output_activation,
+                    "unpremultiply_alpha": dec.unpremultiply_alpha,
                 },
             }
             ema_state = self.feature_decoder.ema_state_dict()
@@ -1028,6 +1085,8 @@ class Trainer3DGRUT:
         metrics: list,
         conf: DictConfig,
     ):
+        self._apply_color_refine_freeze(global_step)
+
         # Freeze Gaussians and suspend strategy when distillation starts
         if self._distillation_start_step >= 0 and global_step >= self._distillation_start_step:
             self.model.freeze_gaussians()
@@ -1108,6 +1167,7 @@ class Trainer3DGRUT:
 
         # Optimizer step
         with torch.cuda.nvtx.range(f"train_{global_step}_backprop"):
+            self._zero_color_refine_frozen_grads()
             if isinstance(self.model.optimizer, SelectiveAdam):
                 assert (
                     outputs["mog_visibility"].shape == self.model.density.shape
@@ -1120,6 +1180,7 @@ class Trainer3DGRUT:
         # Scheduler step
         with torch.cuda.nvtx.range(f"train_{global_step}_scheduler"):
             self.model.scheduler_step(global_step)
+            self._apply_color_refine_freeze(global_step)
 
         # Feature decoder optimizer/scheduler step
         if self.feature_decoder_optimizer is not None:

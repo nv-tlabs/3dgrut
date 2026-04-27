@@ -109,6 +109,13 @@ def setup_3dgut(conf):
         "-O3",
         *defines,
     ]
+    # Diagnostic: dump ptxas register / smem / spill stats per kernel.
+    # Enable with `export NHT_PTXAS_VERBOSE=1` before launching training.
+    if os.environ.get("NHT_PTXAS_VERBOSE", "0") == "1":
+        cuda_cflags += [
+            "-Xptxas=-v",
+            "--resource-usage",
+        ]
     # When PARTICLE_FEATURE_HALF=1 the Slang-generated header uses __half types;
     # the Slang prelude only pulls in <cuda_fp16.h> and defines __half when
     # SLANG_CUDA_ENABLE_HALF is set.

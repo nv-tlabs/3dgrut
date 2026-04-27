@@ -11,6 +11,9 @@ defaults:
 model:
   feature_type: "nht"
 
+render:
+  particle_kernel_max_alpha: 0.999
+
 loss:
   use_opacity: true
   lambda_opacity: 0.02
