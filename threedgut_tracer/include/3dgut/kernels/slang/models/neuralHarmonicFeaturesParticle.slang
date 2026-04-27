@@ -17,7 +17,8 @@
 // Same CudaDeviceExport API as shRadiativeParticles.slang for drop-in replacement.
 // Compile-time: FEATURE_INTERPOLATION_TYPE, FEATURE_INTERPOLATION_SUPPORT, FEATURE_ACTIVATION_TYPE, FEATURE_ACTIVATION_NUM_FREQUENCIES,
 //   PARTICLE_FEATURE_DIM (total K per particle = buffer stride), INTERP_POINT_FEATURE_DIM (per-interpolation-point = K/num_points).
-// Support: center -> K=interpPointDim; tetrahedra -> K=4*interpPointDim. With activation: N = interpPointDim * num_frequencies (decoder input).
+// Support: center -> K=interpPointDim; tetrahedra -> K=4*interpPointDim.
+// With sincos activation: N = interpPointDim * num_frequencies * 2 (separate sin/cos channels).
 
 namespace neuralHarmonicFeaturesParticle
 {
@@ -42,8 +43,8 @@ static const int InterpolationSupport_Tetrahedra = 1;
 static const int InterpolationSupport_CoTriangles = 2; // 2 coplanar triangles / Not supported yet
 static const int InterpolationSupport = FEATURE_INTERPOLATION_SUPPORT;
 
-// Canonical regular tetrahedron that contains the unit sphere; each face is tangent to the unit sphere
-// (insphere radius = 1). Same geometry as particlePrimitives.cu (enclosing tetrahedra).
+// Canonical regular tetrahedron matching the GSplat NHT reference layout:
+// p0=(sqrt(6),-sqrt(2),-1), p1=(-sqrt(6),-sqrt(2),-1), p2=(0,2*sqrt(2),-1), p3=(0,0,3).
 // Incenter at origin; base z=-1, apex z=3; edge s=sqrt(24), height h=4, inradius r=1.
 static const float tetraHedraEdge         = 4.898979485566356f;   // sqrt(24)
 static const float tetraHedraFaceHeight   = 4.242640687119285f;   // s*sqrt(3)/2
@@ -51,10 +52,10 @@ static const float tetraHedraHeight       = 4.0f;                 // s*sqrt(2/3)
 static const float tetraHedraFaceInRadius = 1.4142135623730951f; // s*sqrt(3)/6 = sqrt(2)
 static const float tetraHedraInRadius     = 1.0f;                 // unit sphere
 static const float3 canonicalTetraVerts[4] = {
+    float3(0.5f * tetraHedraEdge, -tetraHedraFaceInRadius, -1.0f),
     float3(-0.5f * tetraHedraEdge, -tetraHedraFaceInRadius, -1.0f),
     float3(0.0f, tetraHedraFaceHeight - tetraHedraFaceInRadius, -1.0f),
-    float3(0.0f, 0.0f, tetraHedraHeight - tetraHedraInRadius),
-    float3(0.5f * tetraHedraEdge, -tetraHedraFaceInRadius, -1.0f)
+    float3(0.0f, 0.0f, tetraHedraHeight - tetraHedraInRadius)
 };
 // Cramer terms for canonical tetrahedron (independent of P); used by barycentricTetrahedronCanonical.
 static const float3 canonicalTetraE1 = canonicalTetraVerts[1] - canonicalTetraVerts[0];
@@ -132,7 +133,7 @@ float4 barycentricTetrahedronCanonical(float3 P)
     return weights;
 }
 
-// Encode and activate : none -> identity; siren -> sin(b*2^f); sincos -> sin(b*2^f)+cos(b*2^f); relu -> max(0,b).
+// Encode and activate : none -> identity; siren -> sin(b*2^f); relu -> max(0,b).
 [BackwardDifferentiable][ForceInline]
 float encodeAndActivate(float baseVal, no_diff int f)
 {
@@ -142,9 +143,7 @@ float encodeAndActivate(float baseVal, no_diff int f)
         return max(0.0f, baseVal);
     float freq = ldexp(1.0f, f);
     float angle = baseVal * freq;
-    if (FeatureActivationType == FeatureActivationType_Siren)
-        return sin(angle);
-    return sin(angle) + cos(angle);
+    return sin(angle);
 }
 
 // Compute blended features into baseFeatures[INTERP_POINT_FEATURE_DIM], then optionally expand by activation to features[RayFeatureDim].
@@ -173,6 +172,20 @@ void featuresFromParametersBuffer(ParametersBuffer parametersBuffer,
     if (FeatureActivationType == FeatureActivationType_None) {
         [ForceUnroll] for (int i = 0; i < InterpPointFeatureDim; ++i) {
             features[i] = baseFeatures[i];
+        }
+    } else if (FeatureActivationType == FeatureActivationType_Relu) {
+        [ForceUnroll] for (int i = 0; i < InterpPointFeatureDim; ++i) {
+            features[i] = max(0.0f, baseFeatures[i]);
+        }
+    } else if (FeatureActivationType == FeatureActivationType_Sincos) {
+        [ForceUnroll] for (int k = 0; k < InterpPointFeatureDim; ++k) {
+            [ForceUnroll] for (int f = 0; f < FeatureActivationNumFrequencies; ++f) {
+                float freq = float(f + 1);
+                float angle = baseFeatures[k] * freq;
+                int outIdx = k * FeatureActivationNumFrequencies * 2 + f * 2;
+                features[outIdx + 0] = sin(angle);
+                features[outIdx + 1] = cos(angle);
+            }
         }
     } else {
         [ForceUnroll] for (int k = 0; k < InterpPointFeatureDim; ++k) {

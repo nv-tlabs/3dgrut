@@ -372,7 +372,7 @@ __device__ inline bool processHit(
     const float grayDist = dot(gcrod, gcrod);
 
     const float gres   = particleResponse<ParticleKernelDegree>(grayDist);
-    const float galpha = fminf(0.99f, gres * particleDensity);
+    const float galpha = fminf(GAUSSIAN_PARTICLE_MAX_ALPHA, gres * particleDensity);
 
     const bool acceptHit = (gres > minParticleKernelDensity) && (galpha > minParticleAlpha);
     if (acceptHit) {
@@ -513,7 +513,7 @@ __device__ inline void processHitBwd(
     const float grayDist = dot(gcrod, gcrod);
 
     const float gres   = particleResponse<ParticleKernelDegree>(grayDist);
-    const float galpha = fminf(0.99f, gres * particleDensity);
+    const float galpha = fminf(GAUSSIAN_PARTICLE_MAX_ALPHA, gres * particleDensity);
 
     if ((gres > minParticleKernelDensity) && (galpha > minParticleAlpha)) {
         ParticleDensity& particleDensityGrad = particleDensityGradPtr[particleIdx];
