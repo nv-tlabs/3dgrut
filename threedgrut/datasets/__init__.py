@@ -184,6 +184,73 @@ def make(name: str, config, ray_jitter):
     return train_dataset, val_dataset
 
 
+def make_train(name: str, config, ray_jitter=None):
+    match name:
+        case "nerf":
+            dataset = NeRFDataset(
+                config.path,
+                split="train",
+                bg_color=config.model.background.color,
+                ray_jitter=ray_jitter,
+            )
+        case "colmap":
+            # Load EXIF exposure data if enabled
+            if config.dataset.get("load_exif", True):
+                exif_exposures = _load_colmap_exif_exposures(
+                    config.path,
+                    config.dataset.downsample_factor,
+                )
+            else:
+                exif_exposures = None
+
+            dataset = ColmapDataset(
+                config.path,
+                split="train",
+                downsample_factor=config.dataset.downsample_factor,
+                test_split_interval=config.dataset.test_split_interval,
+                ray_jitter=ray_jitter,
+                exif_exposures=exif_exposures,
+            )
+        case "scannetpp":
+            dataset = ScannetppDataset(
+                config.path,
+                split="train",
+                ray_jitter=ray_jitter,
+                downsample_factor=config.dataset.downsample_factor,
+                test_split_interval=config.dataset.test_split_interval,
+            )
+        case "ncore":
+            dataset = NCoreDataset(
+                datapath=config.path,
+                device="cuda",
+                split="train",
+                camera_ids=config.dataset.get("camera_ids", None),
+                lidar_ids=config.dataset.get("lidar_ids", None),
+                downsample=config.dataset.get("downsample", 1.0),
+                sample_full_image=config.dataset.train.get("sample_full_image", True),
+                window_size=config.dataset.train.get("window_size", 256),
+                n_samples_per_epoch=config.dataset.train.get("n_samples_per_epoch", 1000),
+                n_train_sample_timepoints=config.dataset.train.get("n_train_sample_timepoints", 1),
+                n_train_sample_camera_rays=config.dataset.train.get("n_train_sample_camera_rays", 4096),
+                n_val_image_subsample=config.dataset.get("n_val_image_subsample", 1),
+                val_frame_interval=config.dataset.get("val_frame_interval", 8),
+                seek_offset_sec=config.dataset.train.get("seek_offset_sec", 0.0),
+                duration_sec=config.dataset.train.get("duration_sec", None),
+                poses_component_group=config.dataset.get("poses_component_group", "default"),
+                intrinsics_component_group=config.dataset.get("intrinsics_component_group", "default"),
+                masks_component_group=config.dataset.get("masks_component_group", "default"),
+                jpeg_backend_cpu=config.dataset.get("jpeg_backend_cpu", "simplejpeg"),
+                simplejpeg_fastdct=config.dataset.get("simplejpeg_fastdct", False),
+                simplejpeg_fastupsample=config.dataset.get("simplejpeg_fastupsample", False),
+                lidar_color_generic_data_name=config.dataset.get("lidar_color_generic_data_name", "rgb"),
+            )
+        case _:
+            raise ValueError(
+                f'Unsupported dataset type: {config.dataset.type}. Choose between: ["colmap", "nerf", "scannetpp", "ncore"].'
+            )
+    return dataset
+
+
 def make_test(name: str, config):
     match name:
         case "nerf":
