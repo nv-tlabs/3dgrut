@@ -47,6 +47,7 @@ COLOR_PARAMS_PER_FRAME = 8
 CHANNEL_SUFFIXES = ["R", "G", "B"]
 
 PPISP_SPG_USDA_FILE = "ppisp_usd_spg.slang.usda"
+PPISP_SPG_SLANG_FILE = "ppisp_usd_spg.slang"
 PPISP_INPUT_RENDER_VAR = "HdrColor"
 PPISP_OUTPUT_RENDER_VAR = "PPISPColor"
 LDR_COLOR_RENDER_VAR = "LdrColor"
@@ -96,12 +97,12 @@ def _add_ldr_color_render_var(
     ppisp_output_path: Sdf.Path,
 ) -> str:
     """Create a LdrColor RenderVar wired to the PPISP output."""
-    ldr_var_path = f"{render_product_path}/{LDR_COLOR_RENDER_VAR}"
-    ldr_var = stage.DefinePrim(ldr_var_path, "RenderVar")
-    ldr_var.CreateAttribute("sourceName", Sdf.ValueTypeNames.String).Set(LDR_COLOR_RENDER_VAR)
-    aov_attr = ldr_var.CreateAttribute("omni:rtx:aov", Sdf.ValueTypeNames.Opaque)
+    render_var_path = f"{render_product_path}/{LDR_COLOR_RENDER_VAR}"
+    render_var = stage.DefinePrim(render_var_path, "RenderVar")
+    render_var.CreateAttribute("sourceName", Sdf.ValueTypeNames.String).Set(LDR_COLOR_RENDER_VAR)
+    aov_attr = render_var.CreateAttribute("omni:rtx:aov", Sdf.ValueTypeNames.Opaque, custom=False)
     aov_attr.SetConnections([ppisp_output_path])
-    return ldr_var_path
+    return render_var_path
 
 
 def _create_shader_prim(stage: Usd.Stage, render_product_path: str) -> UsdShade.Shader:
@@ -118,12 +119,23 @@ def _create_shader_prim(stage: Usd.Stage, render_product_path: str) -> UsdShade.
     input_var_path = f"{render_product_path}/{PPISP_INPUT_RENDER_VAR}"
     input_var_prim = stage.GetPrimAtPath(input_var_path)
     if input_var_prim.IsValid():
-        input_var_prim.CreateAttribute("omni:rtx:aov", Sdf.ValueTypeNames.Opaque)
+        input_var_prim.CreateAttribute("omni:rtx:aov", Sdf.ValueTypeNames.Opaque, custom=False)
 
     # PPISP Shader prim referencing the SPG asset definition
     ppisp_shader_path = f"{render_product_path}/PPISP"
     shader = UsdShade.Shader.Define(stage, ppisp_shader_path)
     shader.GetPrim().GetReferences().AddReference(PPISP_SPG_USDA_FILE)
+    # Duplicate the source metadata on the instance. Some Kit SPG/Fabric paths
+    # do not resolve referenced shader metadata when opening packaged USDZ files.
+    shader.GetPrim().CreateAttribute("info:implementationSource", Sdf.ValueTypeNames.Token, custom=False).Set(
+        "sourceAsset"
+    )
+    shader.GetPrim().CreateAttribute("info:spg:sourceAsset", Sdf.ValueTypeNames.Asset, custom=False).Set(
+        Sdf.AssetPath(PPISP_SPG_SLANG_FILE)
+    )
+    shader.GetPrim().CreateAttribute("info:spg:sourceAsset:subIdentifier", Sdf.ValueTypeNames.Token, custom=False).Set(
+        "ppispProcess"
+    )
 
     # HdrColor opaque input wired to the input RenderVar's AOV
     hdr_input = shader.CreateInput(PPISP_INPUT_RENDER_VAR, Sdf.ValueTypeNames.Opaque)
@@ -132,7 +144,8 @@ def _create_shader_prim(stage: Usd.Stage, render_product_path: str) -> UsdShade.
     # PPISPColor opaque output
     shader.CreateOutput(PPISP_OUTPUT_RENDER_VAR, Sdf.ValueTypeNames.Opaque)
 
-    # LdrColor RenderVar connected to the output
+    # LdrColor RenderVar connected to the PPISP output. This intentionally
+    # replaces the display AOV with PPISP's LDR output.
     ppisp_output_path = shader.GetPath().AppendProperty(f"outputs:{PPISP_OUTPUT_RENDER_VAR}")
     ldr_var_path = _add_ldr_color_render_var(stage, render_product_path, ppisp_output_path)
 
@@ -140,7 +153,7 @@ def _create_shader_prim(stage: Usd.Stage, render_product_path: str) -> UsdShade.
     ordered_vars_rel = render_product.GetRelationship("orderedVars")
     if ordered_vars_rel:
         targets = list(ordered_vars_rel.GetTargets())
-        targets.append(Sdf.Path(ldr_var_path))
+        targets.append(Sdf.Path(LDR_COLOR_RENDER_VAR))
         ordered_vars_rel.SetTargets(targets)
 
     return shader

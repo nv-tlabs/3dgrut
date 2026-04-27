@@ -64,6 +64,15 @@ from threedgrut.export.usd.writers.camera import export_cameras_to_usd
 logger = logging.getLogger(__name__)
 
 
+_GAUSSIAN_SKIP_TONEMAPPING_RENDER_SETTING = "rtx:rtpt:gaussian:skipTonemapping:enabled"
+
+
+def _set_render_setting(stage: Usd.Stage, key: str, value: Any) -> None:
+    render_settings = dict(stage.GetRootLayer().customLayerData.get("renderSettings", {}) or {})
+    render_settings[key] = value
+    stage.SetMetadataByDictKey("customLayerData", "renderSettings", render_settings)
+
+
 def _extract_camera_params_from_dataset(dataset) -> Optional[List]:
     """
     Extract per-frame camera parameters from a dataset.
@@ -92,7 +101,7 @@ def _extract_camera_params_from_dataset(dataset) -> Optional[List]:
                     camera_params.append(None)
                     continue
 
-                params_dict, _, _, camera_name = params_tuple
+                params_dict, _, _, camera_name, *_ = params_tuple
 
                 # Reconstruct CameraModelParameters from dict
                 if camera_name == "OpenCVPinholeCameraModelParameters":
@@ -479,14 +488,18 @@ class USDExporter(ModelExporter):
                 logger.warning(f"Failed to export background: {e}")
 
         render_product_entries = None
-        export_spg_ppisp = self.export_ppisp and (
+        post_processing = kwargs.get("post_processing")
+        has_ppisp_export_source = self.export_ppisp and post_processing is not None
+        export_spg_ppisp = has_ppisp_export_source and (
             self.ov_post_processing == MODE_PPISP_OMNI_FALLBACK_NONE
             or self.ov_post_processing == MODE_PPISP_OMNI_FALLBACK_SPG_PLUS_FITTED_POST_PROCESSING
         )
         export_omni_ppisp_fallback = (
-            self.export_ppisp and self.ov_post_processing != MODE_PPISP_OMNI_FALLBACK_NONE
+            has_ppisp_export_source and self.ov_post_processing != MODE_PPISP_OMNI_FALLBACK_NONE
         )
-        needs_ppisp_render_products = self.export_ppisp
+        needs_ppisp_render_products = has_ppisp_export_source
+        if self.export_ppisp and post_processing is None:
+            logger.info("PPISP export requested but no post_processing module is available; skipping /Render export")
         if needs_ppisp_render_products:
             render_product_entries = self._create_ppisp_render_products(
                 stage=scene_stage,
@@ -499,11 +512,15 @@ class USDExporter(ModelExporter):
 
         # Export PPISP as SPG shaders on RenderProducts
         if export_spg_ppisp and render_product_entries is not None:
+            _set_render_setting(scene_stage, _GAUSSIAN_SKIP_TONEMAPPING_RENDER_SETTING, False)
+            logger.info(
+                "Disabled Gaussian skip-tonemapping render setting for PPISP SPG export"
+            )
             self._export_ppisp(
                 stage=scene_stage,
                 dataset=dataset,
                 camera_names=camera_names,
-                post_processing=kwargs.get("post_processing"),
+                post_processing=post_processing,
                 files=files,
             )
 
@@ -515,7 +532,7 @@ class USDExporter(ModelExporter):
                 camera_prim_paths=camera_prim_paths,
                 render_product_entries=render_product_entries,
                 dataset=dataset,
-                post_processing=kwargs.get("post_processing"),
+                post_processing=post_processing,
             )
 
         # Package
@@ -596,6 +613,19 @@ class USDExporter(ModelExporter):
                 "expected ppisp.PPISP — skipping"
             )
             return
+
+        ppisp_config = getattr(post_processing, "config", None)
+        controllers = getattr(post_processing, "controllers", None)
+        has_controller = (
+            bool(getattr(ppisp_config, "use_controller", False))
+            and controllers is not None
+            and len(controllers) > 0
+        )
+        if has_controller:
+            logger.warning(
+                "PPISP controller export is not implemented yet; SPG export uses only "
+                "stored exposure/color parameters, vignetting, and CRF."
+            )
 
         from threedgrut.export.usd.writers.ppisp_writer import (
             add_ppisp_to_all_render_products,

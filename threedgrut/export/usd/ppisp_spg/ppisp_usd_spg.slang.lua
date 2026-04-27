@@ -1,17 +1,5 @@
 -- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 -- SPDX-License-Identifier: Apache-2.0
---
--- Licensed under the Apache License, Version 2.0 (the "License");
--- you may not use this file except in compliance with the License.
--- You may obtain a copy of the License at
---
--- http://www.apache.org/licenses/LICENSE-2.0
---
--- Unless required by applicable law or agreed to in writing, software
--- distributed under the License is distributed on an "AS IS" BASIS,
--- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
--- See the License for the specific language governing permissions and
--- limitations under the License.
 
 -- PPISP (Physically Plausible Image Signal Processing) SPG Launcher
 --
@@ -24,10 +12,10 @@ function ppispProcess(inputs, outputs, params)
     local in_rgba = inputs["HdrColor"]
     assert(in_rgba and in_rgba.rank == 2, "HdrColor input must be a 2D texture")
 
-    -- Output texture mirrors input shape and dtype
+    -- LdrColor expects an RGBA8 output, even when the input is HdrColor.
     local height = in_rgba.shape[1]
     local width = in_rgba.shape[2]
-    outputs["PPISPColor"] = slang.empty({height, width}, in_rgba.dtype)
+    outputs["PPISPColor"] = slang.empty({height, width}, slang.uchar4)
 
     -- Pass params directly to preserve __fullName for shader reflection matching.
     local function getFloat2(name)
@@ -36,6 +24,9 @@ function ppispProcess(inputs, outputs, params)
     end
 
     return slang.dispatch({
+        stage = "compute",
+        numthreads = { 16, 16, 1 },
+        grid = { math.ceil(width / 16), math.ceil(height / 16), 1 },
         bind = {
             slang.ParameterBlock(
                 -- Exposure

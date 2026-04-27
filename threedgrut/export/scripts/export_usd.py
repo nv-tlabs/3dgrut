@@ -264,15 +264,16 @@ def main():
             elif not hasattr(conf, "dataset") or not hasattr(conf.dataset, "type"):
                 logger.warning("No dataset type in checkpoint config. Cannot load dataset for camera export.")
             else:
-                dataset = datasets.make_test(name=conf.dataset.type, config=conf)
+                dataset = datasets.make_train(name=conf.dataset.type, config=conf, ray_jitter=None)
                 split = getattr(dataset, "split", "unknown")
                 logger.info(f"Loaded dataset with {len(dataset)} frames for camera export (split={split})")
         except Exception as e:
-            logger.warning(f"Failed to load dataset for camera export: {e}")
+            logger.error(f"Failed to load dataset for camera export: {e}")
             if args.verbose:
                 import traceback
 
                 traceback.print_exc()
+            sys.exit(1)
 
     # Create exporter based on format
     if args.format == "nurec":
@@ -282,6 +283,7 @@ def main():
         half_geometry = args.half_geometry or args.half
         half_features = args.half_features or args.half
         export_conf = getattr(conf, "export_usd", None) or conf
+        export_ppisp = bool(getattr(export_conf, "export_ppisp", False) or post_processing is not None)
         exporter = USDExporter(
             half_geometry=half_geometry,
             half_features=half_features,
@@ -290,7 +292,7 @@ def main():
             apply_normalizing_transform=not args.no_transform,
             sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", "cameraDistance"),
             linear_srgb=args.linear_srgb or getattr(export_conf, "linear_srgb", False),
-            export_ppisp=getattr(export_conf, "export_ppisp", False),
+            export_ppisp=export_ppisp,
             ov_post_processing=_get_export_conf_value(export_conf, "ov-post-processing", "ov_post_processing", "none"),
             frames_per_second=getattr(export_conf, "frames_per_second", 1.0),
         )

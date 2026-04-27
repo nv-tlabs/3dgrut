@@ -506,6 +506,8 @@ class TestUSDExportColorSpace:
             assert stage
             assert stage.GetPrimAtPath("/World/Cameras/camera_0000").IsValid()
             assert not stage.GetPrimAtPath("/World/gaussians/Cameras/camera_0000").IsValid()
+            assert stage.GetStartTimeCode() == 0.0
+            assert stage.GetEndTimeCode() == 1.0
 
 
 if __name__ == "__main__":

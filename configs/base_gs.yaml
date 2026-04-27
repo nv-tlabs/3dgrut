@@ -49,8 +49,8 @@ export_usd:
   sorting_mode_hint: cameraDistance
   # If true, Gaussian prim ColorSpaceAPI uses lin_rec709_scene; else srgb_rec709_display
   linear_srgb: false
-  # Enable PPISP post-processing export. ov-post-processing selects the implementation.
-  export_ppisp: false
+  # Enable PPISP post-processing export when post_processing.method is "ppisp".
+  export_ppisp: true
   # none uses the full SPG path when export_ppisp is true.
   # Other values use Omniverse USD post-processing fallback modes.
   # none | ppisp-exposure-fallback | ppisp-fitted-post-processing-fallback | ppisp-spg-plus-fitted-post-processing-fallback

@@ -241,5 +241,5 @@ void ppispProcess(uint3 tid : SV_DispatchThreadID)
     rgb.g = applyCRF(rgb.g, g_Params.crfToeG, g_Params.crfShoulderG, g_Params.crfGammaG, g_Params.crfCenterG);
     rgb.b = applyCRF(rgb.b, g_Params.crfToeB, g_Params.crfShoulderB, g_Params.crfGammaB, g_Params.crfCenterB);
 
-    g_OutTex[tid.xy] = float4(rgb, pixel.a);
+    g_OutTex[tid.xy] = float4(saturate(rgb), 1.0);
 }

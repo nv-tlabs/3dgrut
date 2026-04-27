@@ -24,7 +24,7 @@ post-processing shaders (e.g. PPISP).
 import logging
 from typing import Dict, Tuple
 
-from pxr import Sdf, Usd, UsdGeom
+from pxr import Gf, Sdf, Usd, UsdGeom
 
 log = logging.getLogger(__name__)
 
@@ -63,9 +63,9 @@ def create_render_products(
         product_prim = stage.DefinePrim(product_path, "RenderProduct")
 
         # Resolution
-        product_prim.CreateAttribute(
-            "resolution", Sdf.ValueTypeNames.Int2
-        ).Set((width, height))
+        product_prim.CreateAttribute("resolution", Sdf.ValueTypeNames.Int2).Set(
+            Gf.Vec2i(int(width), int(height))
+        )
 
         # Camera relationship
         camera_rel = product_prim.CreateRelationship("camera")
@@ -75,10 +75,11 @@ def create_render_products(
         hdr_var_path = f"{product_path}/{_HDR_COLOR_VAR}"
         hdr_var = stage.DefinePrim(hdr_var_path, "RenderVar")
         hdr_var.CreateAttribute("sourceName", Sdf.ValueTypeNames.String).Set(_HDR_COLOR_VAR)
+        hdr_var.CreateAttribute("omni:rtx:aov", Sdf.ValueTypeNames.Opaque, custom=False)
 
         # orderedVars relationship
         ordered_vars_rel = product_prim.CreateRelationship("orderedVars")
-        ordered_vars_rel.SetTargets([Sdf.Path(hdr_var_path)])
+        ordered_vars_rel.SetTargets([Sdf.Path(_HDR_COLOR_VAR)])
 
         log.debug(f"Created RenderProduct at {product_path} → camera {camera_path} ({width}×{height})")
 

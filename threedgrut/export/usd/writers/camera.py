@@ -156,6 +156,8 @@ def export_cameras_to_usd(
     UsdGeom.Xform.Define(stage, root_path)
 
     result: Dict[str, str] = {}
+    usd_start_time_code = float("inf")
+    usd_end_time_code = float("-inf")
 
     for cam_idx, cam_name in enumerate(camera_names):
         frame_indices = camera_frames[cam_idx]
@@ -190,11 +192,17 @@ def export_cameras_to_usd(
         for frame_idx in frame_indices:
             usd_pose = poses[frame_idx] @ _CAMERA_COORD_FLIP
             transform_op.Set(column_vector_4x4_to_usd_matrix(usd_pose), float(frame_idx))
+            usd_start_time_code = min(usd_start_time_code, float(frame_idx))
+            usd_end_time_code = max(usd_end_time_code, float(frame_idx))
 
         imageable = UsdGeom.Imageable(camera_prim)
         imageable.CreateVisibilityAttr().Set("inherited" if visible else "invisible")
 
         result[cam_name] = camera_path
+
+    if usd_start_time_code <= usd_end_time_code:
+        stage.SetStartTimeCode(usd_start_time_code)
+        stage.SetEndTimeCode(usd_end_time_code)
 
     logger.info(
         f"Exported {len(result)} camera(s) ({len(poses)} total frames) to {root_path}"
