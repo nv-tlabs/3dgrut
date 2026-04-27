@@ -124,6 +124,11 @@ Examples:
         action="store_true",
         help="Set prim color space to lin_rec709_scene (linear). Default is srgb_rec709_display.",
     )
+    parser.add_argument(
+        "--omni-usd",
+        action="store_true",
+        help="Enable Omniverse-specific USD authoring such as PPISP SPG and MDL material binding.",
+    )
 
     # Dataset path (optional, overrides checkpoint's dataset path)
     parser.add_argument(
@@ -283,7 +288,8 @@ def main():
         half_geometry = args.half_geometry or args.half
         half_features = args.half_features or args.half
         export_conf = getattr(conf, "export_usd", None) or conf
-        export_ppisp = bool(getattr(export_conf, "export_ppisp", False) or post_processing is not None)
+        export_ppisp = bool(getattr(export_conf, "export_ppisp", True))
+        omni_usd = bool(args.omni_usd or _get_export_conf_value(export_conf, "omni-usd", "omni_usd", False))
         exporter = USDExporter(
             half_geometry=half_geometry,
             half_features=half_features,
@@ -292,6 +298,7 @@ def main():
             apply_normalizing_transform=not args.no_transform,
             sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", "cameraDistance"),
             linear_srgb=args.linear_srgb or getattr(export_conf, "linear_srgb", False),
+            omni_usd=omni_usd,
             export_ppisp=export_ppisp,
             ov_post_processing=_get_export_conf_value(export_conf, "ov-post-processing", "ov_post_processing", "none"),
             frames_per_second=getattr(export_conf, "frames_per_second", 1.0),

@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Dict, List, Tuple
 
 import numpy as np
 
-from pxr import Gf, Sdf, Usd, UsdShade
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
 
 if TYPE_CHECKING:
     from ppisp import PPISP  # type: ignore[import-not-found]
@@ -51,6 +51,7 @@ PPISP_SPG_SLANG_FILE = "ppisp_usd_spg.slang"
 PPISP_INPUT_RENDER_VAR = "HdrColor"
 PPISP_OUTPUT_RENDER_VAR = "PPISPColor"
 LDR_COLOR_RENDER_VAR = "LdrColor"
+PPISP_CAMERA_EXPOSURE = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +308,28 @@ def add_ppisp_shader_to_render_product(
     return shader.GetPrim()
 
 
+def _force_ppisp_camera_exposure(stage: Usd.Stage, render_product: Usd.Prim) -> None:
+    camera_rel = render_product.GetRelationship("camera")
+    camera_targets = camera_rel.GetTargets() if camera_rel else []
+    if not camera_targets:
+        log.warning(
+            "RenderProduct %s has no camera target; skipping PPISP camera exposure",
+            render_product.GetPath(),
+        )
+        return
+
+    camera_prim = stage.GetPrimAtPath(camera_targets[0])
+    if not camera_prim.IsValid():
+        log.warning(
+            "RenderProduct %s targets missing camera %s; skipping PPISP camera exposure",
+            render_product.GetPath(),
+            camera_targets[0],
+        )
+        return
+
+    UsdGeom.Camera(camera_prim).CreateExposureAttr().Set(PPISP_CAMERA_EXPOSURE)
+
+
 # ---------------------------------------------------------------------------
 # Batch export over all RenderProducts
 # ---------------------------------------------------------------------------
@@ -363,6 +386,7 @@ def add_ppisp_to_all_render_products(
             continue
 
         frame_indices = camera_frame_mapping.get(camera_name, [])
+        _force_ppisp_camera_exposure(stage, child)
 
         shader_prim = add_ppisp_shader_to_render_product(
             stage=stage,

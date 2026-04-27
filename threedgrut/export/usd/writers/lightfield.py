@@ -51,8 +51,17 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
         projection_mode_hint: str = "perspective",
         sorting_mode_hint: str = "cameraDistance",
         linear_srgb: bool = False,
+        omni_usd: bool = False,
+        has_post_processing: bool = False,
     ) -> None:
-        super().__init__(stage, capabilities, content_root_path, linear_srgb=linear_srgb)
+        super().__init__(
+            stage,
+            capabilities,
+            content_root_path,
+            linear_srgb=linear_srgb,
+            omni_usd=omni_usd,
+            has_post_processing=has_post_processing,
+        )
         self.half_geometry = half_geometry
         self.half_features = half_features
         self.projection_mode_hint = projection_mode_hint
@@ -91,6 +100,14 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
         self._set_rendering_hints()
 
         self.apply_color_space_to_prim(self.prim)
+        if self.omni_usd:
+            from threedgrut.export.usd.writers.omni_material import bind_particlefield_emissive_material
+
+            bind_particlefield_emissive_material(
+                stage=self.stage,
+                prim=self.prim,
+                has_post_processing=self.has_post_processing,
+            )
         return self.prim
 
     def _apply_surflet_kernel_schemas(self) -> None:
