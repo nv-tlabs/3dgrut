@@ -124,11 +124,6 @@ Examples:
         action="store_true",
         help="Set prim color space to lin_rec709_scene (linear). Default is srgb_rec709_display.",
     )
-    parser.add_argument(
-        "--omni-usd",
-        action="store_true",
-        help="Enable Omniverse-specific USD authoring such as PPISP SPG and MDL material binding.",
-    )
     post_processing_group = parser.add_mutually_exclusive_group()
     post_processing_group.add_argument(
         "--export-post-processing",
@@ -146,9 +141,9 @@ Examples:
     parser.add_argument(
         "--post-processing-export-mode",
         type=str,
-        choices=["baked-sh", "native"],
+        choices=["baked-sh", "omni-native"],
         default=None,
-        help="Post-processing export mode. Default is baked-sh when post-processing export is enabled.",
+        help="Post-processing export mode. 'omni-native' uses PPISP SPG and Omniverse material authoring.",
     )
     parser.add_argument(
         "--post-processing-bake-epochs",
@@ -336,12 +331,11 @@ def main():
         "post_processing_export_mode",
         "baked-sh",
     )
-
     # Load dataset for camera export and for train-split post-processing SH baking.
     dataset = None
     needs_dataset = (
         not args.no_cameras
-        or (post_processing is not None and export_post_processing and post_processing_export_mode == "baked-sh")
+        or (post_processing is not None and export_post_processing)
     )
     if needs_dataset:
         try:
@@ -376,7 +370,6 @@ def main():
     else:
         half_geometry = args.half_geometry or args.half
         half_features = args.half_features or args.half
-        omni_usd = bool(args.omni_usd or _get_export_conf_value(export_conf, "omni-usd", "omni_usd", False))
         exporter = USDExporter(
             half_geometry=half_geometry,
             half_features=half_features,
@@ -385,7 +378,6 @@ def main():
             apply_normalizing_transform=not args.no_transform,
             sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", "cameraDistance"),
             linear_srgb=args.linear_srgb or getattr(export_conf, "linear_srgb", False),
-            omni_usd=omni_usd,
             export_post_processing=export_post_processing,
             post_processing_export_mode=post_processing_export_mode,
             post_processing_bake_epochs=_arg_or_conf(
@@ -423,7 +415,6 @@ def main():
                 "ppisp_bake_vignetting_mode",
                 "achromatic-fit",
             ),
-            ov_post_processing=_get_export_conf_value(export_conf, "ov-post-processing", "ov_post_processing", "none"),
             frames_per_second=getattr(export_conf, "frames_per_second", 1.0),
         )
         logger.info("Using ParticleField3DGaussianSplat schema (standard)")
