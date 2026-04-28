@@ -107,9 +107,9 @@ conda activate 3dgrut
 
 ```bash
 # Supported CUDA_VERSION values: 11.8 (or 11), 12.4, 12.6, 12.8 (or 12), 13.0 (or 13)
-CUDA_VERSION=12 ./scripts/create_venv_cuda.sh   # ~4 GB download on first run
-./install_env_uv.sh
+FORCE_LOCAL_CUDA=1 CUDA_VERSION=12 ./scripts/create_venv_cuda.sh   # ~4 GB download on first run
 source .venv/bin/activate
+./install_env_uv.sh
 ```
 
 > [!NOTE]
@@ -191,9 +191,9 @@ CUDA_VERSION=12.8.1 ./install_env.sh 3dgrut_cuda12 WITH_GCC11
 
 Or using the UV script:
 ```sh
-CUDA_VERSION=12 ./scripts/create_venv_cuda.sh 3dgrut_cuda12
-./install_env_uv.sh
+FORCE_LOCAL_CUDA=1 CUDA_VERSION=12 ./scripts/create_venv_cuda.sh 3dgrut_cuda12
 source .venv/bin/activate
+./install_env_uv.sh
 ```
 
 ### Building and Running with Docker
