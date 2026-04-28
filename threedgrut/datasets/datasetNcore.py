@@ -574,6 +574,38 @@ class NCoreDataset(torch.utils.data.Dataset, BoundedMultiViewDataset, DatasetVis
         )
         return self._get_camera_centers(camera_id, frame_indices)
 
+    def get_poses(self) -> np.ndarray:
+        """Get camera poses as (N, 4, 4) C2W matrices in world-global frame.
+
+        Batches frame retrieval per camera (one RPC call per camera, not per frame)
+        to avoid O(N_frames) overhead on long sequences.
+        """
+        self._init_worker()
+
+        assert len(self.camera_ids), "NCoreDataset: no camera sensors loaded"
+
+        all_poses = []
+        for camera_id in self.camera_ids:
+            frame_indices = self.camera_train_frame_indices[camera_id]
+            if len(frame_indices) == 0:
+                continue
+            try:
+                camera_sensor = self.sequence_camera_sensors[self.sequence_id][camera_id]
+                poses = self._transform_poses_to_world_global(
+                    camera_sensor.get_frames_T_source_target(
+                        source_node=camera_sensor.sensor_id,
+                        target_node="world",
+                        frame_indices=frame_indices,
+                        frame_timepoint=ncore.data.FrameTimepoint.START,
+                    ),
+                    self.T_world_to_world_global,
+                ).reshape(-1, 4, 4)
+                all_poses.append(poses)
+            except Exception as e:
+                logger.warning(f"NCoreDataset.get_poses: failed to retrieve poses for camera '{camera_id}': {e}")
+
+        return np.concatenate(all_poses, axis=0) if all_poses else np.empty((0, 4, 4), dtype=np.float32)
+
     def get_scene_extent(self):
         """Compute scene extent from ALL camera centers (both train and val).
 

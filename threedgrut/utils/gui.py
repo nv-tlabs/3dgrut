@@ -133,6 +133,23 @@ class GUI:
         # Update once to popualte lazily-created structures
         self.update_render_view_viz(force=True)
 
+        # Set initial camera from first dataset pose if available.
+        # Must be done after the first frame_tick (inside update_render_view_viz)
+        # so the home view has already been computed and won't override our camera.
+        poses = train_dataset.get_poses()
+        if poses is not None and len(poses) > 0:
+            c2w = np.asarray(poses[0], dtype=np.float32)
+            root = c2w[:3, 3]
+            look_dir = c2w[:3, 2]
+            up_dir = -c2w[:3, 1]
+            cam_params = ps.get_view_camera_parameters()
+            extrinsics = ps.CameraExtrinsics(root=root, look_dir=look_dir, up_dir=up_dir)
+            intrinsics = ps.CameraIntrinsics(
+                fov_vertical_deg=cam_params.get_fov_vertical_deg(),
+                aspect=cam_params.get_aspect(),
+            )
+            ps.set_view_camera_parameters(ps.CameraParameters(intrinsics, extrinsics))
+
     def update_cloud_viz(self):
         # re-initialize the viz
         if self.ps_point_cloud is None or self.ps_point_cloud.n_points() != self.model.positions.shape[0]:

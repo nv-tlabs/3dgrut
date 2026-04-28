@@ -174,6 +174,40 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 pixel_coords,
             )
 
+        def create_opencv_pinhole_camera(focalx, focaly, w, h, cx=None, cy=None, radial_coeffs=None):
+            cx = cx if cx is not None else w / 2.0
+            cy = cy if cy is not None else h / 2.0
+            # Generate UV coordinates
+            u = np.tile(np.arange(w), h)
+            v = np.arange(h).repeat(w)
+            out_shape = (1, h, w, 3)
+            params = OpenCVPinholeCameraModelParameters(
+                resolution=np.array([w, h], dtype=np.uint64),
+                shutter_type=ShutterType.GLOBAL,
+                principal_point=np.array([cx, cy], dtype=np.float32),
+                focal_length=np.array([focalx, focaly], dtype=np.float32),
+                radial_coeffs=(
+                    np.zeros((6,), dtype=np.float32)
+                    if radial_coeffs is None
+                    else np.asarray(radial_coeffs, dtype=np.float32)
+                ),
+                tangential_coeffs=np.zeros((2,), dtype=np.float32),
+                thin_prism_coeffs=np.zeros((4,), dtype=np.float32),
+            )
+            camera_model = ncore.sensors.CameraModel.from_parameters(params, device="cpu", dtype=torch.float32)
+            int_pixel_coords = torch.tensor(np.stack([u, v], axis=1), dtype=torch.int32)
+            image_points = camera_model.pixels_to_image_points(int_pixel_coords)
+            rays_d_cam = camera_model.image_points_to_camera_rays(image_points)
+            rays_o_cam = torch.zeros_like(rays_d_cam)
+            pixel_coords = create_pixel_coords(w, h)
+            return (
+                params.to_dict(),
+                rays_o_cam.to(torch.float32).reshape(out_shape),
+                rays_d_cam.to(torch.float32).reshape(out_shape),
+                type(params).__name__,
+                pixel_coords,
+            )
+
         def create_fisheye_camera(params, w, h):
             # Generate UV coordinates
             u = np.tile(np.arange(w), h)
@@ -258,15 +292,26 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                     focal_length_x, focal_length_y, width, height, cx=cx, cy=cy
                 )
 
+            elif intr.model == "SIMPLE_RADIAL":
+                focal_length = intr.params[0] / scaling_factor
+                cx = intr.params[1] / scaling_factor
+                cy = intr.params[2] / scaling_factor
+                radial_coeffs = np.zeros((6,), dtype=np.float32)
+                radial_coeffs[0] = intr.params[3]
+                self.intrinsics[intr.id] = create_opencv_pinhole_camera(
+                    focal_length, focal_length, width, height, cx=cx, cy=cy, radial_coeffs=radial_coeffs
+                )
+
             elif intr.model == "OPENCV_FISHEYE":
                 params = copy.deepcopy(intr.params)
                 params[:4] = params[:4] / scaling_factor
                 self.intrinsics[intr.id] = create_fisheye_camera(params, width, height)
 
             else:
-                assert (
-                    False
-                ), f"Colmap camera model '{intr.model}' not handled: Only undistorted datasets (PINHOLE, SIMPLE_PINHOLE or OPENCV_FISHEYE cameras) supported!"
+                assert False, (
+                    f"Colmap camera model '{intr.model}' not handled: supported camera models are "
+                    "PINHOLE, SIMPLE_PINHOLE, SIMPLE_RADIAL, and OPENCV_FISHEYE."
+                )
 
         # Load poses and paths
         self.poses = []
