@@ -129,19 +129,60 @@ Examples:
         action="store_true",
         help="Enable Omniverse-specific USD authoring such as PPISP SPG and MDL material binding.",
     )
-    ppisp_group = parser.add_mutually_exclusive_group()
-    ppisp_group.add_argument(
-        "--export-ppisp",
-        dest="export_ppisp",
+    post_processing_group = parser.add_mutually_exclusive_group()
+    post_processing_group.add_argument(
+        "--export-post-processing",
+        dest="export_post_processing",
         action="store_true",
         default=None,
-        help="Export PPISP effects when the checkpoint contains a PPISP module.",
+        help="Export post-processing effects when the checkpoint contains a supported post-processing module.",
     )
-    ppisp_group.add_argument(
-        "--no-export-ppisp",
-        dest="export_ppisp",
+    post_processing_group.add_argument(
+        "--no-export-post-processing",
+        dest="export_post_processing",
         action="store_false",
-        help="Skip PPISP export even when the checkpoint contains a PPISP module.",
+        help="Skip post-processing export even when the checkpoint contains a supported post-processing module.",
+    )
+    parser.add_argument(
+        "--post-processing-export-mode",
+        type=str,
+        choices=["baked-sh", "native"],
+        default=None,
+        help="Post-processing export mode. Default is baked-sh when post-processing export is enabled.",
+    )
+    parser.add_argument(
+        "--post-processing-bake-epochs",
+        type=int,
+        default=None,
+        help="Number of sequential passes over the train/reference set for post-processing baked-SH export.",
+    )
+    parser.add_argument(
+        "--post-processing-bake-learning-rate",
+        type=float,
+        default=None,
+        help="Adam learning rate for post-processing baked-SH export.",
+    )
+    parser.add_argument(
+        "--post-processing-bake-camera-id",
+        type=int,
+        default=None,
+        help="Camera id used by the fixed post-processing baked-SH export.",
+    )
+    parser.add_argument(
+        "--post-processing-bake-frame-id",
+        type=int,
+        default=None,
+        help="Frame id used by the fixed post-processing baked-SH export.",
+    )
+    parser.add_argument(
+        "--ppisp-bake-vignetting-mode",
+        type=str,
+        choices=["none", "achromatic-fit"],
+        default=None,
+        help=(
+            "Vignetting handling for PPISP baked-SH fitting. 'none' disables PPISP vignetting; "
+            "'achromatic-fit' uses chromatic PPISP reference and an achromatic fit-only vignette."
+        ),
     )
 
     # Dataset path (optional, overrides checkpoint's dataset path)
@@ -210,6 +251,21 @@ def _get_export_conf_value(export_conf, dashed_name: str, attr_name: str, defaul
     return getattr(export_conf, attr_name, default)
 
 
+def _get_export_post_processing_default(export_conf):
+    if hasattr(export_conf, "get"):
+        return export_conf.get(
+            "export-post-processing",
+            getattr(export_conf, "export_post_processing", True),
+        )
+    return getattr(export_conf, "export_post_processing", True)
+
+
+def _arg_or_conf(cli_value, export_conf, dashed_name: str, attr_name: str, default):
+    if cli_value is not None:
+        return cli_value
+    return _get_export_conf_value(export_conf, dashed_name, attr_name, default)
+
+
 def load_model_from_checkpoint(checkpoint_path: str):
     """Load a 3DGRUT model from checkpoint."""
     from threedgrut.model.model import MixtureOfGaussians
@@ -266,9 +322,28 @@ def main():
             traceback.print_exc()
         sys.exit(1)
 
-    # Load dataset for camera export
+    export_conf = getattr(conf, "export_usd", None) or conf
+    if args.export_post_processing is not None:
+        export_post_processing = args.export_post_processing
+    elif post_processing is not None:
+        export_post_processing = True
+    else:
+        export_post_processing = bool(_get_export_post_processing_default(export_conf))
+    post_processing_export_mode = _arg_or_conf(
+        args.post_processing_export_mode,
+        export_conf,
+        "post-processing-export-mode",
+        "post_processing_export_mode",
+        "baked-sh",
+    )
+
+    # Load dataset for camera export and for train-split post-processing SH baking.
     dataset = None
-    if not args.no_cameras:
+    needs_dataset = (
+        not args.no_cameras
+        or (post_processing is not None and export_post_processing and post_processing_export_mode == "baked-sh")
+    )
+    if needs_dataset:
         try:
             import threedgrut.datasets as datasets
 
@@ -301,13 +376,6 @@ def main():
     else:
         half_geometry = args.half_geometry or args.half
         half_features = args.half_features or args.half
-        export_conf = getattr(conf, "export_usd", None) or conf
-        if args.export_ppisp is not None:
-            export_ppisp = args.export_ppisp
-        elif post_processing is not None:
-            export_ppisp = True
-        else:
-            export_ppisp = bool(getattr(export_conf, "export_ppisp", True))
         omni_usd = bool(args.omni_usd or _get_export_conf_value(export_conf, "omni-usd", "omni_usd", False))
         exporter = USDExporter(
             half_geometry=half_geometry,
@@ -318,7 +386,43 @@ def main():
             sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", "cameraDistance"),
             linear_srgb=args.linear_srgb or getattr(export_conf, "linear_srgb", False),
             omni_usd=omni_usd,
-            export_ppisp=export_ppisp,
+            export_post_processing=export_post_processing,
+            post_processing_export_mode=post_processing_export_mode,
+            post_processing_bake_epochs=_arg_or_conf(
+                args.post_processing_bake_epochs,
+                export_conf,
+                "post-processing-bake-epochs",
+                "post_processing_bake_epochs",
+                1,
+            ),
+            post_processing_bake_learning_rate=_arg_or_conf(
+                args.post_processing_bake_learning_rate,
+                export_conf,
+                "post-processing-bake-learning-rate",
+                "post_processing_bake_learning_rate",
+                1.0e-3,
+            ),
+            post_processing_bake_camera_id=_arg_or_conf(
+                args.post_processing_bake_camera_id,
+                export_conf,
+                "post-processing-bake-camera-id",
+                "post_processing_bake_camera_id",
+                0,
+            ),
+            post_processing_bake_frame_id=_arg_or_conf(
+                args.post_processing_bake_frame_id,
+                export_conf,
+                "post-processing-bake-frame-id",
+                "post_processing_bake_frame_id",
+                0,
+            ),
+            ppisp_bake_vignetting_mode=_arg_or_conf(
+                args.ppisp_bake_vignetting_mode,
+                export_conf,
+                "ppisp-bake-vignetting-mode",
+                "ppisp_bake_vignetting_mode",
+                "achromatic-fit",
+            ),
             ov_post_processing=_get_export_conf_value(export_conf, "ov-post-processing", "ov_post_processing", "none"),
             frames_per_second=getattr(export_conf, "frames_per_second", 1.0),
         )

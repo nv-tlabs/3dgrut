@@ -59,12 +59,19 @@ from threedgrut.export.usd.writers.ov_post_processing import (
     MODE_PPISP_OMNI_FALLBACK_SPG_PLUS_FITTED_POST_PROCESSING,
     normalize_ov_post_processing_mode,
 )
+from threedgrut.export.usd.post_processing_sh_bake import MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT
 from threedgrut.export.usd.writers.camera import export_cameras_to_usd
 
 logger = logging.getLogger(__name__)
 
 
 _GAUSSIAN_SKIP_TONEMAPPING_RENDER_SETTING = "rtx:rtpt:gaussian:skipTonemapping:enabled"
+MODE_POST_PROCESSING_EXPORT_BAKED_SH = "baked-sh"
+MODE_POST_PROCESSING_EXPORT_NATIVE = "native"
+POST_PROCESSING_EXPORT_MODES = {
+    MODE_POST_PROCESSING_EXPORT_BAKED_SH,
+    MODE_POST_PROCESSING_EXPORT_NATIVE,
+}
 
 
 def _set_render_setting(stage: Usd.Stage, key: str, value: Any) -> None:
@@ -79,6 +86,16 @@ def _is_ppisp_post_processing(post_processing: Any) -> bool:
         post_processing_type.__name__ == "PPISP"
         and post_processing_type.__module__.split(".", maxsplit=1)[0] == "ppisp"
     )
+
+
+def normalize_post_processing_export_mode(mode: str | None) -> str:
+    normalized = MODE_POST_PROCESSING_EXPORT_BAKED_SH if mode is None else str(mode).strip().lower()
+    if normalized not in POST_PROCESSING_EXPORT_MODES:
+        raise ValueError(
+            f"Unsupported post-processing export mode '{mode}'. "
+            f"Expected one of: {sorted(POST_PROCESSING_EXPORT_MODES)}"
+        )
+    return normalized
 
 
 def _get_export_config_value(export_conf, hyphen_name: str, attr_name: str, default: Any) -> Any:
@@ -269,7 +286,13 @@ class USDExporter(ModelExporter):
         sorting_mode_hint: str = "cameraDistance",
         linear_srgb: bool = False,
         omni_usd: bool = False,
-        export_ppisp: bool = True,
+        export_post_processing: bool = True,
+        post_processing_export_mode: str = MODE_POST_PROCESSING_EXPORT_BAKED_SH,
+        post_processing_bake_epochs: int = 1,
+        post_processing_bake_learning_rate: float = 1.0e-3,
+        post_processing_bake_camera_id: int = 0,
+        post_processing_bake_frame_id: int = 0,
+        ppisp_bake_vignetting_mode: str = MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
         ov_post_processing: str = MODE_PPISP_OMNI_FALLBACK_NONE,
         frames_per_second: float = 1.0,
     ):
@@ -287,11 +310,20 @@ class USDExporter(ModelExporter):
             linear_srgb: If True, set prim color space to lin_rec709_scene.
             omni_usd: If True, author Omniverse-specific USD features such as
                 ParticleFieldEmissive MDL binding and PPISP SPG graphs.
-            export_ppisp: If True, export PPISP using SPG or the selected
-                Omniverse USD fallback mode. Requires post_processing kwarg to
-                be a ppisp.PPISP instance.
+            export_post_processing: If True, export the checkpoint post-processing
+                module using the selected export mode.
+            post_processing_export_mode: "baked-sh" bakes one fixed
+                post-processing transform into Gaussian SH coefficients.
+                "native" uses the module-specific native export path.
+            post_processing_bake_epochs: Number of sequential passes over the train/reference set.
+            post_processing_bake_learning_rate: Adam learning rate for baked SH.
+            post_processing_bake_camera_id: Camera index for the fixed baked transform.
+            post_processing_bake_frame_id: Frame index for the fixed baked transform.
+            ppisp_bake_vignetting_mode: "none" disables vignetting in the PPISP
+                reference. "achromatic-fit" keeps chromatic PPISP vignetting in
+                the reference and applies an achromatic estimate only in the fit loss.
             ov_post_processing: PPISP export implementation selector. "none"
-                uses the full SPG path when export_ppisp is enabled.
+                uses the native PPISP path when export_post_processing is enabled.
             frames_per_second: Sets stage.timeCodesPerSecond. Time codes are always
                 bare frame indices (float(frame_idx)), so this controls playback speed.
                 Default 1.0 means 1 frame per second of real time.
@@ -307,12 +339,18 @@ class USDExporter(ModelExporter):
         self.sorting_mode_hint = sorting_mode_hint
         self.linear_srgb = linear_srgb
         self.omni_usd = omni_usd
-        self.export_ppisp = export_ppisp
+        self.export_post_processing = export_post_processing
+        self.post_processing_export_mode = normalize_post_processing_export_mode(post_processing_export_mode)
+        self.post_processing_bake_epochs = int(post_processing_bake_epochs)
+        self.post_processing_bake_learning_rate = float(post_processing_bake_learning_rate)
+        self.post_processing_bake_camera_id = int(post_processing_bake_camera_id)
+        self.post_processing_bake_frame_id = int(post_processing_bake_frame_id)
+        self.ppisp_bake_vignetting_mode = str(ppisp_bake_vignetting_mode)
         self.ov_post_processing = normalize_ov_post_processing_mode(ov_post_processing)
-        if not self.export_ppisp and self.ov_post_processing != MODE_PPISP_OMNI_FALLBACK_NONE:
+        if not self.export_post_processing and self.ov_post_processing != MODE_PPISP_OMNI_FALLBACK_NONE:
             raise ValueError(
-                "export_usd.ov-post-processing requires export_usd.export_ppisp=true. "
-                "Set export_ppisp=true to export PPISP through an Omniverse USD fallback, "
+                "export_usd.ov-post-processing requires export_usd.export_post_processing=true. "
+                "Set export_post_processing=true to export PPISP through an Omniverse USD fallback, "
                 "or set ov-post-processing=none."
             )
         if not self.omni_usd and self.ov_post_processing != MODE_PPISP_OMNI_FALLBACK_NONE:
@@ -358,8 +396,7 @@ class USDExporter(ModelExporter):
             conf: Configuration parameters.
             background: Optional background model for environment export.
             **kwargs:
-                post_processing: ppisp.PPISP instance for SPG export (used when
-                    export_ppisp=True or ov-post-processing is enabled).
+                post_processing: checkpoint post-processing module to bake or export natively.
                 validate_usd (default True): run OpenUSD stage validators.
                 apply_coordinate_transform (bool): apply 3DGRUT→USDZ coordinate flip.
                 copy_source_usd: (stage_path, res_root) for prim merge.
@@ -369,12 +406,44 @@ class USDExporter(ModelExporter):
         logger.info(f"Exporting USD file to {output_path}...")
         post_processing = kwargs.get("post_processing")
         has_ppisp_module = _is_ppisp_post_processing(post_processing)
-        if has_ppisp_module and self.export_ppisp and not self.omni_usd:
+        uses_baked_post_processing_export = (
+            post_processing is not None
+            and self.export_post_processing
+            and self.post_processing_export_mode == MODE_POST_PROCESSING_EXPORT_BAKED_SH
+            and self.ov_post_processing == MODE_PPISP_OMNI_FALLBACK_NONE
+        )
+        if has_ppisp_module and self.export_post_processing and not uses_baked_post_processing_export and not self.omni_usd:
             raise ValueError(
-                "PPISP USD export requires export_usd.omni-usd=true because the current PPISP "
-                "implementation uses Omniverse SPG. Re-run with export_usd.omni-usd=true, "
-                "or set export_usd.export_ppisp=false / pass --no-export-ppisp to export the "
-                "model without PPISP effects."
+                "PPISP SPG/fallback USD export requires export_usd.omni-usd=true. "
+                "Use post_processing_export_mode=baked-sh for standard USD baked-SH export, "
+                "or set export_usd.export_post_processing=false / pass --no-export-post-processing."
+            )
+
+        if uses_baked_post_processing_export:
+            from threedgrut.export.usd.post_processing_sh_bake import (
+                PPISPPostProcessingBakeAdapter,
+                bake_post_processing_into_sh,
+            )
+
+            if not has_ppisp_module:
+                raise ValueError("Baked-SH post-processing export currently supports PPISP post-processing only.")
+            adapter = PPISPPostProcessingBakeAdapter(
+                camera_id=self.post_processing_bake_camera_id,
+                frame_id=self.post_processing_bake_frame_id,
+                vignetting_mode=self.ppisp_bake_vignetting_mode,
+            )
+            logger.info(
+                "Baking post-processing into Gaussian SH coefficients before export "
+                f"(camera={self.post_processing_bake_camera_id}, frame={self.post_processing_bake_frame_id})"
+            )
+            model = bake_post_processing_into_sh(
+                model=model,
+                post_processing=post_processing,
+                train_dataset=dataset,
+                conf=conf,
+                adapter=adapter,
+                epochs=self.post_processing_bake_epochs,
+                learning_rate=self.post_processing_bake_learning_rate,
             )
 
         # Get model data via accessor
@@ -423,7 +492,7 @@ class USDExporter(ModelExporter):
             sorting_mode_hint=self.sorting_mode_hint,
             linear_srgb=self.linear_srgb,
             omni_usd=self.omni_usd,
-            has_post_processing=has_ppisp_module and self.export_ppisp,
+            has_post_processing=has_ppisp_module and self.export_post_processing and not uses_baked_post_processing_export,
         )
         writer.create_prim(attrs.num_gaussians)
         writer.write_attributes(attrs)
@@ -523,22 +592,27 @@ class USDExporter(ModelExporter):
                 logger.warning(f"Failed to export background: {e}")
 
         render_product_entries = None
-        if not self.export_ppisp and _is_ppisp_post_processing(post_processing):
+        if not self.export_post_processing and _is_ppisp_post_processing(post_processing):
             logger.warning(
-                "PPISP post-processing module is present but export_usd.export_ppisp=false; "
-                "PPISP effects will not be exported. Set export_usd.export_ppisp=true to export them."
+                "PPISP post-processing module is present but export_usd.export_post_processing=false; "
+                "PPISP effects will not be exported. Set export_usd.export_post_processing=true to export them."
             )
-        has_ppisp_export_source = self.export_ppisp and post_processing is not None
+        has_ppisp_export_source = (
+            self.export_post_processing and post_processing is not None and not uses_baked_post_processing_export
+        )
         export_spg_ppisp = has_ppisp_export_source and (
-            self.ov_post_processing == MODE_PPISP_OMNI_FALLBACK_NONE
+            (
+                self.post_processing_export_mode == MODE_POST_PROCESSING_EXPORT_NATIVE
+                and self.ov_post_processing == MODE_PPISP_OMNI_FALLBACK_NONE
+            )
             or self.ov_post_processing == MODE_PPISP_OMNI_FALLBACK_SPG_PLUS_FITTED_POST_PROCESSING
         )
         export_omni_ppisp_fallback = (
             has_ppisp_export_source and self.ov_post_processing != MODE_PPISP_OMNI_FALLBACK_NONE
         )
         needs_ppisp_render_products = has_ppisp_export_source
-        if self.export_ppisp and post_processing is None:
-            logger.info("PPISP export requested but no post_processing module is available; skipping /Render export")
+        if self.export_post_processing and post_processing is None:
+            logger.info("Post-processing export requested but no post_processing module is available; skipping /Render export")
         if needs_ppisp_render_products:
             render_product_entries = self._create_ppisp_render_products(
                 stage=scene_stage,
@@ -648,7 +722,7 @@ class USDExporter(ModelExporter):
 
         if not isinstance(post_processing, PPISP):
             logger.warning(
-                f"export_ppisp=True but post_processing is {type(post_processing).__name__}, "
+                f"export_post_processing=True but post_processing is {type(post_processing).__name__}, "
                 "expected ppisp.PPISP — skipping"
             )
             return
@@ -754,7 +828,48 @@ class USDExporter(ModelExporter):
             sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", "cameraDistance"),
             linear_srgb=getattr(export_conf, "linear_srgb", False),
             omni_usd=_get_export_config_value(export_conf, "omni-usd", "omni_usd", False),
-            export_ppisp=getattr(export_conf, "export_ppisp", True),
+            export_post_processing=_get_export_config_value(
+                export_conf,
+                "export-post-processing",
+                "export_post_processing",
+                True,
+            ),
+            post_processing_export_mode=_get_export_config_value(
+                export_conf,
+                "post-processing-export-mode",
+                "post_processing_export_mode",
+                MODE_POST_PROCESSING_EXPORT_BAKED_SH,
+            ),
+            post_processing_bake_epochs=_get_export_config_value(
+                export_conf,
+                "post-processing-bake-epochs",
+                "post_processing_bake_epochs",
+                1,
+            ),
+            post_processing_bake_learning_rate=_get_export_config_value(
+                export_conf,
+                "post-processing-bake-learning-rate",
+                "post_processing_bake_learning_rate",
+                1.0e-3,
+            ),
+            post_processing_bake_camera_id=_get_export_config_value(
+                export_conf,
+                "post-processing-bake-camera-id",
+                "post_processing_bake_camera_id",
+                0,
+            ),
+            post_processing_bake_frame_id=_get_export_config_value(
+                export_conf,
+                "post-processing-bake-frame-id",
+                "post_processing_bake_frame_id",
+                0,
+            ),
+            ppisp_bake_vignetting_mode=_get_export_config_value(
+                export_conf,
+                "ppisp-bake-vignetting-mode",
+                "ppisp_bake_vignetting_mode",
+                MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
+            ),
             ov_post_processing=_get_export_config_value(
                 export_conf,
                 "ov-post-processing",
