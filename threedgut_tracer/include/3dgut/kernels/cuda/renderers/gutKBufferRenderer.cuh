@@ -591,7 +591,9 @@ struct GUTKBufferRenderer : Params {
                         float3 canonicalIntersection = make_float3(0.f, 0.f, 0.f);
 
                         if (particles.densityHit(ray.origin, ray.direction, particleData.densityParameters,
-                                                  hitAlpha, hitT, canonicalIntersection)) {
+                                                  hitAlpha, hitT, canonicalIntersection) &&
+                            (hitT > ray.tMinMax.x) &&
+                            (hitT < ray.tMinMax.y)) {
                             // Re-evaluate NHT features at canonical intersection point (cheap: barycentric interp)
                             const TFeaturesVec hitFeatures = particles.featuresFromBuffer(particleData.idx, ray.direction, canonicalIntersection);
 

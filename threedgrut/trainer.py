@@ -288,7 +288,6 @@ class Trainer3DGRUT:
                 ema_state = fd_ckpt.get("ema")
                 if ema_state is not None:
                     self.feature_decoder.load_ema_state_dict(ema_state)
-                    self.feature_decoder.apply_ema_shadow()
                 logger.info("🎨 Feature decoder state restored from checkpoint")
 
             # Restore post-processing state
@@ -980,18 +979,24 @@ class Trainer3DGRUT:
             logger.log_rule("Evaluation on Test Set")
 
             # Renderer test split
-            renderer = Renderer.from_preloaded_model(
-                model=self.model,
-                out_dir=out_dir,
-                path=conf.path,
-                save_gt=False,
-                writer=self.tracking.writer,
-                global_step=self.global_step,
-                compute_extra_metrics=conf.compute_extra_metrics,
-                post_processing=self.post_processing,
-                feature_decoder=self.feature_decoder,
-            )
-            renderer.render_all()
+            if self.feature_decoder is not None:
+                self.feature_decoder.apply_ema_shadow()
+            try:
+                renderer = Renderer.from_preloaded_model(
+                    model=self.model,
+                    out_dir=out_dir,
+                    path=conf.path,
+                    save_gt=False,
+                    writer=self.tracking.writer,
+                    global_step=self.global_step,
+                    compute_extra_metrics=conf.compute_extra_metrics,
+                    post_processing=self.post_processing,
+                    feature_decoder=self.feature_decoder,
+                )
+                renderer.render_all()
+            finally:
+                if self.feature_decoder is not None:
+                    self.feature_decoder.restore_ema()
 
     @torch.cuda.nvtx.range(f"save_checkpoint")
     def save_checkpoint(self, last_checkpoint: bool = False):
