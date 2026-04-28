@@ -252,7 +252,7 @@ class ViserGUI:
         # points_plane = self.model.positions[u, v]
         # Return the same outputs as polyscope version
         return (
-            outputs["pred_rgb"],
+            outputs["pred_features"],
             outputs["pred_opacity"],
             outputs["pred_dist"],
             outputs["pred_normals"],

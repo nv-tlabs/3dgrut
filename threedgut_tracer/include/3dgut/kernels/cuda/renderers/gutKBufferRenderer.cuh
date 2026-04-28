@@ -18,16 +18,52 @@
 #include <3dgut/kernels/cuda/common/rayPayloadBackward.cuh>
 #include <3dgut/renderer/gutRendererParameters.h>
 
-struct HitParticle {
+// HitParticle stores per-ray hit state inside the k-buffer. The
+// `canonicalIntersection` is only consumed by the NHT feature path; for the
+// SH path (`PerRayParticleFeatures=false`) we drop it from the struct so the
+// k-buffer pays no storage cost in registers / shared memory per hit.
+template <bool HasCanonical>
+struct HitParticleT;
+
+// Base / SH case: common per-hit state only.
+template <>
+struct HitParticleT<false> {
     static constexpr float InvalidHitT = -1.0f;
     int idx                            = -1;
     float hitT                         = InvalidHitT;
     float alpha                        = 0.0f;
 };
 
-template <int K>
-struct HitParticleKBuffer {
-    __device__ HitParticleKBuffer() {
+// NHT case extends with the per-ray canonical intersection point used by the
+// feature evaluation. Plain (non-virtual) inheritance: layout is base fields
+// then the extra `float3`, matching the pre-refactor combined struct exactly.
+template <>
+struct HitParticleT<true> : HitParticleT<false> {
+    float3 canonicalIntersection = make_float3(0.f, 0.f, 0.f);
+};
+
+// Helper returning a writable `float3&` slot usable as the `densityHit`
+// canonical-intersection out-parameter. Routes to the struct field when
+// present, otherwise to a caller-provided stack scratch (which the compiler
+// elides when unused downstream).
+template <bool HasCanonical>
+__forceinline__ __device__ float3& canonicalIntersectionSlot(HitParticleT<HasCanonical>& hit, float3& scratch);
+
+template <>
+__forceinline__ __device__ float3& canonicalIntersectionSlot<true>(HitParticleT<true>& hit, float3& /*scratch*/) {
+    return hit.canonicalIntersection;
+}
+
+template <>
+__forceinline__ __device__ float3& canonicalIntersectionSlot<false>(HitParticleT<false>& /*hit*/, float3& scratch) {
+    return scratch;
+}
+
+template <int K, bool HasCanonical>
+struct HitParticleKBufferT {
+    using HitParticle = HitParticleT<HasCanonical>;
+
+    __device__ HitParticleKBufferT() {
         m_numHits = 0;
 #pragma unroll
         for (int i = 0; i < K; ++i) {
@@ -75,8 +111,9 @@ private:
     uint32_t m_numHits;
 };
 
-template <>
-struct HitParticleKBuffer<0> {
+template <bool HasCanonical>
+struct HitParticleKBufferT<0, HasCanonical> {
+    using HitParticle = HitParticleT<HasCanonical>;
     constexpr inline __device__ void insert(HitParticle& hitParticle) const {}
     constexpr inline __device__ HitParticle operator[](int) const { return HitParticle(); }
     constexpr inline __device__ uint32_t numHits() const { return 0; }
@@ -91,8 +128,13 @@ struct GUTKBufferRenderer : Params {
     using DensityRawParameters = typename Particles::DensityRawParameters;
     using TFeaturesVec         = typename Particles::TFeaturesVec;
 
-    using TRayPayload         = RayPayload<Particles::FeaturesDim>;
-    using TRayPayloadBackward = RayPayloadBackward<Particles::FeaturesDim>;
+    using TRayPayload         = RayPayload<Particles::RayFeatureDim>;
+    using TRayPayloadBackward = RayPayloadBackward<Particles::RayFeatureDim>;
+
+    // Storage-optimized hit types: the per-ray canonical intersection is kept
+    // only when the feature model needs it (NHT / PerRayParticleFeatures).
+    using HitParticle        = HitParticleT<Params::PerRayParticleFeatures>;
+    using HitParticleKBuffer = HitParticleKBufferT<Params::KHitBufferSize, Params::PerRayParticleFeatures>;
 
     struct PrefetchedParticleData {
         uint32_t idx;
@@ -115,24 +157,27 @@ struct GUTKBufferRenderer : Params {
 
         if constexpr (Backward) {
             float hitAlphaGrad = 0.f;
+            float3 canonicalIntersectionGrad = make_float3(0.f, 0.f, 0.f);
             if constexpr (Params::PerRayParticleFeatures) {
                 particles.featuresIntegrateBwdToBuffer<false>(ray.direction,
+                                                              hitParticle.canonicalIntersection,
+                                                              canonicalIntersectionGrad,
                                                               hitParticle.alpha,
                                                               hitAlphaGrad,
                                                               hitParticle.idx,
-                                                              particles.featuresFromBuffer(hitParticle.idx, ray.direction),
+                                                              particles.featuresFromBuffer(hitParticle.idx, ray.direction, hitParticle.canonicalIntersection),
                                                               ray.featuresBackward,
                                                               ray.featuresGradient);
             } else {
                 TFeaturesVec particleFeaturesGradientVec = TFeaturesVec::zero();
                 particles.featuresIntegrateBwd(hitParticle.alpha,
                                                hitAlphaGrad,
-                                               particleFeatures[hitParticle.idx],
+                                               tcnn::max(particleFeatures[hitParticle.idx], 0.f),
                                                particleFeaturesGradientVec,
                                                ray.featuresBackward,
                                                ray.featuresGradient);
 #pragma unroll
-                for (int i = 0; i < Particles::FeaturesDim; ++i) {
+                for (int i = 0; i < Particles::RayFeatureDim; ++i) {
                     atomicAdd(&(particleFeaturesGradient[hitParticle.idx][i]), particleFeaturesGradientVec[i]);
                 }
             }
@@ -146,7 +191,8 @@ struct GUTKBufferRenderer : Params {
                                                           ray.transmittanceGradient,
                                                           hitParticle.hitT,
                                                           ray.hitTBackward,
-                                                          ray.hitTGradient);
+                                                          ray.hitTGradient,
+                                                          canonicalIntersectionGrad);
 
             ray.transmittance *= (1.0 - hitParticle.alpha);
 
@@ -157,12 +203,20 @@ struct GUTKBufferRenderer : Params {
                                               hitParticle.hitT,
                                               ray.hitT);
 
-            particles.featureIntegrateFwd(hitWeight,
-                                          Params::PerRayParticleFeatures ? particles.featuresFromBuffer(hitParticle.idx, ray.direction) : tcnn::max(particleFeatures[hitParticle.idx], 0.f),
-                                          ray.features);
+            // `if constexpr` branches so the SH specialization of Hit (which
+            // has no `canonicalIntersection` member) is not instantiated with
+            // a missing field reference.
+            if constexpr (Params::PerRayParticleFeatures) {
+                particles.featureIntegrateFwd(hitWeight,
+                                              particles.featuresFromBuffer(hitParticle.idx, ray.direction, hitParticle.canonicalIntersection),
+                                              ray.features);
+            } else {
+                particles.featureIntegrateFwd(hitWeight,
+                                              tcnn::max(particleFeatures[hitParticle.idx], 0.f),
+                                              ray.features);
+            }
 
-            if (hitWeight > 0.0f)
-                ray.countHit();
+            if (hitWeight > 0.0f) ray.countHit();
         }
 
         if (ray.transmittance < Particles::MinTransmittanceThreshold) {
@@ -228,7 +282,7 @@ struct GUTKBufferRenderer : Params {
         using namespace threedgut;
         __shared__ PrefetchedParticleData prefetchedParticlesData[GUTParameters::Tiling::BlockSize];
 
-        HitParticleKBuffer<Params::KHitBufferSize> hitParticleKBuffer;
+        HitParticleKBuffer hitParticleKBuffer;
 
         for (uint32_t i = 0; i < tileNumBlocksToProcess; i++, tileNumParticlesToProcess -= GUTParameters::Tiling::BlockSize) {
 
@@ -261,11 +315,15 @@ struct GUTKBufferRenderer : Params {
 
                 HitParticle hitParticle;
                 hitParticle.idx = particleData.idx;
+                // `canonicalScratch` is only written when the SH specialization
+                // of Hit has no canonicalIntersection field; compiler elides it.
+                float3 canonicalScratch = make_float3(0.f, 0.f, 0.f);
                 if (particles.densityHit(ray.origin,
                                          ray.direction,
                                          particleData.densityParameters,
                                          hitParticle.alpha,
-                                         hitParticle.hitT) &&
+                                         hitParticle.hitT,
+                                         canonicalIntersectionSlot<Params::PerRayParticleFeatures>(hitParticle, canonicalScratch)) &&
                     (hitParticle.hitT > ray.tMinMax.x) &&
                     (hitParticle.hitT < ray.tMinMax.y)) {
 
@@ -349,24 +407,26 @@ struct GUTKBufferRenderer : Params {
             if (!ray.isAlive())
                 break;
 
-            float hitAlpha           = 0.0f;
-            float hitT               = 0.0f;
+            float hitAlpha = 0.0f;
+            float3 hitCanonicalIntersection = make_float3(0.f, 0.f, 0.f);
+            float hitT = 0.0f;
             TFeaturesVec hitFeatures = TFeaturesVec::zero();
-            bool validHit            = false;
+            bool validHit = false;
 
             // Step 1: Each thread tests one Gaussian intersection
             if (j < tileNumParticlesToProcess) {
                 const uint32_t toProcessSortedIndex = tileParticleRangeIndices.x + j;
-                const uint32_t particleIdx          = sortedTileParticleIdxPtr[toProcessSortedIndex];
+                const uint32_t particleIdx = sortedTileParticleIdxPtr[toProcessSortedIndex];
 
                 if (particleIdx != GUTParameters::InvalidParticleIdx) {
                     auto densityParams = particles.fetchDensityParameters(particleIdx);
 
                     if (particles.densityHit(ray.origin,
-                                             ray.direction,
-                                             densityParams,
-                                             hitAlpha,
-                                             hitT) &&
+                                           ray.direction,
+                                           densityParams,
+                                           hitAlpha,
+                                           hitT,
+                                           hitCanonicalIntersection) &&
                         (hitT > ray.tMinMax.x) &&
                         (hitT < ray.tMinMax.y)) {
 
@@ -374,7 +434,7 @@ struct GUTKBufferRenderer : Params {
 
                         // Get Gaussian features
                         if constexpr (Params::PerRayParticleFeatures) {
-                            hitFeatures = particles.featuresFromBuffer(particleIdx, ray.direction);
+                            hitFeatures = particles.featuresFromBuffer(particleIdx, ray.direction, hitCanonicalIntersection);
                         } else {
                             hitFeatures = tcnn::max(particleFeaturesBuffer[particleIdx], 0.f);
                         }
@@ -430,15 +490,15 @@ struct GUTKBufferRenderer : Params {
                 float hitWeight             = hitAlpha * particleTransmittance;
 
                 // Compute weighted contributions
-                for (int featIdx = 0; featIdx < Particles::FeaturesDim; ++featIdx) {
+                for (int featIdx = 0; featIdx < Particles::RayFeatureDim; ++featIdx) {
                     accumulatedFeatures[featIdx] = hitFeatures[featIdx] * hitWeight;
                 }
-                accumulatedHitT     = hitT * hitWeight;
+                accumulatedHitT = hitT * hitWeight;
                 accumulatedHitCount = (hitWeight > 0.0f) ? 1 : 0;
             }
 
             // Step 6: Warp-level reduction (tree-based sum)
-            for (int featIdx = 0; featIdx < Particles::FeaturesDim; ++featIdx) {
+            for (int featIdx = 0; featIdx < Particles::RayFeatureDim; ++featIdx) {
                 for (uint32_t offset = WarpSize / 2; offset > 0; offset >>= 1) {
                     accumulatedFeatures[featIdx] += __shfl_down_sync(WarpMask, accumulatedFeatures[featIdx], offset);
                 }
@@ -451,7 +511,7 @@ struct GUTKBufferRenderer : Params {
 
             // Step 7: Only lane 0 updates ray state (avoid race conditions)
             if (laneId == 0) {
-                for (int featIdx = 0; featIdx < Particles::FeaturesDim; ++featIdx) {
+                for (int featIdx = 0; featIdx < Particles::RayFeatureDim; ++featIdx) {
                     ray.features[featIdx] += accumulatedFeatures[featIdx];
                 }
                 ray.hitT += accumulatedHitT;
@@ -481,83 +541,177 @@ struct GUTKBufferRenderer : Params {
         static_assert(Backward && (Params::KHitBufferSize == 0), "Optimized path for backward pass with no KBuffer");
 
         using namespace threedgut;
-        __shared__ PrefetchedRawParticleData prefetchedRawParticlesData[GUTParameters::Tiling::BlockSize];
 
-        for (uint32_t i = 0; i < tileNumBlocksToProcess; i++, tileNumParticlesToProcess -= GUTParameters::Tiling::BlockSize) {
+        if constexpr (Params::PerRayParticleFeatures) {
+            // NHT path: features are re-evaluated per-ray from buffer (no pre-computed feature cache).
+            // Gradients accumulate into a thread-private local buffer, then warp-reduced before a single
+            // atomicAdd per feature dim — reduces global memory traffic by up to 32× vs. per-hit atomics.
+            __shared__ PrefetchedParticleData prefetchedParticlesData[GUTParameters::Tiling::BlockSize];
 
-            if (__syncthreads_and(!ray.isAlive())) {
-                break;
-            }
+            for (uint32_t i = 0; i < tileNumBlocksToProcess; i++, tileNumParticlesToProcess -= GUTParameters::Tiling::BlockSize) {
 
-            // Collectively fetch particle data
-            const uint32_t toProcessSortedIndex = tileParticleRangeIndices.x + i * GUTParameters::Tiling::BlockSize + tileThreadIdx;
-            if (toProcessSortedIndex < tileParticleRangeIndices.y) {
-                const uint32_t particleIdx = sortedTileParticleIdxPtr[toProcessSortedIndex];
-                if (particleIdx != GUTParameters::InvalidParticleIdx) {
-                    prefetchedRawParticlesData[tileThreadIdx].densityParameters = particles.fetchDensityRawParameters(particleIdx);
-                    if constexpr (Params::PerRayParticleFeatures) {
-                        prefetchedRawParticlesData[tileThreadIdx].features = TFeaturesVec::zero();
+                if (__syncthreads_and(!ray.isAlive())) {
+                    break;
+                }
+
+                // Collectively fetch density parameters only (features fetched per-ray below)
+                const uint32_t toProcessSortedIndex = tileParticleRangeIndices.x + i * GUTParameters::Tiling::BlockSize + tileThreadIdx;
+                if (toProcessSortedIndex < tileParticleRangeIndices.y) {
+                    const uint32_t particleIdx = sortedTileParticleIdxPtr[toProcessSortedIndex];
+                    if (particleIdx != GUTParameters::InvalidParticleIdx) {
+                        prefetchedParticlesData[tileThreadIdx] = {particleIdx, particles.fetchDensityParameters(particleIdx)};
                     } else {
-                        prefetchedRawParticlesData[tileThreadIdx].features = tcnn::max(particleFeaturesBuffer[particleIdx], 0.f);
+                        prefetchedParticlesData[tileThreadIdx].idx = GUTParameters::InvalidParticleIdx;
                     }
-                    prefetchedRawParticlesData[tileThreadIdx].idx = particleIdx;
+                } else {
+                    prefetchedParticlesData[tileThreadIdx].idx = GUTParameters::InvalidParticleIdx;
+                }
+                __syncthreads();
+
+                // Process fetched particles
+                for (int j = 0; j < min(GUTParameters::Tiling::BlockSize, tileNumParticlesToProcess); j++) {
+
+                    if (__all_sync(GUTParameters::Tiling::WarpMask, !ray.isAlive())) {
+                        break;
+                    }
+
+                    const PrefetchedParticleData particleData = prefetchedParticlesData[j];
+                    if (particleData.idx == GUTParameters::InvalidParticleIdx) {
+                        ray.kill();
+                        break;
+                    }
+
+                    // Thread-private feature gradient buffer for warp reduction.
+                    // Zero-initialized: non-hitting threads contribute 0 to the warp sum.
+                    float featureLocalGrad[Particles::ParticleFeatureDim] = {};
+
+                    if (ray.isAlive()) {
+                        float hitAlpha = 0.f;
+                        float hitT     = 0.f;
+                        float3 canonicalIntersection = make_float3(0.f, 0.f, 0.f);
+
+                        if (particles.densityHit(ray.origin, ray.direction, particleData.densityParameters,
+                                                  hitAlpha, hitT, canonicalIntersection) &&
+                            (hitT > ray.tMinMax.x) &&
+                            (hitT < ray.tMinMax.y)) {
+                            // Re-evaluate NHT features at canonical intersection point (cheap: barycentric interp)
+                            const TFeaturesVec hitFeatures = particles.featuresFromBuffer(particleData.idx, ray.direction, canonicalIntersection);
+
+                            float hitAlphaGrad = 0.f;
+                            float3 canonicalIntersectionGrad = make_float3(0.f, 0.f, 0.f);
+
+                            // Write feature grad to thread-private local buffer (no atomics); warp reduction follows below.
+                            particles.featuresIntegrateBwdToLocalGrad(ray.direction,
+                                                                       canonicalIntersection,
+                                                                       canonicalIntersectionGrad,
+                                                                       hitAlpha,
+                                                                       hitAlphaGrad,
+                                                                       particleData.idx,
+                                                                       hitFeatures,
+                                                                       ray.featuresBackward,
+                                                                       ray.featuresGradient,
+                                                                       featureLocalGrad);
+
+                            particles.template densityProcessHitBwdToBuffer<false>(ray.origin,
+                                                                                    ray.direction,
+                                                                                    particleData.idx,
+                                                                                    hitAlpha,
+                                                                                    hitAlphaGrad,
+                                                                                    ray.transmittanceBackward,
+                                                                                    ray.transmittanceGradient,
+                                                                                    hitT,
+                                                                                    ray.hitTBackward,
+                                                                                    ray.hitTGradient,
+                                                                                    canonicalIntersectionGrad);
+
+                            ray.transmittance *= (1.0f - hitAlpha);
+                        }
+
+                        if (ray.transmittance < Particles::MinTransmittanceThreshold) {
+                            ray.kill();
+                        }
+                    }
+
+                    // Warp reduction: all 32 threads (alive or not) participate in __shfl_xor_sync.
+                    // Non-hitting threads contribute featureLocalGrad=0 → no spurious gradient.
+                    // Reduces 32×ParticleFeatureDim atomics per particle to ParticleFeatureDim atomics.
+                    particles.featureLocalGradWarpReduceAndWrite(particleData.idx, featureLocalGrad, tileThreadIdx);
+                }
+            }
+        } else {
+            // SH path: pre-computed features fetched from shared memory, gradients via precomputed buffer.
+            __shared__ PrefetchedRawParticleData prefetchedRawParticlesData[GUTParameters::Tiling::BlockSize];
+
+            for (uint32_t i = 0; i < tileNumBlocksToProcess; i++, tileNumParticlesToProcess -= GUTParameters::Tiling::BlockSize) {
+
+                if (__syncthreads_and(!ray.isAlive())) {
+                    break;
+                }
+
+                // Collectively fetch particle data
+                const uint32_t toProcessSortedIndex = tileParticleRangeIndices.x + i * GUTParameters::Tiling::BlockSize + tileThreadIdx;
+                if (toProcessSortedIndex < tileParticleRangeIndices.y) {
+                    const uint32_t particleIdx = sortedTileParticleIdxPtr[toProcessSortedIndex];
+                    if (particleIdx != GUTParameters::InvalidParticleIdx) {
+                        prefetchedRawParticlesData[tileThreadIdx].densityParameters = particles.fetchDensityRawParameters(particleIdx);
+                        prefetchedRawParticlesData[tileThreadIdx].features = tcnn::max(particleFeaturesBuffer[particleIdx], 0.f);
+                        prefetchedRawParticlesData[tileThreadIdx].idx = particleIdx;
+                    } else {
+                        prefetchedRawParticlesData[tileThreadIdx].idx = GUTParameters::InvalidParticleIdx;
+                    }
                 } else {
                     prefetchedRawParticlesData[tileThreadIdx].idx = GUTParameters::InvalidParticleIdx;
                 }
-            } else {
-                prefetchedRawParticlesData[tileThreadIdx].idx = GUTParameters::InvalidParticleIdx;
-            }
-            __syncthreads();
+                __syncthreads();
 
-            // Process fetched particles
-            for (int j = 0; j < min(GUTParameters::Tiling::BlockSize, tileNumParticlesToProcess); j++) {
+                // Process fetched particles
+                for (int j = 0; j < min(GUTParameters::Tiling::BlockSize, tileNumParticlesToProcess); j++) {
 
-                if (__all_sync(GUTParameters::Tiling::WarpMask, !ray.isAlive())) {
-                    break;
-                }
-
-                const PrefetchedRawParticleData particleData = prefetchedRawParticlesData[j];
-                if (particleData.idx == GUTParameters::InvalidParticleIdx) {
-                    ray.kill();
-                    break;
-                }
-
-                DensityRawParameters densityRawParametersGrad;
-                densityRawParametersGrad.density    = 0.0f;
-                densityRawParametersGrad.position   = make_float3(0.0f);
-                densityRawParametersGrad.quaternion = make_float4(0.0f);
-                densityRawParametersGrad.scale      = make_float3(0.0f);
-
-                TFeaturesVec featuresGrad = TFeaturesVec::zero();
-
-                if (ray.isAlive()) {
-                    particles.processHitBwd<Params::PerRayParticleFeatures>(
-                        ray.origin,
-                        ray.direction,
-                        particleData.idx,
-                        particleData.densityParameters,
-                        &densityRawParametersGrad,
-                        particleData.features,
-                        &featuresGrad,
-                        ray.transmittance,
-                        ray.transmittanceBackward,
-                        ray.transmittanceGradient,
-                        ray.features,
-                        ray.featuresBackward,
-                        ray.featuresGradient,
-                        ray.hitT,
-                        ray.hitTBackward,
-                        ray.hitTGradient);
-                    if (ray.transmittance < Particles::MinTransmittanceThreshold) {
-                        ray.kill();
+                    if (__all_sync(GUTParameters::Tiling::WarpMask, !ray.isAlive())) {
+                        break;
                     }
-                }
 
-                if constexpr (!Params::PerRayParticleFeatures) {
+                    const PrefetchedRawParticleData particleData = prefetchedRawParticlesData[j];
+                    if (particleData.idx == GUTParameters::InvalidParticleIdx) {
+                        ray.kill();
+                        break;
+                    }
+
+                    DensityRawParameters densityRawParametersGrad;
+                    densityRawParametersGrad.density    = 0.0f;
+                    densityRawParametersGrad.position   = make_float3(0.0f);
+                    densityRawParametersGrad.quaternion = make_float4(0.0f);
+                    densityRawParametersGrad.scale      = make_float3(0.0f);
+
+                    TFeaturesVec featuresGrad = TFeaturesVec::zero();
+
+                    if (ray.isAlive()) {
+                        particles.processHitBwd<false>(
+                            ray.origin,
+                            ray.direction,
+                            particleData.idx,
+                            particleData.densityParameters,
+                            &densityRawParametersGrad,
+                            particleData.features,
+                            &featuresGrad,
+                            ray.transmittance,
+                            ray.transmittanceBackward,
+                            ray.transmittanceGradient,
+                            ray.features,
+                            ray.featuresBackward,
+                            ray.featuresGradient,
+                            ray.hitT,
+                            ray.hitTBackward,
+                            ray.hitTGradient);
+                        if (ray.transmittance < Particles::MinTransmittanceThreshold) {
+                            ray.kill();
+                        }
+                    }
+
                     particles.processHitBwdUpdateFeaturesGradient(particleData.idx, featuresGrad,
                                                                   particleFeaturesGradientBuffer, tileThreadIdx);
+                    particles.processHitBwdUpdateDensityGradient(particleData.idx, densityRawParametersGrad, tileThreadIdx);
                 }
-                particles.processHitBwdUpdateDensityGradient(particleData.idx, densityRawParametersGrad, tileThreadIdx);
             }
         }
     }

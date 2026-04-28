@@ -15,6 +15,10 @@
 
 #include <3dgut/kernels/cuda/common/mathUtils.cuh>
 
+#if PARTICLE_FEATURE_HALF
+#include <cuda_fp16.h>
+#endif
+
 namespace threedgut {
 
 struct ParticleDensity {
@@ -382,7 +386,7 @@ __device__ inline bool processHitFwd(
     const float grayDist = dot(gcrod, gcrod);
 
     const float gres   = particleResponse<ParticleKernelDegree>(grayDist);
-    const float galpha = fminf(0.99f, gres * particleDensity);
+    const float galpha = fminf(GAUSSIAN_PARTICLE_MAX_ALPHA, gres * particleDensity);
 
     const bool acceptHit = (gres > minParticleKernelDensity) && (galpha > minParticleAlpha);
     if (acceptHit) {
@@ -525,7 +529,7 @@ __device__ inline void processHitBwd(
     const float grayDist = dot(gcrod, gcrod);
 
     const float gres   = particleResponse<ParticleKernelDegree>(grayDist);
-    const float galpha = fminf(0.99f, gres * particleDensity);
+    const float galpha = fminf(GAUSSIAN_PARTICLE_MAX_ALPHA, gres * particleDensity);
 
     if ((gres > minParticleKernelDensity) && (galpha > minParticleAlpha)) {
 
@@ -745,5 +749,238 @@ __device__ inline void processHitBwd(
         transmittance = nextTransmit;
     }
 }
+
+// =======================================================================================
+// Neural Harmonic Textures — handwritten CUDA backward.
+//
+// Mirrors `particleFeaturesIntegrateBwdToBuffer` from neuralHarmonicFeaturesParticle.slang
+// called with `exclusiveGradient=true` and a shifted local-grad buffer (see
+// `featuresIntegrateBwdToLocalGrad` in shRadiativeGaussianParticles.cuh for context).
+//
+// Scope: tetrahedral 4-vertex barycentric interpolation + {None, Siren, Sincos, Relu}
+// activation, fp16/fp32 particle feature storage, fp32 gradients.
+// =======================================================================================
+namespace nht {
+
+// Canonical tetrahedron matching the GSplat NHT reference vertex ordering.
+// v0=(sqrt(6),-sqrt(2),-1), v1=(-sqrt(6),-sqrt(2),-1), v2=(0,2*sqrt(2),-1), v3=(0,0,3).
+__forceinline__ __device__ float3 tetraV0() {
+    return make_float3(2.449489742783178f, -1.4142135623730951f, -1.0f);
+}
+// Scaled inward face normals N_k = d(w_k)/dP from the GSplat reference tetrahedron.
+// Verified: w_k = 1 exactly at v_k, 0 at the other vertices, sum_k w_k = 1.
+__forceinline__ __device__ float3 tetraN0() {
+    return make_float3( 0.20412414523193154f, -0.11785113019775792f, -0.08333333333333333f);
+}
+__forceinline__ __device__ float3 tetraN1() {
+    return make_float3(-0.20412414523193154f, -0.11785113019775792f, -0.08333333333333333f);
+}
+__forceinline__ __device__ float3 tetraN2() {
+    return make_float3( 0.00000000000000000f,  0.23570226039551587f, -0.08333333333333333f);
+}
+__forceinline__ __device__ float3 tetraN3() {
+    return make_float3( 0.00000000000000000f,  0.00000000000000000f,  0.25000000000000000f);
+}
+
+// Mirrors neuralHarmonicFeaturesParticle.slang's FeatureActivationType_*.
+enum ActivationType : int {
+    ActivationNone   = 0,
+    ActivationSiren  = 1,
+    ActivationSincos = 2,
+    ActivationRelu   = 3,
+};
+
+// Single-element load promoting fp16 to fp32 when needed; identity on float.
+// Uses __half's device `operator float()` (cuda_fp16.h) when TFeatElem is __half.
+template <typename TFeatElem>
+__forceinline__ __device__ float loadFeatureElem(const TFeatElem* p) {
+    return static_cast<float>(*p);
+}
+
+/**
+ * Handwritten reverse of Slang's `particleFeaturesIntegrateBwdToBuffer` for the NHT path.
+ * Writes per-vertex gradient contributions directly into a thread-private `featureLocalGrad`
+ * scratch buffer of size `4*InterpPointFeatureDim` (caller warp-reduces + atomic-adds
+ * downstream — see `featureLocalGradWarpReduceAndWrite`).
+ *
+ * Buffer layout assumption: `vertex_k[i] = particleFeatureBufPtr[particleIdx*4*IPFD + k*IPFD + i]`.
+ *
+ * Walk order: renderer traverses hits front-to-back (near → far) for both fwd and bwd.
+ * Compositing algebra: Slang decomposes fwd as the equivalent back-to-front lerp
+ *   C_i = alpha_i * f_i + (1 - alpha_i) * C_{i+1},   C_0 = forward-final color, C_N = 0.
+ * Each call to this function unwinds one lerp step of the current particle, advancing
+ * the stored accumulator from C_i to C_{i+1} — consistent with the front-to-back walk
+ * starting from `integratedFeatures = C_0` (set by initializeBackwardRay).
+ *
+ * Mutations (match Slang `particleFeaturesIntegrateBwdToBuffer` exactly):
+ *  - integratedFeatures[i]      = (integratedFeatures[i] - features[i] * alpha) / (1 - alpha)
+ *                                 (recovers C_{i+1} from C_i; seen by the next hit)
+ *  - integratedFeaturesGrad[i]  = (1 - alpha) * d(acc_post)_i
+ *                                 (d(C_i)/d(C_{i+1}) from the lerp VJP)
+ *  - alphaGrad                 += Σ_i (features[i] - acc_prev_i) * d(acc_post)_i
+ *  - canonicalIntersectionGrad += barycentric VJP
+ *  - featureLocalGrad[k*IPFD+i]+= w_k * dBase[i]   (matches `exclusiveGradient=true`)
+ *
+ * No-op when `alpha <= 0`.
+ */
+template <int InterpPointFeatureDim,
+          int NumFrequencies,
+          int ActivationType,
+          typename TFeatElem>
+__forceinline__ __device__ void featuresIntegrateBwdToLocalGrad(
+    const float3&    canonicalIntersection,
+    float3&          canonicalIntersectionGrad,
+    float            alpha,
+    float&           alphaGrad,
+    uint32_t         particleIdx,
+    const float*     features,                 // [RayFeatureDim] read-only
+    float*           integratedFeatures,       // [RayFeatureDim] inout (→ acc_prev)
+    float*           integratedFeaturesGrad,   // [RayFeatureDim] inout (→ d(acc_prev))
+    const TFeatElem* particleFeatureBufPtr,    // [N * 4*IPFD]
+    float*           featureLocalGrad) {       // [4*IPFD] inout (+= accumulator)
+
+    static_assert(ActivationType >= 0 && ActivationType <= 3,
+                  "unsupported FEATURE_ACTIVATION_TYPE for NHT CUDA backward");
+    constexpr int kIPFD = InterpPointFeatureDim;
+    constexpr int kRFD  = (ActivationType == ActivationNone || ActivationType == ActivationRelu)
+                              ? kIPFD
+                              : (ActivationType == ActivationSincos ? kIPFD * NumFrequencies * 2 : kIPFD * NumFrequencies);
+    constexpr int kPFD  = 4 * kIPFD;
+
+    if (alpha <= 0.0f) {
+        return;
+    }
+
+    const float oneMinusAlpha    = 1.0f - alpha;
+    const float invOneMinusAlpha = 1.0f / oneMinusAlpha;
+
+    // Step 1+2: advance stored accumulator C_i -> C_{i+1} (one lerp unwind) AND apply the lerp VJP.
+    //   fwd (lerp form):  y_i = (1-alpha)*acc_prev_i + alpha*f_i
+    //   unwind:           acc_prev_i = (y_i - alpha*f_i) / (1-alpha)
+    //   VJP:              d(acc_prev)_i = (1-alpha) * dy_i
+    //                     d(f)_i        = alpha     * dy_i
+    //                     d(alpha)     += sum_i (f_i - acc_prev_i) * dy_i
+    float dFeatures[kRFD];
+    float dAlphaAcc = 0.0f;
+#pragma unroll
+    for (int i = 0; i < kRFD; ++i) {
+        const float dy_i      = integratedFeaturesGrad[i];
+        const float accPrev_i = (integratedFeatures[i] - features[i] * alpha) * invOneMinusAlpha;
+        dFeatures[i]              = alpha * dy_i;
+        dAlphaAcc                += (features[i] - accPrev_i) * dy_i;
+        integratedFeatures[i]     = accPrev_i;
+        integratedFeaturesGrad[i] = oneMinusAlpha * dy_i;
+    }
+    alphaGrad += dAlphaAcc;
+
+    // Barycentric weights (Slang Cramer form).
+    float w[4];
+    {
+        const float3 v0 = tetraV0();
+        const float3 N1 = tetraN1();
+        const float3 N2 = tetraN2();
+        const float3 N3 = tetraN3();
+        const float3 d  = make_float3(canonicalIntersection.x - v0.x,
+                                      canonicalIntersection.y - v0.y,
+                                      canonicalIntersection.z - v0.z);
+        w[1] = d.x * N1.x + d.y * N1.y + d.z * N1.z;
+        w[2] = d.x * N2.x + d.y * N2.y + d.z * N2.z;
+        w[3] = d.x * N3.x + d.y * N3.y + d.z * N3.z;
+        w[0] = 1.0f - w[1] - w[2] - w[3];
+    }
+
+    // Load all 4 vertex feature blocks once (fp16 → fp32 if applicable).
+    const uint32_t particleOffset = particleIdx * kPFD;
+    float vert[4][kIPFD];
+#pragma unroll
+    for (int k = 0; k < 4; ++k) {
+        const uint32_t vkOff = particleOffset + k * kIPFD;
+#pragma unroll
+        for (int i = 0; i < kIPFD; ++i) {
+            vert[k][i] = loadFeatureElem(&particleFeatureBufPtr[vkOff + i]);
+        }
+    }
+
+    // Step 3: activation backward → dBase[kIPFD].
+    float dBase[kIPFD];
+    if constexpr (ActivationType == ActivationNone) {
+#pragma unroll
+        for (int i = 0; i < kIPFD; ++i) {
+            dBase[i] = dFeatures[i];
+        }
+    } else if constexpr (ActivationType == ActivationRelu) {
+        // features[i] = max(0, base[i]); mask from features[i] > 0 (bit-identical to base[i] > 0).
+#pragma unroll
+        for (int i = 0; i < kIPFD; ++i) {
+            dBase[i] = (features[i] > 0.0f) ? dFeatures[i] : 0.0f;
+        }
+    } else {
+        // Siren / Sincos: need baseFeatures for the trig derivative.
+        float baseFeatures[kIPFD] = {};
+#pragma unroll
+        for (int k = 0; k < 4; ++k) {
+#pragma unroll
+            for (int i = 0; i < kIPFD; ++i) {
+                baseFeatures[i] += w[k] * vert[k][i];
+            }
+        }
+#pragma unroll
+        for (int i = 0; i < kIPFD; ++i) {
+            dBase[i] = 0.0f;
+        }
+        if constexpr (ActivationType == ActivationSiren) {
+            // features[k*NFreq+f] = sin(base[k] * 2^f) → dBase[k] += cos(angle)*freq*dOut
+#pragma unroll
+            for (int k = 0; k < kIPFD; ++k) {
+#pragma unroll
+                for (int f = 0; f < NumFrequencies; ++f) {
+                    const float freq  = ldexpf(1.0f, f);
+                    const float angle = baseFeatures[k] * freq;
+                    dBase[k] += cosf(angle) * freq * dFeatures[k * NumFrequencies + f];
+                }
+            }
+        } else {
+            // ActivationSincos follows GSplat: separate sin/cos channels per frequency.
+#pragma unroll
+            for (int k = 0; k < kIPFD; ++k) {
+#pragma unroll
+                for (int f = 0; f < NumFrequencies; ++f) {
+                    const float freq  = static_cast<float>(f + 1);
+                    const float angle = baseFeatures[k] * freq;
+                    float s, c;
+                    __sincosf(angle, &s, &c);
+                    const int outIdx = k * NumFrequencies * 2 + f * 2;
+                    dBase[k] += (c * dFeatures[outIdx] - s * dFeatures[outIdx + 1]) * freq;
+                }
+            }
+        }
+    }
+
+    // Step 4: barycentric backward.
+    //   d(vertex_k[i])      = w_k * dBase[i]               → featureLocalGrad (+= matches Slang exclusiveGradient=true)
+    //   d(canonicalPos)    += sum_k (sum_i vert_k[i]*dBase[i]) * N_k
+    float3 dP = make_float3(0.0f, 0.0f, 0.0f);
+#pragma unroll
+    for (int k = 0; k < 4; ++k) {
+        float dw_k = 0.0f;
+#pragma unroll
+        for (int i = 0; i < kIPFD; ++i) {
+            featureLocalGrad[k * kIPFD + i] += w[k] * dBase[i];
+            dw_k                            += vert[k][i] * dBase[i];
+        }
+        const float3 Nk = (k == 0)   ? tetraN0()
+                          : (k == 1) ? tetraN1()
+                          : (k == 2) ? tetraN2()
+                                     : tetraN3();
+        dP.x += dw_k * Nk.x;
+        dP.y += dw_k * Nk.y;
+        dP.z += dw_k * Nk.z;
+    }
+    canonicalIntersectionGrad.x += dP.x;
+    canonicalIntersectionGrad.y += dP.y;
+    canonicalIntersectionGrad.z += dP.z;
+}
+
+} // namespace nht
 
 } // namespace threedgut

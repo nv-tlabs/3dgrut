@@ -21,6 +21,7 @@ import torch
 import torch.utils.cpp_extension
 
 from threedgrut.datasets.protocols import Batch
+from threedgrut.model.features import Features
 from threedgrut.utils.timer import CudaTimer
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ class Tracer:
             min_transmittance,
         ):
             particle_density = torch.concat([mog_pos, mog_dns, mog_rot, mog_scl, torch.zeros_like(mog_dns)], dim=1)
-            ray_radiance, ray_density, ray_hit_distance, ray_normals, hits_count, mog_visibility = tracer_wrapper.trace(
+            ray_features, ray_density, ray_hit_distance, ray_normals, hits_count, mog_visibility = tracer_wrapper.trace(
                 frame_id,
                 ray_to_world,
                 ray_ori,
@@ -81,7 +82,7 @@ class Tracer:
                 ray_to_world,
                 ray_ori,
                 ray_dir,
-                ray_radiance,
+                ray_features,
                 ray_density,
                 ray_hit_distance,
                 ray_normals,
@@ -94,7 +95,7 @@ class Tracer:
             ctx.min_transmittance = min_transmittance
             ctx.tracer_wrapper = tracer_wrapper
             return (
-                ray_radiance,
+                ray_features.float(),  # always fp32 to caller; fp16 saved in ctx for trace_bwd
                 ray_density,
                 ray_hit_distance[:, :, :, 0:1],  # return only the hit distance
                 ray_normals,
@@ -105,7 +106,7 @@ class Tracer:
         @staticmethod
         def backward(
             ctx,
-            ray_radiance_grd,
+            ray_features_grd,
             ray_density_grd,
             ray_hit_distance_grd,
             ray_normals_grd,
@@ -116,7 +117,7 @@ class Tracer:
                 ray_to_world,
                 ray_ori,
                 ray_dir,
-                ray_radiance,
+                ray_features,
                 ray_density,
                 ray_hit_distance,
                 ray_normals,
@@ -129,13 +130,13 @@ class Tracer:
                 ray_to_world,
                 ray_ori,
                 ray_dir,
-                ray_radiance,
+                ray_features,
                 ray_density,
                 ray_hit_distance,
                 ray_normals,
                 particle_density,
                 mog_sph,
-                ray_radiance_grd,
+                ray_features_grd,
                 ray_density_grd,
                 ray_hit_distance_grd,
                 ray_normals_grd,
@@ -167,10 +168,10 @@ class Tracer:
         DEFAULT = NONE
 
     def __init__(self, conf):
-
         self.device = "cuda"
         self.conf = conf
         self.num_update_bvh = 0
+        self.feature_transform_type = Features(conf).transform_type
 
         logger.info(f'🔆 Creating Optix tracing pipeline.. Using CUDA path: "{torch.utils.cpp_extension.CUDA_HOME}"')
         torch.zeros(1, device=self.device)  # Create a dummy tensor to force cuda context init
@@ -220,7 +221,7 @@ class Tracer:
             if self.frame_timer is not None:
                 self.frame_timer.start()
 
-            pred_rgb, pred_opacity, pred_dist, pred_normals, hits_count, mog_visibility = Tracer._Autograd.apply(
+            (pred_features, pred_opacity, pred_dist, pred_normals, hits_count, mog_visibility) = Tracer._Autograd.apply(
                 self.tracer_wrapper,
                 frame_id,
                 gpu_batch.T_to_world.contiguous(),
@@ -230,7 +231,11 @@ class Tracer:
                 gaussians.get_rotation().contiguous(),
                 gaussians.get_scale().contiguous(),
                 gaussians.get_density().contiguous(),
-                gaussians.get_features().contiguous(),
+                (
+                    gaussians.get_features().half().contiguous()
+                    if self.conf.render.particle_feature_half
+                    else gaussians.get_features().contiguous()
+                ),
                 Tracer.RenderOpts.DEFAULT,
                 gaussians.n_active_features,
                 self.conf.render.min_transmittance,
@@ -239,15 +244,11 @@ class Tracer:
             if self.frame_timer is not None:
                 self.frame_timer.end()
 
-            pred_rgb, pred_opacity = gaussians.background(
-                gpu_batch.T_to_world.contiguous(), gpu_batch.rays_dir.contiguous(), pred_rgb, pred_opacity, train
-            )
-
         if self.frame_timer is not None:
             self.timings["forward_render"] = self.frame_timer.timing()
 
         return {
-            "pred_rgb": pred_rgb,
+            "pred_features": pred_features,
             "pred_opacity": pred_opacity,
             "pred_dist": pred_dist,
             "pred_normals": torch.nn.functional.normalize(pred_normals, dim=3),

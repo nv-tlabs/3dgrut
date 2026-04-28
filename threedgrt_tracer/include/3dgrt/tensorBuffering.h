@@ -33,13 +33,18 @@ inline scalar_t* getPtr(torch::Tensor tensor) {
         return reinterpret_cast<scalar_t*>(tensor.contiguous().data_ptr<int>());
     } else if (tensor.dtype() == torch::kFloat32) {
         return reinterpret_cast<scalar_t*>(tensor.contiguous().data_ptr<float>());
+    } else if (tensor.dtype() == torch::kHalf) {
+        return reinterpret_cast<scalar_t*>(tensor.contiguous().data_ptr<at::Half>());
     } else {
         throw std::runtime_error("getPtr(tensor) received a tensor of unsupported type");
     }
 }
 
+// Note: `reinterpret_cast` is used on the raw `tensor.data_ptr()` so that this
+// template instantiates for element types without a PyTorch scalar_type entry
+// (e.g. `__half`). Dtype agreement is the caller's responsibility.
 template <class T, int N, template <typename U> class PtrTraits = DefaultPtrTraits>
 PackedTensorAccessor32<T, N> packed_accessor32(torch::Tensor tensor) {
-    return PackedTensorAccessor32<T, N, PtrTraits>(static_cast<typename PtrTraits<T>::PtrType>(tensor.data_ptr<T>()),
+    return PackedTensorAccessor32<T, N, PtrTraits>(reinterpret_cast<typename PtrTraits<T>::PtrType>(tensor.data_ptr()),
                                                    tensor.sizes().data(), tensor.strides().data());
 }

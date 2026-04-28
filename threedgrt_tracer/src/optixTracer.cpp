@@ -215,6 +215,19 @@ std::vector<std::string> OptixTracer::generateDefines(
         defines.emplace_back("-DSPH_MAX_NUM_COEFFS=" + std::to_string((_state->particleRadianceSphDegree + 1) * (_state->particleRadianceSphDegree + 1)));
         defines.emplace_back("-DPARTICLE_PRIMITIVE_TYPE=" + std::to_string(_state->gPrimType));
         defines.emplace_back("-DPARTICLE_PRIMITIVE_CLAMPED=" + std::to_string(particleKernelDensityClamping ? 1 : 0));
+        // Feature dims: use C++ defines so JIT OptiX pipeline sees same values as extension build
+        defines.emplace_back("-DPARTICLE_FEATURE_DIM=" + std::to_string(PipelineParameters::ParticleFeatureDim));
+        defines.emplace_back("-DRAY_FEATURE_DIM=" + std::to_string(PipelineParameters::RayFeatureDim));
+        defines.emplace_back("-DFEATURE_TRANSFORM_TYPE=" + std::to_string(PipelineParameters::FeatureTransformType));
+        // Half-precision flags: must match what the extension build sees so the
+        // PipelineParameters struct layout and the Slang-generated header agree
+        // with the NVRTC-compiled OptiX kernels.
+        defines.emplace_back("-DPARTICLE_FEATURE_HALF=" + std::to_string(PARTICLE_FEATURE_HALF));
+        defines.emplace_back("-DFEATURE_OUTPUT_HALF=" + std::to_string(FEATURE_OUTPUT_HALF));
+#if PARTICLE_FEATURE_HALF || FEATURE_OUTPUT_HALF
+        // Enable `__half` in the Slang-generated CUDA prelude.
+        defines.emplace_back("-DSLANG_CUDA_ENABLE_HALF=1");
+#endif
     }
     return defines;
 }
@@ -356,9 +369,21 @@ void OptixTracer::createPipeline(const OptixDeviceContext context,
         std::string optix_include_dir = dependencies_path + "/dependencies/optix-dev/include";
         std::string cuda_include_dir  = cuda_path + "/include";
 
+        // Some CUDA distributions (e.g. conda's cuda-toolkit) place per-target
+        // SDK headers such as <cuda_fp16.h> under $CUDA_HOME/targets/<triple>/include
+        // rather than directly under $CUDA_HOME/include. Thread that extra
+        // search path to NVRTC when present so Slang-generated CUDA that uses
+        // __half compiles.
+        std::vector<std::string> extra_includes_with_cuda_targets = extra_includes;
+#if defined(__x86_64__) || defined(_M_X64)
+        extra_includes_with_cuda_targets.push_back(cuda_path + "/targets/x86_64-linux/include");
+#elif defined(__aarch64__)
+        extra_includes_with_cuda_targets.push_back(cuda_path + "/targets/sbsa-linux/include");
+#endif
+
         const char* input = getInputData(shaderFile.c_str(), includeDir.c_str(), optix_include_dir.c_str(),
                                          cuda_include_dir.c_str(), kernel_name.c_str(), inputSize, defines,
-                                         (const char**)&log, extra_includes);
+                                         (const char**)&log, extra_includes_with_cuda_targets);
         size_t sizeof_log = sizeof(log);
 
         OPTIX_CHECK_LOG(optixModuleCreateFromPTX(
@@ -857,13 +882,18 @@ OptixTracer::trace(uint32_t frameNumber,
                    torch::Tensor rayOri,
                    torch::Tensor rayDir,
                    torch::Tensor particleDensity,
-                   torch::Tensor particleRadiance,
+                   torch::Tensor particleFeatures,
                    uint32_t renderOpts,
                    int sphDegree,
                    float minTransmittance) {
 
     const torch::TensorOptions opts  = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
-    torch::Tensor rayRad             = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 3}, opts);
+#if FEATURE_OUTPUT_HALF
+    const torch::TensorOptions rayFeatOpts = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA);
+#else
+    const torch::TensorOptions rayFeatOpts = opts;
+#endif
+    torch::Tensor rayFeat            = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), static_cast<int64_t>(PipelineParameters::RayFeatureDim)}, rayFeatOpts);
     torch::Tensor rayDns             = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 1}, opts);
     torch::Tensor rayHit             = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 2}, opts);
     torch::Tensor rayNrm             = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 3}, opts);
@@ -889,11 +919,11 @@ OptixTracer::trace(uint32_t frameNumber,
     paramsHost.rayDirection = packed_accessor32<float, 4>(rayDir);
 
     paramsHost.particleDensity      = getPtr<const ParticleDensity>(particleDensity);
-    paramsHost.particleRadiance     = getPtr<const float>(particleRadiance);
+    paramsHost.particleFeatures     = getPtr<const TParticleFeatureElem>(particleFeatures);
     paramsHost.particleExtendedData = reinterpret_cast<const void*>(_state->gPipelineParticleData);
     paramsHost.particleVisibility   = getPtr<int32_t>(particleVisibility);
 
-    paramsHost.rayRadiance    = packed_accessor32<float, 4>(rayRad);
+    paramsHost.rayFeatures    = packed_accessor32<TRayFeatureElem, 4>(rayFeat);
     paramsHost.rayDensity     = packed_accessor32<float, 4>(rayDns);
     paramsHost.rayHitDistance = packed_accessor32<float, 4>(rayHit);
     paramsHost.rayNormal      = packed_accessor32<float, 4>(rayNrm);
@@ -906,12 +936,12 @@ OptixTracer::trace(uint32_t frameNumber,
         reinterpret_cast<void*>(_state->paramsDevice), &paramsHost, sizeof(paramsHost), cudaMemcpyHostToDevice, cudaStream));
 
     OPTIX_CHECK(optixLaunch(_state->pipelineTracingFwd, cudaStream, _state->paramsDevice,
-                            sizeof(PipelineParameters), &_state->sbtTracingFwd, rayRad.size(2),
-                            rayRad.size(1), rayRad.size(0)));
+                            sizeof(PipelineParameters), &_state->sbtTracingFwd, rayFeat.size(2),
+                            rayFeat.size(1), rayFeat.size(0)));
 
     CUDA_CHECK_LAST();
 
-    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(rayRad, rayDns, rayHit, rayNrm, rayHitsCount, particleVisibility);
+    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(rayFeat, rayDns, rayHit, rayNrm, rayHitsCount, particleVisibility);
 }
 
 std::tuple<torch::Tensor, torch::Tensor>
@@ -919,13 +949,13 @@ OptixTracer::traceBwd(uint32_t frameNumber,
                       torch::Tensor rayToWorld,
                       torch::Tensor rayOri,
                       torch::Tensor rayDir,
-                      torch::Tensor rayRad,
+                      torch::Tensor rayFeat,
                       torch::Tensor rayDns,
                       torch::Tensor rayHit,
                       torch::Tensor rayNrm,
                       torch::Tensor particleDensity,
-                      torch::Tensor particleRadiance,
-                      torch::Tensor rayRadGrd,
+                      torch::Tensor particleFeatures,
+                      torch::Tensor rayFeatGrd,
                       torch::Tensor rayDnsGrd,
                       torch::Tensor rayHitGrd,
                       torch::Tensor rayNrmGrd,
@@ -935,7 +965,7 @@ OptixTracer::traceBwd(uint32_t frameNumber,
 
     const torch::TensorOptions opts    = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
     torch::Tensor particleDensityGrad  = torch::zeros({particleDensity.size(0), particleDensity.size(1)}, opts);
-    torch::Tensor particleRadianceGrad = torch::zeros({particleRadiance.size(0), particleRadiance.size(1)}, opts);
+    torch::Tensor particleFeaturesGrad = torch::zeros({particleFeatures.size(0), particleFeatures.size(1)}, opts);
 
     PipelineBackwardParameters paramsHost;
     paramsHost.handle = _state->gasHandle;
@@ -956,18 +986,18 @@ OptixTracer::traceBwd(uint32_t frameNumber,
     paramsHost.rayDirection = packed_accessor32<float, 4>(rayDir);
 
     paramsHost.particleDensity      = getPtr<const ParticleDensity>(particleDensity);
-    paramsHost.particleRadiance     = getPtr<const float>(particleRadiance);
+    paramsHost.particleFeatures     = getPtr<const TParticleFeatureElem>(particleFeatures);
     paramsHost.particleExtendedData = reinterpret_cast<const void*>(_state->gPipelineParticleData);
 
-    paramsHost.rayRadiance    = packed_accessor32<float, 4>(rayRad);
+    paramsHost.rayFeatures    = packed_accessor32<TRayFeatureElem, 4>(rayFeat);
     paramsHost.rayDensity     = packed_accessor32<float, 4>(rayDns);
     paramsHost.rayHitDistance = packed_accessor32<float, 4>(rayHit);
     paramsHost.rayNormal      = packed_accessor32<float, 4>(rayNrm);
 
     paramsHost.particleDensityGrad  = getPtr<ParticleDensity>(particleDensityGrad);
-    paramsHost.particleRadianceGrad = getPtr<float>(particleRadianceGrad);
+    paramsHost.particleFeaturesGrad = getPtr<float>(particleFeaturesGrad);
 
-    paramsHost.rayRadianceGrad    = packed_accessor32<float, 4>(rayRadGrd);
+    paramsHost.rayFeaturesGrad    = packed_accessor32<float, 4>(rayFeatGrd);
     paramsHost.rayDensityGrad     = packed_accessor32<float, 4>(rayDnsGrd);
     paramsHost.rayHitDistanceGrad = packed_accessor32<float, 4>(rayHitGrd);
     paramsHost.rayNormalGrad      = packed_accessor32<float, 4>(rayNrmGrd);
@@ -980,7 +1010,7 @@ OptixTracer::traceBwd(uint32_t frameNumber,
 
     OPTIX_CHECK(optixLaunch(_state->pipelineTracingBwd, cudaStream, _state->paramsDevice,
                             sizeof(PipelineBackwardParameters), &_state->sbtTracingBwd,
-                            rayRad.size(2), rayRad.size(1), rayRad.size(0)));
+                            rayFeat.size(2), rayFeat.size(1), rayFeat.size(0)));
 
-    return std::tuple<torch::Tensor, torch::Tensor>(particleDensityGrad, particleRadianceGrad);
+    return std::tuple<torch::Tensor, torch::Tensor>(particleDensityGrad, particleFeaturesGrad);
 }

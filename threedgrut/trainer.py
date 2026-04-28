@@ -39,7 +39,7 @@ from threedgrut.render import Renderer
 from threedgrut.strategy.base import BaseStrategy
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import check_step_condition, create_summary_writer, jet_map
-from threedgrut.utils.render import apply_post_processing
+from threedgrut.utils.render import apply_background, apply_feature_decoder, apply_post_processing
 from threedgrut.utils.timer import CudaTimer
 
 
@@ -85,6 +85,9 @@ class Trainer3DGRUT:
     _distillation_start_step: int = -1
     """ Step at which distillation starts (-1 means disabled) """
 
+    _color_refine_frozen_param_names = frozenset(("positions", "scale", "rotation", "density"))
+    """ Gaussian optimizer parameter groups frozen during NHT color refinement """
+
     @staticmethod
     def create_from_checkpoint(resume: str, conf: DictConfig):
         """Create a new trainer from a checkpoint file"""
@@ -119,6 +122,10 @@ class Trainer3DGRUT:
         """ Total number of train epochs / passes, e.g. single pass over the dataset."""
         self.val_frequency = conf.val_frequency
         """ Validation frequency, in terms on global steps """
+        self._color_refine_start_step = self._get_color_refine_start_step(conf)
+        """ Step at which NHT color refinement starts """
+        self._in_color_refine = False
+        """ Whether NHT color refinement is active """
 
         # Setup the trainer and components
         logger.log_rule("Load Datasets")
@@ -129,10 +136,56 @@ class Trainer3DGRUT:
         self.init_densification_and_pruning_strategy(conf)
         logger.log_rule("Setup Model Weights & Training")
         self.init_metrics()
+        # Feature decoder and post-processing must exist before setup_training so resume can load their state.
+        self.init_feature_decoder(conf)
+        self.init_post_processing(conf)
         self.setup_training(conf, self.model, self.train_dataset)
         self.init_experiments_tracking(conf)
-        self.init_post_processing(conf)
         self.init_gui(conf, self.model, self.train_dataset, self.val_dataset, self.scene_bbox)
+
+    def _get_color_refine_start_step(self, conf: DictConfig) -> int:
+        """Return the first step of the NHT color-only refinement phase."""
+        feature_type = str(OmegaConf.select(conf, "model.feature_type", default="sh")).lower()
+        if feature_type != "nht":
+            return conf.n_iterations
+
+        color_refine_steps = int(OmegaConf.select(conf, "model.nht_decoder.color_refine_steps", default=0) or 0)
+        if color_refine_steps <= 0:
+            return conf.n_iterations
+
+        return max(0, conf.n_iterations - color_refine_steps)
+
+    def _is_color_refine_active(self, global_step: int) -> bool:
+        return global_step >= self._color_refine_start_step and self._color_refine_start_step < self.conf.n_iterations
+
+    def _apply_color_refine_freeze(self, global_step: int) -> None:
+        """Freeze Gaussian geometry/opacity optimizer groups while colors keep training."""
+        if not self._is_color_refine_active(global_step):
+            return
+
+        if not self._in_color_refine:
+            self._in_color_refine = True
+            self.strategy.suspend()
+            logger.info(
+                f"🎨 [step {global_step}] Entering NHT color refinement: "
+                "freezing geometry + opacity and disabling scale/opacity regularization."
+            )
+
+        if self.model.optimizer is None:
+            return
+
+        for param_group in self.model.optimizer.param_groups:
+            if param_group.get("name") in self._color_refine_frozen_param_names:
+                param_group["lr"] = 0.0
+
+    def _zero_color_refine_frozen_grads(self) -> None:
+        if not self._in_color_refine or self.model.optimizer is None:
+            return
+
+        for param_group in self.model.optimizer.param_groups:
+            if param_group.get("name") in self._color_refine_frozen_param_names:
+                for param in param_group["params"]:
+                    param.grad = None
 
     def init_dataloaders(self, conf: DictConfig):
         from threedgrut.datasets.utils import configure_dataloader_for_platform
@@ -226,6 +279,17 @@ class Trainer3DGRUT:
             self.strategy.init_densification_buffer(checkpoint)
             global_step = checkpoint["global_step"]
 
+            # Restore feature decoder state (skip if architecture drifted vs checkpoint)
+            if "feature_decoder" in checkpoint and self.feature_decoder is not None:
+                fd_ckpt = checkpoint["feature_decoder"]
+                self.feature_decoder.load_state_dict(fd_ckpt["module"])
+                self.feature_decoder_optimizer.load_state_dict(fd_ckpt["optimizer"])
+                self.feature_decoder_scheduler.load_state_dict(fd_ckpt["scheduler"])
+                ema_state = fd_ckpt.get("ema")
+                if ema_state is not None:
+                    self.feature_decoder.load_ema_state_dict(ema_state)
+                logger.info("🎨 Feature decoder state restored from checkpoint")
+
             # Restore post-processing state
             if "post_processing" in checkpoint and self.post_processing is not None:
                 self.post_processing.load_state_dict(checkpoint["post_processing"]["module"])
@@ -240,6 +304,7 @@ class Trainer3DGRUT:
                 ):
                     sched.load_state_dict(sched_state)
                 logger.info("📷 Post-processing state restored from checkpoint")
+            model.build_acc()
         elif conf.import_ply.enabled:
             ply_path = (
                 conf.import_ply.path
@@ -329,15 +394,16 @@ class Trainer3DGRUT:
     ):
         gui = None
 
+        feature_decoder = getattr(self, "feature_decoder", None)
         if conf.with_gui:
             from threedgrut.utils.gui import GUI
 
-            gui = GUI(conf, model, train_dataset, val_dataset, scene_bbox)
+            gui = GUI(conf, model, train_dataset, val_dataset, scene_bbox, feature_decoder=feature_decoder)
 
         elif conf.with_viser_gui:
             from threedgrut.utils.viser_gui_util import ViserGUI
 
-            gui = ViserGUI(conf, model, train_dataset, val_dataset, scene_bbox)
+            gui = ViserGUI(conf, model, train_dataset, val_dataset, scene_bbox, feature_decoder=feature_decoder)
 
         self.gui = gui
 
@@ -424,6 +490,84 @@ class Trainer3DGRUT:
         else:
             raise ValueError(f"Unknown post-processing method: {method}")
 
+    def init_feature_decoder(self, conf: DictConfig):
+        """Initialize feature decoder for learned features mode."""
+        from threedgrut.model.features import Features
+
+        if self.model.feature_type != Features.Type.NHT:
+            self.feature_decoder = None
+            self.feature_decoder_optimizer = None
+            self.feature_decoder_scheduler = None
+            return
+
+        dec_conf = conf.model.nht_decoder
+        if not getattr(dec_conf, "enabled", True):
+            self.feature_decoder = None
+            self.feature_decoder_optimizer = None
+            self.feature_decoder_scheduler = None
+            return
+
+        from threedgrut.model.feature_decoder import FeatureDecoder
+
+        ray_feature_dim = self.model.ray_feature_dim
+        dec = conf.model.nht_decoder
+        hidden_dim = dec.hidden_dim
+        num_layers = getattr(dec, "num_layers", 4)
+        dir_encoding = getattr(dec, "dir_encoding", "SphericalHarmonics")
+        dir_encoding_degree = getattr(dec, "dir_encoding_degree", 3)
+        sh_scale = getattr(dec, "sh_scale", 1.0)
+        output_activation = getattr(dec, "output_activation", "Sigmoid")
+        unpremultiply_alpha = getattr(dec, "unpremultiply_alpha", False)
+        ema_decay = getattr(dec_conf, "ema_decay", 0.0)
+        ema_start_step = getattr(dec_conf, "ema_start_step", 0)
+        logger.info(f"Initializing FeatureDecoder: {ray_feature_dim} -> 3 RGB")
+        self.feature_decoder = FeatureDecoder(
+            ray_feature_dim=ray_feature_dim,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            dir_encoding=dir_encoding,
+            dir_encoding_degree=dir_encoding_degree,
+            sh_scale=sh_scale,
+            output_activation=output_activation,
+            ema_decay=ema_decay,
+            ema_start_step=ema_start_step,
+            unpremultiply_alpha=unpremultiply_alpha,
+        ).to(self.device)
+
+        lr = dec.learning_rate
+        weight_decay = getattr(dec, "reg_weight", 0.0)
+        self.feature_decoder_optimizer = torch.optim.Adam(
+            self.feature_decoder.parameters(),
+            lr=lr,
+            weight_decay=weight_decay,
+        )
+
+        scheduler_conf = dec.scheduler
+        max_steps = getattr(conf, "n_iterations", 30000)
+        decay_final = float(getattr(scheduler_conf, "decay_final", 0.001))
+        if scheduler_conf.type == "exponential":
+            gamma = decay_final ** (1.0 / max_steps)
+            self.feature_decoder_scheduler = torch.optim.lr_scheduler.ExponentialLR(
+                self.feature_decoder_optimizer,
+                gamma=gamma,
+            )
+        elif scheduler_conf.type == "cosine":
+            eta_min = lr * decay_final
+            self.feature_decoder_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.feature_decoder_optimizer,
+                T_max=max_steps,
+                eta_min=eta_min,
+            )
+        else:
+            raise ValueError(f"Unknown scheduler type: {scheduler_conf.type}")
+
+        if ema_decay > 0:
+            logger.info(f"🎨 FeatureDecoder EMA: decay={ema_decay}, start_step={ema_start_step}")
+        logger.info(
+            f"🎨 FeatureDecoder optimizer: lr={lr}, "
+            f"weight_decay={weight_decay}, scheduler={scheduler_conf.type}"
+        )
+
     @torch.cuda.nvtx.range("get_metrics")
     def get_metrics(
         self,
@@ -448,7 +592,7 @@ class Trainer3DGRUT:
         step = self.global_step
 
         rgb_gt = gpu_batch.rgb_gt
-        rgb_pred = outputs["pred_rgb"]
+        rgb_pred = outputs["pred_features"]
 
         psnr = self.criterions["psnr"]
         ssim = self.criterions["ssim"]
@@ -471,18 +615,18 @@ class Trainer3DGRUT:
                 metrics["psnr"] = psnr(rgb_pred, rgb_gt).item()
 
             rgb_gt_full = rgb_gt.permute(0, 3, 1, 2)
-            pred_rgb_full = rgb_pred.permute(0, 3, 1, 2)
-            pred_rgb_full_clipped = rgb_pred.clip(0, 1).permute(0, 3, 1, 2)
+            pred_features_full = rgb_pred.permute(0, 3, 1, 2)
+            pred_features_full_clipped = rgb_pred.clip(0, 1).permute(0, 3, 1, 2)
 
             with torch.cuda.nvtx.range(f"criterions_ssim"):
-                metrics["ssim"] = ssim(pred_rgb_full, rgb_gt_full).item()
+                metrics["ssim"] = ssim(pred_features_full, rgb_gt_full).item()
             with torch.cuda.nvtx.range(f"criterions_lpips"):
-                metrics["lpips"] = lpips(pred_rgb_full_clipped, rgb_gt_full).item()
+                metrics["lpips"] = lpips(pred_features_full_clipped, rgb_gt_full).item()
 
             if iteration in self.conf.writer.log_image_views:
                 metrics["img_hit_counts"] = jet_map(outputs["hits_count"][-1], self.conf.writer.max_num_hits)
                 metrics["img_gt"] = gpu_batch.rgb_gt[-1].clip(0, 1.0)
-                metrics["img_pred"] = outputs["pred_rgb"][-1].clip(0, 1.0)
+                metrics["img_pred"] = outputs["pred_features"][-1].clip(0, 1.0)
                 metrics["img_pred_dist"] = jet_map(outputs["pred_dist"][-1], 100)
                 metrics["img_pred_opacity"] = jet_map(outputs["pred_opacity"][-1], 1)
 
@@ -508,7 +652,7 @@ class Trainer3DGRUT:
             losses: dictionary of loss terms computed for current batch.
         """
         rgb_gt = gpu_batch.rgb_gt
-        rgb_pred = outputs["pred_rgb"]
+        rgb_pred = outputs["pred_features"]
         mask = gpu_batch.mask
 
         # Mask out the invalid pixels if the mask is provided
@@ -529,7 +673,7 @@ class Trainer3DGRUT:
         lambda_l2 = 0.0
         if self.conf.loss.use_l2:
             with torch.cuda.nvtx.range(f"loss-l2"):
-                loss_l2 = torch.nn.functional.mse_loss(outputs["pred_rgb"], rgb_gt)
+                loss_l2 = torch.nn.functional.mse_loss(outputs["pred_features"], rgb_gt)
                 lambda_l2 = self.conf.loss.lambda_l2
 
         # DSSIM loss
@@ -538,14 +682,14 @@ class Trainer3DGRUT:
         if self.conf.loss.use_ssim:
             with torch.cuda.nvtx.range(f"loss-ssim"):
                 rgb_gt_full = torch.permute(rgb_gt, (0, 3, 1, 2))
-                pred_rgb_full = torch.permute(rgb_pred, (0, 3, 1, 2))
-                loss_ssim = 1.0 - ssim(pred_rgb_full, rgb_gt_full)
+                pred_features_full = torch.permute(rgb_pred, (0, 3, 1, 2))
+                loss_ssim = 1.0 - ssim(pred_features_full, rgb_gt_full)
                 lambda_ssim = self.conf.loss.lambda_ssim
 
         # Opacity regularization
         loss_opacity = torch.zeros(1, device=self.device)
         lambda_opacity = 0.0
-        if self.conf.loss.use_opacity:
+        if self.conf.loss.use_opacity and not self._in_color_refine:
             with torch.cuda.nvtx.range(f"loss-opacity"):
                 loss_opacity = torch.abs(self.model.get_density()).mean()
                 lambda_opacity = self.conf.loss.lambda_opacity
@@ -553,7 +697,7 @@ class Trainer3DGRUT:
         # Scale regularization
         loss_scale = torch.zeros(1, device=self.device)
         lambda_scale = 0.0
-        if self.conf.loss.use_scale:
+        if self.conf.loss.use_scale and not self._in_color_refine:
             with torch.cuda.nvtx.range(f"loss-scale"):
                 loss_scale = torch.abs(self.model.get_scale()).mean()
                 lambda_scale = self.conf.loss.lambda_scale
@@ -713,6 +857,8 @@ class Trainer3DGRUT:
                     post_processing_reg_loss,
                     global_step,
                 )
+            if self._color_refine_start_step < self.conf.n_iterations:
+                writer.add_scalar("train/color_refine", float(self._in_color_refine), global_step)
             if "psnr" in batch_metrics:
                 writer.add_scalar("psnr/train", batch_metrics["psnr"], self.global_step)
             if "ssim" in batch_metrics:
@@ -833,17 +979,24 @@ class Trainer3DGRUT:
             logger.log_rule("Evaluation on Test Set")
 
             # Renderer test split
-            renderer = Renderer.from_preloaded_model(
-                model=self.model,
-                out_dir=out_dir,
-                path=conf.path,
-                save_gt=False,
-                writer=self.tracking.writer,
-                global_step=self.global_step,
-                compute_extra_metrics=conf.compute_extra_metrics,
-                post_processing=self.post_processing,
-            )
-            renderer.render_all()
+            if self.feature_decoder is not None:
+                self.feature_decoder.apply_ema_shadow()
+            try:
+                renderer = Renderer.from_preloaded_model(
+                    model=self.model,
+                    out_dir=out_dir,
+                    path=conf.path,
+                    save_gt=False,
+                    writer=self.tracking.writer,
+                    global_step=self.global_step,
+                    compute_extra_metrics=conf.compute_extra_metrics,
+                    post_processing=self.post_processing,
+                    feature_decoder=self.feature_decoder,
+                )
+                renderer.render_all()
+            finally:
+                if self.feature_decoder is not None:
+                    self.feature_decoder.restore_ema()
 
     @torch.cuda.nvtx.range(f"save_checkpoint")
     def save_checkpoint(self, last_checkpoint: bool = False):
@@ -859,6 +1012,26 @@ class Trainer3DGRUT:
 
         strategy_parameters = self.strategy.get_strategy_parameters()
         parameters = {**parameters, **strategy_parameters}
+
+        # Add feature decoder state to checkpoint (module + optimizer + scheduler + EMA)
+        if self.feature_decoder is not None:
+            dec = self.feature_decoder
+            parameters["feature_decoder"] = {
+                "module": dec.state_dict(),
+                "optimizer": self.feature_decoder_optimizer.state_dict(),
+                "scheduler": self.feature_decoder_scheduler.state_dict(),
+                "arch": {
+                    "ray_feature_dim": dec.ray_feature_dim,
+                    "hidden_dim": dec.hidden_dim,
+                    "num_layers": dec.num_layers,
+                    "sh_scale": dec.sh_scale,
+                    "output_activation": dec.output_activation,
+                    "unpremultiply_alpha": dec.unpremultiply_alpha,
+                },
+            }
+            ema_state = self.feature_decoder.ema_state_dict()
+            if ema_state:
+                parameters["feature_decoder"]["ema"] = ema_state
 
         # Add post-processing state to checkpoint (module + optimizers + schedulers)
         if self.post_processing is not None:
@@ -917,6 +1090,8 @@ class Trainer3DGRUT:
         metrics: list,
         conf: DictConfig,
     ):
+        self._apply_color_refine_freeze(global_step)
+
         # Freeze Gaussians and suspend strategy when distillation starts
         if self._distillation_start_step >= 0 and global_step >= self._distillation_start_step:
             self.model.freeze_gaussians()
@@ -925,6 +1100,8 @@ class Trainer3DGRUT:
         # Access the GPU-cache batch data
         with torch.cuda.nvtx.range(f"train_iter{global_step}_get_gpu_batch"):
             gpu_batch = self.train_dataset.get_gpu_batch_with_intrinsics(batch)
+
+        profilers["step_total"].start()
 
         # Perform validation if required
         is_time_to_validate = (global_step > 0 or conf.validate_first) and (global_step % self.val_frequency == 0)
@@ -937,6 +1114,14 @@ class Trainer3DGRUT:
             outputs = self.model(gpu_batch, train=True, frame_id=global_step)
             profilers["inference"].end()
 
+        # Apply feature decoder to convert N-dimensional features to RGB
+        if self.feature_decoder is not None:
+            with torch.cuda.nvtx.range(f"train_{global_step}_feature_decoder"):
+                profilers["feature_decoder"].start()
+                outputs = apply_feature_decoder(self.feature_decoder, outputs, gpu_batch, training=True)
+                profilers["feature_decoder"].end()
+        outputs = apply_background(self.model.background, outputs, gpu_batch, training=True)
+
         # Apply post-processing to rendered output
         if self.post_processing is not None:
             with torch.cuda.nvtx.range(f"train_{global_step}_post_processing"):
@@ -945,6 +1130,14 @@ class Trainer3DGRUT:
         # Compute the losses of a single batch
         with torch.cuda.nvtx.range(f"train_{global_step}_loss"):
             batch_losses = self.get_losses(gpu_batch, outputs)
+
+            # Add feature decoder regularization loss
+            if self.feature_decoder is not None and "decoder_reg_loss" in outputs:
+                decoder_reg_weight = conf.model.nht_decoder.reg_weight
+                decoder_reg_loss = decoder_reg_weight * outputs["decoder_reg_loss"]
+                batch_losses["total_loss"] = batch_losses["total_loss"] + decoder_reg_loss
+                batch_losses["decoder_reg_loss"] = decoder_reg_loss
+
             # Add post-processing regularization loss
             if self.post_processing is not None:
                 post_processing_reg_loss = self.post_processing.get_regularization_loss()
@@ -979,6 +1172,7 @@ class Trainer3DGRUT:
 
         # Optimizer step
         with torch.cuda.nvtx.range(f"train_{global_step}_backprop"):
+            self._zero_color_refine_frozen_grads()
             if isinstance(self.model.optimizer, SelectiveAdam):
                 assert (
                     outputs["mog_visibility"].shape == self.model.density.shape
@@ -991,6 +1185,15 @@ class Trainer3DGRUT:
         # Scheduler step
         with torch.cuda.nvtx.range(f"train_{global_step}_scheduler"):
             self.model.scheduler_step(global_step)
+            self._apply_color_refine_freeze(global_step)
+
+        # Feature decoder optimizer/scheduler step
+        if self.feature_decoder_optimizer is not None:
+            with torch.cuda.nvtx.range(f"train_{global_step}_feature_decoder_opt"):
+                self.feature_decoder_optimizer.step()
+                self.feature_decoder_optimizer.zero_grad()
+                self.feature_decoder_scheduler.step()
+                self.feature_decoder.ema_update(global_step)
 
         # Post-processing optimizer/scheduler step
         if self.post_processing_optimizers is not None:
@@ -1025,6 +1228,8 @@ class Trainer3DGRUT:
                 profilers["build_as"].start()
                 self.model.build_acc(rebuild=True)
                 profilers["build_as"].end()
+
+        profilers["step_total"].end()
 
         # Increment the global step
         global_step += 1
@@ -1067,7 +1272,10 @@ class Trainer3DGRUT:
             "inference": CudaTimer(enabled=self.conf.enable_frame_timings),
             "backward": CudaTimer(enabled=self.conf.enable_frame_timings),
             "build_as": CudaTimer(enabled=self.conf.enable_frame_timings),
+            "step_total": CudaTimer(enabled=self.conf.enable_frame_timings),
         }
+        if self.feature_decoder is not None:
+            profilers["feature_decoder"] = CudaTimer(enabled=self.conf.enable_frame_timings)
 
         for iter, batch in enumerate(self.train_dataloader):
             # Check if we have reached the maximum number of iterations
@@ -1087,6 +1295,8 @@ class Trainer3DGRUT:
              dictionary of metrics computed and aggregated over validation set.
         """
 
+        if self.feature_decoder is not None:
+            self.feature_decoder.apply_ema_shadow()
         profilers = {
             "inference": CudaTimer(),
         }
@@ -1106,6 +1316,10 @@ class Trainer3DGRUT:
             with torch.cuda.nvtx.range(f"train.validation_step_{self.global_step}"):
                 profilers["inference"].start()
                 outputs = self.model(gpu_batch, train=False)
+                # Apply feature decoder to convert N-dimensional features to RGB
+                if self.feature_decoder is not None:
+                    outputs = apply_feature_decoder(self.feature_decoder, outputs, gpu_batch, training=False)
+                outputs = apply_background(self.model.background, outputs, gpu_batch, training=False)
                 # Apply post-processing for validation (novel view mode)
                 if self.post_processing is not None:
                     outputs = apply_post_processing(self.post_processing, outputs, gpu_batch, training=False)
@@ -1125,6 +1339,8 @@ class Trainer3DGRUT:
                 metrics.append(batch_metrics)
 
         logger.end_progress(task_name="Validation")
+        if self.feature_decoder is not None:
+            self.feature_decoder.restore_ema()
 
         metrics = self._flatten_list_of_dicts(metrics)
         self.log_validation_pass(metrics)

@@ -29,7 +29,7 @@ from threedgrut.model.model import MixtureOfGaussians
 from threedgrut.utils.color_correct import color_correct_affine
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import create_summary_writer
-from threedgrut.utils.render import apply_post_processing
+from threedgrut.utils.render import apply_background, apply_feature_decoder, apply_post_processing
 
 
 class Renderer:
@@ -44,6 +44,7 @@ class Renderer:
         writer=None,
         compute_extra_metrics=True,
         post_processing=None,
+        feature_decoder=None,
     ) -> None:
 
         if path:  # Replace the path to the test data
@@ -59,6 +60,7 @@ class Renderer:
         self.writer = writer
         self.compute_extra_metrics = compute_extra_metrics
         self.post_processing = post_processing
+        self.feature_decoder = feature_decoder
 
         if conf.model.background.color == "black":
             self.bg_color = torch.zeros((3,), dtype=torch.float32, device="cuda")
@@ -148,6 +150,44 @@ class Renderer:
             num_frames = post_processing.exposure_params.shape[0]
             logger.info(f"📷 {method.upper()} loaded from checkpoint: {num_cameras} cameras, {num_frames} frames")
 
+        # Load feature decoder for nht models
+        feature_decoder = None
+        if "feature_decoder" in checkpoint:
+            from threedgrut.model.features import Features
+            from threedgrut.model.feature_decoder import FeatureDecoder
+
+            if model.feature_type == Features.Type.NHT:
+                conf_model = conf.model
+                dec = conf_model.nht_decoder
+                hidden_dim = dec.hidden_dim
+                num_layers = getattr(dec, "num_layers", 4)
+                dir_encoding = getattr(dec, "dir_encoding", "SphericalHarmonics")
+                dir_encoding_degree = getattr(dec, "dir_encoding_degree", 3)
+                sh_scale = getattr(dec, "sh_scale", 1.0)
+                output_activation = getattr(dec, "output_activation", "Sigmoid")
+                unpremultiply_alpha = getattr(dec, "unpremultiply_alpha", False)
+                ema_decay = getattr(dec, "ema_decay", 0.0)
+                ema_start_step = getattr(dec, "ema_start_step", 0)
+                feature_decoder = FeatureDecoder(
+                    ray_feature_dim=model.ray_feature_dim,
+                    hidden_dim=hidden_dim,
+                    num_layers=num_layers,
+                    dir_encoding=dir_encoding,
+                    dir_encoding_degree=dir_encoding_degree,
+                    sh_scale=sh_scale,
+                    output_activation=output_activation,
+                    ema_decay=ema_decay,
+                    ema_start_step=ema_start_step,
+                    unpremultiply_alpha=unpremultiply_alpha,
+                ).to("cuda")
+                feature_decoder.load_state_dict(checkpoint["feature_decoder"]["module"])
+                ema_state = checkpoint["feature_decoder"].get("ema")
+                if ema_state is not None:
+                    feature_decoder.load_ema_state_dict(ema_state)
+                    feature_decoder.apply_ema_shadow()
+                feature_decoder.eval()
+                logger.info("🎨 Feature decoder loaded from checkpoint")
+
         return Renderer(
             model=model,
             conf=conf,
@@ -158,6 +198,7 @@ class Renderer:
             writer=writer,
             compute_extra_metrics=computes_extra_metrics,
             post_processing=post_processing,
+            feature_decoder=feature_decoder,
         )
 
     @classmethod
@@ -171,6 +212,7 @@ class Renderer:
         global_step=None,
         compute_extra_metrics=False,
         post_processing=None,
+        feature_decoder=None,
     ):
         """Loads checkpoint for test path."""
 
@@ -188,6 +230,7 @@ class Renderer:
             writer=writer,
             compute_extra_metrics=compute_extra_metrics,
             post_processing=post_processing,
+            feature_decoder=feature_decoder,
         )
 
     @torch.no_grad()
@@ -236,20 +279,23 @@ class Renderer:
 
             # Compute the outputs of a single batch
             outputs = self.model(gpu_batch)
+            if self.feature_decoder is not None:
+                outputs = apply_feature_decoder(self.feature_decoder, outputs, gpu_batch, training=False)
+            outputs = apply_background(self.model.background, outputs, gpu_batch, training=False)
 
             # Apply post-processing
             if self.post_processing is not None:
                 outputs = apply_post_processing(self.post_processing, outputs, gpu_batch, training=False)
 
-            pred_rgb_full = outputs["pred_rgb"]
+            pred_features_full = outputs["pred_features"]
             rgb_gt_full = gpu_batch.rgb_gt
 
             # The values are already alpha composited with the background
             torchvision.utils.save_image(
-                pred_rgb_full.squeeze(0).permute(2, 0, 1),
+                pred_features_full.squeeze(0).permute(2, 0, 1),
                 os.path.join(output_path_renders, "{0:05d}".format(iteration) + ".png"),
             )
-            pred_img_to_write = pred_rgb_full[-1].clip(0, 1.0)
+            pred_img_to_write = pred_features_full[-1].clip(0, 1.0)
             gt_img_to_write = rgb_gt_full[-1].clip(0, 1.0)
 
             if self.save_gt:
@@ -259,7 +305,7 @@ class Renderer:
                 )
 
             # Compute the loss
-            psnr_single_img = criterions["psnr"](outputs["pred_rgb"], gpu_batch.rgb_gt).item()
+            psnr_single_img = criterions["psnr"](outputs["pred_features"], gpu_batch.rgb_gt).item()
             psnr.append(psnr_single_img)  # evaluation on valid rays only
             logger.info(f"Frame {iteration}, PSNR: {psnr[-1]}")
 
@@ -276,29 +322,29 @@ class Renderer:
             # evaluate on full image
             ssim.append(
                 criterions["ssim"](
-                    pred_rgb_full.permute(0, 3, 1, 2),
+                    pred_features_full.permute(0, 3, 1, 2),
                     rgb_gt_full.permute(0, 3, 1, 2),
                 ).item()
             )
             lpips.append(
                 criterions["lpips"](
-                    pred_rgb_full.clip(0, 1).permute(0, 3, 1, 2),
+                    pred_features_full.clip(0, 1).permute(0, 3, 1, 2),
                     rgb_gt_full.permute(0, 3, 1, 2),
                 ).item()
             )
 
             # Color-corrected metrics
-            pred_rgb_cc = color_correct_affine(pred_rgb_full, rgb_gt_full)
-            cc_psnr.append(criterions["psnr"](pred_rgb_cc, rgb_gt_full).item())
+            pred_features_cc = color_correct_affine(pred_features_full, rgb_gt_full)
+            cc_psnr.append(criterions["psnr"](pred_features_cc, rgb_gt_full).item())
             cc_ssim.append(
                 criterions["ssim"](
-                    pred_rgb_cc.permute(0, 3, 1, 2),
+                    pred_features_cc.permute(0, 3, 1, 2),
                     rgb_gt_full.permute(0, 3, 1, 2),
                 ).item()
             )
             cc_lpips.append(
                 criterions["lpips"](
-                    pred_rgb_cc.clip(0, 1).permute(0, 3, 1, 2),
+                    pred_features_cc.clip(0, 1).permute(0, 3, 1, 2),
                     rgb_gt_full.permute(0, 3, 1, 2),
                 ).item()
             )
@@ -340,6 +386,7 @@ class Renderer:
             mean_cc_psnr=float(mean_cc_psnr),
             mean_cc_ssim=float(mean_cc_ssim),
             mean_cc_lpips=float(mean_cc_lpips),
+            mean_inference_time_ms=float(mean_inference_time),
         )
         metrics_path = os.path.join(self.out_dir, "metrics.json")
         with open(metrics_path, "w") as f:

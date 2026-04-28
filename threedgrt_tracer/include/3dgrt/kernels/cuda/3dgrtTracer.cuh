@@ -38,7 +38,8 @@ struct RayHit {
 using RayPayload = RayHit[PipelineParameters::MaxNumHitPerTrace];
 
 struct RayData {
-    float3 radiance;
+    float features[RAY_FEATURE_DIM];
+
     float density;
     float3 normal;
     float hitDistance;
@@ -46,12 +47,16 @@ struct RayData {
     float hitCount; // TODO (operel): convert to uint32
 
     __device__ void initialize() {
-        radiance           = make_float3(0.0f);
-        density            = 0.0;
-        normal             = make_float3(0.f);
-        hitDistance        = 0.f;
+        // Zero-initialize all features
+        #pragma unroll
+        for (int i = 0; i < RAY_FEATURE_DIM; ++i) {
+            radiance[i] = 0.0f;
+        }
+        density = 0.0;
+        normal = make_float3(0.f);
+        hitDistance = 0.f;
         rayLastHitDistance = 0.f;
-        hitCount           = 0.f;
+        hitCount = 0.f;
     }
 };
 
@@ -126,7 +131,7 @@ static __device__ __inline__ void trace(
     rayPayload[15].distance   = __uint_as_float(r31);
 }
 
-/* Traces Gaussians along ray and accumulates radiance into rayData.
+/* Traces Gaussians along ray and accumulates features into rayData.
  * ray is bounded by both (tmin, tmax) and launch params.aabb
  */
 static __device__ __inline__ void traceVolumetricGS(
@@ -142,10 +147,10 @@ static __device__ __inline__ void traceVolumetricGS(
     }
 
     float rayTransmittance = 1.0f - rayData.density;
-    float2 minMaxT         = intersectAABB(params.aabb, rayOrigin, rayDirection);
-    minMaxT.x              = fmaxf(minMaxT.x, tmin);
-    minMaxT.y              = fminf(minMaxT.y, tmax);
-    constexpr float epsT   = 1e-9;
+    float2 minMaxT       = intersectAABB(params.aabb, rayOrigin, rayDirection);
+    minMaxT.x = fmaxf(minMaxT.x, tmin);
+    minMaxT.y = fminf(minMaxT.y, tmax);
+    constexpr float epsT = 1e-9;
 
     float rayLastHitDistance = fmaxf(0.0f, minMaxT.x - epsT);
     RayPayload rayPayload;
@@ -165,7 +170,7 @@ static __device__ __inline__ void traceVolumetricGS(
                     rayOrigin,
                     rayDirection,
                     rayHit.particleId,
-                    {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr}},
+                    {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr, true}},
                     &rayTransmittance,
                     &rayData.hitDistance,
 #ifdef ENABLE_NORMALS
@@ -175,11 +180,15 @@ static __device__ __inline__ void traceVolumetricGS(
 #endif
                 );
 
-                particleFeaturesIntegrateFwdFromBuffer(rayDirection,
-                                                       hitWeight,
-                                                       rayHit.particleId,
-                                                       {{(float3*)params.particleRadiance, nullptr}, params.sphDegree},
-                                                       &rayData.radiance);
+                // Call generic Slang wrapper (no conditionals)
+                // The wrapper handles CommonParameters construction internally
+                particleFeaturesIntegrateFwdGeneric(
+                    rayDirection,
+                    hitWeight,
+                    rayHit.particleId,
+                    params.particleFeatures,      // void* - generic buffer pointer
+                    params.sphDegree,             // auxiliary parameter (sphDegree for SH, unused for learned)
+                    rayData.features);            // float* - generic output array
 
                 rayLastHitDistance = fmaxf(rayLastHitDistance, rayHit.distance);
 
@@ -190,7 +199,7 @@ static __device__ __inline__ void traceVolumetricGS(
         }
     }
 
-    rayData.density            = 1 - rayTransmittance;
+    rayData.density = 1 - rayTransmittance;
     rayData.rayLastHitDistance = rayLastHitDistance;
 }
 
@@ -205,7 +214,7 @@ static __device__ __inline__ void intersectVolumetricGS() {
                                                                  : particleDensityHitCustom(optixGetWorldRayOrigin(),
                                                                                             optixGetWorldRayDirection(),
                                                                                             optixGetPrimitiveIndex(),
-                                                                                            {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr}},
+                                                                                            {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr, true}},
                                                                                             optixGetRayTmin(),
                                                                                             optixGetRayTmax(),
                                                                                             params.hitMaxParticleSquaredDistance,

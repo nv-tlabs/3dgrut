@@ -29,7 +29,13 @@ struct model_InternalParams {
 };
 
 struct model_ExternalParams {
-    static constexpr int FeaturesDim                 = 3;
+    // Feature-based radiance dimensions (from compile-time defines)
+    static constexpr int ParticleFeatureDim          = PARTICLE_FEATURE_DIM;
+    static constexpr int RayFeatureDim               = RAY_FEATURE_DIM;
+    static constexpr int FeatureTransformType        = FEATURE_TRANSFORM_TYPE; // 0=SH, 1=nht
+    // NHT requires per-ray evaluation (interpolation); SH can use precomputed features
+    static constexpr bool PerRayParticleFeatures = (FEATURE_TRANSFORM_TYPE != 0);
+
     static constexpr float AlphaThreshold            = GAUSSIAN_PARTICLE_MIN_ALPHA;          // = 1.0/255.0
     static constexpr float MinTransmittanceThreshold = GAUSSIAN_MIN_TRANSMITTANCE_THRESHOLD; // = 0.0001
     static constexpr int KernelDegree                = GAUSSIAN_PARTICLE_KERNEL_DEGREE;
@@ -52,7 +58,7 @@ struct TGUTProjectorParams {
     static constexpr bool TightOpacityBounding   = GAUSSIAN_TIGHT_OPACITY_BOUNDING;
     static constexpr bool RectBounding           = GAUSSIAN_RECT_BOUNDING;
     static constexpr bool TileCulling            = GAUSSIAN_TILE_BASED_CULLING;
-    static constexpr bool PerRayParticleFeatures = false;
+    static constexpr bool PerRayParticleFeatures = model_ExternalParams::PerRayParticleFeatures;
     static constexpr float MaxDepthValue         = 3.4028235e+38;
     static constexpr bool GlobalZOrder           = GAUSSIAN_GLOBAL_Z_ORDER;
     static constexpr bool BackwardProjection     = false; // m_settings.renderMode == Settings::Splat
@@ -77,7 +83,7 @@ static_assert(TGUTProjectionParams::RequireAllSigmaPoints == false, "RequireAllS
 using TGUTProjector = GUTProjector<model_::Particles, TGUTProjectorParams, TGUTProjectionParams>;
 
 struct TGUTRendererParams {
-    static constexpr bool PerRayParticleFeatures = TGUTProjectorParams::PerRayParticleFeatures;
+    static constexpr bool PerRayParticleFeatures = model_ExternalParams::PerRayParticleFeatures;
     static constexpr int KHitBufferSize          = GAUSSIAN_K_BUFFER_SIZE;
     static constexpr bool CustomBackward         = false;
 };
