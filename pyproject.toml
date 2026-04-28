@@ -60,6 +60,7 @@ dependencies = [
 dev = [
     "black==26.3.1",
     "isort==5.13.0",
+    "clang-format==18.1.8",
 ]
 gui = [
     "libigl",
