@@ -27,7 +27,7 @@ pushd "$SCRIPT_DIR" &> /dev/null
 
 CLANG_FORMAT_REQUIRED_VERSION=18
 if command -v clang-format &> /dev/null; then
-    CLANG_FORMAT_VERSION=$(clang-format --version | grep -oP '\d+' | head -1)
+    CLANG_FORMAT_VERSION=$(clang-format --version | grep -oE '[0-9]+' | head -1)
     if [ "$CLANG_FORMAT_VERSION" -ne "$CLANG_FORMAT_REQUIRED_VERSION" ]; then
         echo "clang-format version $CLANG_FORMAT_VERSION detected, but version $CLANG_FORMAT_REQUIRED_VERSION is required."
         echo "Install with: pip3 install 'clang-format==18.*'"
@@ -52,11 +52,11 @@ else
 fi
 
 echo "$ACTION Python code with black..."
-black . "${BLACK_OPTS[@]}" --target-version=py311 --line-length=120 --extend-exclude=thirdparty/tiny-cuda-nn || FAILED=1
+black . ${BLACK_OPTS[@]+"${BLACK_OPTS[@]}"} --target-version=py311 --line-length=120 --extend-exclude=thirdparty/tiny-cuda-nn || FAILED=1
 echo ""
 
 echo "$ACTION Python code with isort..."
-isort . "${ISORT_OPTS[@]}" --skip-gitignore --dont-follow-links --extend-skip=thirdparty/tiny-cuda-nn --profile=black || FAILED=1
+isort . ${ISORT_OPTS[@]+"${ISORT_OPTS[@]}"} --skip-gitignore --dont-follow-links --extend-skip=thirdparty/tiny-cuda-nn --profile=black || FAILED=1
 echo ""
 
 popd &> /dev/null
