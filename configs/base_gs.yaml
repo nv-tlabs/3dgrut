@@ -49,14 +49,12 @@ export_usd:
   sorting_mode_hint: cameraDistance
   # If true, Gaussian prim ColorSpaceAPI uses lin_rec709_scene; else srgb_rec709_display
   linear_srgb: false
-  # Enable Omniverse-specific USD authoring, including PPISP SPG and MDL material binding.
-  omni-usd: false
   # Enable post-processing export when the checkpoint contains a supported module.
   # Defaults to true; post-processing-export-mode controls how the effect is exported.
   export_post_processing: true
   # baked-sh fits a fixed post-processing transform into Gaussian SH coefficients.
-  # native uses the module-specific native path; PPISP native export requires omni-usd=true.
-  # baked-sh | native
+  # omni-native uses the module-specific Omniverse-native path; currently PPISP SPG.
+  # baked-sh | omni-native
   post-processing-export-mode: baked-sh
   # Number of sequential passes over the train/reference set used for fitting.
   post-processing-bake-epochs: 1
@@ -67,9 +65,6 @@ export_usd:
   # with an achromatic fit-only vignette; the achromatic vignette is not exported.
   # none | achromatic-fit
   ppisp-bake-vignetting-mode: achromatic-fit
-  # Omniverse USD post-processing fallback modes. These require omni-usd=true.
-  # none | ppisp-exposure-fallback | ppisp-fitted-post-processing-fallback | ppisp-spg-plus-fitted-post-processing-fallback
-  ov-post-processing: none
   # USD timeCodesPerSecond; time codes are bare frame indices so this sets playback speed
   frames_per_second: 1.0
 
