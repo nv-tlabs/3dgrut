@@ -18,19 +18,6 @@
 #include <3dgut/kernels/cuda/common/rayPayloadBackward.cuh>
 #include <3dgut/renderer/gutRendererParameters.h>
 
-// NHT backward diagnostic toggle — register-pressure attribution (plan T1).
-// Mode selects which components of the NHT bwd inner loop are live.
-// The modes are strictly nested so each one also disables everything below it.
-//   0 = baseline, full pipeline (default)
-//   1 = disable featureLocalGradWarpReduceAndWrite (warp reduce + atomics)
-//   2 = also disable featuresIntegrateBwdToLocalGrad (local-grad compute)
-//   3 = also disable densityProcessHitBwdToBuffer (Slang density bwd)
-// Lower-level (higher-mode) toggles help isolate which symbol is parked in
-// the 214-reg live set. Behavior is intentionally broken under modes > 0.
-#ifndef NHT_BWD_DIAG_MODE
-#define NHT_BWD_DIAG_MODE 0
-#endif
-
 // HitParticle stores per-ray hit state inside the k-buffer. The
 // `canonicalIntersection` is only consumed by the NHT feature path; for the
 // SH path (`PerRayParticleFeatures=false`) we drop it from the struct so the
@@ -612,7 +599,6 @@ struct GUTKBufferRenderer : Params {
                             float3 canonicalIntersectionGrad = make_float3(0.f, 0.f, 0.f);
 
                             // Write feature grad to thread-private local buffer (no atomics); warp reduction follows below.
-#if NHT_BWD_DIAG_MODE < 2
                             particles.featuresIntegrateBwdToLocalGrad(ray.direction,
                                                                        canonicalIntersection,
                                                                        canonicalIntersectionGrad,
@@ -623,9 +609,7 @@ struct GUTKBufferRenderer : Params {
                                                                        ray.featuresBackward,
                                                                        ray.featuresGradient,
                                                                        featureLocalGrad);
-#endif
 
-#if NHT_BWD_DIAG_MODE < 3
                             particles.template densityProcessHitBwdToBuffer<false>(ray.origin,
                                                                                     ray.direction,
                                                                                     particleData.idx,
@@ -637,7 +621,6 @@ struct GUTKBufferRenderer : Params {
                                                                                     ray.hitTBackward,
                                                                                     ray.hitTGradient,
                                                                                     canonicalIntersectionGrad);
-#endif
 
                             ray.transmittance *= (1.0f - hitAlpha);
                         }
@@ -650,11 +633,7 @@ struct GUTKBufferRenderer : Params {
                     // Warp reduction: all 32 threads (alive or not) participate in __shfl_xor_sync.
                     // Non-hitting threads contribute featureLocalGrad=0 → no spurious gradient.
                     // Reduces 32×ParticleFeatureDim atomics per particle to ParticleFeatureDim atomics.
-#if NHT_BWD_DIAG_MODE < 1
                     particles.featureLocalGradWarpReduceAndWrite(particleData.idx, featureLocalGrad, tileThreadIdx);
-#else
-                    (void)featureLocalGrad;
-#endif
                 }
             }
         } else {
