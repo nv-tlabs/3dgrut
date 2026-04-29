@@ -1,0 +1,10 @@
+---
+description: Formatter defaults for Cursor agents
+alwaysApply: true
+---
+
+# Formatter Defaults
+
+- Do not run `bazel run //:format` by default.
+- Prefer the smallest relevant formatter or validation command for the files changed, such as Python syntax checks, lints, or file-scoped formatters.
+- Ask before running repository-wide formatting commands, especially when they may take a long time or touch unrelated files.
