@@ -39,3 +39,4 @@ isort==5.13.0
 # graphics user interfaces
 polyscope>=2.3.0
 viser
+flip-evaluator

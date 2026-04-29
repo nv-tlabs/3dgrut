@@ -63,6 +63,7 @@ dev = [
     "clang-format==18.1.8",
 ]
 gui = [
+    "flip-evaluator",
     "libigl",
     "polyscope>=2.6.0",
     "viser",
