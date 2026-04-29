@@ -229,6 +229,18 @@ def _set_animated_exposure_params(
         attr.Set(float(exposure[frame_idx]), float(frame_idx))
 
 
+def _set_static_exposure_params(
+    shader: UsdShade.Shader,
+    ppisp: PPISP,
+    frame_index: int,
+) -> None:
+    """Write one fixed exposure offset without USD time samples."""
+    exposure = ppisp.exposure_params.cpu().numpy()
+    if frame_index < 0 or frame_index >= len(exposure):
+        raise ValueError(f"frame_index must be in [0, {len(exposure) - 1}], got {frame_index}.")
+    shader.CreateInput("exposureOffset", Sdf.ValueTypeNames.Float).Set(float(exposure[frame_index]))
+
+
 def _set_animated_color_params(
     shader: UsdShade.Shader,
     ppisp: PPISP,
@@ -263,6 +275,24 @@ def _set_animated_color_params(
             )
 
 
+def _set_static_color_params(
+    shader: UsdShade.Shader,
+    ppisp: PPISP,
+    frame_index: int,
+) -> None:
+    """Write one fixed color latent state without USD time samples."""
+    color = ppisp.color_params.cpu().numpy()
+    if frame_index < 0 or frame_index >= len(color):
+        raise ValueError(f"frame_index must be in [0, {len(color) - 1}], got {frame_index}.")
+
+    frame_color = color[frame_index]
+    control_point_names = ["colorLatentBlue", "colorLatentRed", "colorLatentGreen", "colorLatentNeutral"]
+    for i, name in enumerate(control_point_names):
+        shader.CreateInput(name, Sdf.ValueTypeNames.Float2).Set(
+            Gf.Vec2f(float(frame_color[i * 2]), float(frame_color[i * 2 + 1]))
+        )
+
+
 # ---------------------------------------------------------------------------
 # Per-camera entry point
 # ---------------------------------------------------------------------------
@@ -274,6 +304,7 @@ def add_ppisp_shader_to_render_product(
     camera_index: int,
     ppisp: PPISP,
     frame_indices: List[int],
+    fixed_frame_index: int | None = None,
 ) -> Usd.Prim:
     """Add a PPISP Shader to a RenderProduct for one physical camera.
 
@@ -288,6 +319,8 @@ def add_ppisp_shader_to_render_product(
         camera_index: Index of this camera in the PPISP model.
         ppisp: Trained PPISP module.
         frame_indices: Global frame indices belonging to this camera.
+        fixed_frame_index: If set, write this one PPISP frame state as static
+            shader inputs instead of authoring animated time samples.
 
     Returns:
         The created PPISP Shader prim.
@@ -295,15 +328,19 @@ def add_ppisp_shader_to_render_product(
     assert camera_index < ppisp.num_cameras, (
         f"camera_index {camera_index} >= ppisp.num_cameras {ppisp.num_cameras}"
     )
-    if not frame_indices:
+    if not frame_indices and fixed_frame_index is None:
         log.warning(f"No frames for camera {camera_index} at {render_product_path}, skipping")
         return stage.GetPseudoRoot()
 
     shader = _create_shader_prim(stage, render_product_path)
     _set_vignetting_params(shader, ppisp, camera_index)
     _set_crf_params(shader, ppisp, camera_index)
-    _set_animated_exposure_params(shader, ppisp, frame_indices)
-    _set_animated_color_params(shader, ppisp, frame_indices)
+    if fixed_frame_index is None:
+        _set_animated_exposure_params(shader, ppisp, frame_indices)
+        _set_animated_color_params(shader, ppisp, frame_indices)
+    else:
+        _set_static_exposure_params(shader, ppisp, fixed_frame_index)
+        _set_static_color_params(shader, ppisp, fixed_frame_index)
 
     log.info(
         f"Added PPISP shader to {render_product_path} "
@@ -358,6 +395,8 @@ def add_ppisp_to_all_render_products(
     camera_names: List[str],
     camera_frame_mapping: Dict[str, List[int]],
     render_scope_path: str = "/Render",
+    fixed_camera_index: int | None = None,
+    fixed_frame_index: int | None = None,
 ) -> List[Usd.Prim]:
     """Add PPISP shaders to every RenderProduct in the Render scope.
 
@@ -368,6 +407,10 @@ def add_ppisp_to_all_render_products(
         camera_frame_mapping: ``{camera_name: [frame_idx, ...]}`` from
             :func:`build_camera_frame_mapping`.
         render_scope_path: Path to the /Render Scope (default ``/Render``).
+        fixed_camera_index: If set, use this PPISP camera state for every
+            RenderProduct instead of matching the RenderProduct camera.
+        fixed_frame_index: If set, use this PPISP frame state as static shader
+            inputs instead of authoring animated exposure/color samples.
 
     Returns:
         List of created PPISP Shader prims.
@@ -397,10 +440,12 @@ def add_ppisp_to_all_render_products(
             log.warning(f"RenderProduct '{prim_name}' has no matching camera name, skipping")
             continue
 
-        camera_index = camera_name_to_index.get(camera_name)
+        camera_index = fixed_camera_index if fixed_camera_index is not None else camera_name_to_index.get(camera_name)
         if camera_index is None:
             log.warning(f"Camera '{camera_name}' not in camera_names list, skipping")
             continue
+        if camera_index < 0 or camera_index >= ppisp.num_cameras:
+            raise ValueError(f"fixed_camera_index must be in [0, {ppisp.num_cameras - 1}], got {camera_index}.")
 
         frame_indices = camera_frame_mapping.get(camera_name, [])
         _create_ppisp_camera(stage, child)
@@ -411,6 +456,7 @@ def add_ppisp_to_all_render_products(
             camera_index=camera_index,
             ppisp=ppisp,
             frame_indices=frame_indices,
+            fixed_frame_index=fixed_frame_index,
         )
         created.append(shader_prim)
 

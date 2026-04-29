@@ -146,6 +146,18 @@ Examples:
         help="Post-processing export mode. 'omni-native' uses PPISP SPG and Omniverse material authoring.",
     )
     parser.add_argument(
+        "--post-processing-export-camera-id",
+        type=int,
+        default=None,
+        help="Optional PPISP camera id to use for every RenderProduct in omni-native export.",
+    )
+    parser.add_argument(
+        "--post-processing-export-frame-id",
+        type=int,
+        default=None,
+        help="Optional PPISP frame id to write as static omni-native shader inputs instead of animation.",
+    )
+    parser.add_argument(
         "--post-processing-bake-epochs",
         type=int,
         default=None,
@@ -380,6 +392,20 @@ def main():
             linear_srgb=args.linear_srgb or getattr(export_conf, "linear_srgb", False),
             export_post_processing=export_post_processing,
             post_processing_export_mode=post_processing_export_mode,
+            post_processing_export_camera_id=_arg_or_conf(
+                args.post_processing_export_camera_id,
+                export_conf,
+                "post-processing-export-camera-id",
+                "post_processing_export_camera_id",
+                None,
+            ),
+            post_processing_export_frame_id=_arg_or_conf(
+                args.post_processing_export_frame_id,
+                export_conf,
+                "post-processing-export-frame-id",
+                "post_processing_export_frame_id",
+                None,
+            ),
             post_processing_bake_epochs=_arg_or_conf(
                 args.post_processing_bake_epochs,
                 export_conf,

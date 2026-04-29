@@ -56,8 +56,12 @@ export_usd:
   # omni-native uses the module-specific Omniverse-native path; currently PPISP SPG.
   # baked-sh | omni-native
   post-processing-export-mode: baked-sh
+  # Optional fixed PPISP camera/frame for omni-native export. When frame is set,
+  # exposure/color are exported as static shader inputs instead of animation.
+  post-processing-export-camera-id: null
+  post-processing-export-frame-id: null
   # Number of sequential passes over the train/reference set used for fitting.
-  post-processing-bake-epochs: 1
+  post-processing-bake-epochs: 3
   post-processing-bake-learning-rate: 0.001
   post-processing-bake-camera-id: 0
   post-processing-bake-frame-id: 0
