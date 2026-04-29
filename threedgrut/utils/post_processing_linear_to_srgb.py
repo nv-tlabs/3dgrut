@@ -58,7 +58,7 @@ def linear_to_srgb(x: torch.Tensor) -> torch.Tensor:
         Encoded values, same shape / dtype / device as ``x``.
     """
     limit = 0.0031308
-    positive_x = torch.clamp(x, min=0.0)
+    positive_x = torch.clamp(x, min=1e-08)
     return torch.where(
         x > limit,
         1.055 * torch.pow(positive_x, 1.0 / 2.4) - 0.055,
