@@ -50,6 +50,7 @@ from threedgrut.export.usd.post_processing_sh_bake import (
 )
 from threedgrut.utils.color_correct import color_correct_affine
 from threedgrut.utils.logger import logger
+from threedgrut.utils.post_processing_linear_to_srgb import linear_to_srgb
 from threedgrut.utils.render import apply_post_processing
 
 
@@ -127,8 +128,8 @@ def _fitBakedSh(
 
             optimizer.zero_grad(set_to_none=True)
             bakedOutputs = bakedModel(gpuBatch)
-            fittedRgb = _applyAchromaticVignetting(bakedOutputs["pred_rgb"], fixedPpisp, gpuBatch, vignettingMode)
-            loss = torch.nn.functional.mse_loss(fittedRgb, referenceRgb)
+            fittedRgb = torch.clamp(linear_to_srgb(_applyAchromaticVignetting(bakedOutputs["pred_rgb"], fixedPpisp, gpuBatch, vignettingMode)), 0, 1)
+            loss = torch.nn.functional.l1_loss(fittedRgb, referenceRgb)
 
             loss.backward()
             optimizer.step()
@@ -147,6 +148,7 @@ def _evaluateBakedSh(
     referenceModel,
     bakedModel,
     fixedPpisp,
+    fullFixedPpisp,
     dataset,
     dataloader,
     outputRoot: Path,
@@ -160,13 +162,18 @@ def _evaluateBakedSh(
             "lpips": LearnedPerceptualImagePatchSimilarity(net_type="vgg", normalize=True).to("cuda"),
         }
 
+    fullReferencePath = outputRoot / "full_ppisp_reference"
     referencePath = outputRoot / "reference"
+    unfittedPath = outputRoot / "unfitted"
     bakedPath = outputRoot / "baked"
     assistedPath = outputRoot / "baked_assisted"
+    fullReferencePath.mkdir(parents=True, exist_ok=True)
     referencePath.mkdir(parents=True, exist_ok=True)
+    unfittedPath.mkdir(parents=True, exist_ok=True)
     bakedPath.mkdir(parents=True, exist_ok=True)
     assistedPath.mkdir(parents=True, exist_ok=True)
 
+    unfittedPsnrValues = []
     psnrValues = []
     ssimValues = []
     lpipsValues = []
@@ -185,14 +192,33 @@ def _evaluateBakedSh(
     for iteration, batch in enumerate(dataloader):
         gpuBatch = dataset.get_gpu_batch_with_intrinsics(batch)
 
+        fullReferenceRgb = _renderReference(referenceModel, fullFixedPpisp, gpuBatch)
         referenceRgb = _renderReference(referenceModel, fixedPpisp, gpuBatch)
+        unfittedOutputs = referenceModel(gpuBatch)
+        unfittedRgb = unfittedOutputs["pred_rgb"]
         bakedOutputs = bakedModel(gpuBatch)
-        bakedRgb = bakedOutputs["pred_rgb"]
-        assistedRgb = _applyAchromaticVignetting(bakedRgb, fixedPpisp, gpuBatch, vignettingMode)
+        bakedRgb = torch.clamp(
+            linear_to_srgb(bakedOutputs["pred_rgb"]),
+            0,
+            1,
+        )
+        assistedRgb = torch.clamp(
+            linear_to_srgb(_applyAchromaticVignetting(bakedOutputs["pred_rgb"], fixedPpisp, gpuBatch, vignettingMode)),
+            0,
+            1,
+        )
 
+        torchvision.utils.save_image(
+            fullReferenceRgb.squeeze(0).permute(2, 0, 1).clip(0, 1),
+            fullReferencePath / f"{iteration:05d}.png",
+        )
         torchvision.utils.save_image(
             referenceRgb.squeeze(0).permute(2, 0, 1).clip(0, 1),
             referencePath / f"{iteration:05d}.png",
+        )
+        torchvision.utils.save_image(
+            unfittedRgb.squeeze(0).permute(2, 0, 1).clip(0, 1),
+            unfittedPath / f"{iteration:05d}.png",
         )
         torchvision.utils.save_image(
             bakedRgb.squeeze(0).permute(2, 0, 1).clip(0, 1),
@@ -203,6 +229,7 @@ def _evaluateBakedSh(
             assistedPath / f"{iteration:05d}.png",
         )
 
+        unfittedPsnrValues.append(criterions["psnr"](unfittedRgb, referenceRgb).item())
         psnrValues.append(criterions["psnr"](bakedRgb, referenceRgb).item())
         assistedPsnrValues.append(criterions["psnr"](assistedRgb, referenceRgb).item())
         if computeExtraMetrics:
@@ -268,6 +295,8 @@ def _evaluateBakedSh(
 
     metrics = {
         "vignetting_mode": vignettingMode,
+        "unfitted_mean_psnr": float(np.mean(unfittedPsnrValues)),
+        "unfitted_std_psnr": float(np.std(unfittedPsnrValues)),
         "mean_psnr": float(np.mean(psnrValues)),
         "std_psnr": float(np.std(psnrValues)),
         "assisted_mean_psnr": float(np.mean(assistedPsnrValues)),
@@ -362,6 +391,13 @@ def main() -> None:
         "cuda",
         include_vignetting=vignettingMode != MODE_PPISP_BAKE_VIGNETTING_NONE,
     ).eval()
+    fullFixedPpisp = FixedPPISP(
+        renderer.post_processing,
+        args.cameraId,
+        args.frameId,
+        "cuda",
+        include_vignetting=True,
+    ).eval()
 
     referenceModel = renderer.model.eval()
     bakedModel = renderer.model.clone().eval()
@@ -388,6 +424,7 @@ def main() -> None:
         referenceModel=referenceModel,
         bakedModel=bakedModel,
         fixedPpisp=fixedPpisp,
+        fullFixedPpisp=fullFixedPpisp,
         dataset=renderer.dataset,
         dataloader=renderer.dataloader,
         outputRoot=outputRoot,

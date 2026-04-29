@@ -277,6 +277,8 @@ class USDExporter(ModelExporter):
         linear_srgb: bool = False,
         export_post_processing: bool = True,
         post_processing_export_mode: str = MODE_POST_PROCESSING_EXPORT_BAKED_SH,
+        post_processing_export_camera_id: int | None = None,
+        post_processing_export_frame_id: int | None = None,
         post_processing_bake_epochs: int = 1,
         post_processing_bake_learning_rate: float = 1.0e-3,
         post_processing_bake_camera_id: int = 0,
@@ -301,6 +303,10 @@ class USDExporter(ModelExporter):
             post_processing_export_mode: "baked-sh" bakes one fixed transform
                 into Gaussian SH coefficients. "omni-native" uses the module's
                 Omniverse-native path; currently PPISP SPG.
+            post_processing_export_camera_id: Optional PPISP camera index to use
+                for every RenderProduct in omni-native mode.
+            post_processing_export_frame_id: Optional PPISP frame index to write
+                as static exposure/color inputs in omni-native mode.
             post_processing_bake_epochs: Number of sequential passes over the train/reference set.
             post_processing_bake_learning_rate: Adam learning rate for baked SH.
             post_processing_bake_camera_id: Camera index for the fixed baked transform.
@@ -324,6 +330,12 @@ class USDExporter(ModelExporter):
         self.linear_srgb = linear_srgb
         self.export_post_processing = export_post_processing
         self.post_processing_export_mode = normalize_post_processing_export_mode(post_processing_export_mode)
+        self.post_processing_export_camera_id = (
+            None if post_processing_export_camera_id is None else int(post_processing_export_camera_id)
+        )
+        self.post_processing_export_frame_id = (
+            None if post_processing_export_frame_id is None else int(post_processing_export_frame_id)
+        )
         self.post_processing_bake_epochs = int(post_processing_bake_epochs)
         self.post_processing_bake_learning_rate = float(post_processing_bake_learning_rate)
         self.post_processing_bake_camera_id = int(post_processing_bake_camera_id)
@@ -587,6 +599,8 @@ class USDExporter(ModelExporter):
                     camera_names=camera_names,
                     post_processing=post_processing,
                     files=files,
+                    fixed_camera_id=self.post_processing_export_camera_id,
+                    fixed_frame_id=self.post_processing_export_frame_id,
                 )
 
         # Package
@@ -653,6 +667,8 @@ class USDExporter(ModelExporter):
         camera_names,
         post_processing,
         files: List[NamedSerialized],
+        fixed_camera_id: int | None = None,
+        fixed_frame_id: int | None = None,
     ) -> None:
         """Attach PPISP SPG shaders to existing RenderProducts."""
         try:
@@ -695,6 +711,8 @@ class USDExporter(ModelExporter):
                 ppisp=post_processing,
                 camera_names=camera_names,
                 camera_frame_mapping=camera_frame_mapping,
+                fixed_camera_index=fixed_camera_id,
+                fixed_frame_index=fixed_frame_id,
             )
         except Exception as e:
             logger.warning(f"Failed to add PPISP shaders: {e}")
@@ -738,6 +756,18 @@ class USDExporter(ModelExporter):
                 "post-processing-export-mode",
                 "post_processing_export_mode",
                 MODE_POST_PROCESSING_EXPORT_BAKED_SH,
+            ),
+            post_processing_export_camera_id=_get_export_config_value(
+                export_conf,
+                "post-processing-export-camera-id",
+                "post_processing_export_camera_id",
+                None,
+            ),
+            post_processing_export_frame_id=_get_export_config_value(
+                export_conf,
+                "post-processing-export-frame-id",
+                "post_processing_export_frame_id",
+                None,
             ),
             post_processing_bake_epochs=_get_export_config_value(
                 export_conf,

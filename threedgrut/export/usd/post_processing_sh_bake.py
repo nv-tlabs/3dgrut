@@ -137,7 +137,7 @@ def bake_post_processing_into_sh(
                     fixed_post_processing,
                     gpu_batch,
                 )
-                loss = torch.nn.functional.mse_loss(fitted_rgb, reference_rgb)
+                loss = torch.nn.functional.l1_loss(fitted_rgb, reference_rgb)
 
                 loss.backward()
                 optimizer.step()
