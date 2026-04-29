@@ -42,11 +42,35 @@ export_usd:
   enabled: false
   path: ""
   apply_normalizing_transform: true
-  format: standard  # "nurec" for Omniverse USDVol internal format, "standard" for USDVol ParticleField3DGaussianSplat
+  format: standard  # "nurec" for internal USDVol format, "standard" for USDVol ParticleField3DGaussianSplat
   half_precision: false
   export_cameras: true
   export_background: true
   sorting_mode_hint: cameraDistance
+  # If true, Gaussian prim ColorSpaceAPI uses lin_rec709_scene; else srgb_rec709_display
+  linear_srgb: false
+  # Enable post-processing export when the checkpoint contains a supported module.
+  # Defaults to true; post-processing-export-mode controls how the effect is exported.
+  export_post_processing: true
+  # baked-sh fits a fixed post-processing transform into Gaussian SH coefficients.
+  # omni-native uses the module-specific Omniverse-native path; currently PPISP SPG.
+  # baked-sh | omni-native
+  post-processing-export-mode: baked-sh
+  # Optional fixed PPISP camera/frame for omni-native export. When frame is set,
+  # exposure/color are exported as static shader inputs instead of animation.
+  post-processing-export-camera-id: null
+  post-processing-export-frame-id: null
+  # Number of sequential passes over the train/reference set used for fitting.
+  post-processing-bake-epochs: 3
+  post-processing-bake-learning-rate: 0.001
+  post-processing-bake-camera-id: 0
+  post-processing-bake-frame-id: 0
+  # none: disable PPISP vignetting during bake. achromatic-fit: chromatic PPISP reference
+  # with an achromatic fit-only vignette; the achromatic vignette is not exported.
+  # none | achromatic-fit
+  ppisp-bake-vignetting-mode: achromatic-fit
+  # USD timeCodesPerSecond; time codes are bare frame indices so this sets playback speed
+  frames_per_second: 1.0
 
 model:
   density_activation: sigmoid
@@ -124,7 +148,10 @@ loss:
 
 # Post-processing configuration
 post_processing:
-  method: null # Possible values: null, "ppisp"
+  # null | "ppisp" | "linear-to-srgb"
+  # - linear-to-srgb: IEC piecewise linear-to-sRGB on pred_rgb (same as tiny-cuda-nn common.linear_to_srgb).
+  #   No extra deps; no trainable weights. See threedgrut/utils/post_processing_linear_to_srgb.py.
+  method: null
   # Enable the controller for predicting per-frame corrections for novel views.
   # When false, zero corrections are used for novel views.
   use_controller: true

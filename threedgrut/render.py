@@ -119,7 +119,14 @@ class Renderer:
         # Load post-processing if present in checkpoint
         post_processing = None
         method = conf.post_processing.method
-        if "post_processing" in checkpoint and method == "ppisp":
+        if "post_processing" in checkpoint and method == "linear-to-srgb":
+            from threedgrut.utils.post_processing_linear_to_srgb import LinearToSrgbPostProcessing
+
+            post_processing = LinearToSrgbPostProcessing()
+            post_processing.load_state_dict(checkpoint["post_processing"]["module"])
+            post_processing = post_processing.to("cuda")
+            logger.info("Linear-to-sRGB post-processing loaded from checkpoint")
+        elif "post_processing" in checkpoint and method == "ppisp":
             from ppisp import PPISP, PPISPConfig
 
             # Derive config from training settings to match trainer.py

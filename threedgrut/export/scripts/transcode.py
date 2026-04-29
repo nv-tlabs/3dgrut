@@ -25,6 +25,12 @@ Usage:
     python -m threedgrut.export.scripts.transcode input.ply -o output.usdz --format lightfield
     python -m threedgrut.export.scripts.transcode input.usdz -o output.ply
     python -m threedgrut.export.scripts.transcode nurec.usd -o lightfield.usdz --format lightfield
+
+USD/USDZ → LightField: source /World prims (e.g. rig_trajectories) and /Render
+merge into default.usda at the same paths; referenced layers are bundled unchanged
+(preserves camera animation curves and authored render products).
+/World/Gaussians is skipped by default; use --copy-source-include-gaussians to merge it too.
+Use --no-copy-source-prims to disable.
 """
 
 import argparse
@@ -32,6 +38,7 @@ import logging
 import sys
 import tempfile
 import zipfile
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -44,6 +51,7 @@ from threedgrut.export.importers import (
     PLYImporter,
     USDImporter,
 )
+from threedgrut.export.usd.camera_copy import usd_stage_path_context_for_camera_copy
 from threedgrut.export.usd.exporter import USDExporter
 from threedgrut.export.usd.nurec.exporter import NuRecExporter
 
@@ -205,6 +213,9 @@ def transcode(
     apply_coordinate_transform: bool = False,
     render_order_hint: Optional[str] = None,
     linear_srgb: bool = False,
+    copy_cameras_source: Optional[Tuple[Path, Path]] = None,
+    copy_source_skip_subtrees: Optional[Tuple] = None,
+    validate_usd: bool = True,
 ) -> None:
     """Transcode between Gaussian splatting formats.
 
@@ -219,6 +230,9 @@ def transcode(
         apply_coordinate_transform: Apply 3DGRUT-to-USDZ transform (for both lightfield and nurec)
         render_order_hint: If set, force sortingModeHint for lightfield only; ignored for other formats (warning logged).
         linear_srgb: If True, set prim color space to lin_rec709_scene (lightfield only).
+        copy_cameras_source: If set, (root_usd_path, asset_resolution_dir) to copy source /World prims from.
+        copy_source_skip_subtrees: Optional tuple of Sdf.Path roots to skip under /World (None = default skip Gaussians).
+        validate_usd: If True and output is lightfield, run OpenUSD stage validation after export.
     """
     if render_order_hint is not None and output_format != "lightfield":
         logger.warning(
@@ -264,7 +278,14 @@ def transcode(
 
     # Export
     logger.info(f"Exporting to {output_path}...")
-    exporter.export(adapter, output_path, apply_coordinate_transform=apply_coordinate_transform)
+    exporter.export(
+        adapter,
+        output_path,
+        apply_coordinate_transform=apply_coordinate_transform,
+        copy_cameras_source=copy_cameras_source,
+        copy_source_skip_subtrees=copy_source_skip_subtrees,
+        validate_usd=validate_usd if output_format == "lightfield" else False,
+    )
 
     logger.info(f"Transcode complete: {input_path} -> {output_path}")
 
@@ -353,10 +374,32 @@ Examples:
         help="Set prim color space to lin_rec709_scene (lightfield only). Default is srgb_rec709_display.",
     )
     parser.add_argument(
+        "--no-copy-source-prims",
+        action="store_true",
+        dest="no_copy_source_prims",
+        help="When input is USD/USDZ and output is LightField, do not merge source /World prims into default.usda.",
+    )
+    parser.add_argument(
+        "--no-copy-source-cameras",
+        action="store_true",
+        dest="no_copy_source_prims",
+        help="Deprecated alias for --no-copy-source-prims.",
+    )
+    parser.add_argument(
+        "--copy-source-include-gaussians",
+        action="store_true",
+        help="Also copy /World/Gaussians from the source (duplicates old LightField data; can be very large).",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
         help="Enable verbose logging",
+    )
+    parser.add_argument(
+        "--no-usd-validate",
+        action="store_true",
+        help="Skip OpenUSD stage validation after lightfield (.usd/.usdz) export",
     )
 
     return parser.parse_args()
@@ -392,19 +435,32 @@ def main():
     # Create output directory if needed
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    suffix_in = input_path.suffix.lower()
+    use_camera_copy_ctx = (
+        output_format == "lightfield"
+        and suffix_in in (".usd", ".usda", ".usdc", ".usdz")
+        and not args.no_copy_source_prims
+    )
+    camera_ctx = usd_stage_path_context_for_camera_copy(input_path) if use_camera_copy_ctx else nullcontext(None)
+
     try:
-        transcode(
-            input_path=input_path,
-            output_path=output_path,
-            output_format=output_format,
-            max_sh_degree=args.max_sh_degree,
-            half_precision=args.half,
-            half_geometry=args.half_geometry,
-            half_features=args.half_features,
-            apply_coordinate_transform=args.apply_coordinate_transform,
-            render_order_hint=args.render_order_hint,
-            linear_srgb=args.linear_srgb,
-        )
+        with camera_ctx as copy_cameras_source:
+            skip_subtrees = () if args.copy_source_include_gaussians else None
+            transcode(
+                input_path=input_path,
+                output_path=output_path,
+                output_format=output_format,
+                max_sh_degree=args.max_sh_degree,
+                half_precision=args.half,
+                half_geometry=args.half_geometry,
+                half_features=args.half_features,
+                apply_coordinate_transform=args.apply_coordinate_transform,
+                render_order_hint=args.render_order_hint,
+                linear_srgb=args.linear_srgb,
+                copy_cameras_source=copy_cameras_source,
+                copy_source_skip_subtrees=skip_subtrees,
+                validate_usd=not args.no_usd_validate,
+            )
     except Exception as e:
         logger.error(f"Transcode failed: {e}")
         if args.verbose:

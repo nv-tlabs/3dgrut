@@ -62,6 +62,7 @@ dev = [
     "isort==5.13.0",
 ]
 gui = [
+    "flip-evaluator",
     "libigl",
     "polyscope>=2.6.0",
     "viser",

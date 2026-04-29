@@ -1,0 +1,58 @@
+#usda 1.0
+(
+    defaultPrim = "SlangPPISP"
+)
+
+def Shader "SlangPPISP"
+{
+    uniform token info:implementationSource = "sourceAsset"
+    uniform asset info:spg:sourceAsset = @ppisp_usd_spg.slang@
+    uniform token info:spg:sourceAsset:subIdentifier = "ppispProcess"
+
+    # Exposure parameter
+    float inputs:exposureOffset = 0.0
+
+    # Vignetting parameters (per channel: R, G, B)
+    float2 inputs:vignettingCenterR = (0.0, 0.0)
+    float inputs:vignettingAlpha1R = 0.0
+    float inputs:vignettingAlpha2R = 0.0
+    float inputs:vignettingAlpha3R = 0.0
+
+    float2 inputs:vignettingCenterG = (0.0, 0.0)
+    float inputs:vignettingAlpha1G = 0.0
+    float inputs:vignettingAlpha2G = 0.0
+    float inputs:vignettingAlpha3G = 0.0
+
+    float2 inputs:vignettingCenterB = (0.0, 0.0)
+    float inputs:vignettingAlpha1B = 0.0
+    float inputs:vignettingAlpha2B = 0.0
+    float inputs:vignettingAlpha3B = 0.0
+
+    # Color correction latent offsets (ZCA-based, 4 control points x 2D)
+    float2 inputs:colorLatentBlue = (0.0, 0.0)
+    float2 inputs:colorLatentRed = (0.0, 0.0)
+    float2 inputs:colorLatentGreen = (0.0, 0.0)
+    float2 inputs:colorLatentNeutral = (0.0, 0.0)
+
+    # CRF raw parameters (per channel: R, G, B)
+    # Activations: boundedSoftplus(raw, min) for toe/shoulder/gamma, sigmoid(raw) for center
+    # Defaults produce identity CRF: toe=1, shoulder=1, gamma=1, center=0.5
+    float inputs:crfToeR = 0.013659
+    float inputs:crfShoulderR = 0.013659
+    float inputs:crfGammaR = 0.378165
+    float inputs:crfCenterR = 0.0
+
+    float inputs:crfToeG = 0.013659
+    float inputs:crfShoulderG = 0.013659
+    float inputs:crfGammaG = 0.378165
+    float inputs:crfCenterG = 0.0
+
+    float inputs:crfToeB = 0.013659
+    float inputs:crfShoulderB = 0.013659
+    float inputs:crfGammaB = 0.378165
+    float inputs:crfCenterB = 0.0
+
+    # Image inputs/outputs
+    opaque inputs:HdrColor
+    opaque outputs:PPISPColor
+}
