@@ -170,10 +170,12 @@ def _create_shader_prim(
 
     if use_dynamic:
         controller_input = shader.CreateInput(PPISP_CONTROLLER_INPUT, Sdf.ValueTypeNames.Opaque)
-        controller_output_path = controller_shader.GetPath().AppendProperty(
-            f"outputs:{PPISP_CONTROLLER_INPUT}"
+        # Route through the controller's sibling RenderVar's omni:rtx:aov,
+        # mirroring how PPISP reads HdrColor. SPG only resolves AOV
+        # connections, not direct Shader -> Shader output references.
+        controller_input.GetAttr().SetConnections(
+            [Sdf.Path(f"../{PPISP_CONTROLLER_INPUT}.omni:rtx:aov")]
         )
-        controller_input.GetAttr().SetConnections([controller_output_path])
 
     # PPISPColor opaque output
     shader.CreateOutput(PPISP_OUTPUT_RENDER_VAR, Sdf.ValueTypeNames.Opaque)

@@ -251,9 +251,33 @@ def add_controller_shader_to_render_product(
     weights_input = shader.CreateInput(WEIGHTS_INPUT, Sdf.ValueTypeNames.FloatArray)
     weights_input.Set(Vt.FloatArray.FromNumpy(weights))
 
+    # Route the controller output through a RenderVar with omni:rtx:aov, so
+    # SPG resolves it the same way it resolves HdrColor / LdrColor. Direct
+    # Shader -> Shader connections work in slangpy but Kit's runtime walks
+    # AOV connections, not arbitrary UsdShade outputs.
+    var_path = f"{render_product_path}/{CONTROLLER_OUTPUT_NAME}"
+    render_var = stage.DefinePrim(var_path, "RenderVar")
+    render_var.CreateAttribute("sourceName", Sdf.ValueTypeNames.String).Set(CONTROLLER_OUTPUT_NAME)
+    aov_attr = render_var.CreateAttribute(
+        "omni:rtx:aov", Sdf.ValueTypeNames.Opaque, custom=False
+    )
+    aov_attr.SetConnections([
+        shader.GetPath().AppendProperty(f"outputs:{CONTROLLER_OUTPUT_NAME}")
+    ])
+
+    # Add the intermediate var to RenderProduct.orderedVars so SPG discovers it.
+    ordered_vars_rel = render_product.GetRelationship("orderedVars")
+    if ordered_vars_rel:
+        targets = list(ordered_vars_rel.GetTargets())
+        path = Sdf.Path(CONTROLLER_OUTPUT_NAME)
+        if path not in targets:
+            targets.append(path)
+            ordered_vars_rel.SetTargets(targets)
+
     log.debug(
-        "Authored PPISP controller shader at %s (camera %d, %d weights)",
-        shader_path, camera_index, weights.size,
+        "Authored PPISP controller shader at %s (camera %d, %d weights), "
+        "AOV RenderVar at %s",
+        shader_path, camera_index, weights.size, var_path,
     )
     return shader
 
