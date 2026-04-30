@@ -37,7 +37,7 @@ SUPPORTED_IMAGE_EXTENSIONS = {
 
 COMPARISON_MODES = ["slider", "checkerboard", "diff"]
 SLIDER_DIRECTIONS = ["vertical", "horizontal"]
-DIFF_METRICS = ["l1", "l2", "psnr", "ssim", "lpips", "flip"]
+DIFF_METRICS = ["l1", "l2", "psnr", "ssim", "flip"]
 DISPLAY_MODES = ["fit_largest_dimension", "fit"]
 
 
@@ -45,9 +45,7 @@ DISPLAY_MODES = ["fit_largest_dimension", "fit"]
 class MetricResults:
     psnr: Optional[float]
     ssim: Optional[float]
-    lpips: Optional[float]
     flip: Optional[float]
-    lpips_error: Optional[str] = None
     flip_error: Optional[str] = None
 
 
@@ -209,9 +207,6 @@ def compute_error_map(image_a: np.ndarray, image_b: np.ndarray, diff_metric: str
         return compute_psnr_error_map(image_a=image_a, image_b=image_b)
     if diff_metric == "ssim":
         return 1.0 - compute_ssim_map(image_a=image_a, image_b=image_b)
-    if diff_metric == "lpips":
-        lpips_value, _ = compute_lpips_metric(image_a=image_a, image_b=image_b)
-        return scalar_metric_to_map(lpips_value, image_a.shape[:2], higher_is_worse=True)
     if diff_metric == "flip":
         flip_map, flip_value, _ = compute_flip_metric(image_a=image_a, image_b=image_b)
         if flip_map is not None:
@@ -296,29 +291,6 @@ def normalize_error_map(error_map: np.ndarray) -> np.ndarray:
     return np.clip(error_map.astype(np.float32), 0.0, 1.0)
 
 
-def image_to_torch_tensor(image: np.ndarray):
-    import torch
-
-    return torch.from_numpy(np.ascontiguousarray(image)).permute(2, 0, 1).unsqueeze(0).float()
-
-
-def compute_lpips_metric(image_a: np.ndarray, image_b: np.ndarray) -> Tuple[Optional[float], Optional[str]]:
-    try:
-        import torch
-        from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
-    except ImportError as exc:
-        return None, f"LPIPS unavailable: {exc}"
-
-    try:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        metric = LearnedPerceptualImagePatchSimilarity(net_type="vgg", normalize=True).to(device)
-        with torch.no_grad():
-            value = metric(image_to_torch_tensor(image_a).to(device), image_to_torch_tensor(image_b).to(device))
-        return float(value.detach().cpu().item()), None
-    except Exception as exc:
-        return None, f"LPIPS failed: {exc}"
-
-
 def compute_flip_metric(
     image_a: np.ndarray, image_b: np.ndarray
 ) -> Tuple[Optional[np.ndarray], Optional[float], Optional[str]]:
@@ -349,27 +321,33 @@ def compute_flip_metric(
         return None, None, f"FLIP failed: {exc}"
 
 
-def compute_metric_results(
-    image_a: np.ndarray,
-    image_b: np.ndarray,
-    include_perceptual_metrics: bool = False,
-) -> MetricResults:
-    if include_perceptual_metrics:
-        lpips_value, lpips_error = compute_lpips_metric(image_a=image_a, image_b=image_b)
-        _, flip_value, flip_error = compute_flip_metric(image_a=image_a, image_b=image_b)
-    else:
-        lpips_value = None
-        flip_value = None
-        lpips_error = "LPIPS not computed"
-        flip_error = "FLIP not computed"
-
+def compute_metric_results(image_a: np.ndarray, image_b: np.ndarray) -> MetricResults:
+    _, flip_value, flip_error = compute_flip_metric(image_a=image_a, image_b=image_b)
     return MetricResults(
         psnr=compute_psnr(image_a=image_a, image_b=image_b),
         ssim=compute_ssim(image_a=image_a, image_b=image_b),
-        lpips=lpips_value,
         flip=flip_value,
-        lpips_error=lpips_error,
         flip_error=flip_error,
+    )
+
+
+def mean_metric_value(values: List[Optional[float]]) -> Optional[float]:
+    finite_values = [value for value in values if value is not None and np.isfinite(value)]
+    if finite_values:
+        return float(np.mean(finite_values))
+
+    if any(value is not None and math.isinf(value) for value in values):
+        return math.inf
+
+    return None
+
+
+def aggregate_metric_results(metric_results: List[MetricResults]) -> MetricResults:
+    return MetricResults(
+        psnr=mean_metric_value([metrics.psnr for metrics in metric_results]),
+        ssim=mean_metric_value([metrics.ssim for metrics in metric_results]),
+        flip=mean_metric_value([metrics.flip for metrics in metric_results]),
+        flip_error=None if any(metrics.flip is not None for metrics in metric_results) else "FLIP not computed",
     )
 
 
@@ -381,6 +359,18 @@ def format_metric_value(value: Optional[float], precision: int = 5) -> str:
     if math.isnan(value):
         return "nan"
     return f"{value:.{precision}f}"
+
+
+def format_metric_markdown(title: str, metric_results: MetricResults, count: Optional[int] = None) -> str:
+    count_text = "" if count is None else f" ({count} images)"
+    return "\n".join(
+        [
+            f"### {title}{count_text}",
+            f"- PSNR: **{format_metric_value(metric_results.psnr, precision=4)}**",
+            f"- SSIM: **{format_metric_value(metric_results.ssim, precision=5)}**",
+            f"- FLIP: **{format_metric_value(metric_results.flip, precision=5)}**",
+        ]
+    )
 
 
 def apply_jet_colormap(value: np.ndarray) -> np.ndarray:
@@ -471,6 +461,7 @@ class ImageComparisonViewer:
         self.need_update = True
         self.image_cache: Dict[str, Tuple[np.ndarray, np.ndarray, str]] = {}
         self.metric_cache: Dict[str, MetricResults] = {}
+        self.global_metric_cache: Dict[bool, MetricResults] = {}
         self.error_map_cache: Dict[Tuple[str, str], np.ndarray] = {}
 
         self.image_pair_dropdown = None
@@ -481,11 +472,8 @@ class ImageComparisonViewer:
         self.checker_size_slider = None
         self.diff_metric_dropdown = None
         self.diff_scale_slider = None
-        self.psnr_text = None
-        self.ssim_text = None
-        self.lpips_text = None
-        self.flip_text = None
-        self.compute_perceptual_metrics_button = None
+        self.current_metrics_markdown = None
+        self.global_metrics_markdown = None
         self.status_text = None
 
         self.init_ui()
@@ -549,11 +537,13 @@ class ImageComparisonViewer:
             self.status_text = self.server.gui.add_text("Status", initial_value="Loading", disabled=True)
 
         with self.server.gui.add_folder("Metrics"):
-            self.psnr_text = self.server.gui.add_text("PSNR", initial_value="unavailable", disabled=True)
-            self.ssim_text = self.server.gui.add_text("SSIM", initial_value="unavailable", disabled=True)
-            self.lpips_text = self.server.gui.add_text("LPIPS", initial_value="unavailable", disabled=True)
-            self.flip_text = self.server.gui.add_text("FLIP", initial_value="unavailable", disabled=True)
-            self.compute_perceptual_metrics_button = self.server.gui.add_button("Compute LPIPS / FLIP")
+            empty_metrics = MetricResults(psnr=None, ssim=None, flip=None)
+            self.current_metrics_markdown = self.server.gui.add_markdown(
+                format_metric_markdown("Current Image", empty_metrics)
+            )
+            self.global_metrics_markdown = self.server.gui.add_markdown(
+                format_metric_markdown("Folder Mean", empty_metrics, count=len(self.image_pairs))
+            )
 
         controls = [
             self.image_pair_dropdown,
@@ -576,6 +566,7 @@ class ImageComparisonViewer:
         def _(_) -> None:
             self.image_cache.clear()
             self.metric_cache.clear()
+            self.global_metric_cache.clear()
             self.error_map_cache.clear()
             self.need_update = True
 
@@ -586,11 +577,6 @@ class ImageComparisonViewer:
         @next_image_button.on_click
         def _(_) -> None:
             self.select_relative_image_pair(offset=1)
-
-        @self.compute_perceptual_metrics_button.on_click
-        def _(_) -> None:
-            self.compute_selected_perceptual_metrics()
-            self.need_update = True
 
     def select_relative_image_pair(self, offset: int) -> None:
         selected_name = self.image_pair_dropdown.value
@@ -622,21 +608,30 @@ class ImageComparisonViewer:
             self.metric_cache[image_pair.name] = compute_metric_results(image_a=image_a, image_b=image_b)
         return self.metric_cache[image_pair.name]
 
-    def compute_selected_perceptual_metrics(self) -> None:
-        image_pair = self.get_selected_pair()
-        image_a, image_b, _ = self.get_aligned_pair(image_pair)
-        self.metric_cache[image_pair.name] = compute_metric_results(
-            image_a=image_a,
-            image_b=image_b,
-            include_perceptual_metrics=True,
-        )
-        self.update_metric_widgets(metric_results=self.metric_cache[image_pair.name])
+    def get_global_metric_results(self) -> MetricResults:
+        if True in self.global_metric_cache:
+            return self.global_metric_cache[True]
 
-    def update_metric_widgets(self, metric_results: MetricResults) -> None:
-        self.psnr_text.value = format_metric_value(metric_results.psnr, precision=4)
-        self.ssim_text.value = format_metric_value(metric_results.ssim, precision=5)
-        self.lpips_text.value = format_metric_value(metric_results.lpips, precision=5)
-        self.flip_text.value = format_metric_value(metric_results.flip, precision=5)
+        global_metric_results = []
+        for image_pair in self.image_pairs:
+            image_a, image_b, _ = self.get_aligned_pair(image_pair)
+            metric_results = self.get_metric_results(image_pair=image_pair, image_a=image_a, image_b=image_b)
+            global_metric_results.append(metric_results)
+
+        self.global_metric_cache[True] = aggregate_metric_results(global_metric_results)
+        return self.global_metric_cache[True]
+
+    def update_metric_widgets(
+        self,
+        current_metric_results: MetricResults,
+        global_metric_results: MetricResults,
+    ) -> None:
+        self.current_metrics_markdown.content = format_metric_markdown("Current Image", current_metric_results)
+        self.global_metrics_markdown.content = format_metric_markdown(
+            "Folder Mean",
+            global_metric_results,
+            count=len(self.image_pairs),
+        )
 
     def render_current_diff(
         self,
@@ -660,7 +655,11 @@ class ImageComparisonViewer:
         image_pair = self.get_selected_pair()
         image_a, image_b, status = self.get_aligned_pair(image_pair)
         metric_results = self.get_metric_results(image_pair=image_pair, image_a=image_a, image_b=image_b)
-        self.update_metric_widgets(metric_results=metric_results)
+        global_metric_results = self.get_global_metric_results()
+        self.update_metric_widgets(
+            current_metric_results=metric_results,
+            global_metric_results=global_metric_results,
+        )
         mode = self.mode_dropdown.value
 
         if mode == "checkerboard":
@@ -690,8 +689,6 @@ class ImageComparisonViewer:
         return float_image_to_uint8(output)
 
     def get_metric_warning(self, metric_results: MetricResults, diff_metric: str) -> str:
-        if diff_metric == "lpips" and metric_results.lpips_error is not None:
-            return f" | {metric_results.lpips_error}"
         if diff_metric == "flip" and metric_results.flip_error is not None:
             return f" | {metric_results.flip_error}"
         return ""

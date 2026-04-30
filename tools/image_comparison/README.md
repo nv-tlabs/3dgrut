@@ -47,7 +47,7 @@ Use `Previous Image` and `Next Image` to cycle through matched image pairs.
 
 ## Metrics
 
-The `Metrics` panel displays scalar `PSNR`, `SSIM`, `LPIPS`, and `FLIP` values for the selected image pair. `PSNR` and `SSIM` are computed automatically. Use `Compute LPIPS / FLIP` to compute the heavier perceptual metrics on demand.
+The `Metrics` panel displays readable text blocks for the current image pair and the global folder mean. `PSNR`, `SSIM`, and `FLIP` are computed automatically.
 
 The `Diff Metric` dropdown supports:
 
@@ -55,7 +55,6 @@ The `Diff Metric` dropdown supports:
 - `l2`: per-pixel RGB root mean squared difference.
 - `psnr`: per-pixel PSNR-derived error, where lower PSNR is brighter.
 - `ssim`: local `1 - SSIM` dissimilarity.
-- `lpips`: scalar LPIPS displayed as a uniform heatmap.
 - `flip`: FLIP error map when `flip-evaluator` is installed.
 
-`LPIPS` depends on `torchmetrics` and its model weights. `FLIP` depends on the `flip-evaluator` package, which provides the `flip_evaluator` Python module. Do not install the unrelated `flip` package.
+`FLIP` depends on the `flip-evaluator` package, which provides the `flip_evaluator` Python module. Do not install the unrelated `flip` package.
