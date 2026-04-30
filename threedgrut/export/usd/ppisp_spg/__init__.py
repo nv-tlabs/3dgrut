@@ -29,21 +29,21 @@ from threedgrut.export.usd.stage_utils import NamedSerialized
 log = logging.getLogger(__name__)
 
 _SPG_DIR = Path(__file__).parent
-_SPG_FILES = [
+_SPG_STATIC_FILES = [
     "ppisp_usd_spg.slang",
     "ppisp_usd_spg.slang.lua",
     "ppisp_usd_spg.slang.usda",
 ]
+_SPG_DYN_FILES = [
+    "ppisp_usd_spg_dyn.slang",
+    "ppisp_usd_spg_dyn.slang.lua",
+    "ppisp_usd_spg_dyn.slang.usda",
+]
 
 
-def get_ppisp_spg_files() -> List[NamedSerialized]:
-    """Load all PPISP SPG sidecar files as serialized data for USDZ packaging.
-
-    Returns:
-        List of NamedSerialized for each SPG file (slang, lua, usda).
-    """
+def _load_files(filenames) -> List[NamedSerialized]:
     result: List[NamedSerialized] = []
-    for filename in _SPG_FILES:
+    for filename in filenames:
         path = _SPG_DIR / filename
         if path.exists():
             result.append(NamedSerialized(filename=filename, serialized=path.read_bytes()))
@@ -51,3 +51,17 @@ def get_ppisp_spg_files() -> List[NamedSerialized]:
         else:
             log.warning(f"PPISP SPG sidecar not found: {path}")
     return result
+
+
+def get_ppisp_spg_files() -> List[NamedSerialized]:
+    """Load static-parameter PPISP SPG sidecar files (controller-free path)."""
+    return _load_files(_SPG_STATIC_FILES)
+
+
+def get_ppisp_spg_dyn_files() -> List[NamedSerialized]:
+    """Load controller-aware PPISP SPG sidecar files.
+
+    These accompany the per-camera ``ppisp_controller_<n>.slang`` and read
+    ``exposureOffset`` and the colour latents from the controller output.
+    """
+    return _load_files(_SPG_DYN_FILES)

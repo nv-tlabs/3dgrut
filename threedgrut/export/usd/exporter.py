@@ -693,13 +693,18 @@ class USDExporter(ModelExporter):
         has_controller = (
             bool(getattr(ppisp_config, "use_controller", False)) and controllers is not None and len(controllers) > 0
         )
-        if has_controller:
-            logger.warning(
-                "PPISP controller export is not implemented yet; SPG export uses only "
-                "stored exposure/color parameters, vignetting, and CRF."
+        # The static-frame override modes (fixed_frame_id) intentionally bypass
+        # the controller because the goal is to bake one specific frame's
+        # corrections, not to predict them at runtime.
+        use_controller = has_controller and fixed_frame_id is None
+        if has_controller and fixed_frame_id is not None:
+            logger.info(
+                "PPISP controller present but fixed_frame_id is set; using static "
+                "exposure/color from frame %d instead of the controller.",
+                fixed_frame_id,
             )
 
-        from threedgrut.export.usd.ppisp_spg import get_ppisp_spg_files
+        from threedgrut.export.usd.ppisp_spg import get_ppisp_spg_files, get_ppisp_spg_dyn_files
         from threedgrut.export.usd.writers.ppisp_writer import (
             add_ppisp_to_all_render_products,
             build_camera_frame_mapping,
@@ -715,17 +720,32 @@ class USDExporter(ModelExporter):
                 camera_frame_mapping=camera_frame_mapping,
                 fixed_camera_index=fixed_camera_id,
                 fixed_frame_index=fixed_frame_id,
+                use_controller=use_controller,
             )
         except Exception as e:
             logger.warning(f"Failed to add PPISP shaders: {e}")
             return
 
-        spg_files = get_ppisp_spg_files()
+        if use_controller:
+            spg_files = list(get_ppisp_spg_dyn_files())
+            from threedgrut.export.usd.writers.ppisp_controller_writer import (
+                get_controller_sidecars,
+            )
+            for s in get_controller_sidecars():
+                if not any(f.filename == s.filename for f in spg_files):
+                    spg_files.append(s)
+        else:
+            spg_files = get_ppisp_spg_files()
+
         for spg_file in spg_files:
             if not any(f.filename == spg_file.filename for f in files):
                 files.append(spg_file)
 
-        logger.info(f"PPISP Omniverse-native export complete: {len(spg_files)} sidecar(s) added")
+        logger.info(
+            "PPISP Omniverse-native export complete: %d sidecar(s) added (controller=%s)",
+            len(files),
+            use_controller,
+        )
 
     @classmethod
     def from_config(cls, conf) -> "USDExporter":

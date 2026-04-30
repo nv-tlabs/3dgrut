@@ -48,7 +48,10 @@ CHANNEL_SUFFIXES = ["R", "G", "B"]
 
 PPISP_SPG_USDA_FILE = "ppisp_usd_spg.slang.usda"
 PPISP_SPG_SLANG_FILE = "ppisp_usd_spg.slang"
+PPISP_SPG_DYN_USDA_FILE = "ppisp_usd_spg_dyn.slang.usda"
+PPISP_SPG_DYN_SLANG_FILE = "ppisp_usd_spg_dyn.slang"
 PPISP_INPUT_RENDER_VAR = "HdrColor"
+PPISP_CONTROLLER_INPUT = "ControllerParams"
 PPISP_OUTPUT_RENDER_VAR = "PPISPColor"
 LDR_COLOR_RENDER_VAR = "LdrColor"
 PPISP_CAMERA_EXPOSURE = 0.0
@@ -110,15 +113,34 @@ def _add_ldr_color_render_var(
     return render_var_path
 
 
-def _create_shader_prim(stage: Usd.Stage, render_product_path: str) -> UsdShade.Shader:
+def _create_shader_prim(
+    stage: Usd.Stage,
+    render_product_path: str,
+    *,
+    controller_shader: UsdShade.Shader | None = None,
+) -> UsdShade.Shader:
     """Create the PPISP Shader prim on a RenderProduct.
 
-    Wires HdrColor → PPISP → LdrColor and appends LdrColor to orderedVars.
+    When ``controller_shader`` is None, the static SPG variant is used and
+    ``exposureOffset`` / colour latents must be authored as USD attributes
+    on the returned Shader. When ``controller_shader`` is provided, the
+    dynamic variant is used: the controller's ``ControllerParams`` output is
+    wired into a new opaque input on the PPISP shader, and the per-frame
+    exposure / colour params are sourced from the controller at runtime.
+
+    Wires HdrColor → PPISP → LdrColor (and ControllerParams → PPISP when a
+    controller is present) and appends LdrColor to orderedVars.
+
     Returns the UsdShade.Shader for parameter setting.
     """
     render_product = stage.GetPrimAtPath(render_product_path)
     if not render_product.IsValid():
         raise ValueError(f"RenderProduct not found at path: {render_product_path}")
+
+    use_dynamic = controller_shader is not None
+    usda_file = PPISP_SPG_DYN_USDA_FILE if use_dynamic else PPISP_SPG_USDA_FILE
+    slang_file = PPISP_SPG_DYN_SLANG_FILE if use_dynamic else PPISP_SPG_SLANG_FILE
+    sub_identifier = "ppispProcessDyn" if use_dynamic else "ppispProcess"
 
     # Mark HdrColor RenderVar input as an opaque AOV (no connection needed here)
     input_var_path = f"{render_product_path}/{PPISP_INPUT_RENDER_VAR}"
@@ -129,22 +151,29 @@ def _create_shader_prim(stage: Usd.Stage, render_product_path: str) -> UsdShade.
     # PPISP Shader prim referencing the SPG asset definition
     ppisp_shader_path = f"{render_product_path}/PPISP"
     shader = UsdShade.Shader.Define(stage, ppisp_shader_path)
-    shader.GetPrim().GetReferences().AddReference(PPISP_SPG_USDA_FILE)
+    shader.GetPrim().GetReferences().AddReference(usda_file)
     # Duplicate the source metadata on the instance. Some Kit SPG/Fabric paths
     # do not resolve referenced shader metadata when opening packaged USDZ files.
     shader.GetPrim().CreateAttribute("info:implementationSource", Sdf.ValueTypeNames.Token, custom=False).Set(
         "sourceAsset"
     )
     shader.GetPrim().CreateAttribute("info:spg:sourceAsset", Sdf.ValueTypeNames.Asset, custom=False).Set(
-        Sdf.AssetPath(PPISP_SPG_SLANG_FILE)
+        Sdf.AssetPath(slang_file)
     )
     shader.GetPrim().CreateAttribute("info:spg:sourceAsset:subIdentifier", Sdf.ValueTypeNames.Token, custom=False).Set(
-        "ppispProcess"
+        sub_identifier
     )
 
     # HdrColor opaque input wired to the input RenderVar's AOV
     hdr_input = shader.CreateInput(PPISP_INPUT_RENDER_VAR, Sdf.ValueTypeNames.Opaque)
     hdr_input.GetAttr().SetConnections([Sdf.Path(f"../{PPISP_INPUT_RENDER_VAR}.omni:rtx:aov")])
+
+    if use_dynamic:
+        controller_input = shader.CreateInput(PPISP_CONTROLLER_INPUT, Sdf.ValueTypeNames.Opaque)
+        controller_output_path = controller_shader.GetPath().AppendProperty(
+            f"outputs:{PPISP_CONTROLLER_INPUT}"
+        )
+        controller_input.GetAttr().SetConnections([controller_output_path])
 
     # PPISPColor opaque output
     shader.CreateOutput(PPISP_OUTPUT_RENDER_VAR, Sdf.ValueTypeNames.Opaque)
@@ -305,13 +334,16 @@ def add_ppisp_shader_to_render_product(
     ppisp: PPISP,
     frame_indices: List[int],
     fixed_frame_index: int | None = None,
+    controller_shader: UsdShade.Shader | None = None,
 ) -> Usd.Prim:
     """Add a PPISP Shader to a RenderProduct for one physical camera.
 
     Per-camera parameters (vignetting, CRF) are written as static USD
-    attributes. Per-frame parameters (exposure, color latents) are written
-    with a mean-based default value and one time sample per training frame
-    at time_code = float(frame_idx).
+    attributes. Per-frame parameters (exposure, color latents) are either:
+    - written with mean-based defaults plus per-frame time samples (when
+      ``controller_shader`` is None and ``fixed_frame_index`` is None), or
+    - read at runtime from the upstream controller shader when it is
+      provided (the dynamic SPG variant is selected automatically).
 
     Args:
         stage: USD stage containing the RenderProduct.
@@ -321,26 +353,36 @@ def add_ppisp_shader_to_render_product(
         frame_indices: Global frame indices belonging to this camera.
         fixed_frame_index: If set, write this one PPISP frame state as static
             shader inputs instead of authoring animated time samples.
+        controller_shader: Optional upstream controller Shader whose
+            ``ControllerParams`` output supplies exposure / colour latents.
 
     Returns:
         The created PPISP Shader prim.
     """
     assert camera_index < ppisp.num_cameras, f"camera_index {camera_index} >= ppisp.num_cameras {ppisp.num_cameras}"
-    if not frame_indices and fixed_frame_index is None:
+    if not frame_indices and fixed_frame_index is None and controller_shader is None:
         log.warning(f"No frames for camera {camera_index} at {render_product_path}, skipping")
         return stage.GetPseudoRoot()
 
-    shader = _create_shader_prim(stage, render_product_path)
+    shader = _create_shader_prim(stage, render_product_path, controller_shader=controller_shader)
     _set_vignetting_params(shader, ppisp, camera_index)
     _set_crf_params(shader, ppisp, camera_index)
-    if fixed_frame_index is None:
+    if controller_shader is not None:
+        # Exposure / colour latents are computed by the controller shader
+        # at runtime, so we don't author static or time-sampled values here.
+        pass
+    elif fixed_frame_index is None:
         _set_animated_exposure_params(shader, ppisp, frame_indices)
         _set_animated_color_params(shader, ppisp, frame_indices)
     else:
         _set_static_exposure_params(shader, ppisp, fixed_frame_index)
         _set_static_color_params(shader, ppisp, fixed_frame_index)
 
-    log.info(f"Added PPISP shader to {render_product_path} " f"(camera {camera_index}, {len(frame_indices)} frame(s))")
+    controller_suffix = ", controller" if controller_shader is not None else ""
+    log.info(
+        f"Added PPISP shader to {render_product_path} "
+        f"(camera {camera_index}, {len(frame_indices)} frame(s){controller_suffix})"
+    )
     return shader.GetPrim()
 
 
@@ -392,6 +434,7 @@ def add_ppisp_to_all_render_products(
     render_scope_path: str = "/Render",
     fixed_camera_index: int | None = None,
     fixed_frame_index: int | None = None,
+    use_controller: bool = False,
 ) -> List[Usd.Prim]:
     """Add PPISP shaders to every RenderProduct in the Render scope.
 
@@ -406,11 +449,19 @@ def add_ppisp_to_all_render_products(
             RenderProduct instead of matching the RenderProduct camera.
         fixed_frame_index: If set, use this PPISP frame state as static shader
             inputs instead of authoring animated exposure/color samples.
+        use_controller: If True, author a per-camera PPISP controller shader
+            and wire its output into the PPISP shader, replacing the static /
+            time-sampled exposure & colour inputs. Requires the controller
+            sidecars to be packaged alongside the USD output.
 
     Returns:
         List of created PPISP Shader prims.
     """
     from threedgrut.export.usd.writers.camera import _make_usd_prim_name
+    if use_controller:
+        from threedgrut.export.usd.writers.ppisp_controller_writer import (
+            add_controller_shader_to_render_product,
+        )
 
     render_scope = stage.GetPrimAtPath(render_scope_path)
     if not render_scope.IsValid():
@@ -445,6 +496,23 @@ def add_ppisp_to_all_render_products(
         frame_indices = camera_frame_mapping.get(camera_name, [])
         _create_ppisp_camera(stage, child)
 
+        controller_shader = None
+        if use_controller:
+            controllers = getattr(ppisp, "controllers", None)
+            if controllers is None or int(camera_index) >= len(controllers):
+                log.warning(
+                    "PPISP controllers missing for camera %s (idx=%d); falling back to "
+                    "static parameters for this RenderProduct.",
+                    camera_name, int(camera_index),
+                )
+            else:
+                controller_shader = add_controller_shader_to_render_product(
+                    stage=stage,
+                    render_product_path=str(child.GetPath()),
+                    camera_index=int(camera_index),
+                    controller=controllers[int(camera_index)],
+                )
+
         shader_prim = add_ppisp_shader_to_render_product(
             stage=stage,
             render_product_path=str(child.GetPath()),
@@ -452,6 +520,7 @@ def add_ppisp_to_all_render_products(
             ppisp=ppisp,
             frame_indices=frame_indices,
             fixed_frame_index=fixed_frame_index,
+            controller_shader=controller_shader,
         )
         created.append(shader_prim)
 
