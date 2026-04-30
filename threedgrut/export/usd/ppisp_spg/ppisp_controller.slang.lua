@@ -12,7 +12,7 @@ function controllerProcess(inputs, outputs, params)
     assert(in_rgba and in_rgba.rank == 2, "HdrColor input must be a 2D texture")
 
     local weights = params["weights"]
-    assert(weights, "controllerProcess requires the inputs:weights attribute")
+    assert(weights, "controllerProcess needs the inputs:weights attribute")
 
     -- 1x9 single-channel float image holding [exposure, color latents].
     outputs["ControllerParams"] = slang.empty({ 1, 9 }, slang.float)

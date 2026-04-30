@@ -13,7 +13,7 @@ function ppispProcessDyn(inputs, outputs, params)
     assert(in_rgba and in_rgba.rank == 2, "HdrColor input must be a 2D texture")
 
     local controller = inputs["ControllerParams"]
-    assert(controller, "ppispProcessDyn requires a ControllerParams input texture")
+    assert(controller, "ppispProcessDyn needs a ControllerParams input texture")
 
     local height = in_rgba.shape[1]
     local width = in_rgba.shape[2]
