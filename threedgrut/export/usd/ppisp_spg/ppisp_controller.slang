@@ -52,7 +52,7 @@ static const int THREAD_GROUP_SIZE  = 32;
 
 // ---------------------------------------------------------------------------
 // Weight buffer offsets (the Python writer flattens weights in this order
-// into a single float buffer that gets bound as g_Weights).
+// into a single float buffer that gets bound as weights).
 // ---------------------------------------------------------------------------
 static const int OFF_CONV1_W = 0;                                // 16 * 3       = 48
 static const int OFF_CONV1_B = OFF_CONV1_W + 16 * 3;             // + 16          = 64
@@ -83,7 +83,7 @@ struct PPISPControllerParams
 
 [[vk::binding(0, 1)]] ParameterBlock<PPISPControllerParams> g_Params;
 [[vk::binding(1, 1)]] Texture2D<float4>          g_InTex;
-[[vk::binding(2, 1)]] StructuredBuffer<float>    g_Weights;
+[[vk::binding(2, 1)]] StructuredBuffer<float>    weights;
 [[vk::binding(3, 1)]] RWTexture2D<float>         g_OutTex;
 
 // ---------------------------------------------------------------------------
@@ -94,10 +94,10 @@ void conv1Forward(float3 rgb, out float feat[16])
 {
     [unroll] for (int o = 0; o < 16; ++o)
     {
-        float v = g_Weights[OFF_CONV1_B + o];
-        v += rgb.r * g_Weights[OFF_CONV1_W + o * 3 + 0];
-        v += rgb.g * g_Weights[OFF_CONV1_W + o * 3 + 1];
-        v += rgb.b * g_Weights[OFF_CONV1_W + o * 3 + 2];
+        float v = weights[OFF_CONV1_B + o];
+        v += rgb.r * weights[OFF_CONV1_W + o * 3 + 0];
+        v += rgb.g * weights[OFF_CONV1_W + o * 3 + 1];
+        v += rgb.b * weights[OFF_CONV1_W + o * 3 + 2];
         feat[o] = v;
     }
 }
@@ -106,9 +106,9 @@ void conv2Forward(float fin[16], out float fout[32])
 {
     [unroll] for (int o = 0; o < 32; ++o)
     {
-        float v = g_Weights[OFF_CONV2_B + o];
+        float v = weights[OFF_CONV2_B + o];
         [unroll] for (int i = 0; i < 16; ++i)
-            v += fin[i] * g_Weights[OFF_CONV2_W + o * 16 + i];
+            v += fin[i] * weights[OFF_CONV2_W + o * 16 + i];
         fout[o] = v;
     }
 }
@@ -117,9 +117,9 @@ void conv3Forward(float fin[32], out float fout[64])
 {
     [unroll] for (int o = 0; o < CNN_FEATURE_DIM; ++o)
     {
-        float v = g_Weights[OFF_CONV3_B + o];
+        float v = weights[OFF_CONV3_B + o];
         [unroll] for (int i = 0; i < 32; ++i)
-            v += fin[i] * g_Weights[OFF_CONV3_W + o * 32 + i];
+            v += fin[i] * weights[OFF_CONV3_W + o * 32 + i];
         fout[o] = v;
     }
 }
@@ -241,11 +241,11 @@ void controllerProcess(uint3 gtid : SV_GroupThreadID)
     // across the THREAD_GROUP_SIZE threads.
     for (int o = int(gtid.x); o < MLP_HIDDEN_DIM; o += THREAD_GROUP_SIZE)
     {
-        float v = g_Weights[OFF_TRUNK0_B + o];
+        float v = weights[OFF_TRUNK0_B + o];
         for (int i = 0; i < POOL_FEATURE_LEN; ++i)
-            v += gsPooled[i] * g_Weights[OFF_TRUNK0_W + o * MLP_INPUT_DIM + i];
+            v += gsPooled[i] * weights[OFF_TRUNK0_W + o * MLP_INPUT_DIM + i];
         v += g_Params.priorExposure
-             * g_Weights[OFF_TRUNK0_W + o * MLP_INPUT_DIM + POOL_FEATURE_LEN];
+             * weights[OFF_TRUNK0_W + o * MLP_INPUT_DIM + POOL_FEATURE_LEN];
         gsHiddenA[o] = max(0.0, v);
     }
     GroupMemoryBarrierWithGroupSync();
@@ -253,9 +253,9 @@ void controllerProcess(uint3 gtid : SV_GroupThreadID)
     // Phase 3: trunk1 (128 -> 128). gsHiddenA -> gsHiddenB.
     for (int o = int(gtid.x); o < MLP_HIDDEN_DIM; o += THREAD_GROUP_SIZE)
     {
-        float v = g_Weights[OFF_TRUNK1_B + o];
+        float v = weights[OFF_TRUNK1_B + o];
         for (int i = 0; i < MLP_HIDDEN_DIM; ++i)
-            v += gsHiddenA[i] * g_Weights[OFF_TRUNK1_W + o * MLP_HIDDEN_DIM + i];
+            v += gsHiddenA[i] * weights[OFF_TRUNK1_W + o * MLP_HIDDEN_DIM + i];
         gsHiddenB[o] = max(0.0, v);
     }
     GroupMemoryBarrierWithGroupSync();
@@ -263,9 +263,9 @@ void controllerProcess(uint3 gtid : SV_GroupThreadID)
     // Phase 4: trunk2 (128 -> 128). gsHiddenB -> gsHiddenA.
     for (int o = int(gtid.x); o < MLP_HIDDEN_DIM; o += THREAD_GROUP_SIZE)
     {
-        float v = g_Weights[OFF_TRUNK2_B + o];
+        float v = weights[OFF_TRUNK2_B + o];
         for (int i = 0; i < MLP_HIDDEN_DIM; ++i)
-            v += gsHiddenB[i] * g_Weights[OFF_TRUNK2_W + o * MLP_HIDDEN_DIM + i];
+            v += gsHiddenB[i] * weights[OFF_TRUNK2_W + o * MLP_HIDDEN_DIM + i];
         gsHiddenA[o] = max(0.0, v);
     }
     GroupMemoryBarrierWithGroupSync();
@@ -273,17 +273,17 @@ void controllerProcess(uint3 gtid : SV_GroupThreadID)
     // Phase 5: heads.
     if (gtid.x == 0)
     {
-        float v = g_Weights[OFF_EXP_B];
+        float v = weights[OFF_EXP_B];
         for (int i = 0; i < MLP_HIDDEN_DIM; ++i)
-            v += gsHiddenA[i] * g_Weights[OFF_EXP_W + i];
+            v += gsHiddenA[i] * weights[OFF_EXP_W + i];
         g_OutTex[int2(0, 0)] = v;
     }
     if (gtid.x < uint(COLOR_PARAMS_PER_FRAME))
     {
         int o = int(gtid.x);
-        float v = g_Weights[OFF_COL_B + o];
+        float v = weights[OFF_COL_B + o];
         for (int i = 0; i < MLP_HIDDEN_DIM; ++i)
-            v += gsHiddenA[i] * g_Weights[OFF_COL_W + o * MLP_HIDDEN_DIM + i];
+            v += gsHiddenA[i] * weights[OFF_COL_W + o * MLP_HIDDEN_DIM + i];
         g_OutTex[int2(1 + o, 0)] = v;
     }
 }

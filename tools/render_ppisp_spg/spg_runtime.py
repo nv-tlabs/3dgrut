@@ -219,7 +219,7 @@ def run_controller(
         cur = spy.ShaderCursor(shader_obj)
         _set_param_block(cur, "g_Params", {"priorExposure": float(prior_exposure)})
         cur["g_InTex"] = in_tex
-        cur["g_Weights"] = weights_buf
+        cur["weights"] = weights_buf
         cur["g_OutTex"] = out_tex
         cp.dispatch(spy.math.uint3(32, 1, 1))
     device.submit_command_buffer(encoder.finish())
