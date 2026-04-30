@@ -172,6 +172,15 @@ Examples:
         help="Optional PPISP frame id to write as static omni-native shader inputs instead of animation.",
     )
     parser.add_argument(
+        "--ignore-ppisp-controller",
+        action="store_true",
+        help=(
+            "If the checkpoint contains trained PPISP controllers, ignore them and "
+            "export the optimized per-frame exposure/color parameters as time-sampled "
+            "USD attributes instead. Has no effect when the checkpoint has no controllers."
+        ),
+    )
+    parser.add_argument(
         "--post-processing-bake-epochs",
         type=int,
         default=None,
@@ -423,6 +432,7 @@ def main():
                 "post_processing_export_frame_id",
                 None,
             ),
+            ignore_ppisp_controller=args.ignore_ppisp_controller,
             post_processing_bake_epochs=_arg_or_conf(
                 args.post_processing_bake_epochs,
                 export_conf,

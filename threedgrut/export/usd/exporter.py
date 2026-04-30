@@ -283,6 +283,7 @@ class USDExporter(ModelExporter):
         post_processing_export_mode: str = MODE_POST_PROCESSING_EXPORT_BAKED_SH,
         post_processing_export_camera_id: int | None = None,
         post_processing_export_frame_id: int | None = None,
+        ignore_ppisp_controller: bool = False,
         post_processing_bake_epochs: int = 1,
         post_processing_bake_learning_rate: float = 1.0e-3,
         post_processing_bake_camera_id: int = 0,
@@ -309,6 +310,11 @@ class USDExporter(ModelExporter):
                 Omniverse-native path; currently PPISP SPG.
             post_processing_export_camera_id: Optional PPISP camera index to use
                 for every RenderProduct in omni-native mode.
+            ignore_ppisp_controller: If True, skip the PPISP controller export
+                even when the checkpoint has trained controllers, and fall back
+                to time-sampled exposure / colour USD attributes derived from
+                ``ppisp.exposure_params`` and ``ppisp.color_params``. No effect
+                on checkpoints that were trained without a controller.
             post_processing_export_frame_id: Optional PPISP frame index to write
                 as static exposure/color inputs in omni-native mode.
             post_processing_bake_epochs: Number of sequential passes over the train/reference set.
@@ -340,6 +346,7 @@ class USDExporter(ModelExporter):
         self.post_processing_export_frame_id = (
             None if post_processing_export_frame_id is None else int(post_processing_export_frame_id)
         )
+        self.ignore_ppisp_controller = bool(ignore_ppisp_controller)
         self.post_processing_bake_epochs = int(post_processing_bake_epochs)
         self.post_processing_bake_learning_rate = float(post_processing_bake_learning_rate)
         self.post_processing_bake_camera_id = int(post_processing_bake_camera_id)
@@ -696,12 +703,25 @@ class USDExporter(ModelExporter):
         # The static-frame override modes (fixed_frame_id) intentionally bypass
         # the controller because the goal is to bake one specific frame's
         # corrections, not to predict them at runtime.
-        use_controller = has_controller and fixed_frame_id is None
+        # ignore_ppisp_controller forces the same fall-back even with animation,
+        # so consumers that don't want runtime controller dispatch can ship the
+        # optimized per-frame exposure / colour USD attributes instead.
+        use_controller = (
+            has_controller
+            and fixed_frame_id is None
+            and not self.ignore_ppisp_controller
+        )
         if has_controller and fixed_frame_id is not None:
             logger.info(
                 "PPISP controller present but fixed_frame_id is set; using static "
                 "exposure/color from frame %d instead of the controller.",
                 fixed_frame_id,
+            )
+        elif has_controller and self.ignore_ppisp_controller:
+            logger.info(
+                "PPISP controller present but ignore_ppisp_controller is set; "
+                "exporting time-sampled exposure/color from optimized PPISP parameters "
+                "instead of the runtime controller."
             )
 
         from threedgrut.export.usd.ppisp_spg import get_ppisp_spg_files, get_ppisp_spg_dyn_files
@@ -790,6 +810,12 @@ class USDExporter(ModelExporter):
                 "post-processing-export-frame-id",
                 "post_processing_export_frame_id",
                 None,
+            ),
+            ignore_ppisp_controller=_get_export_config_value(
+                export_conf,
+                "ignore-ppisp-controller",
+                "ignore_ppisp_controller",
+                False,
             ),
             post_processing_bake_epochs=_get_export_config_value(
                 export_conf,
