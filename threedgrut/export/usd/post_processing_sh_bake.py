@@ -137,7 +137,7 @@ def bake_post_processing_into_sh(
                     fixed_post_processing,
                     gpu_batch,
                 )
-                loss = torch.nn.functional.l1_loss(fitted_rgb, reference_rgb)
+                loss = torch.nn.functional.mse_loss(fitted_rgb, reference_rgb)
 
                 loss.backward()
                 optimizer.step()
@@ -244,10 +244,7 @@ def estimate_achromatic_vignetting(
         delta = uv - center
         r2 = torch.sum(delta * delta, dim=-1)
         falloff = (
-            1.0
-            + vig_params[channel, 2] * r2
-            + vig_params[channel, 3] * r2 * r2
-            + vig_params[channel, 4] * r2 * r2 * r2
+            1.0 + vig_params[channel, 2] * r2 + vig_params[channel, 3] * r2 * r2 + vig_params[channel, 4] * r2 * r2 * r2
         )
         channel_falloff.append(torch.clamp(falloff, 0.0, 1.0))
 

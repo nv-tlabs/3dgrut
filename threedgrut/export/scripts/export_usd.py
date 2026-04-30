@@ -345,10 +345,7 @@ def main():
     )
     # Load dataset for camera export and for train-split post-processing SH baking.
     dataset = None
-    needs_dataset = (
-        not args.no_cameras
-        or (post_processing is not None and export_post_processing)
-    )
+    needs_dataset = not args.no_cameras or (post_processing is not None and export_post_processing)
     if needs_dataset:
         try:
             import threedgrut.datasets as datasets

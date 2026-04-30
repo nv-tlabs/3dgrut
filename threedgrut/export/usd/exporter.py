@@ -687,9 +687,7 @@ class USDExporter(ModelExporter):
         ppisp_config = getattr(post_processing, "config", None)
         controllers = getattr(post_processing, "controllers", None)
         has_controller = (
-            bool(getattr(ppisp_config, "use_controller", False))
-            and controllers is not None
-            and len(controllers) > 0
+            bool(getattr(ppisp_config, "use_controller", False)) and controllers is not None and len(controllers) > 0
         )
         if has_controller:
             logger.warning(

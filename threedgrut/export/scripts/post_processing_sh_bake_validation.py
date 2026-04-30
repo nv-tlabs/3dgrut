@@ -27,7 +27,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Iterable
+from typing import Dict, Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
@@ -48,10 +48,15 @@ from threedgrut.export.usd.post_processing_sh_bake import (
     apply_achromatic_vignetting,
     normalize_ppisp_bake_vignetting_mode,
 )
-from threedgrut.utils.color_correct import color_correct_affine
+from threedgrut.export.usd.post_processing_sh_simple_bake import simple_bake
 from threedgrut.utils.logger import logger
 from threedgrut.utils.post_processing_linear_to_srgb import linear_to_srgb
 from threedgrut.utils.render import apply_post_processing
+
+BAKE_FLAVOR_FIT = "fit"
+BAKE_FLAVOR_SIMPLE = "simple"
+BAKE_FLAVOR_SIMPLE_HIGHER_ORDER = "simple-higher-order"
+BAKE_FLAVOR_ALL = "all"
 
 
 def _setShFitParameters(model) -> Iterable[torch.nn.Parameter]:
@@ -128,8 +133,14 @@ def _fitBakedSh(
 
             optimizer.zero_grad(set_to_none=True)
             bakedOutputs = bakedModel(gpuBatch)
-            fittedRgb = torch.clamp(linear_to_srgb(_applyAchromaticVignetting(bakedOutputs["pred_rgb"], fixedPpisp, gpuBatch, vignettingMode)), 0, 1)
-            loss = torch.nn.functional.l1_loss(fittedRgb, referenceRgb)
+            fittedRgb = torch.clamp(
+                linear_to_srgb(
+                    _applyAchromaticVignetting(bakedOutputs["pred_rgb"], fixedPpisp, gpuBatch, vignettingMode)
+                ),
+                0,
+                1,
+            )
+            loss = torch.nn.functional.mse_loss(fittedRgb, referenceRgb)
 
             loss.backward()
             optimizer.step()
@@ -147,6 +158,7 @@ def _fitBakedSh(
 def _evaluateBakedSh(
     referenceModel,
     bakedModel,
+    simpleBakedModels: Dict[str, nn.Module],
     fixedPpisp,
     fullFixedPpisp,
     dataset,
@@ -165,28 +177,35 @@ def _evaluateBakedSh(
     fullReferencePath = outputRoot / "full_ppisp_reference"
     referencePath = outputRoot / "reference"
     unfittedPath = outputRoot / "unfitted"
-    bakedPath = outputRoot / "baked"
-    assistedPath = outputRoot / "baked_assisted"
     fullReferencePath.mkdir(parents=True, exist_ok=True)
     referencePath.mkdir(parents=True, exist_ok=True)
     unfittedPath.mkdir(parents=True, exist_ok=True)
-    bakedPath.mkdir(parents=True, exist_ok=True)
-    assistedPath.mkdir(parents=True, exist_ok=True)
+    bakedPath = outputRoot / "baked" if bakedModel is not None else None
+    assistedPath = outputRoot / "baked_assisted" if bakedModel is not None else None
+    if bakedPath is not None:
+        bakedPath.mkdir(parents=True, exist_ok=True)
+    if assistedPath is not None:
+        assistedPath.mkdir(parents=True, exist_ok=True)
+    simplePaths = {name: outputRoot / f"{name}_baked" for name in simpleBakedModels}
+    for simplePath in simplePaths.values():
+        simplePath.mkdir(parents=True, exist_ok=True)
 
     unfittedPsnrValues = []
     psnrValues = []
     ssimValues = []
     lpipsValues = []
-    ccPsnrValues = []
-    ccSsimValues = []
-    ccLpipsValues = []
     assistedPsnrValues = []
     assistedSsimValues = []
     assistedLpipsValues = []
-    assistedCcPsnrValues = []
-    assistedCcSsimValues = []
-    assistedCcLpipsValues = []
     inferenceTimeValues = []
+    simpleMetricValues = {
+        name: {
+            "psnr": [],
+            "ssim": [],
+            "lpips": [],
+        }
+        for name in simpleBakedModels
+    }
 
     logger.start_progress(task_name="Evaluating baked SH", total_steps=len(dataloader), color="orange1")
     for iteration, batch in enumerate(dataloader):
@@ -196,17 +215,6 @@ def _evaluateBakedSh(
         referenceRgb = _renderReference(referenceModel, fixedPpisp, gpuBatch)
         unfittedOutputs = referenceModel(gpuBatch)
         unfittedRgb = unfittedOutputs["pred_rgb"]
-        bakedOutputs = bakedModel(gpuBatch)
-        bakedRgb = torch.clamp(
-            linear_to_srgb(bakedOutputs["pred_rgb"]),
-            0,
-            1,
-        )
-        assistedRgb = torch.clamp(
-            linear_to_srgb(_applyAchromaticVignetting(bakedOutputs["pred_rgb"], fixedPpisp, gpuBatch, vignettingMode)),
-            0,
-            1,
-        )
 
         torchvision.utils.save_image(
             fullReferenceRgb.squeeze(0).permute(2, 0, 1).clip(0, 1),
@@ -220,108 +228,111 @@ def _evaluateBakedSh(
             unfittedRgb.squeeze(0).permute(2, 0, 1).clip(0, 1),
             unfittedPath / f"{iteration:05d}.png",
         )
-        torchvision.utils.save_image(
-            bakedRgb.squeeze(0).permute(2, 0, 1).clip(0, 1),
-            bakedPath / f"{iteration:05d}.png",
-        )
-        torchvision.utils.save_image(
-            assistedRgb.squeeze(0).permute(2, 0, 1).clip(0, 1),
-            assistedPath / f"{iteration:05d}.png",
-        )
 
         unfittedPsnrValues.append(criterions["psnr"](unfittedRgb, referenceRgb).item())
-        psnrValues.append(criterions["psnr"](bakedRgb, referenceRgb).item())
-        assistedPsnrValues.append(criterions["psnr"](assistedRgb, referenceRgb).item())
-        if computeExtraMetrics:
-            ssimValues.append(
-                criterions["ssim"](
-                    bakedRgb.permute(0, 3, 1, 2),
-                    referenceRgb.permute(0, 3, 1, 2),
-                ).item()
+
+        if bakedModel is not None:
+            bakedOutputs = bakedModel(gpuBatch)
+            bakedRgb = torch.clamp(linear_to_srgb(bakedOutputs["pred_rgb"]), 0, 1)
+            assistedRgb = torch.clamp(
+                linear_to_srgb(
+                    _applyAchromaticVignetting(bakedOutputs["pred_rgb"], fixedPpisp, gpuBatch, vignettingMode)
+                ),
+                0,
+                1,
             )
-            lpipsValues.append(
-                criterions["lpips"](
-                    bakedRgb.clip(0, 1).permute(0, 3, 1, 2),
-                    referenceRgb.clip(0, 1).permute(0, 3, 1, 2),
-                ).item()
+            torchvision.utils.save_image(
+                bakedRgb.squeeze(0).permute(2, 0, 1).clip(0, 1),
+                bakedPath / f"{iteration:05d}.png",
             )
-            assistedSsimValues.append(
-                criterions["ssim"](
-                    assistedRgb.permute(0, 3, 1, 2),
-                    referenceRgb.permute(0, 3, 1, 2),
-                ).item()
-            )
-            assistedLpipsValues.append(
-                criterions["lpips"](
-                    assistedRgb.clip(0, 1).permute(0, 3, 1, 2),
-                    referenceRgb.clip(0, 1).permute(0, 3, 1, 2),
-                ).item()
+            torchvision.utils.save_image(
+                assistedRgb.squeeze(0).permute(2, 0, 1).clip(0, 1),
+                assistedPath / f"{iteration:05d}.png",
             )
 
-            bakedRgbCc = color_correct_affine(bakedRgb, referenceRgb)
-            ccPsnrValues.append(criterions["psnr"](bakedRgbCc, referenceRgb).item())
-            ccSsimValues.append(
-                criterions["ssim"](
-                    bakedRgbCc.permute(0, 3, 1, 2),
-                    referenceRgb.permute(0, 3, 1, 2),
-                ).item()
-            )
-            ccLpipsValues.append(
-                criterions["lpips"](
-                    bakedRgbCc.clip(0, 1).permute(0, 3, 1, 2),
-                    referenceRgb.clip(0, 1).permute(0, 3, 1, 2),
-                ).item()
-            )
-            assistedRgbCc = color_correct_affine(assistedRgb, referenceRgb)
-            assistedCcPsnrValues.append(criterions["psnr"](assistedRgbCc, referenceRgb).item())
-            assistedCcSsimValues.append(
-                criterions["ssim"](
-                    assistedRgbCc.permute(0, 3, 1, 2),
-                    referenceRgb.permute(0, 3, 1, 2),
-                ).item()
-            )
-            assistedCcLpipsValues.append(
-                criterions["lpips"](
-                    assistedRgbCc.clip(0, 1).permute(0, 3, 1, 2),
-                    referenceRgb.clip(0, 1).permute(0, 3, 1, 2),
-                ).item()
-            )
+            psnrValues.append(criterions["psnr"](bakedRgb, referenceRgb).item())
+            assistedPsnrValues.append(criterions["psnr"](assistedRgb, referenceRgb).item())
+            if computeExtraMetrics:
+                ssimValues.append(
+                    criterions["ssim"](bakedRgb.permute(0, 3, 1, 2), referenceRgb.permute(0, 3, 1, 2)).item()
+                )
+                lpipsValues.append(
+                    criterions["lpips"](
+                        bakedRgb.clip(0, 1).permute(0, 3, 1, 2), referenceRgb.clip(0, 1).permute(0, 3, 1, 2)
+                    ).item()
+                )
+                assistedSsimValues.append(
+                    criterions["ssim"](assistedRgb.permute(0, 3, 1, 2), referenceRgb.permute(0, 3, 1, 2)).item()
+                )
+                assistedLpipsValues.append(
+                    criterions["lpips"](
+                        assistedRgb.clip(0, 1).permute(0, 3, 1, 2), referenceRgb.clip(0, 1).permute(0, 3, 1, 2)
+                    ).item()
+                )
 
-        if "frame_time_ms" in bakedOutputs:
-            inferenceTimeValues.append(bakedOutputs["frame_time_ms"])
+            if "frame_time_ms" in bakedOutputs:
+                inferenceTimeValues.append(bakedOutputs["frame_time_ms"])
 
-        logger.log_progress(task_name="Evaluating baked SH", advance=1, iteration=str(iteration), psnr=psnrValues[-1])
+        for simpleName, simpleModel in simpleBakedModels.items():
+            simpleOutputs = simpleModel(gpuBatch)
+            simpleRgb = torch.clamp(simpleOutputs["pred_rgb"], 0, 1)
+            torchvision.utils.save_image(
+                simpleRgb.squeeze(0).permute(2, 0, 1).clip(0, 1),
+                simplePaths[simpleName] / f"{iteration:05d}.png",
+            )
+            simpleValues = simpleMetricValues[simpleName]
+            simpleValues["psnr"].append(criterions["psnr"](simpleRgb, referenceRgb).item())
+            if computeExtraMetrics:
+                simpleValues["ssim"].append(
+                    criterions["ssim"](simpleRgb.permute(0, 3, 1, 2), referenceRgb.permute(0, 3, 1, 2)).item()
+                )
+                simpleValues["lpips"].append(
+                    criterions["lpips"](
+                        simpleRgb.clip(0, 1).permute(0, 3, 1, 2),
+                        referenceRgb.clip(0, 1).permute(0, 3, 1, 2),
+                    ).item()
+                )
+
+        progressPsnr = psnrValues[-1] if psnrValues else unfittedPsnrValues[-1]
+        logger.log_progress(task_name="Evaluating baked SH", advance=1, iteration=str(iteration), psnr=progressPsnr)
     logger.end_progress(task_name="Evaluating baked SH")
 
     metrics = {
         "vignetting_mode": vignettingMode,
         "unfitted_mean_psnr": float(np.mean(unfittedPsnrValues)),
         "unfitted_std_psnr": float(np.std(unfittedPsnrValues)),
-        "mean_psnr": float(np.mean(psnrValues)),
-        "std_psnr": float(np.std(psnrValues)),
-        "assisted_mean_psnr": float(np.mean(assistedPsnrValues)),
-        "assisted_std_psnr": float(np.std(assistedPsnrValues)),
     }
-    if computeExtraMetrics:
+    if psnrValues:
         metrics |= {
-            "mean_ssim": float(np.mean(ssimValues)),
-            "mean_lpips": float(np.mean(lpipsValues)),
-            "mean_cc_psnr": float(np.mean(ccPsnrValues)),
-            "mean_cc_ssim": float(np.mean(ccSsimValues)),
-            "mean_cc_lpips": float(np.mean(ccLpipsValues)),
-            "assisted_mean_ssim": float(np.mean(assistedSsimValues)),
-            "assisted_mean_lpips": float(np.mean(assistedLpipsValues)),
-            "assisted_mean_cc_psnr": float(np.mean(assistedCcPsnrValues)),
-            "assisted_mean_cc_ssim": float(np.mean(assistedCcSsimValues)),
-            "assisted_mean_cc_lpips": float(np.mean(assistedCcLpipsValues)),
+            "mean_psnr": float(np.mean(psnrValues)),
+            "std_psnr": float(np.std(psnrValues)),
+            "assisted_mean_psnr": float(np.mean(assistedPsnrValues)),
+            "assisted_std_psnr": float(np.std(assistedPsnrValues)),
         }
+    if computeExtraMetrics:
+        if ssimValues:
+            metrics |= {
+                "mean_ssim": float(np.mean(ssimValues)),
+                "mean_lpips": float(np.mean(lpipsValues)),
+                "assisted_mean_ssim": float(np.mean(assistedSsimValues)),
+                "assisted_mean_lpips": float(np.mean(assistedLpipsValues)),
+            }
+    for simpleName, simpleValues in simpleMetricValues.items():
+        metrics[f"{simpleName}_mean_psnr"] = float(np.mean(simpleValues["psnr"]))
+        metrics[f"{simpleName}_std_psnr"] = float(np.std(simpleValues["psnr"]))
+        if computeExtraMetrics:
+            metrics |= {
+                f"{simpleName}_mean_ssim": float(np.mean(simpleValues["ssim"])),
+                f"{simpleName}_mean_lpips": float(np.mean(simpleValues["lpips"])),
+            }
     if inferenceTimeValues:
         metrics["mean_inference_time"] = f"{np.mean(inferenceTimeValues):.2f} ms/frame"
 
     with open(outputRoot / "metrics.json", "w") as file:
         json.dump(metrics, file, indent=2)
 
-    logger.log_table("Post-Processing SH Bake Validation", record=metrics)
+    psnrMetrics = {key: value for key, value in metrics.items() if "psnr" in key}
+    logger.log_table("Post-Processing SH Bake Validation PSNR", record=psnrMetrics)
     return metrics
 
 
@@ -354,6 +365,21 @@ def main() -> None:
         help="Number of sequential passes over the train/reference set.",
     )
     parser.add_argument("--learning-rate", dest="learningRate", default=1.0e-3, type=float, help="SH fitting LR.")
+    parser.add_argument(
+        "--bake-flavor",
+        dest="bakeFlavor",
+        choices=[
+            BAKE_FLAVOR_FIT,
+            BAKE_FLAVOR_SIMPLE,
+            BAKE_FLAVOR_SIMPLE_HIGHER_ORDER,
+            BAKE_FLAVOR_ALL,
+        ],
+        default=BAKE_FLAVOR_FIT,
+        help=(
+            "Bake flavor to evaluate. 'fit' optimizes SH; 'simple' one-shot bakes DC SH; "
+            "'simple-higher-order' also linearizes higher-order SH; 'all' compares every flavor."
+        ),
+    )
     parser.add_argument(
         "--vignetting-mode",
         dest="vignettingMode",
@@ -400,29 +426,59 @@ def main() -> None:
     ).eval()
 
     referenceModel = renderer.model.eval()
-    bakedModel = renderer.model.clone().eval()
-    bakedModel.build_acc()
 
     outputRoot = Path(renderer.out_dir) / f"post_processing_sh_bake_ci{args.cameraId}_fi{args.frameId}"
     outputRoot.mkdir(parents=True, exist_ok=True)
 
     trainDataset, trainDataloader = _createTrainDataloader(renderer.conf)
 
-    logger.info(f"Fitting SH coefficients to fixed PPISP camera={args.cameraId} frame={args.frameId}")
-    _fitBakedSh(
-        referenceModel=referenceModel,
-        bakedModel=bakedModel,
-        fixedPpisp=fixedPpisp,
-        dataset=trainDataset,
-        dataloader=trainDataloader,
-        fitEpochs=args.fitEpochs,
-        learningRate=args.learningRate,
-        vignettingMode=vignettingMode,
-    )
+    runFit = args.bakeFlavor in (BAKE_FLAVOR_FIT, BAKE_FLAVOR_ALL)
+    simpleFlavorHigherOrderFlags = []
+    if args.bakeFlavor in (BAKE_FLAVOR_SIMPLE, BAKE_FLAVOR_ALL):
+        simpleFlavorHigherOrderFlags.append(("simple", False))
+    if args.bakeFlavor in (BAKE_FLAVOR_SIMPLE_HIGHER_ORDER, BAKE_FLAVOR_ALL):
+        simpleFlavorHigherOrderFlags.append(("simple_higher_order", True))
+
+    bakedModel = None
+    if runFit:
+        bakedModel = renderer.model.clone().eval()
+        bakedModel.build_acc()
+        logger.info(f"Fitting SH coefficients to fixed PPISP camera={args.cameraId} frame={args.frameId}")
+        _fitBakedSh(
+            referenceModel=referenceModel,
+            bakedModel=bakedModel,
+            fixedPpisp=fixedPpisp,
+            dataset=trainDataset,
+            dataloader=trainDataloader,
+            fitEpochs=args.fitEpochs,
+            learningRate=args.learningRate,
+            vignettingMode=vignettingMode,
+        )
+
+    simpleBakedModels = {}
+    for simpleName, higherOrder in simpleFlavorHigherOrderFlags:
+        simpleModel = renderer.model.clone().eval()
+        logger.info(
+            f"Simple-baking SH for camera_id={args.cameraId} "
+            f"frame_id={args.frameId} (fixed exposure/color; higher_order={higherOrder})"
+        )
+        exposure, color = simple_bake(
+            model=simpleModel,
+            ppisp=renderer.post_processing,
+            camera_id=args.cameraId,
+            frame_id=args.frameId,
+            higher_order=higherOrder,
+        )
+        simpleModel.build_acc()
+        simpleBakedModels[simpleName] = simpleModel
+        logger.info(
+            f"{simpleName} bake done. exposure={exposure:.6f}; " f"color={[float(value) for value in color.tolist()]}"
+        )
 
     _evaluateBakedSh(
         referenceModel=referenceModel,
         bakedModel=bakedModel,
+        simpleBakedModels=simpleBakedModels,
         fixedPpisp=fixedPpisp,
         fullFixedPpisp=fullFixedPpisp,
         dataset=renderer.dataset,
