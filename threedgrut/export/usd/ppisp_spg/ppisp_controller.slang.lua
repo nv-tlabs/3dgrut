@@ -10,23 +10,39 @@
 -- Bind the controller weight buffer using whichever buffer-helper SPG's
 -- slang lua API exposes. The trained weights live as a USD float[]
 -- attribute (params["weights"]) and the slang shader reads them as a
--- read-only StructuredBuffer<float>. Names tried in order match common
--- HLSL/Slang resource type names.
+-- read-only StructuredBuffer<float>.
 local function bind_weights(w)
-    local fn =
-        slang.StructuredBuffer
-        or slang.RWStructuredBuffer
-        or slang.Buffer
-        or slang.RWBuffer
-        or slang.ByteAddressBuffer
-        or slang.RWByteAddressBuffer
-    if fn then return fn(w) end
-    -- Surface what IS available so we can iterate the API name from
-    -- a Kit log without having to guess.
-    local names = {}
-    for k, _ in pairs(slang) do table.insert(names, tostring(k)) end
+    -- Probe a long list of plausible names. The first non-nil wins.
+    local candidates = {
+        "StructuredBuffer", "RWStructuredBuffer",
+        "Buffer", "RWBuffer",
+        "ByteAddressBuffer", "RWByteAddressBuffer",
+        "ConstantBuffer",
+        "buffer", "Array", "array",
+        "float_array", "FloatArray", "floatArray",
+        "FloatBuffer", "floatBuffer",
+        "image", "Image",
+        "uniform", "Uniform",
+        "list", "List",
+    }
+    local hits = {}
+    for _, name in ipairs(candidates) do
+        if slang[name] ~= nil then
+            table.insert(hits, name)
+        end
+    end
+    if #hits > 0 then
+        return slang[hits[1]](w)
+    end
+    -- No buffer helper. List EVERY direct slang.* key plus every
+    -- candidate we tried (so the metatable surface is also probed via
+    -- __index above). The error message goes to Kit's log.
+    local direct = {}
+    for k, _ in pairs(slang) do table.insert(direct, tostring(k)) end
+    table.sort(direct)
     error("ppisp_controller: no slang buffer-binding helper found. " ..
-          "slang.* keys = " .. table.concat(names, ", "))
+          "Tried: " .. table.concat(candidates, ",") ..
+          " | direct keys = " .. table.concat(direct, ","))
 end
 
 function controllerProcess(inputs, outputs, params)
