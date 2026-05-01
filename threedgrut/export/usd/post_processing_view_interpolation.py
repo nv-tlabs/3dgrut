@@ -10,22 +10,14 @@
 """View samplers for SH-bake fitting.
 
 The default fit loop iterates the training dataloader, so the optimizer
-only sees the discrete set of training poses. This module adds two
-interpolation-based samplers:
+only sees the discrete set of training poses. The ``trajectory`` sampler
+orders the training views along a smooth path (nearest-neighbour + 2-opt
+on position+direction), arc-length-parameterises the path on ``[0, 1]``,
+then samples random ``t in [0, 1]`` and slerps inside the bracketing
+segment. Useful when training views are sparse and a residual fit needs
+to generalise to nearby novel views.
 
-* ``random-pair-slerp`` -- pick two distinct training views uniformly at
-  random, slerp between them at a random ``s in [0, 1]``. Cheap, no
-  global structure.
-
-* ``trajectory`` -- order the training views along a smooth path using
-  nearest-neighbour + 2-opt with a position+direction distance, then
-  arc-length-parameterise the path on ``[0, 1]``. Each sample picks a
-  random ``t in [0, 1]``, locates the bracketing pair, and slerps inside
-  the segment. Closer to the kind of camera continuum a viewer would
-  fly through; better for fitting a residual that is supposed to
-  generalise to nearby novel views.
-
-Both samplers reuse the dataset's per-intrinsic camera-space rays and
+The sampler reuses the dataset's per-intrinsic camera-space rays and
 pixel-coordinate grid -- only ``T_to_world`` changes per sample. PPISP's
 ``FixedPPISP`` ignores the per-frame indices on the synthetic batch, so
 camera/frame indices on the template are kept as-is.
@@ -47,11 +39,9 @@ logger = logging.getLogger(__name__)
 
 
 VIEW_SAMPLING_TRAINING = "training"
-VIEW_SAMPLING_RANDOM_PAIR_SLERP = "random-pair-slerp"
 VIEW_SAMPLING_TRAJECTORY = "trajectory"
 VIEW_SAMPLING_MODES = {
     VIEW_SAMPLING_TRAINING,
-    VIEW_SAMPLING_RANDOM_PAIR_SLERP,
     VIEW_SAMPLING_TRAJECTORY,
 }
 
@@ -266,11 +256,11 @@ class InterpolatedViewSampler:
         train_dataset: must implement
             :meth:`~threedgrut.datasets.protocols.BoundedMultiViewDataset.get_poses`
             and :meth:`get_gpu_batch_with_intrinsics`.
-        mode: ``"random-pair-slerp"`` or ``"trajectory"``.
+        mode: only ``"trajectory"`` is supported.
         steps_per_epoch: how many synthetic batches to emit per pass.
         seed: optional RNG seed for reproducibility.
-        weight_position / weight_rotation: trajectory mode only.
-        start_index: trajectory mode only.
+        weight_position / weight_rotation: trajectory distance weights.
+        start_index: trajectory NN seed index.
     """
 
     def __init__(
@@ -308,35 +298,22 @@ class InterpolatedViewSampler:
             raise ValueError("Need at least 2 training views to interpolate.")
         self._poses = poses
 
-        if mode == VIEW_SAMPLING_TRAJECTORY:
-            self._ordered_indices, self._cum_t = order_views_along_trajectory(
-                poses,
-                weight_position=weight_position,
-                weight_rotation=weight_rotation,
-                start_index=start_index,
-            )
-            logger.info(
-                "Built %d-view trajectory (NN + 2-opt) for SH-bake interpolation.",
-                len(self._ordered_indices),
-            )
-        else:
-            self._ordered_indices = None
-            self._cum_t = None
+        self._ordered_indices, self._cum_t = order_views_along_trajectory(
+            poses,
+            weight_position=weight_position,
+            weight_rotation=weight_rotation,
+            start_index=start_index,
+        )
+        logger.info(
+            "Built %d-view trajectory (NN + 2-opt) for SH-bake interpolation.",
+            len(self._ordered_indices),
+        )
 
     # ------------------------------------------------------------------
     # Pose sampling
     # ------------------------------------------------------------------
 
-    def _sample_pose_random_pair(self) -> np.ndarray:
-        n = self._poses.shape[0]
-        i = int(self._rng.integers(0, n))
-        j = int(self._rng.integers(0, n - 1))
-        if j >= i:
-            j += 1  # ensures j != i without bias
-        s = float(self._rng.random())
-        return slerp_pose(self._poses[i], self._poses[j], s)
-
-    def _sample_pose_trajectory(self) -> np.ndarray:
+    def _sample_pose(self) -> np.ndarray:
         t = float(self._rng.random())
         cum = self._cum_t
         # Find segment k s.t. cum[k-1] <= t <= cum[k] (with cum[0]=0).
@@ -347,11 +324,6 @@ class InterpolatedViewSampler:
         a = self._ordered_indices[k - 1]
         b = self._ordered_indices[k]
         return slerp_pose(self._poses[a], self._poses[b], local_s)
-
-    def _sample_pose(self) -> np.ndarray:
-        if self.mode == VIEW_SAMPLING_RANDOM_PAIR_SLERP:
-            return self._sample_pose_random_pair()
-        return self._sample_pose_trajectory()
 
     # ------------------------------------------------------------------
     # Batch construction

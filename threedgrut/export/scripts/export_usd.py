@@ -217,12 +217,12 @@ Examples:
     parser.add_argument(
         "--post-processing-bake-view-mode",
         type=str,
-        choices=["training", "random-pair-slerp", "trajectory"],
+        choices=["training", "trajectory"],
         default=None,
         help=(
             "Which views the bake fit sees per step. 'training' (default) iterates the train "
-            "dataloader. 'random-pair-slerp' picks two random training views and slerps. "
-            "'trajectory' orders views along an NN+2-opt camera path and samples random t in [0,1]."
+            "dataloader. 'trajectory' orders views along an NN+2-opt camera path and samples "
+            "random t in [0,1] -- useful when training views are sparse."
         ),
     )
     parser.add_argument(

@@ -329,10 +329,10 @@ class USDExporter(ModelExporter):
                 reference. "achromatic-fit" keeps chromatic PPISP vignetting in
                 the reference and applies an achromatic estimate only in the fit loss.
             post_processing_bake_view_mode: which views the bake fit sees per step.
-                "training" iterates the train dataloader (default). "random-pair-slerp"
-                samples two random training views and slerps between them. "trajectory"
+                "training" iterates the train dataloader (default). "trajectory"
                 orders the training views along an NN+2-opt camera path, parameterises
-                arc-length on [0, 1], and samples a random t per step.
+                arc-length on [0, 1], and samples a random t per step (helpful when
+                training views are sparse).
             post_processing_bake_view_seed: optional RNG seed for the interpolation
                 samplers. None (default) leaves it non-deterministic.
             post_processing_bake_trajectory_weight_position: trajectory mode only.

@@ -111,14 +111,13 @@ def bake_post_processing_into_sh(
     ``view_sampling_mode`` controls what the optimizer sees each step:
 
     * ``"training"`` (default) -- iterate the training dataloader as usual.
-    * ``"random-pair-slerp"`` -- pick two random training views and slerp
-      between them at a random ``s ∈ [0, 1]``.
     * ``"trajectory"`` -- order the training views along an approximate
       Hamiltonian path (NN + 2-opt on a position+direction metric),
       arc-length-parameterise the path on ``[0, 1]``, sample random
-      ``t ∈ [0, 1]``, slerp inside the bracketing segment.
+      ``t ∈ [0, 1]``, slerp inside the bracketing segment. Helpful on
+      datasets with sparse view coverage.
 
-    The interpolated-view modes synthesise a ``Batch`` per step from the
+    The trajectory mode synthesises a ``Batch`` per step from the
     template of the first training batch, replacing ``T_to_world`` with
     the interpolated pose. ``steps_per_epoch`` matches
     ``len(train_dataloader)`` so total step count is unchanged.
