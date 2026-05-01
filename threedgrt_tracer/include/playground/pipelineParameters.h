@@ -52,8 +52,8 @@ struct PlaygroundTracingParams : PipelineParameters {
     // rayOri ->  rayOrigin
     // rayDir ->  rayDirection
     // mogPos, mogRot, mogScl, mogDns -> particleDensity
-    // mogSph-> particleRadiance
-    // rayRad -> rayRadiance
+    // mogSph-> particleFeatures
+    // rayRad -> rayFeatures
     // rayDns -> rayDensity
     // rayHit -> rayHitDistance
     // rayHitsCount -> rayHitsCount

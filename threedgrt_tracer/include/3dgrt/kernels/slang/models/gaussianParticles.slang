@@ -185,6 +185,17 @@ struct Parameters : IDifferentiable {
     return sqrt(dot(grds, grds));
 }
 
+[BackwardDifferentiable] [ForceInline] float canonicalRayIntersection(
+    float3 canonicalRayOrigin,
+    float3 canonicalRayDirection,
+    float3 scale,
+    out float3 canonicalIntersection) {
+    const float3 canonicalGrds = canonicalRayDirection * dot(canonicalRayDirection, -1 * canonicalRayOrigin);
+    canonicalIntersection = canonicalRayOrigin + canonicalGrds;
+    const float3 grds = scale * canonicalGrds;
+    return sqrt(dot(grds, grds));
+}
+
 [BackwardDifferentiable][ForceInline] float3 canonicalRayNormal<let Surfel : bool>(
     float3 canonicalRayOrigin,
     float3 canonicalRayDirection,
@@ -207,6 +218,7 @@ bool hit(
     Parameters parameters,
     out float alpha,
     inout float depth,
+    out float3 canonicalIntersection,
     no_diff bool enableNormal,
     inout float3 normal) {
 
@@ -227,7 +239,7 @@ bool hit(
     const bool acceptHit = ((maxResponse > MinParticleKernelDensity) && (alpha > MinParticleAlpha));
     if (acceptHit)
     {
-        depth = canonicalRayDistance(canonicalRayOrigin, canonicalRayDirection, parameters.scale);
+        depth = canonicalRayIntersection(canonicalRayOrigin, canonicalRayDirection, parameters.scale, canonicalIntersection);
         if (enableNormal)
         {
             normal = canonicalRayNormal<Surfel>(canonicalRayOrigin, canonicalRayDirection, parameters.scale, parameters.rotationT);
@@ -276,6 +288,7 @@ float processHitFromBuffer<let backToFront : bool>(
     no_diff RawParametersBuffer parametersBuffer,
     inout float transmittance,
     inout float integratedDepth,
+    out float3 canonicalIntersection,
     no_diff bool enableNormal,
     inout float3 integratedNormal)
 {
@@ -287,6 +300,7 @@ float processHitFromBuffer<let backToFront : bool>(
             fetchParameters(particleIdx, parametersBuffer),
             alpha,
             depth,
+            canonicalIntersection,
             enableNormal,
             normal))
     {
@@ -320,7 +334,7 @@ float3 incidentDirectionFromParameters(
 }
 
 [BackwardDifferentiable][ForceInline]
-float3 incidentDirectionFromBuffer(
+no_diff float3 incidentDirectionFromBuffer(
     no_diff uint32_t particleIdx,
     no_diff RawParametersBuffer parametersBuffer,
     no_diff float3 sourcePosition
@@ -353,6 +367,7 @@ inline bool particleDensityHit(
     gaussianParticle.Parameters parameters,
     out float alpha,
     out float depth,
+    out float3 canonicalIntersection,
     bool enableNormal,
     out float3 normal)
 {
@@ -361,6 +376,7 @@ inline bool particleDensityHit(
                                 parameters,
                                 alpha,
                                 depth,
+                                canonicalIntersection,
                                 enableNormal,
                                 normal);
 }
@@ -392,6 +408,7 @@ inline float particleDensityProcessHitFwdFromBuffer(
     gaussianParticle.CommonParameters commonParameters,
     inout float transmittance,
     inout float integratedDepth,
+    out float3 canonicalIntersection,
     in bool enableNormal,
     inout float3 integratedNormal)
 {
@@ -402,6 +419,7 @@ inline float particleDensityProcessHitFwdFromBuffer(
         commonParameters.parametersBuffer,
         transmittance,
         integratedDepth,
+        canonicalIntersection,
         enableNormal,
         integratedNormal);
 }
@@ -419,6 +437,7 @@ void particleDensityProcessHitBwdToBuffer(
     in float depth,
     inout float integratedDepth,
     inout float integratedDepthGrad,
+    in float3 canonicalIntersectionGrad,
     bool enableNormal,
     in float3 normal,
     inout float3 integratedNormal,
@@ -452,6 +471,7 @@ void particleDensityProcessHitBwdToBuffer(
             commonParameters.parametersBuffer,
             transmittanceDiff,
             integratedDepthDiff,
+            canonicalIntersectionGrad,
             enableNormal,
             integratedNormalDiff,
             alphaGrad);
@@ -536,10 +556,7 @@ bool particleDensityHitInstance(
     in float3 incidentDirectionGrad
 )
 {
-    bwd_diff(gaussianParticle.incidentDirectionFromBuffer)(
-        particleIdx,
-        commonParameters.parametersBuffer,
-        sourcePosition,
-        incidentDirectionGrad
-    );
+    // 3DGRT: incidentDirectionFromBuffer returns no_diff; position gradient
+    // from incident direction is not propagated back in the 3DGRT path.
 }
+

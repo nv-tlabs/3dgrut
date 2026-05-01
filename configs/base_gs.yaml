@@ -56,16 +56,45 @@ model:
   optimize_density: true
   optimize_features_albedo: true
   optimize_features_specular: true
+  optimize_features: true
   optimize_position: true
   optimize_rotation: true
   optimize_scale: true
   bvh_update_frequency: 1
+  feature_type: "sh" # one of [sh, nht] # sh: spherical harmonics radiance, nht: neural harmonics texture
   progressive_training:
-    feature_type: "sh" # one of [sh, mlp], currently only sh supported
     init_n_features: 0 # sh: initial sh deg | mlp: num of dims initially unmasked
     max_n_features: 3 # sh: maximum sh deg | mlp: total num of dims finally unmasked
     increase_frequency: 1000 # unmask more feature dimensions every N global steps
     increase_step: 1 # sh: how many degrees unmasked per step | mlp: how many dims unmasked per step
+
+  nht_features:
+    dim: 48
+    init_min: -1.5707963267948966
+    init_max: 1.5707963267948966
+    activation:
+      type: "sincos"
+      num_frequencies: 1
+    interpolation_type: "barycentric"
+
+  nht_decoder:
+    enabled: true
+    hidden_dim: 128
+    num_layers: 3
+    dir_encoding: "SphericalHarmonics"
+    dir_encoding_degree: 3
+    sh_scale: 3.0
+    output_activation: "Sigmoid"
+    unpremultiply_alpha: false
+    learning_rate: 0.00068
+    reg_weight: 0.0
+    scheduler:
+      type: "cosine"
+      decay_final: 0.1
+      max_steps: 30000
+    ema_decay: 0.95
+    ema_start_step: 0
+    color_refine_steps: 3000
 
   background:
     name: background-color # one of [skip-background, background-color]
@@ -89,6 +118,8 @@ optimizer:
       lr: 0.0025 # 3DGS value: 0.0025
     features_specular:
       lr: ${div:${optimizer.params.features_albedo.lr},20} # 3DGS value 20x smaller than lr of features_albedo
+    features:
+      lr: 0.015
     rotation:
       lr: 0.001 # 3DGS value: 0.001
     scale:
@@ -105,6 +136,11 @@ scheduler:
 
   density:
     type: skip
+
+  features:
+    type: cosine
+    decay_final: 0.1
+    max_steps: 30000
 
 loss:
   use_l1: true

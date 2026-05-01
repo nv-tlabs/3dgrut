@@ -319,7 +319,7 @@ class ViserGUI:
         points_plane = np.stack([u, v], axis=1)
 
         return (
-            outputs["pred_rgb"],
+            outputs["pred_features"],
             outputs["pred_opacity"],
             outputs["pred_dist"],
             outputs["pred_normals"],

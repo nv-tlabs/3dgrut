@@ -402,30 +402,30 @@ struct GUTProjector : Params, UTParams {
                  const float* __restrict__ particlesPrecomputedFeaturesPtr,
                  const float* __restrict__ particlesPrecomputedFeaturesGradPtr,
                  threedgut::MemoryHandles parametersGradient) {
-        if constexpr (Params::PerRayParticleFeatures) {
-            return;
-        }
+        if constexpr (!Params::PerRayParticleFeatures) {
 
-        const uint32_t particleIdx = blockIdx.x * blockDim.x + threadIdx.x;
-        if (particleIdx >= numParticles) {
-            return;
-        }
-        if (particlesTilesCountPtr[particleIdx] == 0) {
-            return;
-        }
+            const uint32_t particleIdx = blockIdx.x * blockDim.x + threadIdx.x;
+            if (particleIdx >= numParticles) {
+                return;
+            }
+            if (particlesTilesCountPtr[particleIdx] == 0) {
+                return;
+            }
 
-        Particles particles;
-        particles.initializeDensity(parameters);
-        const tcnn::vec3 incidentDirection = tcnn::normalize(particles.fetchPosition(particleIdx) - sensorWorldPosition);
+            Particles particles;
+            particles.initializeDensity(parameters);
+            particles.initializeDensityGradient(parametersGradient);
+            const tcnn::vec3 incidentDirection = tcnn::normalize(particles.fetchPosition(particleIdx) - sensorWorldPosition);
+            tcnn::vec3 incidentDirectionGrad   = tcnn::vec3(0.0f);
 
-        particles.initializeFeatures(parameters);
-        particles.initializeFeaturesGradient(parametersGradient);
-        particles.featuresBwdCustomToBuffer<false>(
-            particleIdx,
-            reinterpret_cast<const TFeaturesVec*>(particlesPrecomputedFeaturesPtr)[particleIdx],
-            reinterpret_cast<const TFeaturesVec*>(particlesPrecomputedFeaturesGradPtr)[particleIdx],
-            incidentDirection);
-        particles.initializeDensityGradient(parametersGradient);
-        particles.template densityIncidentDirectionBwdToBuffer<true>(particleIdx, sensorWorldPosition);
+            particles.initializeFeatures(parameters);
+            particles.initializeFeaturesGradient(parametersGradient);
+            particles.featuresBwdToBuffer<true>(particleIdx,
+                                                reinterpret_cast<const TFeaturesVec*>(particlesPrecomputedFeaturesGradPtr)[particleIdx],
+                                                incidentDirection,
+                                                incidentDirectionGrad);
+
+            particles.template densityIncidentDirectionBwdToBuffer<true>(particleIdx, sensorWorldPosition, incidentDirectionGrad);
+        }
     }
 };

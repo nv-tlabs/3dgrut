@@ -97,14 +97,28 @@ def exponential_scheduler(lr_init, lr_final, max_steps=1000000, type=""):
     return helper
 
 
-def skip_scheduler(type=""):
+def cosine_scheduler(lr_init, lr_final, max_steps=1000000, type=""):
+    """Cosine annealing: lr = lr_final + 0.5 * (lr_init - lr_final) * (1 + cos(pi * step / max_steps))."""
+
+    def helper(step):
+        t = np.clip(step / max_steps, 0, 1)
+        return float(lr_final + 0.5 * (lr_init - lr_final) * (1 + np.cos(np.pi * t)))
+
+    return helper
+
+
+def skip_scheduler(type="", **kwargs):
     def helper(step):
         return None
 
     return helper
 
 
-SCHEDULER_DICT: dict[str, Callable] = {"exp": exponential_scheduler, "skip": skip_scheduler}
+SCHEDULER_DICT: dict[str, Callable] = {
+    "exp": exponential_scheduler,
+    "cosine": cosine_scheduler,
+    "skip": skip_scheduler,
+}
 
 
 def get_scheduler(scheduler: str) -> Callable:
