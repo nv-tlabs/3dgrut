@@ -214,6 +214,35 @@ Examples:
             "'achromatic-fit' uses chromatic PPISP reference and an achromatic fit-only vignette."
         ),
     )
+    parser.add_argument(
+        "--post-processing-bake-view-mode",
+        type=str,
+        choices=["training", "random-pair-slerp", "trajectory"],
+        default=None,
+        help=(
+            "Which views the bake fit sees per step. 'training' (default) iterates the train "
+            "dataloader. 'random-pair-slerp' picks two random training views and slerps. "
+            "'trajectory' orders views along an NN+2-opt camera path and samples random t in [0,1]."
+        ),
+    )
+    parser.add_argument(
+        "--post-processing-bake-view-seed",
+        type=int,
+        default=None,
+        help="Optional RNG seed for the interpolation samplers (None = non-deterministic).",
+    )
+    parser.add_argument(
+        "--post-processing-bake-trajectory-weight-position",
+        type=float,
+        default=None,
+        help="Trajectory mode only: weight on the (mean-normalised) position term in pose distance.",
+    )
+    parser.add_argument(
+        "--post-processing-bake-trajectory-weight-rotation",
+        type=float,
+        default=None,
+        help="Trajectory mode only: weight on the (1 - cos(angle)) rotation term in pose distance.",
+    )
 
     # Dataset path (optional, overrides checkpoint's dataset path)
     parser.add_argument(
@@ -467,6 +496,34 @@ def main():
                 "ppisp-bake-vignetting-mode",
                 "ppisp_bake_vignetting_mode",
                 "achromatic-fit",
+            ),
+            post_processing_bake_view_mode=_arg_or_conf(
+                args.post_processing_bake_view_mode,
+                export_conf,
+                "post-processing-bake-view-mode",
+                "post_processing_bake_view_mode",
+                "training",
+            ),
+            post_processing_bake_view_seed=_arg_or_conf(
+                args.post_processing_bake_view_seed,
+                export_conf,
+                "post-processing-bake-view-seed",
+                "post_processing_bake_view_seed",
+                None,
+            ),
+            post_processing_bake_trajectory_weight_position=_arg_or_conf(
+                args.post_processing_bake_trajectory_weight_position,
+                export_conf,
+                "post-processing-bake-trajectory-weight-position",
+                "post_processing_bake_trajectory_weight_position",
+                1.0,
+            ),
+            post_processing_bake_trajectory_weight_rotation=_arg_or_conf(
+                args.post_processing_bake_trajectory_weight_rotation,
+                export_conf,
+                "post-processing-bake-trajectory-weight-rotation",
+                "post_processing_bake_trajectory_weight_rotation",
+                0.5,
             ),
             frames_per_second=getattr(export_conf, "frames_per_second", 1.0),
         )

@@ -101,8 +101,34 @@ def bake_post_processing_into_sh(
     epochs: int = 1,
     learning_rate: float = 1.0e-3,
     device: str = "cuda",
+    view_sampling_mode: str = "training",
+    interpolated_views_seed: int | None = None,
+    trajectory_weight_position: float = 1.0,
+    trajectory_weight_rotation: float = 0.5,
 ):
-    """Return a cloned model whose SH coefficients approximate fixed post-processing output."""
+    """Return a cloned model whose SH coefficients approximate fixed post-processing output.
+
+    ``view_sampling_mode`` controls what the optimizer sees each step:
+
+    * ``"training"`` (default) -- iterate the training dataloader as usual.
+    * ``"random-pair-slerp"`` -- pick two random training views and slerp
+      between them at a random ``s ∈ [0, 1]``.
+    * ``"trajectory"`` -- order the training views along an approximate
+      Hamiltonian path (NN + 2-opt on a position+direction metric),
+      arc-length-parameterise the path on ``[0, 1]``, sample random
+      ``t ∈ [0, 1]``, slerp inside the bracketing segment.
+
+    The interpolated-view modes synthesise a ``Batch`` per step from the
+    template of the first training batch, replacing ``T_to_world`` with
+    the interpolated pose. ``steps_per_epoch`` matches
+    ``len(train_dataloader)`` so total step count is unchanged.
+    """
+    from threedgrut.export.usd.post_processing_view_interpolation import (
+        InterpolatedViewSampler,
+        VIEW_SAMPLING_TRAINING,
+        normalize_view_sampling_mode,
+    )
+
     if not hasattr(model, "clone"):
         raise TypeError("Post-processing SH bake export requires a cloneable MixtureOfGaussians model.")
     if train_dataset is None:
@@ -111,6 +137,7 @@ def bake_post_processing_into_sh(
         raise ValueError("Post-processing SH bake export requires a post_processing module.")
     if epochs < 1:
         raise ValueError(f"epochs must be >= 1, got {epochs}.")
+    view_sampling_mode = normalize_view_sampling_mode(view_sampling_mode)
 
     adapter.validate(post_processing)
     reference_model = model.to(device).eval()
@@ -129,21 +156,48 @@ def bake_post_processing_into_sh(
     fit_parameters = list(_set_sh_fit_parameters(baked_model))
     optimizer = torch.optim.Adam(fit_parameters, lr=learning_rate)
     train_dataloader = _create_train_dataloader(conf, train_dataset)
+    steps_per_epoch = len(train_dataloader)
+
+    sampler: InterpolatedViewSampler | None = None
+    if view_sampling_mode != VIEW_SAMPLING_TRAINING:
+        # Cache one real training batch to seed the synthetic sampler with
+        # valid intrinsics / rays / pixel coords; only T_to_world rotates
+        # per step.
+        first_batch = next(iter(train_dataloader))
+        template = train_dataset.get_gpu_batch_with_intrinsics(first_batch)
+        sampler = InterpolatedViewSampler(
+            train_dataset,
+            template_gpu_batch=template,
+            mode=view_sampling_mode,
+            steps_per_epoch=steps_per_epoch,
+            seed=interpolated_views_seed,
+            weight_position=trajectory_weight_position,
+            weight_rotation=trajectory_weight_rotation,
+        )
 
     logger.info(
-        "Fitting %s SH bake on train split: epochs=%s frames_per_epoch=%s%s",
+        "Fitting %s SH bake: mode=%s epochs=%s steps_per_epoch=%s%s",
         adapter.name,
+        view_sampling_mode,
         epochs,
-        len(train_dataloader),
+        steps_per_epoch,
         adapter.log_context(),
     )
+
+    def _gpu_batches():
+        if sampler is None:
+            for batch in train_dataloader:
+                yield train_dataset.get_gpu_batch_with_intrinsics(batch)
+        else:
+            for gpu_batch in sampler:
+                yield gpu_batch
+
     with torch.enable_grad():
         global_step = 0
-        total_steps = epochs * len(train_dataloader)
+        total_steps = epochs * steps_per_epoch
         for epoch in range(epochs):
-            for batch in train_dataloader:
+            for gpu_batch in _gpu_batches():
                 global_step += 1
-                gpu_batch = train_dataset.get_gpu_batch_with_intrinsics(batch)
                 reference_rgb = _render_reference(reference_model, fixed_post_processing, gpu_batch)
 
                 optimizer.zero_grad(set_to_none=True)

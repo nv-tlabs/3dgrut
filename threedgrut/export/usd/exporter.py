@@ -289,6 +289,10 @@ class USDExporter(ModelExporter):
         post_processing_bake_camera_id: int = 0,
         post_processing_bake_frame_id: int = 0,
         ppisp_bake_vignetting_mode: str = MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
+        post_processing_bake_view_mode: str = "training",
+        post_processing_bake_view_seed: int | None = None,
+        post_processing_bake_trajectory_weight_position: float = 1.0,
+        post_processing_bake_trajectory_weight_rotation: float = 0.5,
         frames_per_second: float = 1.0,
     ):
         """
@@ -324,6 +328,17 @@ class USDExporter(ModelExporter):
             ppisp_bake_vignetting_mode: "none" disables vignetting in the PPISP
                 reference. "achromatic-fit" keeps chromatic PPISP vignetting in
                 the reference and applies an achromatic estimate only in the fit loss.
+            post_processing_bake_view_mode: which views the bake fit sees per step.
+                "training" iterates the train dataloader (default). "random-pair-slerp"
+                samples two random training views and slerps between them. "trajectory"
+                orders the training views along an NN+2-opt camera path, parameterises
+                arc-length on [0, 1], and samples a random t per step.
+            post_processing_bake_view_seed: optional RNG seed for the interpolation
+                samplers. None (default) leaves it non-deterministic.
+            post_processing_bake_trajectory_weight_position: trajectory mode only.
+                Weight on the (mean-normalised) position term in the pose distance.
+            post_processing_bake_trajectory_weight_rotation: trajectory mode only.
+                Weight on the (1 - cos(angle)) rotation term in the pose distance.
             frames_per_second: Sets stage.timeCodesPerSecond. Time codes are always
                 bare frame indices (float(frame_idx)), so this controls playback speed.
                 Default 1.0 means 1 frame per second of real time.
@@ -352,6 +367,16 @@ class USDExporter(ModelExporter):
         self.post_processing_bake_camera_id = int(post_processing_bake_camera_id)
         self.post_processing_bake_frame_id = int(post_processing_bake_frame_id)
         self.ppisp_bake_vignetting_mode = str(ppisp_bake_vignetting_mode)
+        self.post_processing_bake_view_mode = str(post_processing_bake_view_mode)
+        self.post_processing_bake_view_seed = (
+            None if post_processing_bake_view_seed is None else int(post_processing_bake_view_seed)
+        )
+        self.post_processing_bake_trajectory_weight_position = float(
+            post_processing_bake_trajectory_weight_position
+        )
+        self.post_processing_bake_trajectory_weight_rotation = float(
+            post_processing_bake_trajectory_weight_rotation
+        )
         self.frames_per_second = frames_per_second
 
     def _create_default_stage(self, referenced_stages: List[NamedUSDStage]) -> NamedUSDStage:
@@ -435,6 +460,10 @@ class USDExporter(ModelExporter):
                 adapter=adapter,
                 epochs=self.post_processing_bake_epochs,
                 learning_rate=self.post_processing_bake_learning_rate,
+                view_sampling_mode=self.post_processing_bake_view_mode,
+                interpolated_views_seed=self.post_processing_bake_view_seed,
+                trajectory_weight_position=self.post_processing_bake_trajectory_weight_position,
+                trajectory_weight_rotation=self.post_processing_bake_trajectory_weight_rotation,
             )
         if uses_omni_native_post_processing_export and not has_ppisp_module:
             raise ValueError("Omniverse-native post-processing export currently supports PPISP post-processing only.")
@@ -846,6 +875,30 @@ class USDExporter(ModelExporter):
                 "ppisp-bake-vignetting-mode",
                 "ppisp_bake_vignetting_mode",
                 MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
+            ),
+            post_processing_bake_view_mode=_get_export_config_value(
+                export_conf,
+                "post-processing-bake-view-mode",
+                "post_processing_bake_view_mode",
+                "training",
+            ),
+            post_processing_bake_view_seed=_get_export_config_value(
+                export_conf,
+                "post-processing-bake-view-seed",
+                "post_processing_bake_view_seed",
+                None,
+            ),
+            post_processing_bake_trajectory_weight_position=_get_export_config_value(
+                export_conf,
+                "post-processing-bake-trajectory-weight-position",
+                "post_processing_bake_trajectory_weight_position",
+                1.0,
+            ),
+            post_processing_bake_trajectory_weight_rotation=_get_export_config_value(
+                export_conf,
+                "post-processing-bake-trajectory-weight-rotation",
+                "post_processing_bake_trajectory_weight_rotation",
+                0.5,
             ),
             frames_per_second=getattr(export_conf, "frames_per_second", 1.0),
         )
