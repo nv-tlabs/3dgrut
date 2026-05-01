@@ -60,11 +60,13 @@ function controllerProcess(inputs, outputs, params)
         numthreads = { 32, 1, 1 },
         grid = { 1, 1, 1 },
         bind = {
+            -- weights live inside the ParameterBlock struct so SPG's
+            -- reflection finds them under "params:weights".
             slang.ParameterBlock(
-                slang.float(params["priorExposure"] or 0.0)
+                slang.float(params["priorExposure"] or 0.0),
+                bind_weights(weights)
             ),
             slang.Texture2D(in_rgba),
-            bind_weights(weights),
             slang.RWTexture2D(outputs["ControllerParams"]),
         },
     })

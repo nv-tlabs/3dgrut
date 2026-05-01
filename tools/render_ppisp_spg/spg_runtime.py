@@ -217,9 +217,12 @@ def run_controller(
     with encoder.begin_compute_pass() as cp:
         shader_obj = cp.bind_pipeline(pipeline)
         cur = spy.ShaderCursor(shader_obj)
-        _set_param_block(cur, "g_Params", {"priorExposure": float(prior_exposure)})
+        # weights live inside the g_Params ParameterBlock now, so SPG's
+        # reflection finds them under "params:weights" -- silences the
+        # "Failed to find parameter 'params:weights'" warning in Kit.
+        cur["g_Params"]["priorExposure"] = float(prior_exposure)
+        cur["g_Params"]["weights"] = weights_buf
         cur["g_InTex"] = in_tex
-        cur["weights"] = weights_buf
         cur["g_OutTex"] = out_tex
         cp.dispatch(spy.math.uint3(32, 1, 1))
     device.submit_command_buffer(encoder.finish())
