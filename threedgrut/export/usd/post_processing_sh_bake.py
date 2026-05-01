@@ -367,16 +367,20 @@ class PPISPPostProcessingBakeAdapter(PostProcessingBakeAdapter):
         ).eval()
 
     def apply_fit_transform(self, rgb: torch.Tensor, fixed_post_processing: nn.Module, gpu_batch) -> torch.Tensor:
+        # PPISP reference is display-referred; baked side must encode to sRGB to match.
+        from threedgrut.utils.post_processing_linear_to_srgb import linear_to_srgb
+
         if self.vignetting_mode == MODE_PPISP_BAKE_VIGNETTING_NONE:
-            return rgb
+            return torch.clamp(linear_to_srgb(rgb), 0.0, 1.0)
         _, height, width, _ = rgb.shape
-        return apply_achromatic_vignetting(
+        vignetted = apply_achromatic_vignetting(
             rgb=rgb,
             ppisp=fixed_post_processing.ppisp,
             camera_id=fixed_post_processing.camera_id,
             pixel_coords=gpu_batch.pixel_coords,
             resolution=(width, height),
         )
+        return torch.clamp(linear_to_srgb(vignetted), 0.0, 1.0)
 
     def initialize_fit(self, baked_model, post_processing: nn.Module) -> None:
         """Warm-start with the higher-order simple-bake on the chosen
