@@ -22,6 +22,7 @@ from typing import Tuple
 import torch
 from ppisp import PPISP, ppisp_apply
 
+from threedgrut.utils.post_processing_linear_to_srgb import srgb_to_linear
 from threedgrut.utils.render import RGB2SH, SH2RGB
 
 
@@ -119,9 +120,24 @@ def simple_bake(
     camera_id: int,
     frame_id: int,
     higher_order: bool = False,
+    apply_srgb_to_linear: bool = False,
 ) -> Tuple[float, torch.Tensor]:
-    """Mutate SH coefficients with one fixed PPISP camera/frame transform."""
+    """Mutate SH coefficients with one fixed PPISP camera/frame transform.
+
+    PPISP outputs display-referred values (its CRF folds in gamma-like
+    encoding). Storing those directly in linear SH coefficients leaves the
+    asset double-encoded: downstream consumers that themselves apply a
+    linear→sRGB step (``threedgrut/utils/post_processing_linear_to_srgb``,
+    Kit's tonemap, etc.) will gamma-correct on top of an already-encoded
+    image. ``apply_srgb_to_linear=True`` runs an inverse sRGB on the PPISP
+    output before ``RGB2SH`` so the SH coefficients land in linear scene-
+    referred space and a downstream ``linear_to_srgb`` undoes the
+    transformation cleanly.
+    """
     exposure, color = get_fixed_frame_params(ppisp, frame_id)
+
+    def _maybe_srgb_to_linear(rgb: torch.Tensor) -> torch.Tensor:
+        return srgb_to_linear(rgb) if apply_srgb_to_linear else rgb
 
     if higher_order:
         with torch.enable_grad():
@@ -134,7 +150,7 @@ def simple_bake(
                 color=color,
             )
         with torch.no_grad():
-            model.features_albedo.copy_(RGB2SH(dc_rgb_baked))
+            model.features_albedo.copy_(RGB2SH(_maybe_srgb_to_linear(dc_rgb_baked)))
             _apply_jacobian_to_specular(model.features_specular, jacobian)
     else:
         with torch.no_grad():
@@ -146,6 +162,6 @@ def simple_bake(
                 exposure=exposure,
                 color=color,
             )
-            model.features_albedo.copy_(RGB2SH(dc_rgb_baked))
+            model.features_albedo.copy_(RGB2SH(_maybe_srgb_to_linear(dc_rgb_baked)))
 
     return exposure, color

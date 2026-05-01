@@ -45,6 +45,15 @@ class PostProcessingBakeAdapter:
         del fixed_post_processing, gpu_batch
         return rgb
 
+    def initialize_fit(self, baked_model, post_processing: nn.Module) -> None:
+        """Optionally warm-start the SH fit with a closed-form initialization.
+
+        Default is a no-op: the cloned ``baked_model`` keeps its checkpoint
+        SH coefficients as the starting point. Subclasses (e.g. PPISP) can
+        override to apply a one-shot bake before Adam takes over.
+        """
+        del baked_model, post_processing
+
     def log_context(self) -> str:
         return ""
 
@@ -109,6 +118,13 @@ def bake_post_processing_into_sh(
     baked_model = model.clone().to(device).eval()
     baked_model.build_acc()
     fixed_post_processing = adapter.create_fixed_post_processing(post_processing, device)
+
+    # Warm-start the cloned SH state with the adapter's closed-form bake
+    # (PPISP: simple_bake on the chosen camera/frame, with sRGB→linear so
+    # the resulting SH lives in linear scene-referred space). Adam takes
+    # over from there. Reduces the iterations needed and avoids fitting
+    # from a checkpoint state that's far from the optimum.
+    adapter.initialize_fit(baked_model, post_processing)
 
     fit_parameters = list(_set_sh_fit_parameters(baked_model))
     optimizer = torch.optim.Adam(fit_parameters, lr=learning_rate)
@@ -306,6 +322,26 @@ class PPISPPostProcessingBakeAdapter(PostProcessingBakeAdapter):
             camera_id=fixed_post_processing.camera_id,
             pixel_coords=gpu_batch.pixel_coords,
             resolution=(width, height),
+        )
+
+    def initialize_fit(self, baked_model, post_processing: nn.Module) -> None:
+        """Warm-start with the higher-order simple-bake on the chosen
+        (camera, frame), in linear scene-referred space."""
+        # Late import: avoid pulling ppisp into modules that don't need it.
+        from threedgrut.export.usd.post_processing_sh_simple_bake import simple_bake
+
+        logger.info(
+            "PPISP SH bake init: applying simple_bake (camera=%d, frame=%d, "
+            "higher_order=True, apply_srgb_to_linear=True) before fitting.",
+            self.camera_id, self.frame_id,
+        )
+        simple_bake(
+            baked_model,
+            post_processing,
+            camera_id=self.camera_id,
+            frame_id=self.frame_id,
+            higher_order=True,
+            apply_srgb_to_linear=True,
         )
 
     def log_context(self) -> str:

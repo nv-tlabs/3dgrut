@@ -66,6 +66,34 @@ def linear_to_srgb(x: torch.Tensor) -> torch.Tensor:
     )
 
 
+def srgb_to_linear(x: torch.Tensor) -> torch.Tensor:
+    """Inverse of :func:`linear_to_srgb`: sRGB encoded values back to linear.
+
+    Piecewise IEC 61966-2-1 with break point at ``0.04045``:
+
+    .. code-block:: python
+
+        np.where(x < 0.04045, x / 12.92, ((x + 0.055) / 1.055) ** 2.4)
+
+    Round-trips :func:`linear_to_srgb` to fp32 epsilon for ``x`` in [0, 1];
+    HDR values (``x > 1``) are passed through the upper branch identically
+    to the encode side.
+
+    Args:
+        x: sRGB-encoded tensor (any shape).
+
+    Returns:
+        Linear values, same shape / dtype / device as ``x``.
+    """
+    limit = 0.04045
+    positive_x = torch.clamp(x + 0.055, min=1e-08)
+    return torch.where(
+        x < limit,
+        x / 12.92,
+        torch.pow(positive_x / 1.055, 2.4),
+    )
+
+
 class LinearToSrgbPostProcessing(nn.Module):
     """``nn.Module`` wrapper so linear-to-sRGB can plug into the shared post-processing path.
 
