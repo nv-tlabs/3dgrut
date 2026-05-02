@@ -467,7 +467,7 @@ def main():
                 export_conf,
                 "post-processing-bake-epochs",
                 "post_processing_bake_epochs",
-                1,
+                13,
             ),
             post_processing_bake_learning_rate=_arg_or_conf(
                 args.post_processing_bake_learning_rate,
@@ -502,7 +502,7 @@ def main():
                 export_conf,
                 "post-processing-bake-view-mode",
                 "post_processing_bake_view_mode",
-                "training",
+                "trajectory",
             ),
             post_processing_bake_view_seed=_arg_or_conf(
                 args.post_processing_bake_view_seed,

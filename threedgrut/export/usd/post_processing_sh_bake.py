@@ -382,14 +382,20 @@ class PPISPPostProcessingBakeAdapter(PostProcessingBakeAdapter):
         return torch.clamp(linear_to_srgb(vignetted), 0.0, 1.0)
 
     def initialize_fit(self, baked_model, post_processing: nn.Module) -> None:
-        """Warm-start with the higher-order simple-bake on the chosen
-        (camera, frame), in linear scene-referred space."""
+        """Warm-start with a DC-only simple-bake on the chosen (camera,
+        frame), in linear scene-referred space.
+
+        The trained ``features_specular`` is left untouched: a higher-order
+        Jacobian rotation gives a slightly better starting PSNR but
+        Adam takes much longer to recover from the rotated specular
+        (~7 dB at 9 epochs on bonsai, see tools/ppisp_export benchmark).
+        """
         # Late import: avoid pulling ppisp into modules that don't need it.
         from threedgrut.export.usd.post_processing_sh_simple_bake import simple_bake
 
         logger.info(
             "PPISP SH bake init: applying simple_bake (camera=%d, frame=%d, "
-            "higher_order=True, apply_srgb_to_linear=True) before fitting.",
+            "higher_order=False, apply_srgb_to_linear=True) before fitting.",
             self.camera_id, self.frame_id,
         )
         simple_bake(
@@ -397,7 +403,7 @@ class PPISPPostProcessingBakeAdapter(PostProcessingBakeAdapter):
             post_processing,
             camera_id=self.camera_id,
             frame_id=self.frame_id,
-            higher_order=True,
+            higher_order=False,
             apply_srgb_to_linear=True,
         )
 
