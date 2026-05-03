@@ -4,31 +4,28 @@
 
 """Sweep PPISP SH-bake modes on a trained checkpoint and report aggregated metrics.
 
-For each configured (bake mode, view sampling mode, init policy) tuple
-the script:
+The bake fits gamma-space (display-referred) SH coefficients against the
+PPISP forward output of the trained model, matching the colour space of
+the no-PPISP export. Modes vary along two axes:
 
-1. Builds a baked model from the cloned checkpoint:
-   - ``simple`` / ``simple-higher-order`` flavours run :func:`simple_bake`
-     directly (with optional sRGB→linear).
-   - ``fit`` flavours run :func:`bake_post_processing_into_sh` with the
-     desired view sampling mode and init policy.
+* ``simple`` flavours skip optimisation and write only the DC band.
+* ``fit`` flavours run :func:`bake_post_processing_into_sh` -- Adam over
+  features_albedo, features_specular, and (optionally) density. View
+  sampling is either ``training`` (iterate the dataloader) or
+  ``trajectory`` (NN+2-opt arc-length-parameterised slerp through training
+  poses; useful when training views are sparse).
 
-2. Renders every validation frame through:
-   - the *reference* model + chromatic-vignette PPISP at the chosen
-     (camera, frame) -- the per-frame target.
-   - the *baked* model with ``linear_to_srgb`` applied to its output and
-     an achromatic-vignette correction (matches the evaluator in
-     ``post_processing_sh_bake_validation.py``).
+Per-frame validation:
+  reference = full PPISP applied to reference-model render at val pose
+  baked     = baked-model render (already display-referred) clipped to [0, 1]
 
-3. Computes per-frame PSNR, SSIM and LPIPS, then aggregates mean /
-   median / min / max across the validation split.
-
-4. Prints a table sorted by mean PSNR and writes the raw per-frame
-   numbers to ``<out_dir>/metrics.json``.
+Metrics: per-frame PSNR (+ optional SSIM / LPIPS), aggregated mean /
+median / min / max across the val split. Raw per-frame numbers are
+persisted to ``<out_dir>/metrics.json``.
 
 Usage:
 
-    python tools/bake_modes_benchmark/benchmark.py \\
+    python tools/ppisp_export/bake_modes_benchmark/benchmark.py \\
         --checkpoint runs/<scene>/ckpt_last.pt \\
         --out-dir /tmp/bake_modes \\
         --camera-id 0 --frame-id 0
@@ -52,15 +49,13 @@ import torch.nn as nn
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from threedgrut.export.usd.post_processing_sh_bake import (  # noqa: E402
-    MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
+    MODE_PPISP_BAKE_VIGNETTING_NONE,
     PPISPPostProcessingBakeAdapter,
-    apply_achromatic_vignetting,
     bake_post_processing_into_sh,
     FixedPPISP,
 )
 from threedgrut.export.usd.post_processing_sh_simple_bake import simple_bake  # noqa: E402
 from threedgrut.render import Renderer  # noqa: E402
-from threedgrut.utils.post_processing_linear_to_srgb import linear_to_srgb  # noqa: E402
 from threedgrut.utils.render import apply_post_processing  # noqa: E402
 
 logger = logging.getLogger("bake_modes_benchmark")
@@ -79,48 +74,32 @@ class BakeMode:
     builder: Callable[..., nn.Module]
 
 
-def _build_simple(*, model, ppisp, camera_id, frame_id, higher_order, srgb,
+def _build_simple(*, model, ppisp, camera_id, frame_id, higher_order,
                   dataset=None, conf=None):
     del dataset, conf  # unused by the simple flavours
     baked = model.clone().eval()
     simple_bake(
         baked, ppisp,
         camera_id=camera_id, frame_id=frame_id,
-        higher_order=higher_order, apply_srgb_to_linear=srgb,
+        higher_order=higher_order, apply_srgb_to_linear=False,
     )
     baked.build_acc()
     return baked
 
 
 def _build_fit(*, model, ppisp, dataset, conf, camera_id, frame_id,
-               vignetting_mode, view_mode, view_seed, epochs, learning_rate,
-               init: str):
-    """Run the full fit-by-bake flow.
-
-    ``init`` chooses the warm-start applied before Adam takes over:
-      * ``"none"``       -- patch out initialize_fit, fit from the clone.
-      * ``"higher"``     -- adapter default: simple_bake(higher_order=True, srgb=True).
-      * ``"dc-srgb"``    -- DC-only simple_bake with sRGB->linear (leaves
-                            features_specular at the trained values).
-    """
-    from threedgrut.export.usd.post_processing_sh_simple_bake import simple_bake
-
+               view_mode, view_seed, epochs, learning_rate, optimize_density: bool):
+    """Run the full fit-by-bake flow with the production adapter (gamma SH,
+    no vignetting). ``optimize_density=False`` ablates the density param
+    group by setting its lr to zero."""
     adapter = PPISPPostProcessingBakeAdapter(
-        camera_id=camera_id, frame_id=frame_id, vignetting_mode=vignetting_mode,
+        camera_id=camera_id, frame_id=frame_id,
+        vignetting_mode=MODE_PPISP_BAKE_VIGNETTING_NONE,
     )
-    if init == "none":
-        adapter.initialize_fit = lambda *a, **kw: None  # type: ignore[assignment]
-    elif init == "dc-srgb":
-        def _dc_srgb_init(baked_model, post_processing, _cid=camera_id, _fid=frame_id):
-            simple_bake(baked_model, post_processing,
-                        camera_id=_cid, frame_id=_fid,
-                        higher_order=False, apply_srgb_to_linear=True)
-        adapter.initialize_fit = _dc_srgb_init  # type: ignore[assignment]
-    elif init != "higher":
-        raise ValueError(f"unknown init: {init!r}")
     return bake_post_processing_into_sh(
         model=model, post_processing=ppisp, train_dataset=dataset, conf=conf,
         adapter=adapter, epochs=epochs, learning_rate=learning_rate,
+        learning_rate_density=(5.0e-2 if optimize_density else 0.0),
         view_sampling_mode=view_mode, interpolated_views_seed=view_seed,
     )
 
@@ -129,62 +108,36 @@ def all_modes(*, fit_epochs: int, fit_lr: float, view_seed: int) -> List[BakeMod
     return [
         BakeMode(
             "simple",
-            "one-shot DC-only bake",
-            lambda **k: _build_simple(**k, higher_order=False, srgb=False),
+            "one-shot DC-only bake (no fit, gamma SH)",
+            lambda **k: _build_simple(**k, higher_order=False),
         ),
         BakeMode(
             "simple-higher-order",
-            "one-shot bake with higher-order Jacobian linearisation",
-            lambda **k: _build_simple(**k, higher_order=True, srgb=False),
+            "one-shot DC + Jacobian-rotated specular (no fit)",
+            lambda **k: _build_simple(**k, higher_order=True),
         ),
         BakeMode(
-            "simple-higher-order-srgb",
-            "simple-higher-order with sRGB→linear before RGB2SH",
-            lambda **k: _build_simple(**k, higher_order=True, srgb=True),
-        ),
-        BakeMode(
-            "fit-base",
-            "Adam fit, training views, no warm-start",
+            "fit-color-only",
+            "Adam fit on features_albedo + features_specular only, training views",
             lambda **k: _build_fit(
-                **k, vignetting_mode=MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
-                view_mode="training", view_seed=view_seed,
-                epochs=fit_epochs, learning_rate=fit_lr, init="none",
+                **k, view_mode="training", view_seed=view_seed,
+                epochs=fit_epochs, learning_rate=fit_lr, optimize_density=False,
             ),
         ),
         BakeMode(
-            "fit-base-srgb",
-            "Adam fit, training views, DC-only simple-bake (sRGB->linear) warm-start",
+            "fit",
+            "Adam fit on albedo + specular + density, training views (production default)",
             lambda **k: _build_fit(
-                **k, vignetting_mode=MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
-                view_mode="training", view_seed=view_seed,
-                epochs=fit_epochs, learning_rate=fit_lr, init="dc-srgb",
+                **k, view_mode="training", view_seed=view_seed,
+                epochs=fit_epochs, learning_rate=fit_lr, optimize_density=True,
             ),
         ),
         BakeMode(
-            "fit-base-srgb-trajectory",
-            "Adam fit, DC-only sRGB warm-start + trajectory views (NN+2-opt, slerp)",
+            "fit-trajectory",
+            "Adam fit on albedo + specular + density, trajectory views (NN+2-opt slerp)",
             lambda **k: _build_fit(
-                **k, vignetting_mode=MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
-                view_mode="trajectory", view_seed=view_seed,
-                epochs=fit_epochs, learning_rate=fit_lr, init="dc-srgb",
-            ),
-        ),
-        BakeMode(
-            "fit-init",
-            "Adam fit, training views, higher-order simple-bake (sRGB->linear) warm-start",
-            lambda **k: _build_fit(
-                **k, vignetting_mode=MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
-                view_mode="training", view_seed=view_seed,
-                epochs=fit_epochs, learning_rate=fit_lr, init="higher",
-            ),
-        ),
-        BakeMode(
-            "fit-init-trajectory",
-            "Adam fit, higher-order init + trajectory views (NN+2-opt, slerp)",
-            lambda **k: _build_fit(
-                **k, vignetting_mode=MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
-                view_mode="trajectory", view_seed=view_seed,
-                epochs=fit_epochs, learning_rate=fit_lr, init="higher",
+                **k, view_mode="trajectory", view_seed=view_seed,
+                epochs=fit_epochs, learning_rate=fit_lr, optimize_density=True,
             ),
         ),
     ]
@@ -223,7 +176,6 @@ def _evaluate_mode(
     dataset,
     dataloader,
     criteria,
-    vignetting_mode: str,
     max_frames: Optional[int],
 ) -> FrameMetrics:
     fm = FrameMetrics()
@@ -238,18 +190,9 @@ def _evaluate_mode(
             ref_outputs = apply_post_processing(fixed_pp, ref_outputs, gpu_batch, training=False)
             ref_rgb = ref_outputs["pred_rgb"].clip(0, 1)
 
-            # baked: render + achromatic-vignette + linear_to_srgb
+            # baked: SH eval is already display-referred (gamma); just clip.
             baked_outputs = baked_model(gpu_batch)
-            baked_rgb_lin = baked_outputs["pred_rgb"]
-            if vignetting_mode != "none":
-                _, h, w, _ = baked_rgb_lin.shape
-                baked_rgb_lin = apply_achromatic_vignetting(
-                    rgb=baked_rgb_lin, ppisp=fixed_pp.ppisp,
-                    camera_id=fixed_pp.camera_id,
-                    pixel_coords=gpu_batch.pixel_coords,
-                    resolution=(w, h),
-                )
-            baked_rgb = torch.clamp(linear_to_srgb(baked_rgb_lin), 0, 1)
+            baked_rgb = torch.clamp(baked_outputs["pred_rgb"], 0, 1)
 
             fm.psnr.append(criteria["psnr"](baked_rgb, ref_rgb).item())
             if "ssim" in criteria:
@@ -341,8 +284,11 @@ def main(argv=None) -> int:
     if not hasattr(ppisp, "vignetting_params"):
         raise SystemExit("Checkpoint post-processing is not PPISP-like.")
 
+    # The bake target is PPISP-without-vignetting (matches the production
+    # MODE_PPISP_BAKE_VIGNETTING_NONE adapter); both reference and baked
+    # sides therefore live in the same display-referred space.
     fixed_pp = FixedPPISP(
-        ppisp, args.camera_id, args.frame_id, "cuda", include_vignetting=True,
+        ppisp, args.camera_id, args.frame_id, "cuda", include_vignetting=False,
     ).eval()
 
     # Train dataset for the fit modes (interpolated samplers need it for poses).
@@ -387,7 +333,6 @@ def main(argv=None) -> int:
         fm = _evaluate_mode(
             baked, renderer.model, fixed_pp,
             renderer.dataset, renderer.dataloader, criteria,
-            vignetting_mode=MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
             max_frames=args.max_frames,
         )
         row = {"psnr": _stats(fm.psnr)}
