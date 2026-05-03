@@ -58,7 +58,7 @@ from threedgrut.export.usd.particle_field_hints import (
     DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
     normalize_particle_field_sorting_mode_hint,
 )
-from threedgrut.export.usd.post_processing_sh_bake import MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT
+from threedgrut.export.usd.post_processing_sh_bake import MODE_PPISP_BAKE_VIGNETTING_NONE
 from threedgrut.export.usd.writers.camera import export_cameras_to_usd
 
 logger = logging.getLogger(__name__)
@@ -285,10 +285,12 @@ class USDExporter(ModelExporter):
         post_processing_export_frame_id: int | None = None,
         ignore_ppisp_controller: bool = False,
         post_processing_bake_epochs: int = 13,
-        post_processing_bake_learning_rate: float = 1.0e-3,
+        post_processing_bake_learning_rate: float = 2.5e-3,
+        post_processing_bake_learning_rate_specular: float | None = None,
+        post_processing_bake_learning_rate_density: float = 5.0e-2,
         post_processing_bake_camera_id: int = 0,
         post_processing_bake_frame_id: int = 0,
-        ppisp_bake_vignetting_mode: str = MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
+        ppisp_bake_vignetting_mode: str = MODE_PPISP_BAKE_VIGNETTING_NONE,
         post_processing_bake_view_mode: str = "trajectory",
         post_processing_bake_view_seed: int | None = None,
         post_processing_bake_trajectory_weight_position: float = 1.0,
@@ -322,12 +324,19 @@ class USDExporter(ModelExporter):
             post_processing_export_frame_id: Optional PPISP frame index to write
                 as static exposure/color inputs in omni-native mode.
             post_processing_bake_epochs: Number of sequential passes over the train/reference set.
-            post_processing_bake_learning_rate: Adam learning rate for baked SH.
+            post_processing_bake_learning_rate: Adam learning rate for features_albedo
+                (default 2.5e-3, matches 3DGS).
+            post_processing_bake_learning_rate_specular: Adam learning rate for
+                features_specular. Defaults to ``learning_rate / 20`` (the 3DGS ratio).
+            post_processing_bake_learning_rate_density: Adam learning rate for density
+                (default 5e-2, matches 3DGS). Optimising density alongside SH absorbs
+                spatial frequencies the SH alone aliases as colour rainbow fringes.
             post_processing_bake_camera_id: Camera index for the fixed baked transform.
             post_processing_bake_frame_id: Frame index for the fixed baked transform.
-            ppisp_bake_vignetting_mode: "none" disables vignetting in the PPISP
-                reference. "achromatic-fit" keeps chromatic PPISP vignetting in
-                the reference and applies an achromatic estimate only in the fit loss.
+            ppisp_bake_vignetting_mode: "none" (default) -- bake produces gamma-space
+                SH coefficients with no vignetting; the asset format aligns with
+                no-PPISP exports. "achromatic-fit" is retained for backwards
+                compatibility but no longer the recommended mode.
             post_processing_bake_view_mode: which views the bake fit sees per step.
                 "training" iterates the train dataloader (default). "trajectory"
                 orders the training views along an NN+2-opt camera path, parameterises
@@ -364,6 +373,13 @@ class USDExporter(ModelExporter):
         self.ignore_ppisp_controller = bool(ignore_ppisp_controller)
         self.post_processing_bake_epochs = int(post_processing_bake_epochs)
         self.post_processing_bake_learning_rate = float(post_processing_bake_learning_rate)
+        self.post_processing_bake_learning_rate_specular = (
+            None if post_processing_bake_learning_rate_specular is None
+            else float(post_processing_bake_learning_rate_specular)
+        )
+        self.post_processing_bake_learning_rate_density = float(
+            post_processing_bake_learning_rate_density
+        )
         self.post_processing_bake_camera_id = int(post_processing_bake_camera_id)
         self.post_processing_bake_frame_id = int(post_processing_bake_frame_id)
         self.ppisp_bake_vignetting_mode = str(ppisp_bake_vignetting_mode)
@@ -460,6 +476,8 @@ class USDExporter(ModelExporter):
                 adapter=adapter,
                 epochs=self.post_processing_bake_epochs,
                 learning_rate=self.post_processing_bake_learning_rate,
+                learning_rate_specular=self.post_processing_bake_learning_rate_specular,
+                learning_rate_density=self.post_processing_bake_learning_rate_density,
                 view_sampling_mode=self.post_processing_bake_view_mode,
                 interpolated_views_seed=self.post_processing_bake_view_seed,
                 trajectory_weight_position=self.post_processing_bake_trajectory_weight_position,
@@ -850,13 +868,25 @@ class USDExporter(ModelExporter):
                 export_conf,
                 "post-processing-bake-epochs",
                 "post_processing_bake_epochs",
-                1,
+                13,
             ),
             post_processing_bake_learning_rate=_get_export_config_value(
                 export_conf,
                 "post-processing-bake-learning-rate",
                 "post_processing_bake_learning_rate",
-                1.0e-3,
+                2.5e-3,
+            ),
+            post_processing_bake_learning_rate_specular=_get_export_config_value(
+                export_conf,
+                "post-processing-bake-learning-rate-specular",
+                "post_processing_bake_learning_rate_specular",
+                None,
+            ),
+            post_processing_bake_learning_rate_density=_get_export_config_value(
+                export_conf,
+                "post-processing-bake-learning-rate-density",
+                "post_processing_bake_learning_rate_density",
+                5.0e-2,
             ),
             post_processing_bake_camera_id=_get_export_config_value(
                 export_conf,
@@ -874,7 +904,7 @@ class USDExporter(ModelExporter):
                 export_conf,
                 "ppisp-bake-vignetting-mode",
                 "ppisp_bake_vignetting_mode",
-                MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
+                MODE_PPISP_BAKE_VIGNETTING_NONE,
             ),
             post_processing_bake_view_mode=_get_export_config_value(
                 export_conf,

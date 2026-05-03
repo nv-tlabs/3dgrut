@@ -190,7 +190,19 @@ Examples:
         "--post-processing-bake-learning-rate",
         type=float,
         default=None,
-        help="Adam learning rate for post-processing baked-SH export.",
+        help="Adam learning rate for features_albedo (default 2.5e-3, matches 3DGS).",
+    )
+    parser.add_argument(
+        "--post-processing-bake-learning-rate-specular",
+        type=float,
+        default=None,
+        help="Adam learning rate for features_specular (default = albedo lr / 20, matches 3DGS).",
+    )
+    parser.add_argument(
+        "--post-processing-bake-learning-rate-density",
+        type=float,
+        default=None,
+        help="Adam learning rate for density (default 5e-2, matches 3DGS).",
     )
     parser.add_argument(
         "--post-processing-bake-camera-id",
@@ -474,7 +486,21 @@ def main():
                 export_conf,
                 "post-processing-bake-learning-rate",
                 "post_processing_bake_learning_rate",
-                1.0e-3,
+                2.5e-3,
+            ),
+            post_processing_bake_learning_rate_specular=_arg_or_conf(
+                args.post_processing_bake_learning_rate_specular,
+                export_conf,
+                "post-processing-bake-learning-rate-specular",
+                "post_processing_bake_learning_rate_specular",
+                None,
+            ),
+            post_processing_bake_learning_rate_density=_arg_or_conf(
+                args.post_processing_bake_learning_rate_density,
+                export_conf,
+                "post-processing-bake-learning-rate-density",
+                "post_processing_bake_learning_rate_density",
+                5.0e-2,
             ),
             post_processing_bake_camera_id=_arg_or_conf(
                 args.post_processing_bake_camera_id,
