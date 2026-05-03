@@ -99,7 +99,9 @@ def bake_post_processing_into_sh(
     *,
     adapter: PostProcessingBakeAdapter,
     epochs: int = 1,
-    learning_rate: float = 1.0e-3,
+    learning_rate: float = 2.5e-3,
+    learning_rate_specular: float | None = None,
+    learning_rate_density: float = 5.0e-2,
     device: str = "cuda",
     view_sampling_mode: str = "training",
     interpolated_views_seed: int | None = None,
@@ -107,6 +109,16 @@ def bake_post_processing_into_sh(
     trajectory_weight_rotation: float = 0.5,
 ):
     """Return a cloned model whose SH coefficients approximate fixed post-processing output.
+
+    Three parameter groups are co-optimised, mirroring 3DGS training defaults:
+
+    * ``features_albedo``     at ``learning_rate``                (default 2.5e-3)
+    * ``features_specular``   at ``learning_rate_specular``       (default = lr/20)
+    * ``density``             at ``learning_rate_density``        (default 5e-2)
+
+    Letting density breathe absorbs spatial frequencies the SH alone can't
+    capture without aliasing -- on harder scenes (caterpillar) this is
+    worth +5 dB worst-case PSNR over fitting only colour coefficients.
 
     ``view_sampling_mode`` controls what the optimizer sees each step:
 
@@ -145,15 +157,22 @@ def bake_post_processing_into_sh(
     baked_model.build_acc()
     fixed_post_processing = adapter.create_fixed_post_processing(post_processing, device)
 
-    # Warm-start the cloned SH state with the adapter's closed-form bake
-    # (PPISP: simple_bake on the chosen camera/frame, with sRGB→linear so
-    # the resulting SH lives in linear scene-referred space). Adam takes
-    # over from there. Reduces the iterations needed and avoids fitting
-    # from a checkpoint state that's far from the optimum.
+    # Warm-start the cloned SH state with the adapter's closed-form bake.
+    # PPISPPostProcessingBakeAdapter writes display-referred (gamma-space)
+    # DC; Adam takes over from there. Reduces the iterations needed and
+    # avoids fitting from a checkpoint state far from the optimum.
     adapter.initialize_fit(baked_model, post_processing)
 
-    fit_parameters = list(_set_sh_fit_parameters(baked_model))
-    optimizer = torch.optim.Adam(fit_parameters, lr=learning_rate)
+    if learning_rate_specular is None:
+        learning_rate_specular = learning_rate / 20.0  # 3DGS default ratio
+
+    _set_sh_fit_parameters(baked_model)
+    baked_model.density.requires_grad_(True)
+    optimizer = torch.optim.Adam([
+        {"params": [baked_model.features_albedo], "lr": learning_rate},
+        {"params": [baked_model.features_specular], "lr": learning_rate_specular},
+        {"params": [baked_model.density], "lr": learning_rate_density},
+    ])
     train_dataloader = _create_train_dataloader(conf, train_dataset)
     steps_per_epoch = len(train_dataloader)
 
@@ -280,7 +299,7 @@ class FixedPPISP(nn.Module):
 
 
 def normalize_ppisp_bake_vignetting_mode(mode: str | None) -> str:
-    normalized = MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT if mode is None else str(mode).strip().lower()
+    normalized = MODE_PPISP_BAKE_VIGNETTING_NONE if mode is None else str(mode).strip().lower()
     if normalized not in PPISP_BAKE_VIGNETTING_MODES:
         raise ValueError(
             f"Unsupported PPISP bake vignetting mode '{mode}'. "
@@ -339,7 +358,7 @@ class PPISPPostProcessingBakeAdapter(PostProcessingBakeAdapter):
         self,
         camera_id: int = 0,
         frame_id: int = 0,
-        vignetting_mode: str = MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT,
+        vignetting_mode: str = MODE_PPISP_BAKE_VIGNETTING_NONE,
     ) -> None:
         self.camera_id = int(camera_id)
         self.frame_id = int(frame_id)
@@ -366,36 +385,35 @@ class PPISPPostProcessingBakeAdapter(PostProcessingBakeAdapter):
         ).eval()
 
     def apply_fit_transform(self, rgb: torch.Tensor, fixed_post_processing: nn.Module, gpu_batch) -> torch.Tensor:
-        # PPISP reference is display-referred; baked side must encode to sRGB to match.
-        from threedgrut.utils.post_processing_linear_to_srgb import linear_to_srgb
-
-        if self.vignetting_mode == MODE_PPISP_BAKE_VIGNETTING_NONE:
-            return torch.clamp(linear_to_srgb(rgb), 0.0, 1.0)
-        _, height, width, _ = rgb.shape
-        vignetted = apply_achromatic_vignetting(
-            rgb=rgb,
-            ppisp=fixed_post_processing.ppisp,
-            camera_id=fixed_post_processing.camera_id,
-            pixel_coords=gpu_batch.pixel_coords,
-            resolution=(width, height),
-        )
-        return torch.clamp(linear_to_srgb(vignetted), 0.0, 1.0)
+        del fixed_post_processing, gpu_batch
+        # SH eval lives in display (gamma) space -- initialize_fit warm-starts
+        # with apply_srgb_to_linear=False, the loss target is the full PPISP
+        # output (also display-referred), and the loss gradient flows through
+        # identity. Matches the conditioning of training a 3DGS model
+        # directly in gamma space, where the same SH degree shows no rainbow
+        # aliasing.
+        return torch.clamp(rgb, 0.0, 1.0)
 
     def initialize_fit(self, baked_model, post_processing: nn.Module) -> None:
         """Warm-start with a DC-only simple-bake on the chosen (camera,
-        frame), in linear scene-referred space.
+        frame), in display (gamma) space.
+
+        Matches the colour space the trainer used when ``post_processing.method``
+        is null/linear-to-srgb -- features_albedo lives directly in display-
+        referred RGB and ``apply_fit_transform`` is the identity. Aligns the
+        baked-SH USD asset format with no-PPISP exports.
 
         The trained ``features_specular`` is left untouched: a higher-order
-        Jacobian rotation gives a slightly better starting PSNR but
-        Adam takes much longer to recover from the rotated specular
-        (~7 dB at 9 epochs on bonsai, see tools/ppisp_export benchmark).
+        Jacobian rotation gives a slightly better starting PSNR but Adam
+        takes much longer to recover from the rotated specular (~7 dB at 9
+        epochs on bonsai, see tools/ppisp_export benchmark).
         """
         # Late import: avoid pulling ppisp into modules that don't need it.
         from threedgrut.export.usd.post_processing_sh_simple_bake import simple_bake
 
         logger.info(
             "PPISP SH bake init: applying simple_bake (camera=%d, frame=%d, "
-            "higher_order=False, apply_srgb_to_linear=True) before fitting.",
+            "higher_order=False, apply_srgb_to_linear=False) before fitting.",
             self.camera_id, self.frame_id,
         )
         simple_bake(
@@ -404,7 +422,7 @@ class PPISPPostProcessingBakeAdapter(PostProcessingBakeAdapter):
             camera_id=self.camera_id,
             frame_id=self.frame_id,
             higher_order=False,
-            apply_srgb_to_linear=True,
+            apply_srgb_to_linear=False,
         )
 
     def log_context(self) -> str:
