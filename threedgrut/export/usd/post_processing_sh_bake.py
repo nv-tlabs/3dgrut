@@ -25,9 +25,27 @@ import torch
 import torch.nn as nn
 
 from threedgrut.datasets.utils import configure_dataloader_for_platform
-from threedgrut.utils.render import apply_post_processing
+from threedgrut.utils.render import C0, apply_post_processing
 
 logger = logging.getLogger(__name__)
+
+
+def scale_sh_output(model, scale: float) -> None:
+    """In-place scale the SH-evaluated RGB output by ``scale``.
+
+    SH eval is ``rgb = features_albedo * C0 + 0.5 + sum_k Y_k * features_specular_k``.
+    To get ``s * rgb`` from a forward eval, every term must be scaled:
+      * features_specular -> s * features_specular  (linear, view-dep bands)
+      * features_albedo   -> s * features_albedo + (s - 1) * 0.5 / C0
+        compensates for the constant ``0.5`` offset in the DC band.
+    """
+    if scale == 1.0:
+        return
+    s = float(scale)
+    with torch.no_grad():
+        model.features_specular.mul_(s)
+        model.features_albedo.mul_(s).add_((s - 1.0) * 0.5 / C0)
+    logger.info("Scaled SH output by %.4f (DC offset compensated)", s)
 
 
 class PostProcessingBakeAdapter:

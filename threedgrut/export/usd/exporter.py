@@ -58,7 +58,10 @@ from threedgrut.export.usd.particle_field_hints import (
     DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
     normalize_particle_field_sorting_mode_hint,
 )
-from threedgrut.export.usd.post_processing_sh_bake import MODE_PPISP_BAKE_VIGNETTING_NONE
+from threedgrut.export.usd.post_processing_sh_bake import (
+    MODE_PPISP_BAKE_VIGNETTING_NONE,
+    scale_sh_output,
+)
 from threedgrut.export.usd.writers.camera import export_cameras_to_usd
 
 logger = logging.getLogger(__name__)
@@ -295,6 +298,7 @@ class USDExporter(ModelExporter):
         post_processing_bake_view_seed: int | None = None,
         post_processing_bake_trajectory_weight_position: float = 1.0,
         post_processing_bake_trajectory_weight_rotation: float = 0.5,
+        output_scale: float = 1.0,
         frames_per_second: float = 1.0,
     ):
         """
@@ -393,6 +397,7 @@ class USDExporter(ModelExporter):
         self.post_processing_bake_trajectory_weight_rotation = float(
             post_processing_bake_trajectory_weight_rotation
         )
+        self.output_scale = float(output_scale)
         self.frames_per_second = frames_per_second
 
     def _create_default_stage(self, referenced_stages: List[NamedUSDStage]) -> NamedUSDStage:
@@ -485,6 +490,13 @@ class USDExporter(ModelExporter):
             )
         if uses_omni_native_post_processing_export and not has_ppisp_module:
             raise ValueError("Omniverse-native post-processing export currently supports PPISP post-processing only.")
+
+        # User-requested constant brightness scale, applied uniformly to the
+        # SH output regardless of bake / colour-space mode. The DC offset
+        # baked into RGB2SH is compensated so a forward eval reproduces
+        # output_scale * (original SH-evaluated RGB).
+        if self.output_scale != 1.0:
+            scale_sh_output(model, self.output_scale)
 
         # Get model data via accessor
         accessor = GaussianExportAccessor(model, conf)
@@ -929,6 +941,12 @@ class USDExporter(ModelExporter):
                 "post-processing-bake-trajectory-weight-rotation",
                 "post_processing_bake_trajectory_weight_rotation",
                 0.5,
+            ),
+            output_scale=_get_export_config_value(
+                export_conf,
+                "output-scale",
+                "output_scale",
+                1.0,
             ),
             frames_per_second=getattr(export_conf, "frames_per_second", 1.0),
         )

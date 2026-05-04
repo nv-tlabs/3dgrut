@@ -255,6 +255,17 @@ Examples:
         default=None,
         help="Trajectory mode only: weight on the (1 - cos(angle)) rotation term in pose distance.",
     )
+    parser.add_argument(
+        "--output-scale",
+        type=float,
+        default=None,
+        help=(
+            "Multiplicative scale applied to the SH-evaluated RGB output of the "
+            "exported asset. Default 1.0 (no-op). The DC offset is compensated so "
+            "rendered output equals output-scale x original eval. Useful for "
+            "matching downstream tonemap exposure."
+        ),
+    )
 
     # Dataset path (optional, overrides checkpoint's dataset path)
     parser.add_argument(
@@ -550,6 +561,13 @@ def main():
                 "post-processing-bake-trajectory-weight-rotation",
                 "post_processing_bake_trajectory_weight_rotation",
                 0.5,
+            ),
+            output_scale=_arg_or_conf(
+                args.output_scale,
+                export_conf,
+                "output-scale",
+                "output_scale",
+                1.0,
             ),
             frames_per_second=getattr(export_conf, "frames_per_second", 1.0),
         )
