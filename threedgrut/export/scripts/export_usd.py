@@ -479,7 +479,7 @@ def main():
                 export_conf,
                 "post-processing-bake-epochs",
                 "post_processing_bake_epochs",
-                13,
+                7,
             ),
             post_processing_bake_learning_rate=_arg_or_conf(
                 args.post_processing_bake_learning_rate,

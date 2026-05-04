@@ -284,7 +284,7 @@ class USDExporter(ModelExporter):
         post_processing_export_camera_id: int | None = None,
         post_processing_export_frame_id: int | None = None,
         ignore_ppisp_controller: bool = False,
-        post_processing_bake_epochs: int = 13,
+        post_processing_bake_epochs: int = 7,
         post_processing_bake_learning_rate: float = 2.5e-3,
         post_processing_bake_learning_rate_specular: float | None = None,
         post_processing_bake_learning_rate_density: float = 5.0e-2,
@@ -868,7 +868,7 @@ class USDExporter(ModelExporter):
                 export_conf,
                 "post-processing-bake-epochs",
                 "post_processing_bake_epochs",
-                13,
+                7,
             ),
             post_processing_bake_learning_rate=_get_export_config_value(
                 export_conf,
