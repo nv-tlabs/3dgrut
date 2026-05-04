@@ -29,6 +29,11 @@ function ppispProcess(inputs, outputs, params)
         grid = { math.ceil(width / 16), math.ceil(height / 16), 1 },
         bind = {
             slang.ParameterBlock(
+                -- Per-camera responsivity (premultiplied to input HDR)
+                slang.float(params["responsivityR"] or 1.0),
+                slang.float(params["responsivityG"] or 1.0),
+                slang.float(params["responsivityB"] or 1.0),
+
                 -- Exposure
                 slang.float(params["exposureOffset"] or 0.0),
 

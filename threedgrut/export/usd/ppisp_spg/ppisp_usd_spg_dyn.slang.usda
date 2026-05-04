@@ -9,6 +9,11 @@ def Shader "SlangPPISPDyn"
     uniform asset info:spg:sourceAsset = @ppisp_usd_spg_dyn.slang@
     uniform token info:spg:sourceAsset:subIdentifier = "ppispProcessDyn"
 
+    # User-overridable per-camera responsivity (premultiplied to input HDR).
+    float inputs:responsivityR = 1.0
+    float inputs:responsivityG = 1.0
+    float inputs:responsivityB = 1.0
+
     # Vignetting (per channel: R, G, B)
     float2 inputs:vignettingCenterR = (0.0, 0.0)
     float inputs:vignettingAlpha1R = 0.0

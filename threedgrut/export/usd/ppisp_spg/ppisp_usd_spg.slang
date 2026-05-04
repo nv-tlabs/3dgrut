@@ -26,6 +26,13 @@
 
 struct PPISPParams
 {
+    // User-overridable per-camera responsivity, premultiplied to the
+    // input HdrColor before the rest of the pipeline runs. Defaults to
+    // (1, 1, 1) so the override is a no-op unless explicitly authored.
+    float responsivityR;
+    float responsivityG;
+    float responsivityB;
+
     // Exposure
     float exposureOffset;
 
@@ -215,6 +222,7 @@ void ppispProcess(uint3 tid : SV_DispatchThreadID)
 
     float4 pixel = g_InTex.Load(int3(tid.xy, 0));
     float3 rgb = pixel.rgb;
+    rgb *= float3(g_Params.responsivityR, g_Params.responsivityG, g_Params.responsivityB);
 
     // Normalize to [-0.5, 0.5] range based on max dimension (matching CUDA kernel)
     float maxRes = max(float(w), float(h));

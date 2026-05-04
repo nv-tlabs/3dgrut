@@ -30,6 +30,10 @@ function ppispProcessDyn(inputs, outputs, params)
         grid = { math.ceil(width / 16), math.ceil(height / 16), 1 },
         bind = {
             slang.ParameterBlock(
+                slang.float(params["responsivityR"] or 1.0),
+                slang.float(params["responsivityG"] or 1.0),
+                slang.float(params["responsivityB"] or 1.0),
+
                 getFloat2("vignettingCenterR"),
                 slang.float(params["vignettingAlpha1R"] or 0.0),
                 slang.float(params["vignettingAlpha2R"] or 0.0),

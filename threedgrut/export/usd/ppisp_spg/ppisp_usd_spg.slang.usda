@@ -9,6 +9,11 @@ def Shader "SlangPPISP"
     uniform asset info:spg:sourceAsset = @ppisp_usd_spg.slang@
     uniform token info:spg:sourceAsset:subIdentifier = "ppispProcess"
 
+    # User-overridable per-camera responsivity (premultiplied to input HDR).
+    float inputs:responsivityR = 1.0
+    float inputs:responsivityG = 1.0
+    float inputs:responsivityB = 1.0
+
     # Exposure parameter
     float inputs:exposureOffset = 0.0
 

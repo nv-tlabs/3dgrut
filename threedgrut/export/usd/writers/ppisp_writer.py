@@ -200,6 +200,15 @@ def _create_shader_prim(
 # ---------------------------------------------------------------------------
 
 
+def _set_responsivity_params(shader: UsdShade.Shader) -> None:
+    """Author the user-overridable per-channel responsivity inputs (default
+    1.0). The shader premultiplies these with the input HDR before the rest
+    of the PPISP pipeline runs; consumers can override the values per-camera
+    in the USD asset without re-running the export."""
+    for channel in ("R", "G", "B"):
+        shader.CreateInput(f"responsivity{channel}", Sdf.ValueTypeNames.Float).Set(1.0)
+
+
 def _set_vignetting_params(shader: UsdShade.Shader, ppisp: PPISP, camera_index: int) -> None:
     """Set per-camera vignetting parameters (static).
 
@@ -367,6 +376,7 @@ def add_ppisp_shader_to_render_product(
         return stage.GetPseudoRoot()
 
     shader = _create_shader_prim(stage, render_product_path, controller_shader=controller_shader)
+    _set_responsivity_params(shader)
     _set_vignetting_params(shader, ppisp, camera_index)
     _set_crf_params(shader, ppisp, camera_index)
     if controller_shader is not None:

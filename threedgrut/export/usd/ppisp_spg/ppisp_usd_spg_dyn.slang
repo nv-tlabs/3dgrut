@@ -24,6 +24,13 @@
 
 struct PPISPDynParams
 {
+    // User-overridable per-camera responsivity, premultiplied to the
+    // input HdrColor before the rest of the pipeline runs. Defaults to
+    // (1, 1, 1) so the override is a no-op unless explicitly authored.
+    float responsivityR;
+    float responsivityG;
+    float responsivityB;
+
     float2 vignettingCenterR;
     float vignettingAlpha1R;
     float vignettingAlpha2R;
@@ -175,6 +182,7 @@ void ppispProcessDyn(uint3 tid : SV_DispatchThreadID)
 
     float4 pixel = g_InTex.Load(int3(tid.xy, 0));
     float3 rgb = pixel.rgb;
+    rgb *= float3(g_Params.responsivityR, g_Params.responsivityG, g_Params.responsivityB);
 
     float maxRes = max(float(w), float(h));
     float2 uv = float2(tid.x + 0.5 - float(w) * 0.5,
