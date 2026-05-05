@@ -27,6 +27,7 @@ import numpy as np
 from pxr import Gf, Usd, Vt
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
+from threedgrut.export.usd.particle_field_hints import DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +51,15 @@ class GaussianUSDWriter(ABC):
         capabilities: ModelCapabilities,
         content_root_path: str = "/World/Gaussians",
         linear_srgb: bool = False,
+        omni_usd: bool = False,
+        has_post_processing: bool = False,
     ):
         self.stage = stage
         self.capabilities = capabilities
         self.content_root_path = content_root_path
         self.linear_srgb = linear_srgb
+        self.omni_usd = omni_usd
+        self.has_post_processing = has_post_processing
         self.prim: Optional[Usd.Prim] = None
 
     def apply_color_space_to_prim(self, prim: Usd.Prim) -> None:
@@ -128,8 +133,10 @@ def create_gaussian_writer(
     content_root_path: str = "/World/Gaussians",
     half_geometry: bool = False,
     half_features: bool = False,
-    sorting_mode_hint: str = "cameraDistance",
+    sorting_mode_hint: str = DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
     linear_srgb: bool = False,
+    omni_usd: bool = False,
+    has_post_processing: bool = False,
 ) -> GaussianUSDWriter:
     """Factory function to create USD Gaussian writer.
 
@@ -141,6 +148,8 @@ def create_gaussian_writer(
         half_features: Use half precision for opacities and SH coefficients (LightField)
         sorting_mode_hint: Sorting mode hint for LightField schema
         linear_srgb: If True, set prim color space to lin_rec709_scene; else srgb_rec709_display
+        omni_usd: If True, author Omniverse-specific USD features.
+        has_post_processing: If True, configure Omniverse material for external post-processing.
 
     Returns:
         Configured GaussianUSDWriter instance (LightField schema)
@@ -155,4 +164,6 @@ def create_gaussian_writer(
         half_features=half_features,
         sorting_mode_hint=sorting_mode_hint,
         linear_srgb=linear_srgb,
+        omni_usd=omni_usd,
+        has_post_processing=has_post_processing,
     )

@@ -265,6 +265,14 @@ python train.py --config-name apps/colmap_3dgrt.yaml path=data/mipnerf360/bonsai
 python train.py --config-name apps/colmap_3dgut.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgut dataset.downsample_factor=2 optimizer.type=selective_adam
 ```
 
+### Post-processing (linear-to-sRGB and PPISP)
+
+Hydra key: ``post_processing.method``. Values:
+
+- **null** (default): no change to rendered RGB before the loss.
+- **linear-to-srgb**: **IEC 61966-2-1** piecewise linear-to-sRGB encoding on ``pred_rgb``.
+- **ppisp**: per-frame camera corrections; requires the ``ppisp`` package.
+
 If you use MCMC and Selective Adam in your research, please cite [3dgs-mcmc](https://github.com/ubc-vision/3dgs-mcmc), [taming-3dgs](https://github.com/humansensinglab/taming-3dgs),
 and the [gSplat](https://github.com/nerfstudio-project/gsplat/tree/main) library from which the code was adopted (links to the code are provided in the source files).
 
