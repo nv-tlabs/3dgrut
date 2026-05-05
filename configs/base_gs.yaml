@@ -42,11 +42,38 @@ export_usd:
   enabled: false
   path: ""
   apply_normalizing_transform: true
-  format: standard  # "nurec" for Omniverse USDVol internal format, "standard" for USDVol ParticleField3DGaussianSplat
+  format: standard  # "nurec" for internal USDVol format, "standard" for USDVol ParticleField3DGaussianSplat
   half_precision: false
   export_cameras: true
   export_background: true
+  # zDepth | cameraDistance | rayHitDistance
   sorting_mode_hint: cameraDistance
+  # If true, Gaussian prim ColorSpaceAPI uses lin_rec709_scene; else srgb_rec709_display
+  linear_srgb: false
+  # Enable post-processing export when the checkpoint contains a supported module.
+  # Defaults to true; post-processing-export-mode controls how the effect is exported.
+  export_post_processing: true
+  # baked-sh fits a fixed post-processing transform into Gaussian SH coefficients.
+  # omni-native uses the module-specific Omniverse-native path; currently PPISP SPG.
+  # baked-sh | omni-native
+  post-processing-export-mode: baked-sh
+  # Optional fixed PPISP camera/frame. Baked-SH defaults unset values to 0;
+  # omni-native keeps dynamic per-camera/per-frame behavior when unset.
+  post-processing-camera-id: null
+  post-processing-frame-id: null
+  # Achromatic PPISP responsivity default authored on omni-native SPG shaders.
+  ppisp-responsivity: 1.0
+  # Number of sequential passes over the train/reference set used for fitting.
+  post-processing-bake-epochs: 7
+  post-processing-bake-learning-rate: 0.0025
+  # none: disable PPISP vignetting during bake. achromatic-fit: chromatic PPISP reference
+  # with an achromatic fit-only vignette; the achromatic vignette is not exported.
+  # none | achromatic-fit
+  ppisp-bake-vignetting-mode: none
+  # Multiplicative scale applied to exported SH radiance.
+  radiance-scale: 1.0
+  # USD timeCodesPerSecond; time codes are bare frame indices so this sets playback speed
+  frames_per_second: 1.0
 
 model:
   density_activation: sigmoid
@@ -124,7 +151,8 @@ loss:
 
 # Post-processing configuration
 post_processing:
-  method: null # Possible values: null, "ppisp"
+  # null | "ppisp" | "linear-to-srgb"
+  method: null
   # Enable the controller for predicting per-frame corrections for novel views.
   # When false, zero corrections are used for novel views.
   use_controller: true

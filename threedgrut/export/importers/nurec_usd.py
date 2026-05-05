@@ -41,6 +41,17 @@ _STATE_FEATURES_SPECULAR = ".gaussians_nodes.gaussians.features_specular"
 _STATE_N_ACTIVE = ".gaussians_nodes.gaussians.n_active_features"
 _STATE_EXTRA_SIGNAL = ".gaussians_nodes.gaussians.extra_signal"
 
+_GAUSSIANS_NODES_PREFIX = ".gaussians_nodes."
+# Per-node tensor suffixes (same layout as fill_3dgut_template / static gaussians).
+_REQUIRED_GAUSSIAN_NODE_KEYS = (
+    "positions",
+    "rotations",
+    "scales",
+    "densities",
+    "features_albedo",
+    "features_specular",
+)
+
 
 def _find_nurec_volume_prim(stage: Usd.Stage) -> Optional[Usd.Prim]:
     """Find the NuRec Volume prim (UsdVol::Volume with omni:nurec:isNuRecVolume)."""
@@ -106,6 +117,84 @@ def _tensor_from_state(state: dict, key: str, dtype=np.float16, shape_key: Optio
     if shape is not None:
         arr = arr.reshape(shape)
     return arr.astype(np.float32)
+
+
+def _discover_gaussians_nodes_prefixes(state: dict) -> list[str]:
+    """Find state_dict prefixes like '.gaussians_nodes.background' that hold full Gaussian tensors."""
+    found: set[str] = set()
+    for k in state:
+        if not isinstance(k, str) or not k.endswith(".positions"):
+            continue
+        prefix = k[: -len(".positions")]
+        if not prefix.startswith(_GAUSSIANS_NODES_PREFIX):
+            continue
+        if all(state.get(f"{prefix}.{suffix}") is not None for suffix in _REQUIRED_GAUSSIAN_NODE_KEYS):
+            found.add(prefix)
+    return sorted(found)
+
+
+def _load_merged_gaussian_tensors_from_state(
+    state: dict,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, Optional[list[int]]]:
+    """Load positions…specular from state_dict, merging multiple .gaussians_nodes.<name> blocks if present."""
+    prefixes = _discover_gaussians_nodes_prefixes(state)
+    if not prefixes:
+        positions = _tensor_from_state(state, _STATE_POSITIONS)
+        rotations = _tensor_from_state(state, _STATE_ROTATIONS)
+        scales = _tensor_from_state(state, _STATE_SCALES)
+        densities = _tensor_from_state(state, _STATE_DENSITIES)
+        features_albedo = _tensor_from_state(state, _STATE_FEATURES_ALBEDO)
+        features_specular = _tensor_from_state(state, _STATE_FEATURES_SPECULAR)
+        n_active = state.get(_STATE_N_ACTIVE)
+        n_active_vals = None
+        if n_active is not None:
+            n_active_vals = [int(np.frombuffer(n_active, dtype=np.int64)[0])]
+        return (
+            positions,
+            rotations,
+            scales,
+            densities,
+            features_albedo,
+            features_specular,
+            n_active_vals,
+        )
+
+    chunks: dict[str, list[np.ndarray]] = {k: [] for k in _REQUIRED_GAUSSIAN_NODE_KEYS}
+    n_active_per_node: list[int] = []
+    counts: list[tuple[str, int]] = []
+    for pref in prefixes:
+        for suffix in _REQUIRED_GAUSSIAN_NODE_KEYS:
+            chunks[suffix].append(_tensor_from_state(state, f"{pref}.{suffix}"))
+        na_key = f"{pref}.n_active_features"
+        na_raw = state.get(na_key)
+        if na_raw is not None:
+            n_active_per_node.append(int(np.frombuffer(na_raw, dtype=np.int64)[0]))
+        counts.append((pref, int(chunks["positions"][-1].shape[0])))
+
+    for suffix in _REQUIRED_GAUSSIAN_NODE_KEYS:
+        ref_tail = chunks[suffix][0].shape[1:]
+        for i, arr in enumerate(chunks[suffix][1:], start=1):
+            if arr.shape[1:] != ref_tail:
+                raise ValueError(
+                    f"NuRec state_dict: incompatible '{suffix}' trailing dims across nodes "
+                    f"({prefixes[0]} {ref_tail} vs {prefixes[i]} {arr.shape[1:]})"
+                )
+
+    merged = {suffix: np.concatenate(chunks[suffix], axis=0) for suffix in _REQUIRED_GAUSSIAN_NODE_KEYS}
+    logger.info(
+        "NuRec: merged %d Gaussian node(s) %s",
+        len(prefixes),
+        ", ".join(f"{p}={n}" for p, n in counts),
+    )
+    return (
+        merged["positions"],
+        merged["rotations"],
+        merged["scales"],
+        merged["densities"],
+        merged["features_albedo"],
+        merged["features_specular"],
+        n_active_per_node if n_active_per_node else None,
+    )
 
 
 def _rotation_matrix_to_quat_wxyz(R: np.ndarray) -> np.ndarray:
@@ -248,16 +337,15 @@ class NuRecUSDImporter(FormatImporter):
         raw = _load_nurec_bytes(resolution_root, nurec_path)
         state = _decode_state_dict(raw)
 
-        positions = _tensor_from_state(state, _STATE_POSITIONS)
-        rotations = _tensor_from_state(state, _STATE_ROTATIONS)
-        scales = _tensor_from_state(state, _STATE_SCALES)
-        densities = _tensor_from_state(state, _STATE_DENSITIES)
-        features_albedo = _tensor_from_state(state, _STATE_FEATURES_ALBEDO)
-        features_specular = _tensor_from_state(state, _STATE_FEATURES_SPECULAR)
+        positions, rotations, scales, densities, features_albedo, features_specular, n_active_list = (
+            _load_merged_gaussian_tensors_from_state(state)
+        )
 
-        n_active = state.get(_STATE_N_ACTIVE)
-        if n_active is not None:
-            sh_degree = int(np.frombuffer(n_active, dtype=np.int64)[0])
+        if n_active_list is not None:
+            unique_deg = set(n_active_list)
+            if len(unique_deg) > 1:
+                logger.warning("NuRec nodes disagree on n_active_features %s; using max", n_active_list)
+            sh_degree = max(n_active_list)
         else:
             # Infer from features_specular shape: (N, (degree+1)^2 - 1) * 3
             n_spec = features_specular.shape[1]
