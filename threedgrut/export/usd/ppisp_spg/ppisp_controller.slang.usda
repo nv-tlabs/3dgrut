@@ -1,0 +1,31 @@
+#usda 1.0
+(
+    defaultPrim = "SlangPPISPController"
+)
+
+def Shader "SlangPPISPController"
+{
+    uniform token info:implementationSource = "sourceAsset"
+    uniform asset info:spg:sourceAsset = @ppisp_controller.slang@
+    uniform token info:spg:sourceAsset:subIdentifier = "controllerProcess"
+
+    # Optional EXIF-derived prior exposure. Defaults to zero so the controller
+    # behaves identically to training-time inference when no prior is wired.
+    float inputs:priorExposure = 0.0
+
+    # Flat float buffer holding all controller weights in the layout
+    # encoded by ppisp_controller.slang's OFF_* offsets:
+    #   conv1_weight (16x3) | conv1_bias (16) |
+    #   conv2_weight (32x16) | conv2_bias (32) |
+    #   conv3_weight (64x32) | conv3_bias (64) |
+    #   trunk0_weight (128x1601) | trunk0_bias (128) |
+    #   trunk1_weight (128x128) | trunk1_bias (128) |
+    #   trunk2_weight (128x128) | trunk2_bias (128) |
+    #   exposure_head_weight (128) | exposure_head_bias (1) |
+    #   color_head_weight (8x128) | color_head_bias (8)
+    # = 241,961 floats per camera.
+    float[] inputs:weights = []
+
+    opaque inputs:HdrColor
+    opaque outputs:ControllerParams
+}
