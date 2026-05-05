@@ -46,6 +46,7 @@ export_usd:
   half_precision: false
   export_cameras: true
   export_background: true
+  # zDepth | cameraDistance | rayHitDistance
   sorting_mode_hint: cameraDistance
   # If true, Gaussian prim ColorSpaceAPI uses lin_rec709_scene; else srgb_rec709_display
   linear_srgb: false

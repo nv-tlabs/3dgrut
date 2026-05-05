@@ -54,6 +54,10 @@ from threedgrut.export.usd.camera_copy import (
     merge_source_prim_at_same_path,
     merge_source_world_at_same_paths,
 )
+from threedgrut.export.usd.particle_field_hints import (
+    DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
+    normalize_particle_field_sorting_mode_hint,
+)
 from threedgrut.export.usd.post_processing_sh_bake import MODE_PPISP_BAKE_VIGNETTING_ACHROMATIC_FIT
 from threedgrut.export.usd.writers.camera import export_cameras_to_usd
 
@@ -273,7 +277,7 @@ class USDExporter(ModelExporter):
         export_cameras: bool = True,
         export_background: bool = True,
         apply_normalizing_transform: bool = True,
-        sorting_mode_hint: str = "cameraDistance",
+        sorting_mode_hint: str = DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
         linear_srgb: bool = False,
         export_post_processing: bool = True,
         post_processing_export_mode: str = MODE_POST_PROCESSING_EXPORT_BAKED_SH,
@@ -296,7 +300,7 @@ class USDExporter(ModelExporter):
             export_cameras: Include camera poses in export.
             export_background: Include background/environment in export.
             apply_normalizing_transform: Apply transform to normalize scene orientation.
-            sorting_mode_hint: Sorting hint for rendering ("cameraDistance", "zDepth").
+            sorting_mode_hint: Sorting hint for rendering ("zDepth", "cameraDistance", "rayHitDistance").
             linear_srgb: If True, set prim color space to lin_rec709_scene.
             export_post_processing: If True, export the checkpoint post-processing
                 module with the selected export mode.
@@ -326,7 +330,7 @@ class USDExporter(ModelExporter):
         self.export_cameras = export_cameras
         self.export_background = export_background
         self.apply_normalizing_transform = apply_normalizing_transform
-        self.sorting_mode_hint = sorting_mode_hint
+        self.sorting_mode_hint = normalize_particle_field_sorting_mode_hint(sorting_mode_hint)
         self.linear_srgb = linear_srgb
         self.export_post_processing = export_post_processing
         self.post_processing_export_mode = normalize_post_processing_export_mode(post_processing_export_mode)
@@ -741,7 +745,7 @@ class USDExporter(ModelExporter):
             export_cameras=getattr(export_conf, "export_cameras", True),
             export_background=getattr(export_conf, "export_background", True),
             apply_normalizing_transform=getattr(export_conf, "apply_normalizing_transform", True),
-            sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", "cameraDistance"),
+            sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT),
             linear_srgb=getattr(export_conf, "linear_srgb", False),
             export_post_processing=_get_export_config_value(
                 export_conf,

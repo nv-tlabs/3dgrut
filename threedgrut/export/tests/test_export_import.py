@@ -510,5 +510,32 @@ class TestUSDExportColorSpace:
             assert stage.GetEndTimeCode() == 1.0
 
 
+class TestUSDExportSortingModeHint:
+    """Test ParticleField sortingModeHint authoring."""
+
+    def test_usd_export_sorting_mode_hint_ray_hit_distance(self):
+        """Export can author the usd-core 26.5 rayHitDistance sorting hint."""
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usdz"
+            USDExporter(
+                half_precision=False,
+                export_cameras=False,
+                export_background=False,
+                apply_normalizing_transform=False,
+                sorting_mode_hint="rayHitDistance",
+            ).export(model, usd_path)
+            stage = Usd.Stage.Open(str(usd_path))
+            assert stage
+            prim = _find_prim_with_color_space_api(stage)
+            assert prim is not None, "No Gaussian particle prim found"
+            assert prim.GetAttribute("sortingModeHint").Get() == "rayHitDistance"
+
+    def test_usd_export_sorting_mode_hint_rejects_unknown_token(self):
+        """Unsupported sorting hints fail before authoring invalid USD."""
+        with pytest.raises(ValueError, match="Unsupported ParticleField sortingModeHint"):
+            USDExporter(sorting_mode_hint="frontToBack")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

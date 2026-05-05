@@ -27,6 +27,7 @@ import numpy as np
 from pxr import Gf, Usd, Vt
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
+from threedgrut.export.usd.particle_field_hints import DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +133,7 @@ def create_gaussian_writer(
     content_root_path: str = "/World/Gaussians",
     half_geometry: bool = False,
     half_features: bool = False,
-    sorting_mode_hint: str = "cameraDistance",
+    sorting_mode_hint: str = DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
     linear_srgb: bool = False,
     omni_usd: bool = False,
     has_post_processing: bool = False,

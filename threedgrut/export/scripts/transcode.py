@@ -54,6 +54,10 @@ from threedgrut.export.importers import (
 from threedgrut.export.usd.camera_copy import usd_stage_path_context_for_camera_copy
 from threedgrut.export.usd.exporter import USDExporter
 from threedgrut.export.usd.nurec.exporter import NuRecExporter
+from threedgrut.export.usd.particle_field_hints import (
+    DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
+    PARTICLE_FIELD_SORTING_MODE_HINTS,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -174,7 +178,11 @@ def get_exporter(
                 export_cameras=False,
                 export_background=False,
                 apply_normalizing_transform=False,
-                sorting_mode_hint=render_order_hint if render_order_hint is not None else "cameraDistance",
+                sorting_mode_hint=(
+                    render_order_hint
+                    if render_order_hint is not None
+                    else DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT
+                ),
                 linear_srgb=linear_srgb,
             ),
             False,
@@ -364,9 +372,13 @@ Examples:
     parser.add_argument(
         "--render-order-hint",
         type=str,
+        choices=PARTICLE_FIELD_SORTING_MODE_HINTS,
         default=None,
         metavar="MODE",
-        help="Force sortingModeHint for lightfield export (e.g. cameraDistance, zDepth). Ignored with --format ply/nurec (warning only).",
+        help=(
+            "Force sortingModeHint for lightfield export "
+            "(zDepth, cameraDistance, rayHitDistance). Ignored with --format ply/nurec (warning only)."
+        ),
     )
     parser.add_argument(
         "--linear-srgb",

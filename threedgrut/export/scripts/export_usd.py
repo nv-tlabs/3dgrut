@@ -37,6 +37,10 @@ from pathlib import Path
 import torch
 
 from threedgrut.export import NuRecExporter, USDExporter
+from threedgrut.export.usd.particle_field_hints import (
+    DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
+    PARTICLE_FIELD_SORTING_MODE_HINTS,
+)
 from threedgrut.utils.logger import logger
 
 
@@ -123,6 +127,16 @@ Examples:
         "--linear-srgb",
         action="store_true",
         help="Set prim color space to lin_rec709_scene (linear). Default is srgb_rec709_display.",
+    )
+    parser.add_argument(
+        "--sorting-mode-hint",
+        type=str,
+        choices=PARTICLE_FIELD_SORTING_MODE_HINTS,
+        default=None,
+        help=(
+            "ParticleField sortingModeHint for standard USD export. "
+            "Use rayHitDistance for ray-tracing renderers that support ray-hit sorting."
+        ),
     )
     post_processing_group = parser.add_mutually_exclusive_group()
     post_processing_group.add_argument(
@@ -385,7 +399,13 @@ def main():
             export_cameras=not args.no_cameras,
             export_background=not args.no_background,
             apply_normalizing_transform=not args.no_transform,
-            sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", "cameraDistance"),
+            sorting_mode_hint=_arg_or_conf(
+                args.sorting_mode_hint,
+                export_conf,
+                "sorting-mode-hint",
+                "sorting_mode_hint",
+                DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
+            ),
             linear_srgb=args.linear_srgb or getattr(export_conf, "linear_srgb", False),
             export_post_processing=export_post_processing,
             post_processing_export_mode=post_processing_export_mode,

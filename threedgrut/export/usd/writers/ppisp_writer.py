@@ -175,7 +175,7 @@ def _set_vignetting_params(shader: UsdShade.Shader, ppisp: PPISP, camera_index: 
     ppisp.vignetting_params[camera_index] has shape [3, 5]:
     [cx, cy, alpha1, alpha2, alpha3] per channel.
     """
-    vig = ppisp.vignetting_params[camera_index].cpu().numpy()  # [3, 5]
+    vig = ppisp.vignetting_params[camera_index].detach().cpu().numpy()  # [3, 5]
     for ch in range(NUM_CHANNELS):
         s = CHANNEL_SUFFIXES[ch]
         shader.CreateInput(f"vignettingCenter{s}", Sdf.ValueTypeNames.Float2).Set(
@@ -192,7 +192,7 @@ def _set_crf_params(shader: UsdShade.Shader, ppisp: PPISP, camera_index: int) ->
     ppisp.crf_params[camera_index] has shape [3, 4]:
     [toe, shoulder, gamma, center] per channel (raw, activations applied in shader).
     """
-    crf = ppisp.crf_params[camera_index].cpu().numpy()  # [3, 4]
+    crf = ppisp.crf_params[camera_index].detach().cpu().numpy()  # [3, 4]
     for ch in range(NUM_CHANNELS):
         s = CHANNEL_SUFFIXES[ch]
         shader.CreateInput(f"crfToe{s}", Sdf.ValueTypeNames.Float).Set(float(crf[ch, 0]))
@@ -216,7 +216,7 @@ def _set_animated_exposure_params(
     ppisp.exposure_params has shape [num_frames].
     Time code = float(frame_idx).
     """
-    exposure = ppisp.exposure_params.cpu().numpy()  # [num_frames]
+    exposure = ppisp.exposure_params.detach().cpu().numpy()  # [num_frames]
 
     valid = [i for i in frame_indices if i < len(exposure)]
     mean_val = float(np.mean(exposure[valid])) if valid else 0.0
@@ -235,7 +235,7 @@ def _set_static_exposure_params(
     frame_index: int,
 ) -> None:
     """Write one fixed exposure offset without USD time samples."""
-    exposure = ppisp.exposure_params.cpu().numpy()
+    exposure = ppisp.exposure_params.detach().cpu().numpy()
     if frame_index < 0 or frame_index >= len(exposure):
         raise ValueError(f"frame_index must be in [0, {len(exposure) - 1}], got {frame_index}.")
     shader.CreateInput("exposureOffset", Sdf.ValueTypeNames.Float).Set(float(exposure[frame_index]))
@@ -253,7 +253,7 @@ def _set_animated_color_params(
     Written as 4 float2 attributes.
     Time code = float(frame_idx).
     """
-    color = ppisp.color_params.cpu().numpy()  # [num_frames, 8]
+    color = ppisp.color_params.detach().cpu().numpy()  # [num_frames, 8]
 
     valid = [i for i in frame_indices if i < len(color)]
     mean_color = np.mean(color[valid], axis=0) if valid else np.zeros(8)
@@ -281,7 +281,7 @@ def _set_static_color_params(
     frame_index: int,
 ) -> None:
     """Write one fixed color latent state without USD time samples."""
-    color = ppisp.color_params.cpu().numpy()
+    color = ppisp.color_params.detach().cpu().numpy()
     if frame_index < 0 or frame_index >= len(color):
         raise ValueError(f"frame_index must be in [0, {len(color) - 1}], got {frame_index}.")
 
@@ -325,9 +325,7 @@ def add_ppisp_shader_to_render_product(
     Returns:
         The created PPISP Shader prim.
     """
-    assert camera_index < ppisp.num_cameras, (
-        f"camera_index {camera_index} >= ppisp.num_cameras {ppisp.num_cameras}"
-    )
+    assert camera_index < ppisp.num_cameras, f"camera_index {camera_index} >= ppisp.num_cameras {ppisp.num_cameras}"
     if not frame_indices and fixed_frame_index is None:
         log.warning(f"No frames for camera {camera_index} at {render_product_path}, skipping")
         return stage.GetPseudoRoot()
@@ -342,10 +340,7 @@ def add_ppisp_shader_to_render_product(
         _set_static_exposure_params(shader, ppisp, fixed_frame_index)
         _set_static_color_params(shader, ppisp, fixed_frame_index)
 
-    log.info(
-        f"Added PPISP shader to {render_product_path} "
-        f"(camera {camera_index}, {len(frame_indices)} frame(s))"
-    )
+    log.info(f"Added PPISP shader to {render_product_path} " f"(camera {camera_index}, {len(frame_indices)} frame(s))")
     return shader.GetPrim()
 
 
