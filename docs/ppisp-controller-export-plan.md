@@ -137,7 +137,7 @@ Two-pronged approach:
    PyTorch controller's outputs to within a tight tolerance, using
    `slangpy` to dispatch the controller shader against a reference image.
 
-2. **Tool: `tools/render_usd_renderproduct/`** — a slangpy-based runner
+2. **Tool: `tools/render_ppisp_spg/`** — a slangpy-based runner
    that opens an exported USD/USDZ, walks `/Render/<cam>` prims, finds
    their SPG shader chain, and replays the chain on a supplied HDR input
    for every authored time sample. Useful for visual regression and for

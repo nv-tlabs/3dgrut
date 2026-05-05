@@ -23,7 +23,7 @@ the shared camera grouping and `/Render`/`RenderProduct` authoring are available
 
 ## 1. Context
 
-The current PPISP USD export plan in `docs/ppisp-export-plan.md` uses a custom
+The current PPISP USD export plan in `docs/ppisp-controller-export-plan.md` uses a custom
 SPG shader on each `RenderProduct` because PPISP is a post-blend image-space
 operator:
 
@@ -243,7 +243,7 @@ Confidence: 0.25.
 
 ### Option R0 — SPG-only export
 
-Keep the SPG plan from `docs/ppisp-export-plan.md` as the only PPISP-preserving
+Keep the SPG plan from `docs/ppisp-controller-export-plan.md` as the only PPISP-preserving
 export path.
 
 Use USD post-processing only for user-authored artistic settings unrelated to
@@ -614,9 +614,6 @@ Rationale:
   stable in the target Kit version?
 - Should Gaussian skip-tonemapping be disabled for PPISP USD approximation, or
   is the exported Gaussian material already authored for that path?
-- Should the requested file name keep the `ppsip` spelling, or should a follow-up
-  rename to `ppisp-to-usd-post-processing-plan.md` be made?
-
 ---
 
 ## 9. Current recommendation
