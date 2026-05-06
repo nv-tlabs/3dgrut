@@ -18,6 +18,7 @@ einops
 imageio
 msgpack
 dataclasses_json
+pytest
 # JIT compilation
 setuptools==78.1.1
 # Fused-ssim
@@ -28,7 +29,7 @@ libigl
 pygltflib
 # --find-links https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.2_cu118.html
 # kaolin==0.17.0
-usd-core>=26.3
+usd-core>=26.5
 ppisp @ git+https://github.com/nv-tlabs/ppisp@v1.0.1
 # NCore dataset support (https://github.com/NVIDIA/ncore)
 nvidia-ncore>=19.0.0

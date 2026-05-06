@@ -27,6 +27,10 @@ import numpy as np
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdVol, Vt
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
+from threedgrut.export.usd.particle_field_hints import (
+    DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
+    normalize_particle_field_sorting_mode_hint,
+)
 from threedgrut.export.usd.writers.base import GaussianUSDWriter
 
 logger = logging.getLogger(__name__)
@@ -49,14 +53,23 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
         half_geometry: bool = False,
         half_features: bool = False,
         projection_mode_hint: str = "perspective",
-        sorting_mode_hint: str = "cameraDistance",
+        sorting_mode_hint: str = DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
         linear_srgb: bool = False,
+        omni_usd: bool = False,
+        has_post_processing: bool = False,
     ) -> None:
-        super().__init__(stage, capabilities, content_root_path, linear_srgb=linear_srgb)
+        super().__init__(
+            stage,
+            capabilities,
+            content_root_path,
+            linear_srgb=linear_srgb,
+            omni_usd=omni_usd,
+            has_post_processing=has_post_processing,
+        )
         self.half_geometry = half_geometry
         self.half_features = half_features
         self.projection_mode_hint = projection_mode_hint
-        self.sorting_mode_hint = sorting_mode_hint
+        self.sorting_mode_hint = normalize_particle_field_sorting_mode_hint(sorting_mode_hint)
 
         # Use surflet kernel for surfel models, ellipsoid for 3DGS
         self.use_surflet_kernel = capabilities.is_surfel
@@ -91,6 +104,14 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
         self._set_rendering_hints()
 
         self.apply_color_space_to_prim(self.prim)
+        if self.omni_usd:
+            from threedgrut.export.usd.writers.omni_material import bind_particlefield_emissive_material
+
+            bind_particlefield_emissive_material(
+                stage=self.stage,
+                prim=self.prim,
+                has_post_processing=self.has_post_processing,
+            )
         return self.prim
 
     def _apply_surflet_kernel_schemas(self) -> None:

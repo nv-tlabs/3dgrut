@@ -30,6 +30,7 @@ from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
 from threedgrut.export.adapter import AttributesExportAdapter
 from threedgrut.export.formats import PLYExporter
 from threedgrut.export.importers import PLYImporter, USDImporter
+from threedgrut.export.scripts.transcode import detect_input_format, transcode
 from threedgrut.export.usd.exporter import USDExporter
 
 
@@ -214,6 +215,76 @@ class TestUSDLightFieldRoundTrip:
 
 class TestCrossFormatTranscode:
     """Test transcoding between different formats."""
+
+    def test_transcode_api_ply_to_lightfield(self):
+        """Test the transcode entrypoint converts PLY to USD LightField."""
+        attrs = create_test_attributes(32, sh_degree=3)
+        caps = create_test_capabilities(32, sh_degree=3)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ply_path = Path(tmpdir) / "input.ply"
+            usd_path = Path(tmpdir) / "output.usdz"
+
+            adapter = AttributesExportAdapter(attrs, caps, is_preactivation=True)
+            PLYExporter().export(adapter, ply_path)
+
+            transcode(
+                input_path=ply_path,
+                output_path=usd_path,
+                output_format="lightfield",
+                render_order_hint="rayHitDistance",
+                linear_srgb=True,
+                validate_usd=False,
+            )
+
+            assert usd_path.exists()
+            assert detect_input_format(usd_path) == "lightfield"
+
+            loaded_attrs, _ = USDImporter().load(usd_path)
+            expected_attrs = AttributesExportAdapter(attrs, caps, is_preactivation=True)
+            expected_post = GaussianAttributes(
+                positions=expected_attrs.get_positions().cpu().numpy(),
+                rotations=expected_attrs.get_rotation(preactivation=False).cpu().numpy(),
+                scales=expected_attrs.get_scale(preactivation=False).cpu().numpy(),
+                densities=expected_attrs.get_density(preactivation=False).cpu().numpy(),
+                albedo=expected_attrs.get_features_albedo().cpu().numpy(),
+                specular=expected_attrs.get_features_specular().cpu().numpy(),
+            )
+            results = compare_attributes(expected_post, loaded_attrs, rtol=1e-4, atol=1e-5)
+            for attr_name, result in results.items():
+                assert result["match"], f"PLY→USD transcode failed for {attr_name}: {result}"
+
+    def test_transcode_api_lightfield_to_ply_roundtrip(self):
+        """Test the transcode entrypoint converts USD LightField back to PLY."""
+        attrs = create_test_attributes(32, sh_degree=3)
+        caps = create_test_capabilities(32, sh_degree=3)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "input.usdz"
+            ply_path = Path(tmpdir) / "output.ply"
+
+            adapter = AttributesExportAdapter(attrs, caps, is_preactivation=True)
+            USDExporter(
+                export_cameras=False,
+                export_background=False,
+                apply_normalizing_transform=False,
+            ).export(adapter, usd_path, validate_usd=False)
+
+            transcode(
+                input_path=usd_path,
+                output_path=ply_path,
+                output_format="ply",
+                max_sh_degree=3,
+                validate_usd=False,
+            )
+
+            assert ply_path.exists()
+            assert detect_input_format(ply_path) == "ply"
+
+            loaded_attrs, _ = PLYImporter(max_sh_degree=3).load(ply_path)
+            results = compare_attributes(attrs, loaded_attrs, rtol=1e-2, atol=1e-3)
+            for attr_name, result in results.items():
+                assert result["match"], f"USD→PLY transcode failed for {attr_name}: {result}"
 
     def test_ply_to_usd_to_ply(self):
         """Test PLY → USD LightField → PLY transcode chain."""

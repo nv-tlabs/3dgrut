@@ -21,10 +21,12 @@ Usage:
     python -m threedgrut.export.scripts.export_usd --checkpoint path/to/checkpoint.pt --output output.usdz
 
     # Export with NuRec format (Omniverse compatibility)
-    python -m threedgrut.export.scripts.export_usd --checkpoint path/to/checkpoint.pt --output output.usdz --format nurec
+    python -m threedgrut.export.scripts.export_usd --checkpoint path/to/checkpoint.pt \
+        --output output.usdz --format nurec
 
     # Export without cameras/background
-    python -m threedgrut.export.scripts.export_usd --checkpoint path/to/checkpoint.pt --output output.usdz --no-cameras --no-background
+    python -m threedgrut.export.scripts.export_usd --checkpoint path/to/checkpoint.pt \
+        --output output.usdz --no-cameras --no-background
 """
 
 import argparse
@@ -35,6 +37,10 @@ from pathlib import Path
 import torch
 
 from threedgrut.export import NuRecExporter, USDExporter
+from threedgrut.export.usd.particle_field_hints import (
+    DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
+    PARTICLE_FIELD_SORTING_MODE_HINTS,
+)
 from threedgrut.utils.logger import logger
 
 
@@ -122,6 +128,153 @@ Examples:
         action="store_true",
         help="Set prim color space to lin_rec709_scene (linear). Default is srgb_rec709_display.",
     )
+    parser.add_argument(
+        "--sorting-mode-hint",
+        type=str,
+        choices=PARTICLE_FIELD_SORTING_MODE_HINTS,
+        default=None,
+        help=(
+            "ParticleField sortingModeHint for standard USD export. "
+            "Use rayHitDistance for ray-tracing renderers that support ray-hit sorting."
+        ),
+    )
+    post_processing_group = parser.add_mutually_exclusive_group()
+    post_processing_group.add_argument(
+        "--export-post-processing",
+        dest="export_post_processing",
+        action="store_true",
+        default=None,
+        help="Export post-processing effects when the checkpoint contains a supported post-processing module.",
+    )
+    post_processing_group.add_argument(
+        "--no-export-post-processing",
+        dest="export_post_processing",
+        action="store_false",
+        help="Skip post-processing export even when the checkpoint contains a supported post-processing module.",
+    )
+    parser.add_argument(
+        "--post-processing-export-mode",
+        type=str,
+        choices=["baked-sh", "omni-native"],
+        default=None,
+        help="Post-processing export mode. 'omni-native' uses PPISP SPG and Omniverse material authoring.",
+    )
+    parser.add_argument(
+        "--post-processing-camera-id",
+        type=int,
+        default=None,
+        help=(
+            "Optional fixed PPISP camera id. Baked-SH defaults unset values to 0; "
+            "omni-native keeps per-camera behavior when unset."
+        ),
+    )
+    parser.add_argument(
+        "--post-processing-frame-id",
+        type=int,
+        default=None,
+        help=(
+            "Optional fixed PPISP frame id. Baked-SH defaults unset values to 0; "
+            "omni-native keeps animated frame inputs when unset."
+        ),
+    )
+    parser.add_argument(
+        "--ppisp-responsivity",
+        type=float,
+        default=None,
+        help=(
+            "Achromatic PPISP responsivity default authored on omni-native "
+            "SPG shaders. Default is 1.0."
+        ),
+    )
+    parser.add_argument(
+        "--ignore-ppisp-controller",
+        action="store_true",
+        help=(
+            "If the checkpoint contains trained PPISP controllers, ignore them and "
+            "export the optimized per-frame exposure/color parameters as time-sampled "
+            "USD attributes instead. Has no effect when the checkpoint has no controllers."
+        ),
+    )
+    parser.add_argument(
+        "--post-processing-bake-epochs",
+        type=int,
+        default=None,
+        help="Number of sequential passes over the train/reference set for post-processing baked-SH export.",
+    )
+    parser.add_argument(
+        "--post-processing-bake-learning-rate",
+        type=float,
+        default=None,
+        help="Adam learning rate for features_albedo (default 2.5e-3, matches 3DGS).",
+    )
+    parser.add_argument(
+        "--post-processing-bake-learning-rate-specular",
+        type=float,
+        default=None,
+        help="Adam learning rate for features_specular (default = albedo lr / 20, matches 3DGS).",
+    )
+    parser.add_argument(
+        "--post-processing-bake-learning-rate-density",
+        type=float,
+        default=None,
+        help="Adam learning rate for density (default 5e-2, matches 3DGS).",
+    )
+    parser.add_argument(
+        "--ppisp-bake-vignetting-mode",
+        type=str,
+        choices=["none", "achromatic-fit"],
+        default=None,
+        help=(
+            "Vignetting handling for PPISP baked-SH fitting. 'none' disables PPISP vignetting; "
+            "'achromatic-fit' uses chromatic PPISP reference and an achromatic fit-only vignette."
+        ),
+    )
+    parser.add_argument(
+        "--post-processing-bake-view-mode",
+        type=str,
+        choices=["training", "trajectory"],
+        default=None,
+        help=(
+            "Which views the bake fit sees per step. 'training' (default) iterates the train "
+            "dataloader. 'trajectory' orders views along an NN+2-opt camera path and samples "
+            "random t in [0,1] -- useful when training views are sparse."
+        ),
+    )
+    parser.add_argument(
+        "--post-processing-bake-view-seed",
+        type=int,
+        default=None,
+        help="Optional RNG seed for the interpolation samplers (None = non-deterministic).",
+    )
+    parser.add_argument(
+        "--post-processing-bake-trajectory-weight-position",
+        type=float,
+        default=None,
+        help="Trajectory mode only: weight on the (mean-normalised) position term in pose distance.",
+    )
+    parser.add_argument(
+        "--post-processing-bake-trajectory-weight-rotation",
+        type=float,
+        default=None,
+        help="Trajectory mode only: weight on the (1 - cos(angle)) rotation term in pose distance.",
+    )
+    parser.add_argument(
+        "--radiance-scale",
+        type=float,
+        default=None,
+        help=(
+            "Multiplicative scale applied to the SH-evaluated RGB output of the "
+            "exported asset. Default 1.0 (no-op). The DC offset is compensated so "
+            "rendered output equals radiance-scale x original eval. Useful for "
+            "matching downstream tonemap exposure."
+        ),
+    )
+    parser.add_argument(
+        "--frames-per-second",
+        type=float,
+        default=None,
+        help="USD timeCodesPerSecond for standard export. Default comes from export_usd.frames_per_second.",
+    )
 
     # Dataset path (optional, overrides checkpoint's dataset path)
     parser.add_argument(
@@ -138,8 +291,70 @@ Examples:
         action="store_true",
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--no-usd-validate",
+        action="store_true",
+        help="Skip OpenUSD stage validation after standard (ParticleField) export",
+    )
 
     return parser.parse_args()
+
+
+def _load_ppisp_from_checkpoint(checkpoint, conf):
+    """Load trained PPISP state for USD export when available."""
+    post_conf = getattr(conf, "post_processing", None)
+    if "post_processing" not in checkpoint or post_conf is None or getattr(post_conf, "method", None) != "ppisp":
+        return None
+
+    try:
+        from ppisp import PPISP, PPISPConfig
+    except ImportError:
+        logger.warning("Checkpoint contains PPISP state, but ppisp is not available; skipping PPISP USD export")
+        return None
+
+    use_controller = post_conf.get("use_controller", True)
+    n_distillation_steps = post_conf.get("n_distillation_steps", 5000)
+    if use_controller and n_distillation_steps > 0:
+        main_training_steps = conf.n_iterations - n_distillation_steps
+        controller_activation_ratio = main_training_steps / conf.n_iterations
+        controller_distillation = True
+    elif use_controller:
+        controller_activation_ratio = 0.8
+        controller_distillation = False
+    else:
+        controller_activation_ratio = 0.0
+        controller_distillation = False
+
+    ppisp_config = PPISPConfig(
+        use_controller=use_controller,
+        controller_distillation=controller_distillation,
+        controller_activation_ratio=controller_activation_ratio,
+    )
+    post_processing = PPISP.from_state_dict(checkpoint["post_processing"]["module"], config=ppisp_config)
+    post_processing = post_processing.to("cpu")
+    logger.info("Loaded PPISP post-processing state for USD export")
+    return post_processing
+
+
+def _get_export_conf_value(export_conf, dashed_name: str, attr_name: str, default):
+    if hasattr(export_conf, "get"):
+        return export_conf.get(dashed_name, getattr(export_conf, attr_name, default))
+    return getattr(export_conf, attr_name, default)
+
+
+def _get_export_post_processing_default(export_conf):
+    if hasattr(export_conf, "get"):
+        return export_conf.get(
+            "export-post-processing",
+            getattr(export_conf, "export_post_processing", True),
+        )
+    return getattr(export_conf, "export_post_processing", True)
+
+
+def _arg_or_conf(cli_value, export_conf, dashed_name: str, attr_name: str, default):
+    if cli_value is not None:
+        return cli_value
+    return _get_export_conf_value(export_conf, dashed_name, attr_name, default)
 
 
 def load_model_from_checkpoint(checkpoint_path: str):
@@ -164,7 +379,8 @@ def load_model_from_checkpoint(checkpoint_path: str):
     model.init_from_checkpoint(checkpoint, setup_optimizer=False)
     model.eval()
 
-    return model, conf, model.background
+    post_processing = _load_ppisp_from_checkpoint(checkpoint, conf)
+    return model, conf, model.background, post_processing
 
 
 def main():
@@ -184,7 +400,7 @@ def main():
 
     # Load model from checkpoint
     try:
-        model, conf, background = load_model_from_checkpoint(str(checkpoint_path))
+        model, conf, background, post_processing = load_model_from_checkpoint(str(checkpoint_path))
         logger.info(f"Loaded model with {model.get_positions().shape[0]} Gaussians")
     except ImportError:
         logger.error("Failed to import model class. Is 3DGRUT properly installed?")
@@ -197,9 +413,24 @@ def main():
             traceback.print_exc()
         sys.exit(1)
 
-    # Load dataset for camera export
+    export_conf = getattr(conf, "export_usd", None) or conf
+    if args.export_post_processing is not None:
+        export_post_processing = args.export_post_processing
+    elif post_processing is not None:
+        export_post_processing = True
+    else:
+        export_post_processing = bool(_get_export_post_processing_default(export_conf))
+    post_processing_export_mode = _arg_or_conf(
+        args.post_processing_export_mode,
+        export_conf,
+        "post-processing-export-mode",
+        "post_processing_export_mode",
+        "baked-sh",
+    )
+    # Load dataset for camera export and for train-split post-processing SH baking.
     dataset = None
-    if not args.no_cameras:
+    needs_dataset = not args.no_cameras or (post_processing is not None and export_post_processing)
+    if needs_dataset:
         try:
             import threedgrut.datasets as datasets
 
@@ -214,15 +445,16 @@ def main():
             elif not hasattr(conf, "dataset") or not hasattr(conf.dataset, "type"):
                 logger.warning("No dataset type in checkpoint config. Cannot load dataset for camera export.")
             else:
-                dataset = datasets.make_test(name=conf.dataset.type, config=conf)
+                dataset, _ = datasets.make(name=conf.dataset.type, config=conf, ray_jitter=None)
                 split = getattr(dataset, "split", "unknown")
                 logger.info(f"Loaded dataset with {len(dataset)} frames for camera export (split={split})")
         except Exception as e:
-            logger.warning(f"Failed to load dataset for camera export: {e}")
+            logger.error(f"Failed to load dataset for camera export: {e}")
             if args.verbose:
                 import traceback
 
                 traceback.print_exc()
+            sys.exit(1)
 
     # Create exporter based on format
     if args.format == "nurec":
@@ -237,18 +469,131 @@ def main():
             export_cameras=not args.no_cameras,
             export_background=not args.no_background,
             apply_normalizing_transform=not args.no_transform,
-            linear_srgb=args.linear_srgb,
+            sorting_mode_hint=_arg_or_conf(
+                args.sorting_mode_hint,
+                export_conf,
+                "sorting-mode-hint",
+                "sorting_mode_hint",
+                DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
+            ),
+            linear_srgb=args.linear_srgb or getattr(export_conf, "linear_srgb", False),
+            export_post_processing=export_post_processing,
+            post_processing_export_mode=post_processing_export_mode,
+            post_processing_camera_id=_arg_or_conf(
+                args.post_processing_camera_id,
+                export_conf,
+                "post-processing-camera-id",
+                "post_processing_camera_id",
+                None,
+            ),
+            post_processing_frame_id=_arg_or_conf(
+                args.post_processing_frame_id,
+                export_conf,
+                "post-processing-frame-id",
+                "post_processing_frame_id",
+                None,
+            ),
+            ppisp_responsivity=_arg_or_conf(
+                args.ppisp_responsivity,
+                export_conf,
+                "ppisp-responsivity",
+                "ppisp_responsivity",
+                (1.0, 1.0, 1.0),
+            ),
+            ignore_ppisp_controller=args.ignore_ppisp_controller,
+            post_processing_bake_epochs=_arg_or_conf(
+                args.post_processing_bake_epochs,
+                export_conf,
+                "post-processing-bake-epochs",
+                "post_processing_bake_epochs",
+                7,
+            ),
+            post_processing_bake_learning_rate=_arg_or_conf(
+                args.post_processing_bake_learning_rate,
+                export_conf,
+                "post-processing-bake-learning-rate",
+                "post_processing_bake_learning_rate",
+                2.5e-3,
+            ),
+            post_processing_bake_learning_rate_specular=_arg_or_conf(
+                args.post_processing_bake_learning_rate_specular,
+                export_conf,
+                "post-processing-bake-learning-rate-specular",
+                "post_processing_bake_learning_rate_specular",
+                None,
+            ),
+            post_processing_bake_learning_rate_density=_arg_or_conf(
+                args.post_processing_bake_learning_rate_density,
+                export_conf,
+                "post-processing-bake-learning-rate-density",
+                "post_processing_bake_learning_rate_density",
+                5.0e-2,
+            ),
+            ppisp_bake_vignetting_mode=_arg_or_conf(
+                args.ppisp_bake_vignetting_mode,
+                export_conf,
+                "ppisp-bake-vignetting-mode",
+                "ppisp_bake_vignetting_mode",
+                "none",
+            ),
+            post_processing_bake_view_mode=_arg_or_conf(
+                args.post_processing_bake_view_mode,
+                export_conf,
+                "post-processing-bake-view-mode",
+                "post_processing_bake_view_mode",
+                "trajectory",
+            ),
+            post_processing_bake_view_seed=_arg_or_conf(
+                args.post_processing_bake_view_seed,
+                export_conf,
+                "post-processing-bake-view-seed",
+                "post_processing_bake_view_seed",
+                None,
+            ),
+            post_processing_bake_trajectory_weight_position=_arg_or_conf(
+                args.post_processing_bake_trajectory_weight_position,
+                export_conf,
+                "post-processing-bake-trajectory-weight-position",
+                "post_processing_bake_trajectory_weight_position",
+                1.0,
+            ),
+            post_processing_bake_trajectory_weight_rotation=_arg_or_conf(
+                args.post_processing_bake_trajectory_weight_rotation,
+                export_conf,
+                "post-processing-bake-trajectory-weight-rotation",
+                "post_processing_bake_trajectory_weight_rotation",
+                0.5,
+            ),
+            radiance_scale=_arg_or_conf(
+                args.radiance_scale,
+                export_conf,
+                "radiance-scale",
+                "radiance_scale",
+                1.0,
+            ),
+            frames_per_second=_arg_or_conf(
+                args.frames_per_second,
+                export_conf,
+                "frames-per-second",
+                "frames_per_second",
+                1.0,
+            ),
         )
         logger.info("Using ParticleField3DGaussianSplat schema (standard)")
 
     # Export
     try:
+        export_kw = {}
+        if args.format == "standard":
+            export_kw["validate_usd"] = not args.no_usd_validate
         exporter.export(
             model=model,
             output_path=output_path,
             dataset=dataset,
             conf=conf,
             background=background,
+            post_processing=post_processing,
+            **export_kw,
         )
         logger.info(f"Export successful: {output_path}")
     except Exception as e:

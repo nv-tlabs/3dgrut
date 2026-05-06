@@ -151,6 +151,13 @@ jobs:
         run: |
           .venv/bin/python train.py --help
 
+      - name: Test USD export/import
+        run: |
+          .venv/bin/python -m pytest \
+            threedgrut/export/tests/test_export_import.py \
+            threedgrut/export/tests/test_transcode_roundtrip.py \
+            -v
+
   ci-uv-windows:
     name: ci-uv-windows (CUDA ${{ matrix.cuda_version }})
     runs-on: windows-latest

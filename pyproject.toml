@@ -41,6 +41,7 @@ dependencies = [
     "omegaconf",
     "opencv-python",
     "piexif",
+    "pytest",
     "rich",
     "scikit-learn",
     "tensorboard",
@@ -53,7 +54,7 @@ dependencies = [
     # # slangtorch on amd64 only
     # "slangtorch==1.3.18; sys_platform == 'linux' and platform_machine == 'x86_64'",
     # usd-core only available for amd64
-    "usd-core>=26.3; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "usd-core>=26.5; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
 [project.optional-dependencies]

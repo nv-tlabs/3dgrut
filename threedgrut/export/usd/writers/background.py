@@ -41,9 +41,7 @@ DEFAULT_DOME_INTENSITY = 1.0
 
 def _tensor_to_tuple(color: torch.Tensor) -> Tuple[float, float, float]:
     """Convert a torch tensor color to a tuple of floats."""
-    if color.is_cuda:
-        color = color.cpu()
-    arr = color.numpy()
+    arr = color.detach().cpu().numpy()
     return tuple(float(c) for c in arr[:3])
 
 
