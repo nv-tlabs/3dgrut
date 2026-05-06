@@ -79,6 +79,8 @@ class MockGaussianModel(ExportableModel):
         # Specular (higher-order SH): zeros for simplicity
         num_specular_coeffs = (sh_degree + 1) ** 2 - 1
         self._specular = torch.zeros((num_gaussians, num_specular_coeffs * 3), dtype=torch.float32, device=device)
+        self.features_albedo = self._albedo
+        self.features_specular = self._specular
 
     def get_positions(self) -> torch.Tensor:
         return self._positions
@@ -508,6 +510,33 @@ class TestUSDExportColorSpace:
             assert not stage.GetPrimAtPath("/World/gaussians/Cameras/camera_0000").IsValid()
             assert stage.GetStartTimeCode() == 0.0
             assert stage.GetEndTimeCode() == 1.0
+
+
+class TestUSDSampleExports:
+    """Sample USD exports that exercise representative exporter options."""
+
+    @pytest.mark.parametrize("suffix", [".usda", ".usdz"])
+    def test_sample_standard_export_with_cameras_and_timing(self, suffix: str):
+        """Standard export writes openable stages for both layer and package outputs."""
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        dataset = MockCameraDataset()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / f"sample{suffix}"
+            USDExporter(
+                half_precision=False,
+                export_cameras=True,
+                export_background=False,
+                apply_normalizing_transform=False,
+                frames_per_second=24.0,
+                radiance_scale=1.25,
+            ).export(model, usd_path, dataset=dataset, validate_usd=False)
+
+            assert usd_path.exists()
+            stage = Usd.Stage.Open(str(usd_path))
+            assert stage
+            assert stage.GetTimeCodesPerSecond() == 24.0
+            assert stage.GetPrimAtPath("/World/Cameras/camera_0000").IsValid()
+            assert _find_prim_with_color_space_api(stage) is not None
 
 
 class TestUSDExportSortingModeHint:
