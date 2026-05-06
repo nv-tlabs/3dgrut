@@ -41,6 +41,7 @@ dependencies = [
     "omegaconf",
     "opencv-python",
     "piexif",
+    "pytest",
     "rich",
     "scikit-learn",
     "tensorboard",

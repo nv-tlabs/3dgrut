@@ -18,6 +18,7 @@ einops
 imageio
 msgpack
 dataclasses_json
+pytest
 # JIT compilation
 setuptools==78.1.1
 # Fused-ssim
