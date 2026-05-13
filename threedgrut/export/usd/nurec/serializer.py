@@ -223,6 +223,13 @@ def serialize_usd_default_layer(gauss_stage: NamedUSDStage) -> NamedUSDStage:
         NamedUSDStage: The default USD stage with the gauss reference
     """
     stage = initialize_usd_stage()
+    if (
+        getattr(gauss_stage.stage, "HasAuthoredTimeCodeRange", None)
+        and gauss_stage.stage.HasAuthoredTimeCodeRange()
+    ):
+        stage.SetStartTimeCode(gauss_stage.stage.GetStartTimeCode())
+        stage.SetEndTimeCode(gauss_stage.stage.GetEndTimeCode())
+    stage.SetTimeCodesPerSecond(gauss_stage.stage.GetTimeCodesPerSecond())
 
     # The delegate captures all errors about dangling references, effectively silencing them.
     delegate = UsdUtils.CoalescingDiagnosticDelegate()
@@ -242,7 +249,11 @@ def serialize_usd_default_layer(gauss_stage: NamedUSDStage) -> NamedUSDStage:
 
 
 def write_to_usdz(
-    file_path: Path, model_file: NamedSerialized, gauss_usd: NamedUSDStage, default_usd: NamedUSDStage
+    file_path: Path,
+    model_file: NamedSerialized,
+    gauss_usd: NamedUSDStage,
+    default_usd: NamedUSDStage,
+    extra_files: list[NamedSerialized] | None = None,
 ) -> None:
     """
     Write the USDZ file containing the model data and USD stages.
@@ -260,8 +271,10 @@ def write_to_usdz(
         # Save default.usda first (required by USDZ spec)
         default_usd.save_to_zip(zip_file)
 
-        # Save the model file and gauss USD stage
+        # Save the model file, gauss USD stage, and optional shader sidecars.
         model_file.save_to_zip(zip_file)
         gauss_usd.save_to_zip(zip_file)
+        for extra_file in extra_files or []:
+            extra_file.save_to_zip(zip_file)
 
     logger.info(f"USDZ file created successfully at {file_path}")
