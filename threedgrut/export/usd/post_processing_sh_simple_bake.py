@@ -64,13 +64,14 @@ def _bake_dc_through_ppisp(
     exposure_params = torch.tensor([exposure], device=device, dtype=dtype)
     color_params = color.to(device=device, dtype=dtype).unsqueeze(0)
     vignetting_params = torch.zeros_like(ppisp.vignetting_params, device=device, dtype=dtype)
+    crf_params = ppisp.crf_params.to(device=device, dtype=dtype)
     pixel_coords = torch.zeros(num_gaussians, 2, device=device, dtype=dtype)
 
     return ppisp_apply(
         exposure_params=exposure_params,
         vignetting_params=vignetting_params,
         color_params=color_params,
-        crf_params=ppisp.crf_params,
+        crf_params=crf_params,
         rgb_in=dc_rgb_linear.contiguous(),
         pixel_coords=pixel_coords,
         resolution_w=1,
