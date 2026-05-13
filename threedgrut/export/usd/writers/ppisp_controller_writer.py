@@ -13,8 +13,9 @@ PPISP Controller USD writer.
 Writes the per-camera PPISP controller as a UsdShade Shader prim that
 references the shared ``ppisp_controller.slang`` SPG asset. The trained
 controller weights are flattened into a single ``float[] inputs:weights``
-attribute on the Shader prim — the Slang shader picks them up as a
-``StructuredBuffer<float>`` at dispatch time.
+attribute on the Shader prim. The Slang shader exposes a top-level
+``StructuredBuffer<float> weights`` parameter so Kit's SPG reflection can
+match the authored USD input by name.
 
 The flatten layout must match ``ppisp_controller.slang``'s ``OFF_*``
 constants:
