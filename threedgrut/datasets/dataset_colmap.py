@@ -88,6 +88,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         test_split_interval=8,
         ray_jitter=None,
         exif_exposures: Optional[list[Optional[float]]] = None,
+        camera_names: Optional[list[str]] = None,
+        camera_ids: Optional[list[int]] = None,
     ):
         self.path = path
         self.device = device
@@ -96,6 +98,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.ray_jitter = ray_jitter
         self.test_split_interval = test_split_interval
         self._all_exif_exposures = exif_exposures  # Exposure values for all frames (pre-split)
+        self.camera_names = list(camera_names) if camera_names is not None else None
+        self.camera_ids = [int(camera_id) for camera_id in camera_ids] if camera_ids is not None else None
 
         # Worker-based GPU cache for multiprocessing compatibility
         self._worker_gpu_cache = {}
@@ -109,6 +113,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         # Get the scene data
         self.load_intrinsics_and_extrinsics()
+        frame_indices_before_split = self._filter_cameras()
 
         # Build mapping from COLMAP camera_id to 0-based contiguous index
         # This is needed for post-processing which expects 0-based camera indices
@@ -139,8 +144,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         # Apply split indices to EXIF exposures
         if self._all_exif_exposures is not None:
+            frame_exif_exposures = [self._all_exif_exposures[i] for i in frame_indices_before_split]
             self.exif_exposures: Optional[list[Optional[float]]] = [
-                self._all_exif_exposures[i] for i in np.where(indices)[0]
+                frame_exif_exposures[i] for i in np.where(indices)[0]
             ]
         else:
             self.exif_exposures = None
@@ -162,6 +168,70 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             cameras_intrinsic_file = os.path.join(self.path, "sparse/0", "cameras.txt")
             self.cam_extrinsics = read_colmap_extrinsics_text(cameras_extrinsic_file)
             self.cam_intrinsics = read_colmap_intrinsics_text(cameras_intrinsic_file)
+
+    def _camera_names_by_id(self) -> dict[int, str]:
+        sorted_camera_ids = sorted(self.cam_intrinsics.keys())
+        camera_id_to_idx = {camera_id: idx for idx, camera_id in enumerate(sorted_camera_ids)}
+        names: dict[int, str] = {
+            camera_id: f"camera_{camera_id_to_idx[camera_id]}" for camera_id in sorted_camera_ids
+        }
+
+        for extr in self.cam_extrinsics:
+            parent_folder = os.path.dirname(extr.name)
+            if parent_folder:
+                names[extr.camera_id] = parent_folder
+
+        return names
+
+    def _filter_cameras(self) -> list[int]:
+        selected_camera_ids = set(self.cam_intrinsics.keys())
+        names_by_id = self._camera_names_by_id()
+
+        if self.camera_ids is not None:
+            requested_ids = set(self.camera_ids)
+            missing_ids = sorted(requested_ids - selected_camera_ids)
+            if missing_ids:
+                available_ids = sorted(selected_camera_ids)
+                raise ValueError(f"COLMAP camera_ids {missing_ids} not found. Available camera_ids: {available_ids}")
+            selected_camera_ids &= requested_ids
+
+        if self.camera_names is not None:
+            name_to_ids: dict[str, set[int]] = {}
+            for camera_id, camera_name in names_by_id.items():
+                name_to_ids.setdefault(camera_name, set()).add(camera_id)
+
+            requested_names = set(self.camera_names)
+            missing_names = sorted(requested_names - set(name_to_ids))
+            if missing_names:
+                available_names = sorted(name_to_ids)
+                raise ValueError(
+                    f"COLMAP camera_names {missing_names} not found. Available camera_names: {available_names}"
+                )
+
+            selected_camera_ids &= set().union(*(name_to_ids[camera_name] for camera_name in requested_names))
+
+        if not selected_camera_ids:
+            raise ValueError("COLMAP camera selection is empty.")
+
+        frame_indices = [
+            frame_idx for frame_idx, extr in enumerate(self.cam_extrinsics) if extr.camera_id in selected_camera_ids
+        ]
+        if not frame_indices:
+            selected_names = [names_by_id[camera_id] for camera_id in sorted(selected_camera_ids)]
+            raise ValueError(f"COLMAP camera selection {selected_names} has no frames.")
+
+        if self.camera_names is not None or self.camera_ids is not None:
+            selected_names = [names_by_id[camera_id] for camera_id in sorted(selected_camera_ids)]
+            logger.info(
+                f"Using COLMAP cameras: {selected_names} "
+                f"(camera_ids={sorted(selected_camera_ids)}, frames={len(frame_indices)})"
+            )
+
+        self.cam_extrinsics = [self.cam_extrinsics[i] for i in frame_indices]
+        self.cam_intrinsics = {
+            camera_id: intr for camera_id, intr in self.cam_intrinsics.items() if camera_id in selected_camera_ids
+        }
+        return frame_indices
 
     def get_images_folder(self):
         downsample_suffix = "" if self.downsample_factor == 1 else f"_{self.downsample_factor}"
