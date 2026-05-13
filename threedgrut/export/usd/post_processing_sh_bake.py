@@ -116,7 +116,7 @@ def bake_post_processing_into_sh(
     conf,
     *,
     adapter: PostProcessingBakeAdapter,
-    epochs: int = 1,
+    epochs: int = 7,
     learning_rate: float = 2.5e-3,
     learning_rate_specular: float | None = None,
     learning_rate_density: float = 5.0e-2,

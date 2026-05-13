@@ -15,10 +15,9 @@
 
 """Validate baking one fixed PPISP transform into Gaussian SH coefficients.
 
-The reference is the checkpoint render followed by PPISP from one camera/frame,
-including that camera's chromatic vignetting. The fitted method optimizes only a
-cloned model's SH coefficients, with a temporary achromatic vignette applied in
-the fitting loss to isolate chromatic vignette effects.
+The fitted path delegates to the production baked-SH export helper so defaults,
+warm start, optimizer parameter groups, and color-space handling stay aligned
+with USD export.
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Dict
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
@@ -41,16 +40,16 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 import threedgrut.datasets as datasets
 from threedgrut.render import Renderer
-from threedgrut.datasets.utils import configure_dataloader_for_platform
 from threedgrut.export.usd.post_processing_sh_bake import (
     MODE_PPISP_BAKE_VIGNETTING_NONE,
     FixedPPISP,
+    PPISPPostProcessingBakeAdapter,
     apply_achromatic_vignetting,
+    bake_post_processing_into_sh,
     normalize_ppisp_bake_vignetting_mode,
 )
 from threedgrut.export.usd.post_processing_sh_simple_bake import simple_bake
 from threedgrut.utils.logger import logger
-from threedgrut.utils.post_processing_linear_to_srgb import linear_to_srgb
 from threedgrut.utils.render import apply_post_processing
 
 BAKE_FLAVOR_FIT = "fit"
@@ -58,17 +57,13 @@ BAKE_FLAVOR_SIMPLE = "simple"
 BAKE_FLAVOR_SIMPLE_HIGHER_ORDER = "simple-higher-order"
 BAKE_FLAVOR_ALL = "all"
 
-
-def _setShFitParameters(model) -> Iterable[torch.nn.Parameter]:
-    for parameter in model.parameters():
-        parameter.requires_grad_(False)
-
-    fitParameters = []
-    for fieldName in ("features_albedo", "features_specular"):
-        parameter = getattr(model, fieldName)
-        parameter.requires_grad_(True)
-        fitParameters.append(parameter)
-    return fitParameters
+DEFAULT_FIT_EPOCHS = 7
+DEFAULT_LEARNING_RATE = 2.5e-3
+DEFAULT_LEARNING_RATE_DENSITY = 5.0e-2
+DEFAULT_VIGNETTING_MODE = "none"
+DEFAULT_VIEW_MODE = "training"
+DEFAULT_TRAJECTORY_WEIGHT_POSITION = 1.0
+DEFAULT_TRAJECTORY_WEIGHT_ROTATION = 0.5
 
 
 def _renderReference(referenceModel, fixedPpisp, gpuBatch) -> torch.Tensor:
@@ -91,67 +86,9 @@ def _applyAchromaticVignetting(rgb: torch.Tensor, fixedPpisp, gpuBatch, vignetti
     )
 
 
-def _createTrainDataloader(conf):
+def _createTrainDataset(conf):
     trainDataset, _ = datasets.make(name=conf.dataset.type, config=conf, ray_jitter=None)
-    dataloaderKwargs = configure_dataloader_for_platform(
-        {
-            "num_workers": conf.num_workers,
-            "batch_size": 1,
-            "shuffle": True,
-            "pin_memory": True,
-            "persistent_workers": True if conf.num_workers > 0 else False,
-        }
-    )
-    trainDataloader = torch.utils.data.DataLoader(trainDataset, **dataloaderKwargs)
-    return trainDataset, trainDataloader
-
-
-def _fitBakedSh(
-    referenceModel,
-    bakedModel,
-    fixedPpisp,
-    dataset,
-    dataloader,
-    fitEpochs: int,
-    learningRate: float,
-    vignettingMode: str,
-) -> None:
-    if fitEpochs < 1:
-        raise ValueError(f"fitEpochs must be >= 1, got {fitEpochs}.")
-
-    fitParameters = list(_setShFitParameters(bakedModel))
-    optimizer = torch.optim.Adam(fitParameters, lr=learningRate)
-
-    totalSteps = fitEpochs * len(dataloader)
-    logger.start_progress(task_name="Fitting baked SH", total_steps=totalSteps, color="cyan")
-    globalStep = 0
-    for fitEpoch in range(fitEpochs):
-        for batch in dataloader:
-            globalStep += 1
-            gpuBatch = dataset.get_gpu_batch_with_intrinsics(batch)
-            referenceRgb = _renderReference(referenceModel, fixedPpisp, gpuBatch)
-
-            optimizer.zero_grad(set_to_none=True)
-            bakedOutputs = bakedModel(gpuBatch)
-            fittedRgb = torch.clamp(
-                linear_to_srgb(
-                    _applyAchromaticVignetting(bakedOutputs["pred_rgb"], fixedPpisp, gpuBatch, vignettingMode)
-                ),
-                0,
-                1,
-            )
-            loss = torch.nn.functional.mse_loss(fittedRgb, referenceRgb)
-
-            loss.backward()
-            optimizer.step()
-
-            logger.log_progress(
-                task_name="Fitting baked SH",
-                advance=1,
-                iteration=f"{fitEpoch + 1}/{fitEpochs}:{globalStep}",
-                loss=float(loss.detach().item()),
-            )
-    logger.end_progress(task_name="Fitting baked SH")
+    return trainDataset
 
 
 @torch.no_grad()
@@ -233,11 +170,9 @@ def _evaluateBakedSh(
 
         if bakedModel is not None:
             bakedOutputs = bakedModel(gpuBatch)
-            bakedRgb = torch.clamp(linear_to_srgb(bakedOutputs["pred_rgb"]), 0, 1)
+            bakedRgb = torch.clamp(bakedOutputs["pred_rgb"], 0, 1)
             assistedRgb = torch.clamp(
-                linear_to_srgb(
-                    _applyAchromaticVignetting(bakedOutputs["pred_rgb"], fixedPpisp, gpuBatch, vignettingMode)
-                ),
+                _applyAchromaticVignetting(bakedOutputs["pred_rgb"], fixedPpisp, gpuBatch, vignettingMode),
                 0,
                 1,
             )
@@ -360,11 +295,31 @@ def main() -> None:
     parser.add_argument(
         "--fit-epochs",
         dest="fitEpochs",
-        default=1,
+        default=DEFAULT_FIT_EPOCHS,
         type=int,
-        help="Number of sequential passes over the train/reference set.",
+        help=f"Number of sequential passes over the train/reference set [default: {DEFAULT_FIT_EPOCHS}].",
     )
-    parser.add_argument("--learning-rate", dest="learningRate", default=1.0e-3, type=float, help="SH fitting LR.")
+    parser.add_argument(
+        "--learning-rate",
+        dest="learningRate",
+        default=DEFAULT_LEARNING_RATE,
+        type=float,
+        help=f"Adam learning rate for features_albedo [default: {DEFAULT_LEARNING_RATE}].",
+    )
+    parser.add_argument(
+        "--learning-rate-specular",
+        dest="learningRateSpecular",
+        default=None,
+        type=float,
+        help="Adam learning rate for features_specular [default: learning-rate / 20].",
+    )
+    parser.add_argument(
+        "--learning-rate-density",
+        dest="learningRateDensity",
+        default=DEFAULT_LEARNING_RATE_DENSITY,
+        type=float,
+        help=f"Adam learning rate for density [default: {DEFAULT_LEARNING_RATE_DENSITY}].",
+    )
     parser.add_argument(
         "--bake-flavor",
         dest="bakeFlavor",
@@ -384,10 +339,49 @@ def main() -> None:
         "--vignetting-mode",
         dest="vignettingMode",
         choices=["none", "achromatic-fit"],
-        default="achromatic-fit",
+        default=DEFAULT_VIGNETTING_MODE,
         help=(
             "Vignetting handling for the bake. 'none' disables PPISP vignetting; "
-            "'achromatic-fit' uses chromatic PPISP reference and an achromatic fit-only vignette."
+            "'achromatic-fit' retains the legacy vignetting-aware reference path "
+            f"[default: {DEFAULT_VIGNETTING_MODE}]."
+        ),
+    )
+    parser.add_argument(
+        "--view-mode",
+        dest="viewMode",
+        choices=["training", "trajectory"],
+        default=DEFAULT_VIEW_MODE,
+        help=(
+            "Which views the bake fit sees per step. 'training' iterates the train dataloader; "
+            "'trajectory' samples interpolated poses along the training camera path "
+            f"[default: {DEFAULT_VIEW_MODE}]."
+        ),
+    )
+    parser.add_argument(
+        "--view-seed",
+        dest="viewSeed",
+        default=None,
+        type=int,
+        help="Optional RNG seed for interpolated view sampling [default: non-deterministic].",
+    )
+    parser.add_argument(
+        "--trajectory-weight-position",
+        dest="trajectoryWeightPosition",
+        default=DEFAULT_TRAJECTORY_WEIGHT_POSITION,
+        type=float,
+        help=(
+            "Trajectory mode only: weight on the mean-normalized position term "
+            f"[default: {DEFAULT_TRAJECTORY_WEIGHT_POSITION}]."
+        ),
+    )
+    parser.add_argument(
+        "--trajectory-weight-rotation",
+        dest="trajectoryWeightRotation",
+        default=DEFAULT_TRAJECTORY_WEIGHT_ROTATION,
+        type=float,
+        help=(
+            "Trajectory mode only: weight on the 1 - cos(angle) rotation term "
+            f"[default: {DEFAULT_TRAJECTORY_WEIGHT_ROTATION}]."
         ),
     )
     parser.add_argument(
@@ -430,7 +424,7 @@ def main() -> None:
     outputRoot = Path(renderer.out_dir) / f"post_processing_sh_bake_ci{args.cameraId}_fi{args.frameId}"
     outputRoot.mkdir(parents=True, exist_ok=True)
 
-    trainDataset, trainDataloader = _createTrainDataloader(renderer.conf)
+    trainDataset = _createTrainDataset(renderer.conf)
 
     runFit = args.bakeFlavor in (BAKE_FLAVOR_FIT, BAKE_FLAVOR_ALL)
     simpleFlavorHigherOrderFlags = []
@@ -441,18 +435,25 @@ def main() -> None:
 
     bakedModel = None
     if runFit:
-        bakedModel = renderer.model.clone().eval()
-        bakedModel.build_acc()
         logger.info(f"Fitting SH coefficients to fixed PPISP camera={args.cameraId} frame={args.frameId}")
-        _fitBakedSh(
-            referenceModel=referenceModel,
-            bakedModel=bakedModel,
-            fixedPpisp=fixedPpisp,
-            dataset=trainDataset,
-            dataloader=trainDataloader,
-            fitEpochs=args.fitEpochs,
-            learningRate=args.learningRate,
-            vignettingMode=vignettingMode,
+        bakedModel = bake_post_processing_into_sh(
+            model=renderer.model,
+            post_processing=renderer.post_processing,
+            train_dataset=trainDataset,
+            conf=renderer.conf,
+            adapter=PPISPPostProcessingBakeAdapter(
+                camera_id=args.cameraId,
+                frame_id=args.frameId,
+                vignetting_mode=vignettingMode,
+            ),
+            epochs=args.fitEpochs,
+            learning_rate=args.learningRate,
+            learning_rate_specular=args.learningRateSpecular,
+            learning_rate_density=args.learningRateDensity,
+            view_sampling_mode=args.viewMode,
+            interpolated_views_seed=args.viewSeed,
+            trajectory_weight_position=args.trajectoryWeightPosition,
+            trajectory_weight_rotation=args.trajectoryWeightRotation,
         )
 
     simpleBakedModels = {}
