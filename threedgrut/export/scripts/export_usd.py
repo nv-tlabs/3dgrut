@@ -36,7 +36,8 @@ from pathlib import Path
 
 import torch
 
-from threedgrut.export import NuRecExporter, USDExporter
+from threedgrut.export.usd.exporter import USDExporter
+from threedgrut.export.usd.nurec.exporter import NuRecExporter
 from threedgrut.export.usd.particle_field_hints import (
     DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
     PARTICLE_FIELD_SORTING_MODE_HINTS,
@@ -235,9 +236,9 @@ Examples:
         choices=["training", "trajectory"],
         default=None,
         help=(
-            "Which views the bake fit sees per step. 'training' (default) iterates the train "
-            "dataloader. 'trajectory' orders views along an NN+2-opt camera path and samples "
-            "random t in [0,1] -- useful when training views are sparse."
+            "Which views the bake fit sees per step. 'training' (default) iterates "
+            "the train dataloader. 'trajectory' orders views along an NN+2-opt "
+            "camera path and samples random t in [0,1]."
         ),
     )
     parser.add_argument(
@@ -429,6 +430,7 @@ def main():
     )
     # Load dataset for camera export and for train-split post-processing SH baking.
     dataset = None
+    validation_dataset = None
     needs_dataset = not args.no_cameras or (post_processing is not None and export_post_processing)
     if needs_dataset:
         try:
@@ -445,9 +447,13 @@ def main():
             elif not hasattr(conf, "dataset") or not hasattr(conf.dataset, "type"):
                 logger.warning("No dataset type in checkpoint config. Cannot load dataset for camera export.")
             else:
-                dataset, _ = datasets.make(name=conf.dataset.type, config=conf, ray_jitter=None)
+                dataset, validation_dataset = datasets.make(name=conf.dataset.type, config=conf, ray_jitter=None)
                 split = getattr(dataset, "split", "unknown")
-                logger.info(f"Loaded dataset with {len(dataset)} frames for camera export (split={split})")
+                validation_split = getattr(validation_dataset, "split", "unknown")
+                logger.info(
+                    f"Loaded dataset with {len(dataset)} training frames (split={split}) and "
+                    f"{len(validation_dataset)} validation frames (split={validation_split}) for camera export"
+                )
         except Exception as e:
             logger.error(f"Failed to load dataset for camera export: {e}")
             if args.verbose:
@@ -458,7 +464,103 @@ def main():
 
     # Create exporter based on format
     if args.format == "nurec":
-        exporter = NuRecExporter()
+        exporter = NuRecExporter(
+            export_cameras=not args.no_cameras,
+            export_post_processing=export_post_processing,
+            post_processing_export_mode=post_processing_export_mode,
+            post_processing_camera_id=_arg_or_conf(
+                args.post_processing_camera_id,
+                export_conf,
+                "post-processing-camera-id",
+                "post_processing_camera_id",
+                None,
+            ),
+            post_processing_frame_id=_arg_or_conf(
+                args.post_processing_frame_id,
+                export_conf,
+                "post-processing-frame-id",
+                "post_processing_frame_id",
+                None,
+            ),
+            ppisp_responsivity=_arg_or_conf(
+                args.ppisp_responsivity,
+                export_conf,
+                "ppisp-responsivity",
+                "ppisp_responsivity",
+                1.0,
+            ),
+            ignore_ppisp_controller=args.ignore_ppisp_controller,
+            post_processing_bake_epochs=_arg_or_conf(
+                args.post_processing_bake_epochs,
+                export_conf,
+                "post-processing-bake-epochs",
+                "post_processing_bake_epochs",
+                7,
+            ),
+            post_processing_bake_learning_rate=_arg_or_conf(
+                args.post_processing_bake_learning_rate,
+                export_conf,
+                "post-processing-bake-learning-rate",
+                "post_processing_bake_learning_rate",
+                2.5e-3,
+            ),
+            post_processing_bake_learning_rate_specular=_arg_or_conf(
+                args.post_processing_bake_learning_rate_specular,
+                export_conf,
+                "post-processing-bake-learning-rate-specular",
+                "post_processing_bake_learning_rate_specular",
+                None,
+            ),
+            post_processing_bake_learning_rate_density=_arg_or_conf(
+                args.post_processing_bake_learning_rate_density,
+                export_conf,
+                "post-processing-bake-learning-rate-density",
+                "post_processing_bake_learning_rate_density",
+                5.0e-2,
+            ),
+            ppisp_bake_vignetting_mode=_arg_or_conf(
+                args.ppisp_bake_vignetting_mode,
+                export_conf,
+                "ppisp-bake-vignetting-mode",
+                "ppisp_bake_vignetting_mode",
+                "none",
+            ),
+            post_processing_bake_view_mode=_arg_or_conf(
+                args.post_processing_bake_view_mode,
+                export_conf,
+                "post-processing-bake-view-mode",
+                "post_processing_bake_view_mode",
+                "training",
+            ),
+            post_processing_bake_view_seed=_arg_or_conf(
+                args.post_processing_bake_view_seed,
+                export_conf,
+                "post-processing-bake-view-seed",
+                "post_processing_bake_view_seed",
+                None,
+            ),
+            post_processing_bake_trajectory_weight_position=_arg_or_conf(
+                args.post_processing_bake_trajectory_weight_position,
+                export_conf,
+                "post-processing-bake-trajectory-weight-position",
+                "post_processing_bake_trajectory_weight_position",
+                1.0,
+            ),
+            post_processing_bake_trajectory_weight_rotation=_arg_or_conf(
+                args.post_processing_bake_trajectory_weight_rotation,
+                export_conf,
+                "post-processing-bake-trajectory-weight-rotation",
+                "post_processing_bake_trajectory_weight_rotation",
+                0.5,
+            ),
+            radiance_scale=_arg_or_conf(
+                args.radiance_scale,
+                export_conf,
+                "radiance-scale",
+                "radiance_scale",
+                1.0,
+            ),
+        )
         logger.info("Using NuRec format (Omniverse compatible)")
     else:
         half_geometry = args.half_geometry or args.half
@@ -541,7 +643,7 @@ def main():
                 export_conf,
                 "post-processing-bake-view-mode",
                 "post_processing_bake_view_mode",
-                "trajectory",
+                "training",
             ),
             post_processing_bake_view_seed=_arg_or_conf(
                 args.post_processing_bake_view_seed,
@@ -593,6 +695,7 @@ def main():
             conf=conf,
             background=background,
             post_processing=post_processing,
+            validation_dataset=validation_dataset,
             **export_kw,
         )
         logger.info(f"Export successful: {output_path}")

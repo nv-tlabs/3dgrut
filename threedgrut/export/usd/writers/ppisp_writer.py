@@ -71,7 +71,7 @@ def build_camera_frame_mapping(dataset) -> Tuple[List[str], Dict[str, List[int]]
 
     Returns:
         (camera_names, {camera_name: [frame_idx, ...]}) where frame_idx values
-        are the global training indices used as USD time codes.
+        are dataset indices used to look up trained PPISP parameters.
     """
     num_frames = len(dataset)
 
@@ -94,6 +94,37 @@ def build_camera_frame_mapping(dataset) -> Tuple[List[str], Dict[str, List[int]]
     return camera_names, camera_frames
 
 
+def build_camera_time_mapping(dataset) -> Tuple[List[str], Dict[str, List[float]]]:
+    """Build per-camera USD time-code lists keyed by GLOBAL dataset frame index.
+
+    Each camera's time-code list is the subsequence of global frame indices
+    that belong to that camera, matching the convention used by
+    ``USDExporter._build_camera_time_mapping_from_grouping``. Keeping camera
+    xform time samples and PPISP shader time samples on the same global
+    indexing avoids the runtime desync that would otherwise happen when the
+    renderer reads both at the same USD time code.
+    """
+    num_frames = len(dataset)
+
+    camera_names: List[str]
+    if hasattr(dataset, "get_camera_names"):
+        camera_names = dataset.get_camera_names()
+    else:
+        camera_names = ["camera_0"]
+
+    camera_times: Dict[str, List[float]] = {name: [] for name in camera_names}
+
+    for frame_idx in range(num_frames):
+        if hasattr(dataset, "get_camera_idx"):
+            cam_idx = dataset.get_camera_idx(frame_idx)
+        else:
+            cam_idx = 0
+        if 0 <= cam_idx < len(camera_names):
+            camera_times[camera_names[cam_idx]].append(float(frame_idx))
+
+    return camera_names, camera_times
+
+
 # ---------------------------------------------------------------------------
 # Shader prim creation
 # ---------------------------------------------------------------------------
@@ -111,6 +142,34 @@ def _add_ldr_color_render_var(
     aov_attr = render_var.CreateAttribute("omni:rtx:aov", Sdf.ValueTypeNames.Opaque, custom=False)
     aov_attr.SetConnections([ppisp_output_path])
     return render_var_path
+
+
+def _ensure_render_var(stage: Usd.Stage, render_product_path: str, render_var_name: str) -> str:
+    """Ensure a child RenderVar exists and is declared on orderedVars."""
+    render_product = stage.GetPrimAtPath(render_product_path)
+    render_var_path = f"{render_product_path}/{render_var_name}"
+    render_var = stage.DefinePrim(render_var_path, "RenderVar")
+    render_var.CreateAttribute("sourceName", Sdf.ValueTypeNames.String).Set(render_var_name)
+    render_var.CreateAttribute("omni:rtx:aov", Sdf.ValueTypeNames.Opaque, custom=False)
+
+    ordered_vars_rel = render_product.GetRelationship("orderedVars")
+    if ordered_vars_rel:
+        _append_ordered_var_target_once(ordered_vars_rel, render_product.GetPath(), Sdf.Path(render_var_path))
+    return render_var_path
+
+
+def _append_ordered_var_target_once(
+    ordered_vars_rel: Usd.Relationship,
+    render_product_path: Sdf.Path,
+    target_path: Sdf.Path,
+) -> None:
+    """Append a RenderVar target if not already present, accepting relative authored paths."""
+    target_path = target_path.MakeAbsolutePath(render_product_path)
+    targets = list(ordered_vars_rel.GetTargets())
+    absolute_targets = [target.MakeAbsolutePath(render_product_path) for target in targets]
+    if target_path not in absolute_targets:
+        targets.append(target_path)
+        ordered_vars_rel.SetTargets(targets)
 
 
 def _create_shader_prim(
@@ -142,11 +201,9 @@ def _create_shader_prim(
     slang_file = PPISP_SPG_DYN_SLANG_FILE if use_dynamic else PPISP_SPG_SLANG_FILE
     sub_identifier = "ppispProcessDyn" if use_dynamic else "ppispProcess"
 
-    # Mark HdrColor RenderVar input as an opaque AOV (no connection needed here)
-    input_var_path = f"{render_product_path}/{PPISP_INPUT_RENDER_VAR}"
-    input_var_prim = stage.GetPrimAtPath(input_var_path)
-    if input_var_prim.IsValid():
-        input_var_prim.CreateAttribute("omni:rtx:aov", Sdf.ValueTypeNames.Opaque, custom=False)
+    # PPISP needs HdrColor as shader input even when the default camera
+    # RenderProduct only exposes LdrColor.
+    _ensure_render_var(stage, render_product_path, PPISP_INPUT_RENDER_VAR)
 
     # PPISP Shader prim referencing the SPG asset definition
     ppisp_shader_path = f"{render_product_path}/PPISP"
@@ -188,9 +245,11 @@ def _create_shader_prim(
     # Append LdrColor to orderedVars
     ordered_vars_rel = render_product.GetRelationship("orderedVars")
     if ordered_vars_rel:
-        targets = list(ordered_vars_rel.GetTargets())
-        targets.append(Sdf.Path(LDR_COLOR_RENDER_VAR))
-        ordered_vars_rel.SetTargets(targets)
+        _append_ordered_var_target_once(
+            ordered_vars_rel,
+            render_product.GetPath(),
+            Sdf.Path(ldr_var_path),
+        )
 
     return shader
 
@@ -249,23 +308,32 @@ def _set_animated_exposure_params(
     shader: UsdShade.Shader,
     ppisp: PPISP,
     frame_indices: List[int],
+    time_codes: List[float] | None = None,
 ) -> None:
     """Write time-sampled exposure offset; default = mean across this camera's frames.
 
     ppisp.exposure_params has shape [num_frames].
-    Time code = float(frame_idx).
+    Time codes default to float(frame_idx), but multi-camera exports pass
+    per-camera-local time codes so all physical cameras share a compact stage
+    animation range.
     """
     exposure = ppisp.exposure_params.detach().cpu().numpy()  # [num_frames]
 
-    valid = [i for i in frame_indices if i < len(exposure)]
-    mean_val = float(np.mean(exposure[valid])) if valid else 0.0
+    if time_codes is None:
+        time_codes = [float(i) for i in frame_indices]
+    if len(time_codes) != len(frame_indices):
+        raise ValueError("time_codes length must match frame_indices length")
+
+    valid = [(i, t) for i, t in zip(frame_indices, time_codes) if i < len(exposure)]
+    valid_indices = [i for i, _ in valid]
+    mean_val = float(np.mean(exposure[valid_indices])) if valid_indices else 0.0
 
     exposure_input = shader.CreateInput("exposureOffset", Sdf.ValueTypeNames.Float)
     attr = exposure_input.GetAttr()
     attr.Set(mean_val)
 
-    for frame_idx in valid:
-        attr.Set(float(exposure[frame_idx]), float(frame_idx))
+    for frame_idx, time_code in valid:
+        attr.Set(float(exposure[frame_idx]), float(time_code))
 
 
 def _set_static_exposure_params(
@@ -284,18 +352,26 @@ def _set_animated_color_params(
     shader: UsdShade.Shader,
     ppisp: PPISP,
     frame_indices: List[int],
+    time_codes: List[float] | None = None,
 ) -> None:
     """Write time-sampled color latent offsets; default = mean across this camera's frames.
 
     ppisp.color_params has shape [num_frames, 8]:
     [db_r, db_g, dr_r, dr_g, dg_r, dg_g, dgray_r, dgray_g].
     Written as 4 float2 attributes.
-    Time code = float(frame_idx).
+    Time codes default to float(frame_idx), but multi-camera exports pass
+    per-camera-local time codes.
     """
     color = ppisp.color_params.detach().cpu().numpy()  # [num_frames, 8]
 
-    valid = [i for i in frame_indices if i < len(color)]
-    mean_color = np.mean(color[valid], axis=0) if valid else np.zeros(8)
+    if time_codes is None:
+        time_codes = [float(i) for i in frame_indices]
+    if len(time_codes) != len(frame_indices):
+        raise ValueError("time_codes length must match frame_indices length")
+
+    valid = [(i, t) for i, t in zip(frame_indices, time_codes) if i < len(color)]
+    valid_indices = [i for i, _ in valid]
+    mean_color = np.mean(color[valid_indices], axis=0) if valid_indices else np.zeros(8)
 
     control_point_names = ["colorLatentBlue", "colorLatentRed", "colorLatentGreen", "colorLatentNeutral"]
     attrs = []
@@ -305,12 +381,12 @@ def _set_animated_color_params(
         attr.Set(Gf.Vec2f(float(mean_color[i * 2]), float(mean_color[i * 2 + 1])))
         attrs.append(attr)
 
-    for frame_idx in valid:
+    for frame_idx, time_code in valid:
         frame_color = color[frame_idx]
         for i, attr in enumerate(attrs):
             attr.Set(
                 Gf.Vec2f(float(frame_color[i * 2]), float(frame_color[i * 2 + 1])),
-                float(frame_idx),
+                float(time_code),
             )
 
 
@@ -332,6 +408,13 @@ def _set_static_color_params(
         )
 
 
+def _set_neutral_frame_params(shader: UsdShade.Shader) -> None:
+    """Write default exposure/color state for validation or novel-view products."""
+    shader.CreateInput("exposureOffset", Sdf.ValueTypeNames.Float).Set(0.0)
+    for name in ("colorLatentBlue", "colorLatentRed", "colorLatentGreen", "colorLatentNeutral"):
+        shader.CreateInput(name, Sdf.ValueTypeNames.Float2).Set(Gf.Vec2f(0.0, 0.0))
+
+
 # ---------------------------------------------------------------------------
 # Per-camera entry point
 # ---------------------------------------------------------------------------
@@ -343,14 +426,19 @@ def add_ppisp_shader_to_render_product(
     camera_index: int,
     ppisp: PPISP,
     frame_indices: List[int],
+    time_codes: List[float] | None = None,
     fixed_frame_index: int | None = None,
     controller_shader: UsdShade.Shader | None = None,
     responsivity: float = 1.0,
+    neutral_frame_params: bool = False,
 ) -> Usd.Prim:
     """Add a PPISP Shader to a RenderProduct for one physical camera.
 
     Per-camera parameters (vignetting, CRF) are written as static USD
     attributes. Per-frame parameters (exposure, color latents) are either:
+    - written as neutral exposure/color state when ``neutral_frame_params``
+      is set, for validation products that should use only per-camera PPISP
+      state, or
     - written with mean-based defaults plus per-frame time samples (when
       ``controller_shader`` is None and ``fixed_frame_index`` is None), or
     - read at runtime from the upstream controller shader when it is
@@ -362,12 +450,15 @@ def add_ppisp_shader_to_render_product(
         camera_index: Index of this camera in the PPISP model.
         ppisp: Trained PPISP module.
         frame_indices: Global frame indices belonging to this camera.
+        time_codes: USD time codes matching frame_indices. Defaults to frame_indices.
         fixed_frame_index: If set, write this one PPISP frame state as static
             shader inputs instead of authoring animated time samples.
         controller_shader: Optional upstream controller Shader whose
             ``ControllerParams`` output supplies exposure / colour latents.
         responsivity: Achromatic input HDR multiplier authored on the PPISP
             shader as a user-overridable default.
+        neutral_frame_params: If True, author exposure 0 and zero color
+            latents instead of per-frame/fixed PPISP exposure/color state.
 
     Returns:
         The created PPISP Shader prim.
@@ -375,7 +466,7 @@ def add_ppisp_shader_to_render_product(
     assert camera_index < ppisp.num_cameras, (
         f"camera_index {camera_index} >= ppisp.num_cameras {ppisp.num_cameras}"
     )
-    if not frame_indices and fixed_frame_index is None and controller_shader is None:
+    if not frame_indices and fixed_frame_index is None and controller_shader is None and not neutral_frame_params:
         log.warning(f"No frames for camera {camera_index} at {render_product_path}, skipping")
         return stage.GetPseudoRoot()
 
@@ -387,9 +478,11 @@ def add_ppisp_shader_to_render_product(
         # Exposure / colour latents are computed by the controller shader
         # at runtime, so we don't author static or time-sampled values here.
         pass
+    elif neutral_frame_params:
+        _set_neutral_frame_params(shader)
     elif fixed_frame_index is None:
-        _set_animated_exposure_params(shader, ppisp, frame_indices)
-        _set_animated_color_params(shader, ppisp, frame_indices)
+        _set_animated_exposure_params(shader, ppisp, frame_indices, time_codes)
+        _set_animated_color_params(shader, ppisp, frame_indices, time_codes)
     else:
         _set_static_exposure_params(shader, ppisp, fixed_frame_index)
         _set_static_color_params(shader, ppisp, fixed_frame_index)
@@ -447,11 +540,13 @@ def add_ppisp_to_all_render_products(
     ppisp: PPISP,
     camera_names: List[str],
     camera_frame_mapping: Dict[str, List[int]],
+    camera_time_mapping: Dict[str, List[float]] | None = None,
     render_scope_path: str = "/Render",
     fixed_camera_index: int | None = None,
     fixed_frame_index: int | None = None,
     use_controller: bool = False,
     responsivity: float = 1.0,
+    neutral_frame_params: bool = False,
 ) -> List[Usd.Prim]:
     """Add PPISP shaders to every RenderProduct in the Render scope.
 
@@ -461,6 +556,8 @@ def add_ppisp_to_all_render_products(
         camera_names: Ordered list of camera names (index = camera_idx in ppisp).
         camera_frame_mapping: ``{camera_name: [frame_idx, ...]}`` from
             :func:`build_camera_frame_mapping`.
+        camera_time_mapping: ``{camera_name: [time_code, ...]}`` parallel to
+            camera_frame_mapping. Defaults to frame indices as time codes.
         render_scope_path: Path to the /Render Scope (default ``/Render``).
         fixed_camera_index: If set, use this PPISP camera state for every
             RenderProduct instead of matching the RenderProduct camera.
@@ -472,6 +569,9 @@ def add_ppisp_to_all_render_products(
             sidecars to be packaged alongside the USD output.
         responsivity: Achromatic input HDR multiplier authored on every PPISP
             shader as a user-overridable default.
+        neutral_frame_params: If True, author exposure 0 and zero color
+            latents for non-controller products instead of optimized
+            per-frame/fixed exposure/color state.
 
     Returns:
         List of created PPISP Shader prims.
@@ -513,6 +613,7 @@ def add_ppisp_to_all_render_products(
             raise ValueError(f"fixed_camera_index must be in [0, {ppisp.num_cameras - 1}], got {camera_index}.")
 
         frame_indices = camera_frame_mapping.get(camera_name, [])
+        time_codes = None if camera_time_mapping is None else camera_time_mapping.get(camera_name)
         _create_ppisp_camera(stage, child)
 
         controller_shader = None
@@ -538,9 +639,11 @@ def add_ppisp_to_all_render_products(
             camera_index=camera_index,
             ppisp=ppisp,
             frame_indices=frame_indices,
+            time_codes=time_codes,
             fixed_frame_index=fixed_frame_index,
             controller_shader=controller_shader,
             responsivity=responsivity,
+            neutral_frame_params=neutral_frame_params,
         )
         created.append(shader_prim)
 

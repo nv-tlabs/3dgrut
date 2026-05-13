@@ -25,6 +25,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from pxr import Sdf, Usd
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
 from threedgrut.export.adapter import AttributesExportAdapter
@@ -32,6 +33,28 @@ from threedgrut.export.formats import PLYExporter
 from threedgrut.export.importers import PLYImporter, USDImporter
 from threedgrut.export.scripts.transcode import detect_input_format, transcode
 from threedgrut.export.usd.exporter import USDExporter
+
+
+class MockCameraDataset:
+    """Minimal dataset exposing camera poses for USD camera export tests."""
+
+    image_w = 640
+    image_h = 480
+    intrinsics = [500.0, 500.0, 320.0, 240.0]
+
+    def __len__(self) -> int:
+        return 2
+
+    def get_poses(self) -> np.ndarray:
+        poses = np.repeat(np.eye(4, dtype=np.float64)[None, :, :], len(self), axis=0)
+        poses[1, 0, 3] = 1.0
+        return poses
+
+    def get_camera_names(self):
+        return ["camera_0000"]
+
+    def get_camera_idx(self, frame_idx: int) -> int:
+        return 0
 
 
 def create_test_attributes(num_gaussians: int = 100, sh_degree: int = 3) -> GaussianAttributes:
@@ -285,6 +308,42 @@ class TestCrossFormatTranscode:
             results = compare_attributes(attrs, loaded_attrs, rtol=1e-2, atol=1e-3)
             for attr_name, result in results.items():
                 assert result["match"], f"USD→PLY transcode failed for {attr_name}: {result}"
+
+    def test_transcode_api_usd_to_usd_copies_render_products(self):
+        """USD→USD transcode preserves source /Render RenderProducts."""
+        attrs = create_test_attributes(32, sh_degree=3)
+        caps = create_test_capabilities(32, sh_degree=3)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            input_path = tmp_path / "input.usda"
+            output_path = tmp_path / "output.usda"
+
+            adapter = AttributesExportAdapter(attrs, caps, is_preactivation=True)
+            USDExporter(
+                export_cameras=True,
+                export_background=False,
+                apply_normalizing_transform=False,
+            ).export(adapter, input_path, dataset=MockCameraDataset(), validate_usd=False)
+
+            transcode(
+                input_path=input_path,
+                output_path=output_path,
+                output_format="lightfield",
+                copy_cameras_source=(input_path, tmp_path),
+                validate_usd=False,
+            )
+
+            stage = Usd.Stage.Open(str(output_path))
+            assert stage
+            product = stage.GetPrimAtPath("/Render/camera_0000")
+            assert product.IsValid()
+            assert product.GetTypeName() == "RenderProduct"
+            assert product.GetRelationship("camera").GetTargets() == [Sdf.Path("/World/Cameras/camera_0000")]
+            assert tuple(product.GetAttribute("resolution").Get()) == (640, 480)
+            assert product.GetRelationship("orderedVars").GetTargets() == [
+                Sdf.Path("/Render/camera_0000/LdrColor")
+            ]
 
     def test_ply_to_usd_to_ply(self):
         """Test PLY → USD LightField → PLY transcode chain."""

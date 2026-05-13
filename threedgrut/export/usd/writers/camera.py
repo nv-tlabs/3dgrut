@@ -121,6 +121,7 @@ def export_cameras_to_usd(
     camera_names: List[str],
     frame_to_camera: List[int],
     camera_params: Optional[List] = None,
+    frame_time_codes: Optional[List[float]] = None,
     root_path: str = "/World/Cameras",
     visible: bool = False,
 ) -> Dict[str, str]:
@@ -128,8 +129,9 @@ def export_cameras_to_usd(
     Export camera poses with intrinsics to a USD stage.
 
     Creates one Camera prim per physical camera with time-sampled transforms
-    and static intrinsics. The time code for frame i is float(i), so
-    stage.GetTimeCodesPerSecond() controls real-time playback speed.
+    and static intrinsics. By default the time code for frame i is float(i);
+    multi-camera exporters can pass frame_time_codes to author compact,
+    per-camera-local time samples.
 
     Args:
         stage: USD stage to export to.
@@ -139,6 +141,8 @@ def export_cameras_to_usd(
         frame_to_camera: Per-frame camera index mapping, length N_frames.
         camera_params: Per-frame CameraModelParameters (OpenCVPinhole / Fisheye).
             Intrinsics are taken from the first frame of each camera.
+        frame_time_codes: Per-frame USD time code mapping, length N_frames.
+            When omitted, frame indices are used as time codes.
         root_path: USD path for the camera root Xform.
         visible: Whether camera prims should be visible in the viewport.
 
@@ -146,6 +150,13 @@ def export_cameras_to_usd(
         Mapping {camera_name: usd_prim_path} for every exported camera.
     """
     num_cameras = len(camera_names)
+    if frame_time_codes is None:
+        frame_time_codes = [float(i) for i in range(len(frame_to_camera))]
+    if len(frame_time_codes) != len(frame_to_camera):
+        raise ValueError(
+            f"frame_time_codes length ({len(frame_time_codes)}) must match "
+            f"frame_to_camera length ({len(frame_to_camera)})"
+        )
 
     # Group frame indices by camera
     camera_frames: Dict[int, List[int]] = {i: [] for i in range(num_cameras)}
@@ -190,10 +201,11 @@ def export_cameras_to_usd(
         xformable = UsdGeom.Xformable(camera_prim)
         transform_op = xformable.AddTransformOp()
         for frame_idx in frame_indices:
+            usd_time_code = float(frame_time_codes[frame_idx])
             usd_pose = poses[frame_idx] @ _CAMERA_COORD_FLIP
-            transform_op.Set(column_vector_4x4_to_usd_matrix(usd_pose), float(frame_idx))
-            usd_start_time_code = min(usd_start_time_code, float(frame_idx))
-            usd_end_time_code = max(usd_end_time_code, float(frame_idx))
+            transform_op.Set(column_vector_4x4_to_usd_matrix(usd_pose), usd_time_code)
+            usd_start_time_code = min(usd_start_time_code, usd_time_code)
+            usd_end_time_code = max(usd_end_time_code, usd_time_code)
 
         imageable = UsdGeom.Imageable(camera_prim)
         imageable.CreateVisibilityAttr().Set("inherited" if visible else "invisible")

@@ -48,6 +48,7 @@ from threedgrut.export.usd.stage_utils import (
 )
 from threedgrut.export.usd.writers.background import export_background_to_usd
 from threedgrut.export.usd.writers.base import create_gaussian_writer
+from threedgrut.export.usd.writers.render_product import create_render_products
 from threedgrut.export.usd.camera_copy import (
     collect_transitive_sidecars_for_subtree,
     copy_authored_time_settings_from_source,
@@ -68,6 +69,10 @@ logger = logging.getLogger(__name__)
 
 
 _GAUSSIAN_SKIP_TONEMAPPING_RENDER_SETTING = "rtx:rtpt:gaussian:skipTonemapping:enabled"
+_DEFAULT_RENDER_SCOPE_PATH = "/Render"
+_DEFAULT_RENDER_PRODUCT_VAR = "LdrColor"
+_PPISP_INPUT_RENDER_PRODUCT_VAR = "HdrColor"
+_VALIDATION_CAMERA_SUFFIX = "_val"
 MODE_POST_PROCESSING_EXPORT_BAKED_SH = "baked-sh"
 MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE = "omni-native"
 POST_PROCESSING_EXPORT_MODES = {
@@ -265,6 +270,51 @@ def _extract_camera_resolutions(camera_params: List, camera_names: List[str], fr
     return result
 
 
+def _suffix_camera_names(camera_names: List[str], suffix: str = _VALIDATION_CAMERA_SUFFIX) -> List[str]:
+    return [f"{name}{suffix}" for name in camera_names]
+
+
+def _build_camera_frame_mapping_from_grouping(camera_names: List[str], frame_to_camera: List[int]) -> Dict[str, List[int]]:
+    mapping: Dict[str, List[int]] = {name: [] for name in camera_names}
+    for frame_idx, cam_idx in enumerate(frame_to_camera):
+        if 0 <= cam_idx < len(camera_names):
+            mapping[camera_names[cam_idx]].append(frame_idx)
+    return mapping
+
+
+def _build_camera_time_mapping_from_grouping(
+    camera_names: List[str],
+    frame_to_camera: List[int],
+) -> Dict[str, List[float]]:
+    """Per-camera USD time codes using GLOBAL dataset frame indices.
+
+    Each camera's time code list is the subsequence of global frame indices
+    where ``frame_to_camera[i] == cam_idx``. Sparse but uniquely identifies
+    the originating dataset frame, so ``(camera, time_code)`` round-trips
+    back to a single ``frame_idx`` without any sidecar.
+
+    Required by the OVRTX-vs-PyTorch comparator: PyTorch ``render.py`` writes
+    PNG ``<global_frame_idx:05d>.png``; OVRTX writes ``<time_code:06d>.png``;
+    matching by integer key works directly across multi-rig validation sets.
+    """
+    mapping: Dict[str, List[float]] = {name: [] for name in camera_names}
+    for global_idx, cam_idx in enumerate(frame_to_camera):
+        if 0 <= cam_idx < len(camera_names):
+            mapping[camera_names[cam_idx]].append(float(global_idx))
+    return mapping
+
+
+def _build_frame_time_codes_from_grouping(camera_names: List[str], frame_to_camera: List[int]) -> List[float]:
+    """Per-frame USD time codes using GLOBAL dataset frame indices.
+
+    Returns ``[0.0, 1.0, ..., N-1]`` matching the dataloader iteration order
+    used by ``threedgrut/render.py``. Camera xform time samples and PPISP
+    shader time samples both use this convention so they stay aligned at
+    runtime.
+    """
+    return [float(i) for i in range(len(frame_to_camera))]
+
+
 class USDExporter(ModelExporter):
     """
     Exporter for OpenUSD format using ParticleField3DGaussianSplat schema.
@@ -303,7 +353,7 @@ class USDExporter(ModelExporter):
         post_processing_bake_learning_rate_specular: float | None = None,
         post_processing_bake_learning_rate_density: float = 5.0e-2,
         ppisp_bake_vignetting_mode: str = MODE_PPISP_BAKE_VIGNETTING_NONE,
-        post_processing_bake_view_mode: str = "trajectory",
+        post_processing_bake_view_mode: str = "training",
         post_processing_bake_view_seed: int | None = None,
         post_processing_bake_trajectory_weight_position: float = 1.0,
         post_processing_bake_trajectory_weight_rotation: float = 0.5,
@@ -353,19 +403,19 @@ class USDExporter(ModelExporter):
                 no-PPISP exports. "achromatic-fit" is retained for backwards
                 compatibility but no longer the recommended mode.
             post_processing_bake_view_mode: which views the bake fit sees per step.
-                "training" iterates the train dataloader (default). "trajectory"
-                orders the training views along an NN+2-opt camera path, parameterises
-                arc-length on [0, 1], and samples a random t per step (helpful when
-                training views are sparse).
+                "training" (default) iterates the train dataloader. "trajectory"
+                orders the training views along an NN+2-opt camera path,
+                parameterises arc-length on [0, 1], and samples a random t per step.
             post_processing_bake_view_seed: optional RNG seed for the interpolation
                 samplers. None (default) leaves it non-deterministic.
             post_processing_bake_trajectory_weight_position: trajectory mode only.
                 Weight on the (mean-normalised) position term in the pose distance.
             post_processing_bake_trajectory_weight_rotation: trajectory mode only.
                 Weight on the (1 - cos(angle)) rotation term in the pose distance.
-            frames_per_second: Sets stage.timeCodesPerSecond. Time codes are always
-                bare frame indices (float(frame_idx)), so this controls playback speed.
-                Default 1.0 means 1 frame per second of real time.
+            frames_per_second: Sets stage.timeCodesPerSecond. Multi-camera
+                camera exports use compact per-camera-local frame time codes, so
+                this controls playback speed. Default 1.0 means 1 frame per
+                second of real time.
         """
         if half_precision:
             half_geometry = True
@@ -416,6 +466,15 @@ class USDExporter(ModelExporter):
         """
         stage = initialize_usd_stage(up_axis="Y")
         stage.SetTimeCodesPerSecond(self.frames_per_second)
+        authored_ranges = [
+            (ref_stage.stage.GetStartTimeCode(), ref_stage.stage.GetEndTimeCode())
+            for ref_stage in referenced_stages
+            if getattr(ref_stage.stage, "HasAuthoredTimeCodeRange", None)
+            and ref_stage.stage.HasAuthoredTimeCodeRange()
+        ]
+        if authored_ranges:
+            stage.SetStartTimeCode(min(start for start, _ in authored_ranges))
+            stage.SetEndTimeCode(max(end for _, end in authored_ranges))
 
         for ref_stage in referenced_stages:
             filename_stem = Path(ref_stage.filename).stem
@@ -454,6 +513,7 @@ class USDExporter(ModelExporter):
         output_path = Path(output_path)
         logger.info(f"Exporting USD file to {output_path}...")
         post_processing = kwargs.get("post_processing")
+        validation_dataset = kwargs.get("validation_dataset")
         has_ppisp_module = _is_ppisp_post_processing(post_processing)
         uses_baked_post_processing_export = (
             post_processing is not None
@@ -607,9 +667,23 @@ class USDExporter(ModelExporter):
         frame_to_camera = None
         camera_prim_paths: Dict[str, str] = {}
         camera_params = None
+        camera_time_mapping = None
+        validation_camera_names = None
+        validation_frame_to_camera = None
+        validation_camera_prim_paths: Dict[str, str] = {}
+        validation_camera_params = None
+        validation_camera_time_mapping = None
 
         if dataset is not None:
             camera_names, frame_to_camera = _extract_camera_grouping(dataset)
+            camera_time_mapping = _build_camera_time_mapping_from_grouping(camera_names, frame_to_camera)
+        if validation_dataset is not None:
+            validation_camera_names, validation_frame_to_camera = _extract_camera_grouping(validation_dataset)
+            validation_camera_names = _suffix_camera_names(validation_camera_names)
+            validation_camera_time_mapping = _build_camera_time_mapping_from_grouping(
+                validation_camera_names,
+                validation_frame_to_camera,
+            )
 
         # Export cameras — one prim per physical camera with time-sampled transforms
         if self.export_cameras and dataset is not None:
@@ -631,12 +705,79 @@ class USDExporter(ModelExporter):
                     camera_names=camera_names,
                     frame_to_camera=frame_to_camera,
                     camera_params=camera_params,
+                    frame_time_codes=_build_frame_time_codes_from_grouping(camera_names, frame_to_camera),
                     root_path="/World/Cameras",
                     visible=False,
                 )
                 logger.info(f"Exported {len(camera_prim_paths)} camera(s) from {len(poses)} frames")
             except (AttributeError, KeyError, ValueError) as e:
                 logger.warning(f"Failed to export cameras: {e}")
+
+        if self.export_cameras and validation_dataset is not None:
+            try:
+                validation_poses = validation_dataset.get_poses()
+
+                if self.apply_normalizing_transform:
+                    validation_poses = np.einsum("ij,njk->nik", normalizing_transform, validation_poses)
+
+                validation_camera_params = _extract_camera_params_from_dataset(validation_dataset)
+                if validation_camera_params is not None:
+                    logger.info(f"Extracted validation camera params for {len(validation_camera_params)} frames")
+                else:
+                    logger.warning("Could not extract validation camera intrinsics, skipping validation RenderProducts")
+
+                previous_start = scene_stage.GetStartTimeCode()
+                previous_end = scene_stage.GetEndTimeCode()
+                validation_camera_prim_paths = export_cameras_to_usd(
+                    stage=scene_stage,
+                    poses=validation_poses,
+                    camera_names=validation_camera_names,
+                    frame_to_camera=validation_frame_to_camera,
+                    camera_params=validation_camera_params,
+                    frame_time_codes=_build_frame_time_codes_from_grouping(
+                        validation_camera_names,
+                        validation_frame_to_camera,
+                    ),
+                    root_path="/World/Cameras",
+                    visible=False,
+                )
+                scene_stage.SetStartTimeCode(min(previous_start, scene_stage.GetStartTimeCode()))
+                scene_stage.SetEndTimeCode(max(previous_end, scene_stage.GetEndTimeCode()))
+                logger.info(
+                    f"Exported {len(validation_camera_prim_paths)} validation camera(s) "
+                    f"from {len(validation_poses)} frames"
+                )
+            except (AttributeError, KeyError, ValueError) as e:
+                logger.warning(f"Failed to export validation cameras: {e}")
+
+        if (
+            self.export_cameras
+            and dataset is not None
+            and camera_prim_paths
+            and not uses_omni_native_post_processing_export
+        ):
+            self._create_camera_render_products(
+                stage=scene_stage,
+                camera_names=camera_names,
+                frame_to_camera=frame_to_camera,
+                camera_prim_paths=camera_prim_paths,
+                camera_params=camera_params,
+                render_vars=(_DEFAULT_RENDER_PRODUCT_VAR,),
+            )
+        if (
+            self.export_cameras
+            and validation_dataset is not None
+            and validation_camera_prim_paths
+            and not uses_omni_native_post_processing_export
+        ):
+            self._create_camera_render_products(
+                stage=scene_stage,
+                camera_names=validation_camera_names,
+                frame_to_camera=validation_frame_to_camera,
+                camera_prim_paths=validation_camera_prim_paths,
+                camera_params=validation_camera_params,
+                render_vars=(_DEFAULT_RENDER_PRODUCT_VAR,),
+            )
 
         # Export background if requested
         envmap_bytes = None
@@ -673,6 +814,15 @@ class USDExporter(ModelExporter):
                 camera_params=camera_params,
             )
             if render_product_entries is not None:
+                if validation_dataset is not None and validation_camera_prim_paths:
+                    self._create_camera_render_products(
+                        stage=scene_stage,
+                        camera_names=validation_camera_names,
+                        frame_to_camera=validation_frame_to_camera,
+                        camera_prim_paths=validation_camera_prim_paths,
+                        camera_params=validation_camera_params,
+                        render_vars=(_PPISP_INPUT_RENDER_PRODUCT_VAR,),
+                    )
                 _set_render_setting(scene_stage, _GAUSSIAN_SKIP_TONEMAPPING_RENDER_SETTING, False)
                 logger.info("Disabled Gaussian skip-tonemapping render setting for PPISP Omniverse-native export")
                 self._export_ppisp(
@@ -684,7 +834,29 @@ class USDExporter(ModelExporter):
                     fixed_camera_id=self.post_processing_camera_id,
                     fixed_frame_id=self.post_processing_frame_id,
                     responsivity=self.ppisp_responsivity,
+                    camera_time_mapping=camera_time_mapping,
                 )
+                if validation_dataset is not None and validation_camera_names is not None:
+                    validation_mapping = _build_camera_frame_mapping_from_grouping(
+                        validation_camera_names,
+                        validation_frame_to_camera,
+                    )
+                    self._export_ppisp(
+                        stage=scene_stage,
+                        dataset=validation_dataset,
+                        camera_names=validation_camera_names,
+                        post_processing=post_processing,
+                        files=files,
+                        fixed_camera_id=self.post_processing_camera_id,
+                        fixed_frame_id=self.post_processing_frame_id,
+                        responsivity=self.ppisp_responsivity,
+                        camera_frame_mapping=validation_mapping,
+                        camera_time_mapping=validation_camera_time_mapping,
+                        neutral_frame_params=(
+                            self.post_processing_camera_id is None
+                            and self.post_processing_frame_id is None
+                        ),
+                    )
 
         # Package
         if suffix == ".usdz":
@@ -727,16 +899,62 @@ class USDExporter(ModelExporter):
             logger.warning("No camera prims available for PPISP RenderProduct wiring, skipping")
             return None
 
-        from threedgrut.export.usd.writers.render_product import create_render_products
+        resolutions = _extract_camera_resolutions(camera_params, camera_names, frame_to_camera)
+        camera_entries = {}
+        for cam_name, cam_path in camera_prim_paths.items():
+            if cam_name not in resolutions:
+                logger.warning("No native resolution found for camera %s; skipping RenderProduct", cam_name)
+                continue
+            w, h = resolutions[cam_name]
+            camera_entries[cam_name] = (cam_path, w, h)
+        if not camera_entries:
+            logger.warning("No camera RenderProducts created because no native camera resolutions were found")
+            return None
+
+        try:
+            create_render_products(
+                stage=stage,
+                camera_entries=camera_entries,
+                render_vars=(_PPISP_INPUT_RENDER_PRODUCT_VAR,),
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create RenderProducts: {e}")
+            return None
+
+        return camera_entries
+
+    def _create_camera_render_products(
+        self,
+        stage,
+        camera_names,
+        frame_to_camera,
+        camera_prim_paths: Dict[str, str],
+        camera_params,
+        render_vars=(_DEFAULT_RENDER_PRODUCT_VAR,),
+    ):
+        """Create per-camera RenderProducts for exported cameras."""
+        if not camera_prim_paths:
+            logger.warning("No camera prims available for RenderProduct wiring, skipping")
+            return None
 
         resolutions = _extract_camera_resolutions(camera_params, camera_names, frame_to_camera)
         camera_entries = {}
         for cam_name, cam_path in camera_prim_paths.items():
-            w, h = resolutions.get(cam_name, (0, 0))
+            if cam_name not in resolutions:
+                logger.warning("No native resolution found for camera %s; skipping RenderProduct", cam_name)
+                continue
+            w, h = resolutions[cam_name]
             camera_entries[cam_name] = (cam_path, w, h)
+        if not camera_entries:
+            logger.warning("No camera RenderProducts created because no native camera resolutions were found")
+            return None
 
         try:
-            create_render_products(stage=stage, camera_entries=camera_entries)
+            create_render_products(
+                stage=stage,
+                camera_entries=camera_entries,
+                render_vars=render_vars,
+            )
         except Exception as e:
             logger.warning(f"Failed to create RenderProducts: {e}")
             return None
@@ -753,6 +971,9 @@ class USDExporter(ModelExporter):
         fixed_camera_id: int | None = None,
         fixed_frame_id: int | None = None,
         responsivity: float = 1.0,
+        camera_frame_mapping: Dict[str, List[int]] | None = None,
+        camera_time_mapping: Dict[str, List[float]] | None = None,
+        neutral_frame_params: bool = False,
     ) -> None:
         """Attach PPISP SPG shaders to existing RenderProducts."""
         try:
@@ -801,9 +1022,13 @@ class USDExporter(ModelExporter):
         from threedgrut.export.usd.writers.ppisp_writer import (
             add_ppisp_to_all_render_products,
             build_camera_frame_mapping,
+            build_camera_time_mapping,
         )
 
-        _, camera_frame_mapping = build_camera_frame_mapping(dataset)
+        if camera_frame_mapping is None:
+            _, camera_frame_mapping = build_camera_frame_mapping(dataset)
+        if camera_time_mapping is None:
+            _, camera_time_mapping = build_camera_time_mapping(dataset)
 
         try:
             add_ppisp_to_all_render_products(
@@ -811,10 +1036,12 @@ class USDExporter(ModelExporter):
                 ppisp=post_processing,
                 camera_names=camera_names,
                 camera_frame_mapping=camera_frame_mapping,
+                camera_time_mapping=camera_time_mapping,
                 fixed_camera_index=fixed_camera_id,
                 fixed_frame_index=fixed_frame_id,
                 use_controller=use_controller,
                 responsivity=responsivity,
+                neutral_frame_params=neutral_frame_params and not use_controller,
             )
         except Exception as e:
             logger.warning(f"Failed to add PPISP shaders: {e}")

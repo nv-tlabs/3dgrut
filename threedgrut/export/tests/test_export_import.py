@@ -26,12 +26,33 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
-from pxr import Usd
+from pxr import Sdf, Usd
 
 from threedgrut.export.base import ExportableModel
 from threedgrut.export.formats import PLYExporter
 from threedgrut.export.importers import PLYImporter, USDImporter
 from threedgrut.export.usd.exporter import USDExporter
+
+
+def _assert_default_camera_render_product(
+    stage: Usd.Stage,
+    camera_name: str = "camera_0000",
+    resolution: tuple[int, int] = (640, 480),
+) -> None:
+    product_path = f"/Render/{camera_name}"
+    render_var_path = f"{product_path}/LdrColor"
+    product = stage.GetPrimAtPath(product_path)
+    assert product.IsValid()
+    assert product.GetTypeName() == "RenderProduct"
+    assert product.GetRelationship("camera").GetTargets() == [Sdf.Path(f"/World/Cameras/{camera_name}")]
+    assert product.GetRelationship("orderedVars").GetTargets() == [Sdf.Path(render_var_path)]
+    assert tuple(product.GetAttribute("resolution").Get()) == resolution
+
+    render_var = stage.GetPrimAtPath(render_var_path)
+    assert render_var.IsValid()
+    assert render_var.GetTypeName() == "RenderVar"
+    assert render_var.GetAttribute("sourceName").Get() == "LdrColor"
+    assert not stage.GetPrimAtPath(f"{product_path}/HdrColor").IsValid()
 
 
 class MockGaussianModel(ExportableModel):
@@ -116,6 +137,10 @@ class MockGaussianModel(ExportableModel):
 class MockCameraDataset:
     """Minimal dataset exposing camera poses for USD camera export tests."""
 
+    image_w = 640
+    image_h = 480
+    intrinsics = [500.0, 500.0, 320.0, 240.0]
+
     def __len__(self) -> int:
         return 2
 
@@ -129,6 +154,24 @@ class MockCameraDataset:
 
     def get_camera_idx(self, frame_idx: int) -> int:
         return 0
+
+
+class MockMultiCameraDataset(MockCameraDataset):
+    """Minimal multi-camera dataset with interleaved physical camera frames."""
+
+    def __len__(self) -> int:
+        return 6
+
+    def get_poses(self) -> np.ndarray:
+        poses = np.repeat(np.eye(4, dtype=np.float64)[None, :, :], len(self), axis=0)
+        poses[:, 0, 3] = np.arange(len(self), dtype=np.float64)
+        return poses
+
+    def get_camera_names(self):
+        return ["camera_left", "camera_right"]
+
+    def get_camera_idx(self, frame_idx: int) -> int:
+        return frame_idx % 2
 
 
 class TestPLYExportImport:
@@ -503,13 +546,46 @@ class TestUSDExportColorSpace:
                 export_cameras=True,
                 export_background=False,
                 apply_normalizing_transform=False,
-            ).export(model, usd_path, dataset=dataset)
+            ).export(model, usd_path, dataset=dataset, validation_dataset=MockCameraDataset())
             stage = Usd.Stage.Open(str(usd_path))
             assert stage
             assert stage.GetPrimAtPath("/World/Cameras/camera_0000").IsValid()
+            assert stage.GetPrimAtPath("/World/Cameras/camera_0000_val").IsValid()
             assert not stage.GetPrimAtPath("/World/gaussians/Cameras/camera_0000").IsValid()
             assert stage.GetStartTimeCode() == 0.0
             assert stage.GetEndTimeCode() == 1.0
+            _assert_default_camera_render_product(stage)
+            _assert_default_camera_render_product(stage, "camera_0000_val")
+
+    def test_multi_camera_time_codes_are_global_dataset_indices(self):
+        """Multi-camera exports use GLOBAL dataset frame indices as USD time codes.
+
+        ``MockMultiCameraDataset`` interleaves left/right via ``frame_idx % 2``
+        across 6 frames, so left owns global indices ``[0, 2, 4]`` and right
+        owns ``[1, 3, 5]``. Authoring those exact indices as time samples
+        keeps the OVRTX-vs-PyTorch comparator's basename match working without
+        any sidecar.
+        """
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        dataset = MockMultiCameraDataset()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usda"
+            USDExporter(
+                half_precision=False,
+                export_cameras=True,
+                export_background=False,
+                apply_normalizing_transform=False,
+            ).export(model, usd_path, dataset=dataset, validate_usd=False)
+
+            stage = Usd.Stage.Open(str(usd_path))
+            assert stage
+            assert stage.GetStartTimeCode() == 0.0
+            assert stage.GetEndTimeCode() == 5.0
+
+            left_transform = stage.GetPrimAtPath("/World/Cameras/camera_left").GetAttribute("xformOp:transform")
+            right_transform = stage.GetPrimAtPath("/World/Cameras/camera_right").GetAttribute("xformOp:transform")
+            assert left_transform.GetTimeSamples() == [0.0, 2.0, 4.0]
+            assert right_transform.GetTimeSamples() == [1.0, 3.0, 5.0]
 
 
 class TestUSDSampleExports:
@@ -536,6 +612,7 @@ class TestUSDSampleExports:
             assert stage
             assert stage.GetTimeCodesPerSecond() == 24.0
             assert stage.GetPrimAtPath("/World/Cameras/camera_0000").IsValid()
+            _assert_default_camera_render_product(stage)
             assert _find_prim_with_color_space_api(stage) is not None
 
 
@@ -564,6 +641,111 @@ class TestUSDExportSortingModeHint:
         """Unsupported sorting hints fail before authoring invalid USD."""
         with pytest.raises(ValueError, match="Unsupported ParticleField sortingModeHint"):
             USDExporter(sorting_mode_hint="frontToBack")
+
+
+class TestNuRecExport:
+    """Smoke tests for the NuRec exporter's camera and RenderProduct authoring.
+
+    NuRec USDZs are composed of ``default.usda`` (the package root) which
+    references ``gauss.usda`` at ``/World/gauss``. Cameras authored on
+    ``gauss.usda`` therefore appear under ``/World/gauss/Cameras/...`` in
+    the composed view, while the ``/Render`` scope sits outside ``/World``
+    and is only reachable by opening the gauss layer directly.
+    """
+
+    @staticmethod
+    def _open_gauss_layer(usdz_path: Path, tmp_path: Path) -> Usd.Stage:
+        """Extract gauss.usda from a NuRec USDZ and open it as a standalone stage."""
+        import zipfile
+
+        with zipfile.ZipFile(usdz_path) as zf:
+            zf.extract("gauss.usda", path=tmp_path)
+        stage = Usd.Stage.Open(str(tmp_path / "gauss.usda"))
+        assert stage, f"Failed to open gauss.usda inside {usdz_path}"
+        return stage
+
+    def test_nurec_export_writes_camera_and_default_render_product(self):
+        """Without PPISP, NuRec USDZ ships per-camera xform + /Render LdrColor product."""
+        from threedgrut.export.usd.nurec.exporter import NuRecExporter
+
+        model = MockGaussianModel(num_gaussians=8, sh_degree=3)
+        dataset = MockCameraDataset()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            usd_path = tmp_path / "test.usdz"
+            NuRecExporter(
+                export_cameras=True,
+                export_post_processing=False,
+            ).export(model, usd_path, dataset=dataset)
+
+            assert usd_path.exists()
+
+            composed = Usd.Stage.Open(str(usd_path))
+            assert composed.GetPrimAtPath("/World/gauss/Cameras/camera_0000").IsValid()
+
+            gauss = self._open_gauss_layer(usd_path, tmp_path)
+            assert gauss.GetPrimAtPath("/World/Cameras/camera_0000").IsValid()
+            _assert_default_camera_render_product(gauss)
+
+    def test_nurec_export_writes_validation_camera_with_val_suffix(self):
+        """validation_dataset surfaces a separate ``<name>_val`` camera and product."""
+        from threedgrut.export.usd.nurec.exporter import NuRecExporter
+
+        model = MockGaussianModel(num_gaussians=8, sh_degree=3)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            usd_path = tmp_path / "test.usdz"
+            NuRecExporter(
+                export_cameras=True,
+                export_post_processing=False,
+            ).export(
+                model,
+                usd_path,
+                dataset=MockCameraDataset(),
+                validation_dataset=MockCameraDataset(),
+            )
+
+            composed = Usd.Stage.Open(str(usd_path))
+            assert composed.GetPrimAtPath("/World/gauss/Cameras/camera_0000").IsValid()
+            assert composed.GetPrimAtPath("/World/gauss/Cameras/camera_0000_val").IsValid()
+
+            gauss = self._open_gauss_layer(usd_path, tmp_path)
+            _assert_default_camera_render_product(gauss)
+            _assert_default_camera_render_product(gauss, "camera_0000_val")
+
+    def test_nurec_export_multi_camera_uses_global_dataset_indices_as_time_codes(self):
+        """Multi-camera NuRec exports keep the OVRTX-vs-PyTorch basename match."""
+        from threedgrut.export.usd.nurec.exporter import NuRecExporter
+
+        model = MockGaussianModel(num_gaussians=8, sh_degree=3)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            usd_path = tmp_path / "test.usdz"
+            NuRecExporter(
+                export_cameras=True,
+                export_post_processing=False,
+            ).export(model, usd_path, dataset=MockMultiCameraDataset())
+
+            gauss = self._open_gauss_layer(usd_path, tmp_path)
+            left_transform = gauss.GetPrimAtPath("/World/Cameras/camera_left").GetAttribute("xformOp:transform")
+            right_transform = gauss.GetPrimAtPath("/World/Cameras/camera_right").GetAttribute("xformOp:transform")
+            assert left_transform.GetTimeSamples() == [0.0, 2.0, 4.0]
+            assert right_transform.GetTimeSamples() == [1.0, 3.0, 5.0]
+
+    def test_nurec_export_rejects_unsupported_render_method(self):
+        """The exporter refuses anything other than 3dgut / 3dgrt up front."""
+        from threedgrut.export.usd.nurec.exporter import (
+            NuRecExporter,
+            _get_default_nurec_conf,
+        )
+
+        model = MockGaussianModel(num_gaussians=4, sh_degree=3)
+        conf = _get_default_nurec_conf()
+        conf.render.method = "inria"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usdz"
+            with pytest.raises(ValueError, match="render.method to be '3dgut' or '3dgrt'"):
+                NuRecExporter().export(model, usd_path, conf=conf)
 
 
 if __name__ == "__main__":

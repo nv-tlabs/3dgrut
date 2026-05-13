@@ -16,19 +16,19 @@
 """
 USD RenderProduct writer.
 
-Creates a /Render Scope with one RenderProduct per camera, each holding an
-HdrColor RenderVar and the camera relationship required by downstream
-post-processing shaders (e.g. PPISP).
+Creates a /Render Scope with one RenderProduct per camera, each holding the
+requested RenderVars and the camera relationship required by downstream
+renderers.
 """
 
 import logging
-from typing import Dict, Tuple
+from typing import Dict, Sequence, Tuple
 
-from pxr import Gf, Sdf, Usd, UsdGeom
+from pxr import Gf, Sdf, Usd
 
 log = logging.getLogger(__name__)
 
-_HDR_COLOR_VAR = "HdrColor"
+_LDR_COLOR_VAR = "LdrColor"
 _RENDER_SCOPE_PATH = "/Render"
 
 
@@ -36,14 +36,15 @@ def create_render_products(
     stage: Usd.Stage,
     camera_entries: Dict[str, Tuple[str, int, int]],
     render_scope_path: str = _RENDER_SCOPE_PATH,
+    render_vars: Sequence[str] = (_LDR_COLOR_VAR,),
 ) -> None:
     """Create a /Render Scope with one RenderProduct per camera.
 
     Each RenderProduct is named after its camera and contains:
     - ``camera`` relationship pointing to the USD camera prim.
     - ``resolution`` attribute.
-    - ``orderedVars`` relationship → [.../HdrColor].
-    - Child ``RenderVar`` ``HdrColor`` with ``sourceName = "HdrColor"``.
+    - ``orderedVars`` relationship to child RenderVars.
+    - Child ``RenderVar`` prims with matching ``sourceName`` values.
 
     Args:
         stage: USD stage that already contains the camera prims.
@@ -51,14 +52,25 @@ def create_render_products(
             The camera_name is used as the RenderProduct prim name (after USD
             identifier sanitization to match what export_cameras_to_usd produced).
         render_scope_path: Root path for the Render scope (default ``/Render``).
+        render_vars: RenderVar source names to author. Defaults to ``LdrColor``.
     """
     from threedgrut.export.usd.writers.camera import _make_usd_prim_name
 
+    render_vars = tuple(render_vars)
+    if not render_vars:
+        raise ValueError("create_render_products requires at least one RenderVar")
+
     stage.DefinePrim(render_scope_path, "Scope")
 
+    created_count = 0
     for camera_name, (camera_path, width, height) in camera_entries.items():
         prim_name = _make_usd_prim_name(camera_name)
         product_path = f"{render_scope_path}/{prim_name}"
+
+        existing_product = stage.GetPrimAtPath(product_path)
+        if existing_product.IsValid():
+            log.info("Keeping existing RenderProduct at %s; not overwriting", product_path)
+            continue
 
         product_prim = stage.DefinePrim(product_path, "RenderProduct")
 
@@ -71,16 +83,19 @@ def create_render_products(
         camera_rel = product_prim.CreateRelationship("camera")
         camera_rel.SetTargets([Sdf.Path(camera_path)])
 
-        # HdrColor RenderVar
-        hdr_var_path = f"{product_path}/{_HDR_COLOR_VAR}"
-        hdr_var = stage.DefinePrim(hdr_var_path, "RenderVar")
-        hdr_var.CreateAttribute("sourceName", Sdf.ValueTypeNames.String).Set(_HDR_COLOR_VAR)
-        hdr_var.CreateAttribute("omni:rtx:aov", Sdf.ValueTypeNames.Opaque, custom=False)
+        ordered_var_targets = []
+        for render_var_name in render_vars:
+            var_path = f"{product_path}/{render_var_name}"
+            var_prim = stage.DefinePrim(var_path, "RenderVar")
+            var_prim.CreateAttribute("sourceName", Sdf.ValueTypeNames.String).Set(render_var_name)
+            var_prim.CreateAttribute("omni:rtx:aov", Sdf.ValueTypeNames.Opaque, custom=False)
+            ordered_var_targets.append(Sdf.Path(var_path))
 
         # orderedVars relationship
         ordered_vars_rel = product_prim.CreateRelationship("orderedVars")
-        ordered_vars_rel.SetTargets([Sdf.Path(_HDR_COLOR_VAR)])
+        ordered_vars_rel.SetTargets(ordered_var_targets)
 
         log.debug(f"Created RenderProduct at {product_path} → camera {camera_path} ({width}×{height})")
+        created_count += 1
 
-    log.info(f"Created {len(camera_entries)} RenderProduct(s) under {render_scope_path}")
+    log.info(f"Created {created_count} RenderProduct(s) under {render_scope_path}")
