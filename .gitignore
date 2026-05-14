@@ -39,3 +39,8 @@ assets/nvidia-hq.gif
 assets/playground_glass.gif
 
 uv.lock
+
+tools/**/.pytest_cache/
+
+# Standalone validation skill repo (lives in-tree during the transition).
+/threedgrut_usd_validation/
