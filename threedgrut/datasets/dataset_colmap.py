@@ -47,6 +47,37 @@ from .utils import (
 )
 
 
+def _opencv_pinhole_intrinsics_from_colmap(intr_model: str, intr_params: np.ndarray, scaling_factor: float):
+    """Convert COLMAP distorted pinhole parameters to OpenCVPinholeCameraModelParameters fields."""
+    intr_params = np.asarray(intr_params, dtype=np.float32)
+    radial_coeffs = np.zeros((6,), dtype=np.float32)
+    tangential_coeffs = np.zeros((2,), dtype=np.float32)
+    thin_prism_coeffs = np.zeros((4,), dtype=np.float32)
+
+    if intr_model == "SIMPLE_RADIAL":
+        focal_length = np.array([intr_params[0], intr_params[0]], dtype=np.float32) / scaling_factor
+        principal_point = intr_params[1:3] / scaling_factor
+        radial_coeffs[0] = intr_params[3]
+    elif intr_model == "RADIAL":
+        focal_length = np.array([intr_params[0], intr_params[0]], dtype=np.float32) / scaling_factor
+        principal_point = intr_params[1:3] / scaling_factor
+        radial_coeffs[:2] = intr_params[3:5]
+    elif intr_model == "OPENCV":
+        focal_length = intr_params[:2] / scaling_factor
+        principal_point = intr_params[2:4] / scaling_factor
+        radial_coeffs[:2] = intr_params[4:6]
+        tangential_coeffs[:] = intr_params[6:8]
+    elif intr_model == "FULL_OPENCV":
+        focal_length = intr_params[:2] / scaling_factor
+        principal_point = intr_params[2:4] / scaling_factor
+        radial_coeffs[:] = intr_params[[4, 5, 8, 9, 10, 11]]
+        tangential_coeffs[:] = intr_params[6:8]
+    else:
+        raise ValueError(f"Unsupported distorted pinhole camera model: {intr_model}")
+
+    return focal_length, principal_point, radial_coeffs, tangential_coeffs, thin_prism_coeffs
+
+
 class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def __init__(
         self,
@@ -174,9 +205,15 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 pixel_coords,
             )
 
-        def create_opencv_pinhole_camera(focalx, focaly, w, h, cx=None, cy=None, radial_coeffs=None):
-            cx = cx if cx is not None else w / 2.0
-            cy = cy if cy is not None else h / 2.0
+        def create_opencv_pinhole_camera(
+            focal_length,
+            principal_point,
+            w,
+            h,
+            radial_coeffs,
+            tangential_coeffs,
+            thin_prism_coeffs,
+        ):
             # Generate UV coordinates
             u = np.tile(np.arange(w), h)
             v = np.arange(h).repeat(w)
@@ -184,15 +221,11 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             params = OpenCVPinholeCameraModelParameters(
                 resolution=np.array([w, h], dtype=np.uint64),
                 shutter_type=ShutterType.GLOBAL,
-                principal_point=np.array([cx, cy], dtype=np.float32),
-                focal_length=np.array([focalx, focaly], dtype=np.float32),
-                radial_coeffs=(
-                    np.zeros((6,), dtype=np.float32)
-                    if radial_coeffs is None
-                    else np.asarray(radial_coeffs, dtype=np.float32)
-                ),
-                tangential_coeffs=np.zeros((2,), dtype=np.float32),
-                thin_prism_coeffs=np.zeros((4,), dtype=np.float32),
+                principal_point=np.asarray(principal_point, dtype=np.float32),
+                focal_length=np.asarray(focal_length, dtype=np.float32),
+                radial_coeffs=np.asarray(radial_coeffs, dtype=np.float32),
+                tangential_coeffs=np.asarray(tangential_coeffs, dtype=np.float32),
+                thin_prism_coeffs=np.asarray(thin_prism_coeffs, dtype=np.float32),
             )
             camera_model = ncore.sensors.CameraModel.from_parameters(params, device="cpu", dtype=torch.float32)
             int_pixel_coords = torch.tensor(np.stack([u, v], axis=1), dtype=torch.int32)
@@ -292,14 +325,18 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                     focal_length_x, focal_length_y, width, height, cx=cx, cy=cy
                 )
 
-            elif intr.model == "SIMPLE_RADIAL":
-                focal_length = intr.params[0] / scaling_factor
-                cx = intr.params[1] / scaling_factor
-                cy = intr.params[2] / scaling_factor
-                radial_coeffs = np.zeros((6,), dtype=np.float32)
-                radial_coeffs[0] = intr.params[3]
+            elif intr.model in {"SIMPLE_RADIAL", "RADIAL", "OPENCV", "FULL_OPENCV"}:
+                focal_length, principal_point, radial_coeffs, tangential_coeffs, thin_prism_coeffs = (
+                    _opencv_pinhole_intrinsics_from_colmap(intr.model, intr.params, scaling_factor)
+                )
                 self.intrinsics[intr.id] = create_opencv_pinhole_camera(
-                    focal_length, focal_length, width, height, cx=cx, cy=cy, radial_coeffs=radial_coeffs
+                    focal_length,
+                    principal_point,
+                    width,
+                    height,
+                    radial_coeffs,
+                    tangential_coeffs,
+                    thin_prism_coeffs,
                 )
 
             elif intr.model == "OPENCV_FISHEYE":
@@ -310,7 +347,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             else:
                 assert False, (
                     f"Colmap camera model '{intr.model}' not handled: supported camera models are "
-                    "PINHOLE, SIMPLE_PINHOLE, SIMPLE_RADIAL, and OPENCV_FISHEYE."
+                    "PINHOLE, SIMPLE_PINHOLE, SIMPLE_RADIAL, RADIAL, OPENCV, FULL_OPENCV, and OPENCV_FISHEYE."
                 )
 
         # Load poses and paths
