@@ -466,7 +466,7 @@ class NuRecExporter(ModelExporter):
             and not self.ignore_ppisp_controller
         )
 
-        from threedgrut.export.usd.ppisp_spg import get_ppisp_spg_dyn_files, get_ppisp_spg_files
+        from threedgrut.export.usd.ppisp_spg import get_ppisp_spg_files
         from threedgrut.export.usd.writers.ppisp_writer import (
             add_ppisp_to_all_render_products,
             build_camera_frame_mapping,
@@ -492,10 +492,14 @@ class NuRecExporter(ModelExporter):
         )
 
         if use_controller:
-            spg_files = list(get_ppisp_spg_dyn_files())
-            from threedgrut.export.usd.writers.ppisp_controller_writer import get_controller_sidecars
+            from threedgrut.export.usd.writers.ppisp_controller_writer import (
+                get_ppisp_auto_spg_files,
+                get_ppisp_embedded_controller_spg_files,
+            )
 
-            for sidecar in get_controller_sidecars():
+            spg_files = list(get_ppisp_auto_spg_files())
+            camera_indices = range(len(getattr(post_processing, "controllers", [])))
+            for sidecar in get_ppisp_embedded_controller_spg_files(post_processing, camera_indices):
                 if not any(file.filename == sidecar.filename for file in spg_files):
                     spg_files.append(sidecar)
         else:

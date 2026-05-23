@@ -1018,7 +1018,7 @@ class USDExporter(ModelExporter):
                 "instead of the runtime controller."
             )
 
-        from threedgrut.export.usd.ppisp_spg import get_ppisp_spg_files, get_ppisp_spg_dyn_files
+        from threedgrut.export.usd.ppisp_spg import get_ppisp_spg_files
         from threedgrut.export.usd.writers.ppisp_writer import (
             add_ppisp_to_all_render_products,
             build_camera_frame_mapping,
@@ -1048,11 +1048,14 @@ class USDExporter(ModelExporter):
             return
 
         if use_controller:
-            spg_files = list(get_ppisp_spg_dyn_files())
             from threedgrut.export.usd.writers.ppisp_controller_writer import (
-                get_controller_sidecars,
+                get_ppisp_auto_spg_files,
+                get_ppisp_embedded_controller_spg_files,
             )
-            for s in get_controller_sidecars():
+
+            spg_files = list(get_ppisp_auto_spg_files())
+            camera_indices = range(len(getattr(post_processing, "controllers", [])))
+            for s in get_ppisp_embedded_controller_spg_files(post_processing, camera_indices):
                 if not any(f.filename == s.filename for f in spg_files):
                     spg_files.append(s)
         else:
