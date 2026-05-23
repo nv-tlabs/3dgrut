@@ -43,7 +43,6 @@ from threedgrut.export.usd.exporter import (
     _extract_camera_params_from_dataset,
     _extract_camera_resolutions,
     _is_ppisp_post_processing,
-    _set_render_setting,
     _suffix_camera_names,
 )
 from threedgrut.export.usd.nurec.serializer import (
@@ -58,7 +57,6 @@ from threedgrut.utils.logger import logger
 
 _DEFAULT_RENDER_PRODUCT_VAR = "LdrColor"
 _PPISP_INPUT_RENDER_PRODUCT_VAR = "HdrColor"
-_GAUSSIAN_SKIP_TONEMAPPING_RENDER_SETTING = "rtx:rtpt:gaussian:skipTonemapping:enabled"
 
 
 def _get_default_nurec_conf() -> SimpleNamespace:
@@ -320,7 +318,6 @@ class NuRecExporter(ModelExporter):
                 self._create_camera_render_products(
                     gauss_usd.stage, validation_cameras, (_PPISP_INPUT_RENDER_PRODUCT_VAR,)
                 )
-                _set_render_setting(gauss_usd.stage, _GAUSSIAN_SKIP_TONEMAPPING_RENDER_SETTING, False)
                 self._export_ppisp(
                     stage=gauss_usd.stage,
                     dataset=dataset,
