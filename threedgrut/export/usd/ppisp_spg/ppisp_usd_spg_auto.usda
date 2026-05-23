@@ -1,21 +1,16 @@
 #usda 1.0
 (
-    defaultPrim = "SlangPPISP"
+    defaultPrim = "PPISPAuto"
 )
 
-def Shader "SlangPPISP"
+def Shader "PPISPAuto"
 {
     uniform token info:implementationSource = "sourceAsset"
-    uniform asset info:spg:sourceAsset = @ppisp_usd_spg.slang@
-    uniform token info:spg:sourceAsset:subIdentifier = "ppispProcess"
+    uniform asset info:spg:sourceAsset = @./ppisp_usd_spg_auto.cu@
+    uniform token info:spg:sourceAsset:subIdentifier = "ppispProcessAuto"
 
-    # User-overridable achromatic responsivity (premultiplied to input HDR).
     float inputs:responsivity = 1.0
 
-    # Exposure parameter
-    float inputs:exposureOffset = 0.0
-
-    # Vignetting parameters (per channel: R, G, B)
     float2 inputs:vignettingCenterR = (0.0, 0.0)
     float inputs:vignettingAlpha1R = 0.0
     float inputs:vignettingAlpha2R = 0.0
@@ -31,15 +26,6 @@ def Shader "SlangPPISP"
     float inputs:vignettingAlpha2B = 0.0
     float inputs:vignettingAlpha3B = 0.0
 
-    # Color correction latent offsets (ZCA-based, 4 control points x 2D)
-    float2 inputs:colorLatentBlue = (0.0, 0.0)
-    float2 inputs:colorLatentRed = (0.0, 0.0)
-    float2 inputs:colorLatentGreen = (0.0, 0.0)
-    float2 inputs:colorLatentNeutral = (0.0, 0.0)
-
-    # CRF raw parameters (per channel: R, G, B)
-    # Activations: boundedSoftplus(raw, min) for toe/shoulder/gamma, sigmoid(raw) for center
-    # Defaults produce identity CRF: toe=1, shoulder=1, gamma=1, center=0.5
     float inputs:crfToeR = 0.013659
     float inputs:crfShoulderR = 0.013659
     float inputs:crfGammaR = 0.378165
@@ -55,7 +41,7 @@ def Shader "SlangPPISP"
     float inputs:crfGammaB = 0.378165
     float inputs:crfCenterB = 0.0
 
-    # Image inputs/outputs
     opaque inputs:HdrColor
+    opaque inputs:ControllerParams
     opaque outputs:PPISPColor
 }
