@@ -68,7 +68,6 @@ from threedgrut.export.usd.writers.camera import export_cameras_to_usd
 logger = logging.getLogger(__name__)
 
 
-_GAUSSIAN_SKIP_TONEMAPPING_RENDER_SETTING = "rtx:rtpt:gaussian:skipTonemapping:enabled"
 _DEFAULT_RENDER_SCOPE_PATH = "/Render"
 _DEFAULT_RENDER_PRODUCT_VAR = "LdrColor"
 _PPISP_INPUT_RENDER_PRODUCT_VAR = "HdrColor"
@@ -79,12 +78,6 @@ POST_PROCESSING_EXPORT_MODES = {
     MODE_POST_PROCESSING_EXPORT_BAKED_SH,
     MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE,
 }
-
-
-def _set_render_setting(stage: Usd.Stage, key: str, value: Any) -> None:
-    render_settings = dict(stage.GetRootLayer().customLayerData.get("renderSettings", {}) or {})
-    render_settings[key] = value
-    stage.SetMetadataByDictKey("customLayerData", "renderSettings", render_settings)
 
 
 def _is_ppisp_post_processing(post_processing: Any) -> bool:
@@ -823,8 +816,6 @@ class USDExporter(ModelExporter):
                         camera_params=validation_camera_params,
                         render_vars=(_PPISP_INPUT_RENDER_PRODUCT_VAR,),
                     )
-                _set_render_setting(scene_stage, _GAUSSIAN_SKIP_TONEMAPPING_RENDER_SETTING, False)
-                logger.info("Disabled Gaussian skip-tonemapping render setting for PPISP Omniverse-native export")
                 self._export_ppisp(
                     stage=scene_stage,
                     dataset=dataset,
