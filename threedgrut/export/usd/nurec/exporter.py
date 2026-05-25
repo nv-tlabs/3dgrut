@@ -29,10 +29,16 @@ from typing import Any, Dict
 import msgpack
 import numpy as np
 import torch
+from pxr import Sdf, Usd
 
 from threedgrut.export.accessor import GaussianExportAccessor
 from threedgrut.export.base import ExportableModel, ModelExporter
 from threedgrut.export.transforms import estimate_normalizing_transform
+from threedgrut.export.usd.camera_copy import (
+    merge_source_prim_at_same_path,
+    merge_source_prims_and_collect_sidecars,
+    stage_has_ppisp_post_processing_effects,
+)
 from threedgrut.export.usd.exporter import (
     MODE_POST_PROCESSING_EXPORT_BAKED_SH,
     MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE,
@@ -57,6 +63,37 @@ from threedgrut.utils.logger import logger
 
 _DEFAULT_RENDER_PRODUCT_VAR = "LdrColor"
 _PPISP_INPUT_RENDER_PRODUCT_VAR = "HdrColor"
+_NUREC_REFERENCED_WORLD_PATH = "/World/gauss"
+
+
+def _remap_render_product_camera_targets(
+    stage: Usd.Stage,
+    *,
+    source_prefix: str = "/World/Cameras",
+    target_prefix: str = f"{_NUREC_REFERENCED_WORLD_PATH}/Cameras",
+) -> None:
+    render_scope = stage.GetPrimAtPath("/Render")
+    if not render_scope.IsValid():
+        return
+
+    for prim in Usd.PrimRange(render_scope):
+        if prim.GetTypeName() != "RenderProduct":
+            continue
+        camera_rel = prim.GetRelationship("camera")
+        if not camera_rel:
+            continue
+        remapped_targets = []
+        changed = False
+        for target in camera_rel.GetTargets():
+            target_text = str(target)
+            if target_text == source_prefix or target_text.startswith(f"{source_prefix}/"):
+                suffix = target_text[len(source_prefix) :]
+                remapped_targets.append(Sdf.Path(f"{target_prefix}{suffix}"))
+                changed = True
+            else:
+                remapped_targets.append(target)
+        if changed:
+            camera_rel.SetTargets(remapped_targets)
 
 
 def _get_default_nurec_conf() -> SimpleNamespace:
@@ -220,6 +257,20 @@ class NuRecExporter(ModelExporter):
 
             scale_sh_output(model, self.radiance_scale)
 
+        copy_source_usd = kwargs.get("copy_source_usd")
+        if copy_source_usd is None:
+            copy_source_usd = kwargs.get("copy_cameras_source")
+        copied_source_stage = None
+        copied_source_has_post_processing = False
+        if copy_source_usd is not None:
+            stage_path, _ = copy_source_usd
+            try:
+                copied_source_stage = Usd.Stage.Open(str(stage_path))
+                if copied_source_stage:
+                    copied_source_has_post_processing = stage_has_ppisp_post_processing_effects(copied_source_stage)
+            except Exception as exc:
+                logger.warning("Could not inspect source USD for NuRec post-processing effects: %s", exc)
+
         # Use accessor to get model data
         accessor = GaussianExportAccessor(model, conf)
         attrs = accessor.get_attributes(preactivation=True)
@@ -297,6 +348,11 @@ class NuRecExporter(ModelExporter):
             attrs.positions,
             normalizing_transform,
             apply_coordinate_transform=apply_coordinate_transform,
+            source_gaussian_transform=kwargs.get("source_gaussian_transform"),
+            author_render_settings=True,
+            invert_registered_compositing=not (
+                uses_omni_native_post_processing_export or copied_source_has_post_processing
+            ),
         )
         train_cameras = None
         validation_cameras = None
@@ -392,6 +448,26 @@ class NuRecExporter(ModelExporter):
                         ),
                     )
         default_usd = serialize_usd_default_layer(gauss_usd)
+        if uses_omni_native_post_processing_export:
+            merge_source_prim_at_same_path(default_usd.stage, gauss_usd.stage, "/Render")
+            _remap_render_product_camera_targets(default_usd.stage)
+        if copy_source_usd is not None:
+            stage_path, res_root = copy_source_usd
+            try:
+                src_stage = copied_source_stage or Usd.Stage.Open(str(stage_path))
+                if not src_stage:
+                    logger.warning("Could not open source USD for NuRec prim merge: %s", stage_path)
+                else:
+                    merge_source_prims_and_collect_sidecars(
+                        dest_stage=default_usd.stage,
+                        source_stage=src_stage,
+                        res_root=res_root,
+                        source_stage_path=Path(stage_path),
+                        files=extra_files,
+                        skip_source_subtrees=kwargs.get("copy_source_skip_subtrees"),
+                    )
+            except Exception as exc:
+                logger.warning("Failed to merge source USD prims into NuRec output: %s", exc)
 
         # Write the final USDZ file
         write_to_usdz(output_path, model_file, gauss_usd, default_usd, extra_files if extra_files else None)

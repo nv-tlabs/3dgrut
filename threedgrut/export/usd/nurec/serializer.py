@@ -24,7 +24,11 @@ from pathlib import Path
 import numpy as np
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdUtils, UsdVol
 
-from threedgrut.export.transforms import get_3dgrut_to_usdz_coordinate_transform
+from threedgrut.export.transforms import (
+    USDTransformSamples,
+    apply_usd_transform_samples,
+    get_3dgrut_to_usdz_coordinate_transform,
+)
 from threedgrut.export.usd.nurec.templates import NamedSerialized
 from threedgrut.export.usd.stage_utils import NamedUSDStage
 from threedgrut.export.usd.stage_utils import (
@@ -74,6 +78,9 @@ def serialize_nurec_usd(
     positions: np.ndarray,
     normalizing_transform: np.ndarray = np.eye(4),
     apply_coordinate_transform: bool = False,
+    source_gaussian_transform: USDTransformSamples | None = None,
+    author_render_settings: bool = True,
+    invert_registered_compositing: bool = True,
 ) -> NamedUSDStage:
     """
     Create a USD file for the 3DGS model.
@@ -83,6 +90,9 @@ def serialize_nurec_usd(
         positions: Positions extracted from PLY file for AABB calculation
         normalizing_transform: 4x4 transformation matrix to normalize the scene (defaults to identity)
         apply_coordinate_transform: If True, apply 3DGRUT-to-USDZ coordinate transform (Omniverse convention)
+        source_gaussian_transform: Optional source USD Gaussian transform to preserve during transcode
+        author_render_settings: If True, author NuRec default renderer settings
+        invert_registered_compositing: Value for registered compositing inverse tone/color settings
 
     Returns:
         NamedUSDStage object containing the USD stage
@@ -104,19 +114,19 @@ def serialize_nurec_usd(
     # Initialize the USD stage with standard settings
     stage = initialize_usd_stage()
 
-    # Set up render settings
-    render_settings = {
-        "rtx:rendermode": "RaytracedLighting",
-        "rtx:directLighting:sampledLighting:samplesPerPixel": 8,
-        "rtx:post:histogram:enabled": False,
-        "rtx:post:registeredCompositing:invertToneMap": True,
-        "rtx:post:registeredCompositing:invertColorCorrection": True,
-        "rtx:material:enableRefraction": False,
-        "rtx:post:tonemap:op": 2,
-        "rtx:raytracing:fractionalCutoutOpacity": False,
-        "rtx:matteObject:visibility:secondaryRays": True,
-    }
-    stage.SetMetadataByDictKey("customLayerData", "renderSettings", render_settings)
+    if author_render_settings:
+        render_settings = {
+            "rtx:rendermode": "RaytracedLighting",
+            "rtx:directLighting:sampledLighting:samplesPerPixel": 8,
+            "rtx:post:histogram:enabled": False,
+            "rtx:post:registeredCompositing:invertToneMap": invert_registered_compositing,
+            "rtx:post:registeredCompositing:invertColorCorrection": invert_registered_compositing,
+            "rtx:material:enableRefraction": False,
+            "rtx:post:tonemap:op": 2,
+            "rtx:raytracing:fractionalCutoutOpacity": False,
+            "rtx:matteObject:visibility:secondaryRays": True,
+        }
+        stage.SetMetadataByDictKey("customLayerData", "renderSettings", render_settings)
 
     # Define UsdVol::Volume
     gauss_path = "/World/gauss"
@@ -132,6 +142,7 @@ def serialize_nurec_usd(
         corrected_matrix = normalizing_inverse
 
     # Apply transform directly to the gauss volume
+    apply_usd_transform_samples(gauss_volume, source_gaussian_transform)
     matrix_op = gauss_volume.AddTransformOp()
     matrix_op.Set(Gf.Matrix4d(*corrected_matrix.flatten()))
 
@@ -223,10 +234,7 @@ def serialize_usd_default_layer(gauss_stage: NamedUSDStage) -> NamedUSDStage:
         NamedUSDStage: The default USD stage with the gauss reference
     """
     stage = initialize_usd_stage()
-    if (
-        getattr(gauss_stage.stage, "HasAuthoredTimeCodeRange", None)
-        and gauss_stage.stage.HasAuthoredTimeCodeRange()
-    ):
+    if getattr(gauss_stage.stage, "HasAuthoredTimeCodeRange", None) and gauss_stage.stage.HasAuthoredTimeCodeRange():
         stage.SetStartTimeCode(gauss_stage.stage.GetStartTimeCode())
         stage.SetEndTimeCode(gauss_stage.stage.GetEndTimeCode())
     stage.SetTimeCodesPerSecond(gauss_stage.stage.GetTimeCodesPerSecond())

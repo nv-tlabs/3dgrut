@@ -19,7 +19,10 @@ Export/Import tests with mock ExportableModel.
 Tests the full export pipeline: ExportableModel -> Exporter -> File -> Importer -> verify data.
 """
 
+import sys
 import tempfile
+import types
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -178,6 +181,26 @@ class MockCameraDatasetNoIntrinsics(MockCameraDataset):
     """Camera dataset with poses but no native image resolution metadata."""
 
     intrinsics = None
+
+
+def _install_fake_ppisp_module(monkeypatch):
+    class PPISP(torch.nn.Module):
+        __module__ = "ppisp"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.num_cameras = 1
+            self.config = SimpleNamespace(use_controller=False)
+            self.controllers = torch.nn.ModuleList()
+            self.exposure_params = torch.tensor([0.1, -0.2], dtype=torch.float32)
+            self.color_params = torch.zeros((2, 8), dtype=torch.float32)
+            self.vignetting_params = torch.zeros((1, 3, 5), dtype=torch.float32)
+            self.crf_params = torch.zeros((1, 3, 4), dtype=torch.float32)
+
+    ppisp_module = types.ModuleType("ppisp")
+    ppisp_module.PPISP = PPISP
+    monkeypatch.setitem(sys.modules, "ppisp", ppisp_module)
+    return PPISP
 
 
 class TestPLYExportImport:
@@ -719,10 +742,52 @@ class TestNuRecExport:
 
             composed = Usd.Stage.Open(str(usd_path))
             assert composed.GetPrimAtPath("/World/gauss/Cameras/camera_0000").IsValid()
+            assert "renderSettings" in composed.GetRootLayer().customLayerData
+            render_settings = composed.GetRootLayer().customLayerData["renderSettings"]
+            assert render_settings["rtx:post:registeredCompositing:invertToneMap"] is True
+            assert render_settings["rtx:post:registeredCompositing:invertColorCorrection"] is True
 
             gauss = self._open_gauss_layer(usd_path, tmp_path)
             assert gauss.GetPrimAtPath("/World/Cameras/camera_0000").IsValid()
             _assert_default_camera_render_product(gauss)
+
+    def test_nurec_export_with_native_ppisp_authors_root_spg_and_ppisp_render_settings(self, monkeypatch):
+        """Native NuRec PPISP export exposes the SPG graph and disables registered-compositing inversions."""
+        from threedgrut.export.usd.exporter import (
+            MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE,
+        )
+        from threedgrut.export.usd.nurec.exporter import NuRecExporter
+
+        PPISP = _install_fake_ppisp_module(monkeypatch)
+        model = MockGaussianModel(num_gaussians=8, sh_degree=3)
+        dataset = MockCameraDataset()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usdz"
+            NuRecExporter(
+                export_cameras=True,
+                export_post_processing=True,
+                post_processing_export_mode=MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE,
+            ).export(model, usd_path, dataset=dataset, post_processing=PPISP())
+
+            composed = Usd.Stage.Open(str(usd_path))
+            assert composed.GetPrimAtPath("/World/gauss/Cameras/camera_0000").IsValid()
+            assert composed.GetPrimAtPath("/World/gauss/Cameras/camera_0000_no_isp").IsValid()
+            assert composed.GetPrimAtPath("/Render/camera_0000/PPISP").IsValid()
+            render_settings = composed.GetRootLayer().customLayerData["renderSettings"]
+            assert render_settings["rtx:post:registeredCompositing:invertToneMap"] is False
+            assert render_settings["rtx:post:registeredCompositing:invertColorCorrection"] is False
+
+            product = composed.GetPrimAtPath("/Render/camera_0000")
+            assert product.GetRelationship("camera").GetTargets() == [
+                Sdf.Path("/World/gauss/Cameras/camera_0000_no_isp")
+            ]
+            ldr = composed.GetPrimAtPath("/Render/camera_0000/LdrColor")
+            assert ldr.GetAttribute("omni:rtx:aov").GetConnections() == [
+                Sdf.Path("/Render/camera_0000/PPISP.outputs:PPISPColor")
+            ]
+            with zipfile.ZipFile(usd_path) as zf:
+                names = set(zf.namelist())
+            assert {"ppisp_usd_spg.usda", "ppisp_usd_spg.cu", "ppisp_usd_spg.cu.lua"} <= names
 
     def test_nurec_export_writes_validation_camera_with_val_suffix(self):
         """validation_dataset surfaces a separate ``<name>_val`` camera and product."""
