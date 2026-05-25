@@ -20,8 +20,18 @@ Provides coordinate system transforms and normalizing transforms
 for exporting Gaussian models to various formats.
 """
 
+from dataclasses import dataclass
+
 import numpy as np
-from pxr import Gf
+from pxr import Gf, Usd, UsdGeom
+
+
+@dataclass(frozen=True)
+class USDTransformSamples:
+    """A composed USD transform sampled at default time and optional time codes."""
+
+    default: Gf.Matrix4d
+    time_samples: tuple[tuple[float, Gf.Matrix4d], ...] = ()
 
 
 def estimate_normalizing_transform(poses: np.ndarray) -> np.ndarray:
@@ -134,3 +144,52 @@ def column_vector_4x4_to_usd_matrix(matrix: np.ndarray) -> Gf.Matrix4d:
     m = Gf.Matrix4d()
     m.SetTransform(Gf.Matrix3d(*R.T.flatten()), Gf.Vec3d(t[0], t[1], t[2]))
     return m
+
+
+def usd_matrix_to_numpy(matrix: Gf.Matrix4d) -> np.ndarray:
+    """Return a row-major numpy representation of a USD matrix."""
+    return np.array([[matrix[i][j] for j in range(4)] for i in range(4)], dtype=np.float64)
+
+
+def _is_identity_usd_matrix(matrix: Gf.Matrix4d, atol: float = 1e-12) -> bool:
+    return np.allclose(usd_matrix_to_numpy(matrix), np.eye(4), atol=atol)
+
+
+def collect_local_to_world_transform_samples(prim: Usd.Prim) -> USDTransformSamples:
+    """Collect a prim's composed local-to-world transform at all authored xform sample times."""
+    sample_times: set[float] = set()
+    current = prim
+    while current and current.IsValid() and str(current.GetPath()) != "/":
+        xformable = UsdGeom.Xformable(current)
+        if xformable:
+            for op in xformable.GetOrderedXformOps():
+                attr = op.GetAttr()
+                if attr.IsValid():
+                    sample_times.update(float(t) for t in attr.GetTimeSamples())
+        current = current.GetParent()
+
+    xformable = UsdGeom.Xformable(prim)
+    default = xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+    samples = tuple(
+        (time_code, xformable.ComputeLocalToWorldTransform(Usd.TimeCode(time_code)))
+        for time_code in sorted(sample_times)
+    )
+    return USDTransformSamples(default=default, time_samples=samples)
+
+
+def apply_usd_transform_samples(
+    xformable: UsdGeom.Xformable,
+    transform_samples: USDTransformSamples | None,
+    *,
+    op_suffix: str = "sourcePose",
+) -> None:
+    """Author transform samples on an xformable prim, skipping static identity transforms."""
+    if transform_samples is None:
+        return
+    if not transform_samples.time_samples and _is_identity_usd_matrix(transform_samples.default):
+        return
+
+    transform_op = xformable.AddTransformOp(opSuffix=op_suffix)
+    transform_op.Set(transform_samples.default)
+    for time_code, matrix in transform_samples.time_samples:
+        transform_op.Set(matrix, Usd.TimeCode(time_code))

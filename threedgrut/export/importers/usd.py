@@ -30,6 +30,7 @@ from pxr import Usd, UsdVol
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
 from threedgrut.export.importers.base import FormatImporter
+from threedgrut.export.transforms import collect_local_to_world_transform_samples
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,9 @@ class USDImporter(FormatImporter):
 
     Supports LightField schema (ParticleField3DGaussianSplat) which stores post-activation values.
     """
+
+    def __init__(self) -> None:
+        self.source_gaussian_transform = None
 
     @property
     def stores_preactivation(self) -> bool:
@@ -105,6 +109,7 @@ class USDImporter(FormatImporter):
             )
 
         logger.info(f"Found Gaussian prim: {gaussian_prim.GetPath()} (type: {gaussian_prim.GetTypeName()})")
+        self.source_gaussian_transform = collect_local_to_world_transform_samples(gaussian_prim)
 
         # Load via UsdVol schema API (ParticleField is base; ParticleField3DGaussianSplat is derived)
         if gaussian_prim.IsA(UsdVol.ParticleField):

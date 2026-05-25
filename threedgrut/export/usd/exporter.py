@@ -31,19 +31,18 @@ from ncore.data import (
     OpenCVPinholeCameraModelParameters,
     ShutterType,
 )
-from pxr import Usd
+from pxr import Usd, UsdGeom
 
 from threedgrut.export.accessor import GaussianExportAccessor
 from threedgrut.export.base import ExportableModel, ModelExporter
 from threedgrut.export.transforms import (
+    apply_usd_transform_samples,
     estimate_normalizing_transform,
     get_3dgrut_to_usdz_coordinate_transform,
 )
 from threedgrut.export.usd.camera_copy import (
-    collect_transitive_sidecars_for_subtree,
-    copy_authored_time_settings_from_source,
-    merge_source_prim_at_same_path,
-    merge_source_world_at_same_paths,
+    merge_source_prims_and_collect_sidecars,
+    save_serialized_files,
 )
 from threedgrut.export.usd.particle_field_hints import (
     DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
@@ -595,6 +594,10 @@ class USDExporter(ModelExporter):
             normalizing_transform=normalizing_transform if self.apply_normalizing_transform else None,
             coordinate_transform=coordinate_transform,
         )
+        apply_usd_transform_samples(
+            UsdGeom.Xformable(stage.GetPrimAtPath(gaussians_root)),
+            kwargs.get("source_gaussian_transform"),
+        )
 
         # Write Gaussians
         writer = create_gaussian_writer(
@@ -634,21 +637,14 @@ class USDExporter(ModelExporter):
                     logger.warning("Could not open source USD for prim merge: %s", stage_path)
                 else:
                     skip = kwargs.get("copy_source_skip_subtrees")
-                    merge_target = scene_stage
-                    merge_source_world_at_same_paths(merge_target, src_stage, skip_source_subtrees=skip)
-                    merge_source_prim_at_same_path(merge_target, src_stage, "/Render")
-                    copy_authored_time_settings_from_source(src_stage, merge_target)
-                    if package_as_usdz and res_root is not None and res_root.is_dir():
-                        for path_prefix in ("/World", "/Render"):
-                            sidecars = collect_transitive_sidecars_for_subtree(
-                                merge_target.GetRootLayer(),
-                                res_root,
-                                path_prefix=path_prefix,
-                                extra_skip_names={Path(stage_path).name},
-                            )
-                            for entry in sidecars:
-                                if not any(f.filename == entry.filename for f in files):
-                                    files.append(entry)
+                    merge_source_prims_and_collect_sidecars(
+                        dest_stage=scene_stage,
+                        source_stage=src_stage,
+                        res_root=res_root,
+                        source_stage_path=Path(stage_path),
+                        files=files,
+                        skip_source_subtrees=skip,
+                    )
             except Exception as e:
                 logger.warning("Failed to merge source USD prims: %s", e)
 
@@ -873,10 +869,8 @@ class USDExporter(ModelExporter):
             written_path = output_path
         elif suffix in [".usda", ".usd", ".usdc"]:
             stage.Export(str(output_path))
-            if envmap_bytes is not None:
-                envmap_path = output_path.parent / "envmap.png"
-                with open(envmap_path, "wb") as f:
-                    f.write(envmap_bytes)
+            if files:
+                save_serialized_files(files, output_path.parent)
             written_path = output_path
         else:
             usdz_path = output_path.with_suffix(".usdz")

@@ -179,16 +179,17 @@ def get_exporter(
                 export_background=False,
                 apply_normalizing_transform=False,
                 sorting_mode_hint=(
-                    render_order_hint
-                    if render_order_hint is not None
-                    else DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT
+                    render_order_hint if render_order_hint is not None else DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT
                 ),
                 linear_srgb=linear_srgb,
             ),
             False,
         )
     elif format_name == "nurec":
-        return NuRecExporter(), True
+        # Generic transcode has Gaussian attributes but no training dataset.
+        # Source USD cameras / RenderProducts are copied separately when the
+        # input is USD, so do not ask NuRecExporter to regenerate them.
+        return NuRecExporter(export_cameras=False, export_post_processing=False), True
     else:
         raise ValueError(f"Unknown output format: {format_name}")
 
@@ -256,6 +257,7 @@ def transcode(
     importer = get_importer(input_format, max_sh_degree)
     attrs, caps = importer.load(input_path)
     source_is_preactivation = importer.stores_preactivation
+    source_gaussian_transform = getattr(importer, "source_gaussian_transform", None)
 
     logger.info(f"Loaded {attrs.num_gaussians} Gaussians (preactivation={source_is_preactivation})")
 
@@ -292,6 +294,7 @@ def transcode(
         apply_coordinate_transform=apply_coordinate_transform,
         copy_cameras_source=copy_cameras_source,
         copy_source_skip_subtrees=copy_source_skip_subtrees,
+        source_gaussian_transform=source_gaussian_transform,
         validate_usd=validate_usd if output_format == "lightfield" else False,
     )
 
@@ -389,7 +392,7 @@ Examples:
         "--no-copy-source-prims",
         action="store_true",
         dest="no_copy_source_prims",
-        help="When input is USD/USDZ and output is LightField, do not merge source /World prims into default.usda.",
+        help="When input and output are USD flavors, do not merge source /World and /Render prims into the target.",
     )
     parser.add_argument(
         "--no-copy-source-cameras",
@@ -449,7 +452,7 @@ def main():
 
     suffix_in = input_path.suffix.lower()
     use_camera_copy_ctx = (
-        output_format == "lightfield"
+        output_format in {"lightfield", "nurec"}
         and suffix_in in (".usd", ".usda", ".usdc", ".usdz")
         and not args.no_copy_source_prims
     )

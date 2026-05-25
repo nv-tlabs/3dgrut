@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Copy prims from a source USD stage into an export stage (transcode USD → LightField)."""
+"""Copy prims from a source USD stage into another USD export stage."""
 
 import logging
 import tempfile
@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Collection, Iterator, List, Optional, Set, Tuple
 
-from pxr import Sdf, UsdGeom
+from pxr import Sdf, Usd, UsdGeom, UsdUtils
 
 from threedgrut.export.usd.stage_utils import NamedSerialized
 
@@ -30,8 +30,13 @@ logger = logging.getLogger(__name__)
 
 UsdStagePathPair = Tuple[Path, Path]
 
-# Default: do not duplicate LightField Gaussian root (large); new splats live at /World/Gaussians.
-_DEFAULT_SKIP_SUBTREES = (Sdf.Path("/World/Gaussians"),)
+# Default: do not duplicate source Gaussian roots (large); the transcode target
+# writes a fresh Gaussian payload in its own flavor.
+_DEFAULT_SKIP_SUBTREES = (
+    Sdf.Path("/World/Gaussians"),
+    Sdf.Path("/World/gaussians"),
+    Sdf.Path("/World/gauss"),
+)
 
 
 def _path_is_under_skipped(src_path: Sdf.Path, skip_roots: Collection[Sdf.Path]) -> bool:
@@ -138,9 +143,11 @@ def merge_source_prim_at_same_path(dest_stage, source_stage, prim_path: str) -> 
 def copy_authored_time_settings_from_source(source_stage, dest_stage) -> None:
     """Copy authored time code range and FPS from source to destination stage when set."""
     try:
-        if getattr(source_stage, "HasAuthoredTimeCodeRange", None) and source_stage.HasAuthoredTimeCodeRange():
-            dest_stage.SetStartTimeCode(source_stage.GetStartTimeCode())
-            dest_stage.SetEndTimeCode(source_stage.GetEndTimeCode())
+        source_start = source_stage.GetStartTimeCode()
+        source_end = source_stage.GetEndTimeCode()
+        if source_start != dest_stage.GetStartTimeCode() or source_end != dest_stage.GetEndTimeCode():
+            dest_stage.SetStartTimeCode(source_start)
+            dest_stage.SetEndTimeCode(source_end)
         tps = source_stage.GetTimeCodesPerSecond()
         if tps is not None and float(tps) > 0.0:
             dest_stage.SetTimeCodesPerSecond(tps)
@@ -148,8 +155,9 @@ def copy_authored_time_settings_from_source(source_stage, dest_stage) -> None:
         logger.debug("Could not copy time settings from source stage: %s", ex)
 
 
-# Filenames we always author in LightField USDZ export (never pull from source package).
-_OUTPUT_AUTHORED_NAMES = frozenset({"gaussians.usdc", "default.usda"})
+# Filenames commonly authored by USD transcode targets (never pull from the
+# source package when collecting copied-source sidecars).
+_OUTPUT_AUTHORED_NAMES = frozenset({"gaussians.usdc", "gauss.usda", "default.usda"})
 
 
 def _basename_packaged_ref(asset_path: str) -> Optional[str]:
@@ -193,9 +201,89 @@ def _gather_ref_payload_basenames_from_prim_spec(spec: Sdf.PrimSpec) -> Set[str]
 
 def _companion_sidecar_basenames(basename: str) -> Set[str]:
     """Additional package files implied by a referenced asset."""
+    if basename.endswith(".cu"):
+        return {f"{basename}.lua"}
     if basename.endswith(".slang"):
         return {f"{basename}.lua"}
     return set()
+
+
+def append_unique_serialized_file(files: List[NamedSerialized], entry: NamedSerialized) -> None:
+    """Append ``entry`` unless a file with the same package basename is already queued."""
+    if not any(existing.filename == entry.filename for existing in files):
+        files.append(entry)
+
+
+def save_serialized_files(files: Collection[NamedSerialized], output_dir: Path) -> None:
+    """Write serialized sidecars next to a loose USD output."""
+    for entry in files:
+        entry.save(output_dir)
+
+
+def merge_source_prims_and_collect_sidecars(
+    *,
+    dest_stage,
+    source_stage,
+    res_root: Optional[Path],
+    source_stage_path: Path,
+    files: List[NamedSerialized],
+    skip_source_subtrees: Optional[Collection[Sdf.Path]] = None,
+    path_prefixes: Collection[str] = ("/World", "/Render"),
+) -> None:
+    """Merge source non-Gaussian prims and queue referenced sidecars.
+
+    The merge preserves source ``/World`` support prims (cameras, rigs, etc.)
+    and source ``/Render`` prims while avoiding duplicate Gaussian payloads.
+    Any relative assets referenced under the merged prefixes are queued in
+    ``files`` so packaged USDZ exports can include them and loose USD exports
+    can write them next to the target layer.
+    """
+    # The destination stage is usually anonymous while we are still collecting
+    # sidecars, so relative references cannot resolve until packaging finishes.
+    # Capture those transient diagnostics; missing files are reported by the
+    # explicit sidecar collector below.
+    delegate = UsdUtils.CoalescingDiagnosticDelegate()
+    merge_source_world_at_same_paths(dest_stage, source_stage, skip_source_subtrees=skip_source_subtrees)
+    merge_source_prim_at_same_path(dest_stage, source_stage, "/Render")
+    copy_authored_time_settings_from_source(source_stage, dest_stage)
+    del delegate
+
+    if res_root is None or not res_root.is_dir():
+        return
+
+    for path_prefix in path_prefixes:
+        sidecars = collect_transitive_sidecars_for_subtree(
+            dest_stage.GetRootLayer(),
+            res_root,
+            path_prefix=path_prefix,
+            extra_skip_names={source_stage_path.name},
+        )
+        for entry in sidecars:
+            append_unique_serialized_file(files, entry)
+
+
+def stage_has_ppisp_post_processing_effects(stage, render_scope_path: str = "/Render") -> bool:
+    """Return True if a stage's render scope contains PPISP SPG shader effects."""
+    render_scope = stage.GetPrimAtPath(render_scope_path)
+    if not render_scope.IsValid():
+        return False
+
+    for prim in Usd.PrimRange(render_scope):
+        if prim.GetTypeName() != "Shader":
+            continue
+        prim_text = str(prim.GetPath()).lower()
+        if "ppisp" in prim_text:
+            return True
+        source_asset = prim.GetAttribute("info:spg:sourceAsset")
+        if source_asset.IsValid():
+            asset = source_asset.Get()
+            asset_path = getattr(asset, "path", asset)
+            if asset_path is not None and "ppisp" in str(asset_path).lower():
+                return True
+        implementation_source = prim.GetAttribute("info:implementationSource")
+        if implementation_source.IsValid() and implementation_source.Get() == "sourceAsset" and "ppisp" in prim_text:
+            return True
+    return False
 
 
 def _walk_prim_subtree(layer: Sdf.Layer, root_path: Sdf.Path):
