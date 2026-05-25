@@ -266,7 +266,9 @@ Hydra key: ``post_processing.method``. Values:
 
 - **null** (default): no change to rendered RGB before the loss.
 - **linear-to-srgb**: **IEC 61966-2-1** piecewise linear-to-sRGB encoding on ``pred_rgb``.
-- **ppisp**: per-frame camera corrections; requires the ``ppisp`` package.
+- **ppisp**: physically plausible image signal processing; requires the ``ppisp`` package. PPISP
+  learns exposure, color, vignetting, and camera response corrections. When configured with a
+  controller, it can also predict exposure and color latents from each rendered view.
 
 If you use MCMC and Selective Adam in your research, please cite [3dgs-mcmc](https://github.com/ubc-vision/3dgs-mcmc), [taming-3dgs](https://github.com/humansensinglab/taming-3dgs),
 and the [gSplat](https://github.com/nerfstudio-project/gsplat/tree/main) library from which the code was adopted (links to the code are provided in the source files).
@@ -321,6 +323,71 @@ Optional flags:
 - `--set_collision` — enable collision on mesh prims.
 - `--set_invisible` — make mesh prims invisible.
 - `--referencing_usd` — specify which USD file in the package to modify (default: auto-detect the one with a Volume prim).
+
+#### Exporting PPISP to USD
+
+When a checkpoint contains a supported PPISP module, USD export includes post-processing by default
+(`export_usd.export_post_processing=true`). The export mode controls how PPISP is represented:
+
+- `baked-sh` (default): fits one fixed PPISP look into the Gaussian SH coefficients. The exported
+  asset does not require a runtime PPISP shader. If no PPISP camera or frame is specified, the bake
+  uses camera `0`, frame `0`.
+- `omni-native`: authors Omniverse Sensor Processing Graph (SPG) CUDA shaders on the RenderProducts.
+  This preserves per-camera and animated behavior when PPISP camera/frame IDs are unset, and requires
+  a viewer that can execute the authored Omniverse/RTX SPG shaders.
+
+With `omni-native`, controller-trained checkpoints use the PPISP controller path by default. The
+exporter writes a per-camera controller graph plus generated CUDA sidecars with embedded controller
+weights, and connects the automatic-parameter PPISP shader to the RenderProduct `LdrColor` output.
+Use `--ignore-ppisp-controller` to force the static fallback path, which authors optimized exposure
+and color parameters as USD attributes instead of running the controller. Setting a fixed PPISP frame
+also selects the static path, because a fixed-frame export intentionally represents one specific
+PPISP state.
+
+The equivalent training-config keys live under `export_usd`:
+
+```yaml
+export_usd:
+  export_post_processing: true
+  post-processing-export-mode: baked-sh   # baked-sh | omni-native
+  post-processing-camera-id: null
+  post-processing-frame-id: null
+  ppisp-responsivity: 1.0
+  ignore-ppisp-controller: false
+  radiance-scale: 1.0
+```
+
+The standalone exporter exposes the same controls:
+
+```bash
+python -m threedgrut.export.scripts.export_usd \
+    --checkpoint path/to/checkpoint.pt \
+    --dataset path/to/dataset \
+    --output path/to/asset.usdz \
+    --post-processing-export-mode omni-native
+```
+
+Useful PPISP export flags:
+
+- `--export-post-processing` / `--no-export-post-processing`: include or skip checkpoint
+  post-processing effects.
+- `--post-processing-export-mode {baked-sh,omni-native}`: choose SH-baked export or runtime
+  Omniverse-native SPG export.
+- `--post-processing-camera-id INT`, `--post-processing-frame-id INT`: select the PPISP
+  camera/frame used by `baked-sh`, or pin `omni-native` static export to one camera/frame.
+- `--ppisp-responsivity FLOAT`: runtime achromatic HDR multiplier authored on `omni-native` PPISP
+  shaders. The default `1.0` is a no-op and can be overridden downstream in USD.
+- `--radiance-scale FLOAT`: multiplicative scale applied to exported SH radiance. For
+  `omni-native` PPISP exports, setting `--ppisp-responsivity` to `1 / radiance_scale` preserves the
+  training-time PPISP input magnitude while changing the asset radiance scale.
+- `--ignore-ppisp-controller`: disable controller export for controller-trained checkpoints and
+  use static/time-sampled PPISP parameters instead.
+- `--post-processing-bake-epochs`, `--post-processing-bake-learning-rate`,
+  `--post-processing-bake-learning-rate-specular`, `--post-processing-bake-learning-rate-density`,
+  and `--ppisp-bake-vignetting-mode`: tune the `baked-sh` fit.
+
+The exporter no longer authors renderer skip-tonemapping settings; tone mapping behavior must be
+controlled by the consuming renderer or application.
 
 ## 🎥 3. Rendering from Checkpoints
 Evaluate a checkpoint with splatting, the OptiX tracer, or PyTorch:

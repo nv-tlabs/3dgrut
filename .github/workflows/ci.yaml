@@ -92,6 +92,7 @@ jobs:
         run: |
           .venv/bin/python -m pytest \
             threedgrut/export/tests/test_export_import.py \
+            threedgrut/export/tests/test_ppisp_cuda_export.py \
             threedgrut/export/tests/test_transcode_roundtrip.py \
             -v
 

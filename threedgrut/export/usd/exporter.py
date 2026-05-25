@@ -26,18 +26,32 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
-from pxr import Usd
 from ncore.data import (
     OpenCVFisheyeCameraModelParameters,
     OpenCVPinholeCameraModelParameters,
     ShutterType,
 )
+from pxr import Usd
 
 from threedgrut.export.accessor import GaussianExportAccessor
 from threedgrut.export.base import ExportableModel, ModelExporter
 from threedgrut.export.transforms import (
     estimate_normalizing_transform,
     get_3dgrut_to_usdz_coordinate_transform,
+)
+from threedgrut.export.usd.camera_copy import (
+    collect_transitive_sidecars_for_subtree,
+    copy_authored_time_settings_from_source,
+    merge_source_prim_at_same_path,
+    merge_source_world_at_same_paths,
+)
+from threedgrut.export.usd.particle_field_hints import (
+    DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
+    normalize_particle_field_sorting_mode_hint,
+)
+from threedgrut.export.usd.post_processing_sh_bake import (
+    MODE_PPISP_BAKE_VIGNETTING_NONE,
+    scale_sh_output,
 )
 from threedgrut.export.usd.stage_utils import (
     NamedSerialized,
@@ -48,22 +62,8 @@ from threedgrut.export.usd.stage_utils import (
 )
 from threedgrut.export.usd.writers.background import export_background_to_usd
 from threedgrut.export.usd.writers.base import create_gaussian_writer
-from threedgrut.export.usd.writers.render_product import create_render_products
-from threedgrut.export.usd.camera_copy import (
-    collect_transitive_sidecars_for_subtree,
-    copy_authored_time_settings_from_source,
-    merge_source_prim_at_same_path,
-    merge_source_world_at_same_paths,
-)
-from threedgrut.export.usd.post_processing_sh_bake import (
-    MODE_PPISP_BAKE_VIGNETTING_NONE,
-    scale_sh_output,
-)
-from threedgrut.export.usd.particle_field_hints import (
-    DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
-    normalize_particle_field_sorting_mode_hint,
-)
 from threedgrut.export.usd.writers.camera import export_cameras_to_usd
+from threedgrut.export.usd.writers.render_product import create_render_products
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +267,9 @@ def _suffix_camera_names(camera_names: List[str], suffix: str = _VALIDATION_CAME
     return [f"{name}{suffix}" for name in camera_names]
 
 
-def _build_camera_frame_mapping_from_grouping(camera_names: List[str], frame_to_camera: List[int]) -> Dict[str, List[int]]:
+def _build_camera_frame_mapping_from_grouping(
+    camera_names: List[str], frame_to_camera: List[int]
+) -> Dict[str, List[int]]:
     mapping: Dict[str, List[int]] = {name: [] for name in camera_names}
     for frame_idx, cam_idx in enumerate(frame_to_camera):
         if 0 <= cam_idx < len(camera_names):
@@ -422,34 +424,25 @@ class USDExporter(ModelExporter):
         self.linear_srgb = linear_srgb
         self.export_post_processing = export_post_processing
         self.post_processing_export_mode = normalize_post_processing_export_mode(post_processing_export_mode)
-        self.post_processing_camera_id = (
-            None if post_processing_camera_id is None else int(post_processing_camera_id)
-        )
-        self.post_processing_frame_id = (
-            None if post_processing_frame_id is None else int(post_processing_frame_id)
-        )
+        self.post_processing_camera_id = None if post_processing_camera_id is None else int(post_processing_camera_id)
+        self.post_processing_frame_id = None if post_processing_frame_id is None else int(post_processing_frame_id)
         self.ppisp_responsivity = _normalize_ppisp_responsivity(ppisp_responsivity)
         self.ignore_ppisp_controller = bool(ignore_ppisp_controller)
         self.post_processing_bake_epochs = int(post_processing_bake_epochs)
         self.post_processing_bake_learning_rate = float(post_processing_bake_learning_rate)
         self.post_processing_bake_learning_rate_specular = (
-            None if post_processing_bake_learning_rate_specular is None
+            None
+            if post_processing_bake_learning_rate_specular is None
             else float(post_processing_bake_learning_rate_specular)
         )
-        self.post_processing_bake_learning_rate_density = float(
-            post_processing_bake_learning_rate_density
-        )
+        self.post_processing_bake_learning_rate_density = float(post_processing_bake_learning_rate_density)
         self.ppisp_bake_vignetting_mode = str(ppisp_bake_vignetting_mode)
         self.post_processing_bake_view_mode = str(post_processing_bake_view_mode)
         self.post_processing_bake_view_seed = (
             None if post_processing_bake_view_seed is None else int(post_processing_bake_view_seed)
         )
-        self.post_processing_bake_trajectory_weight_position = float(
-            post_processing_bake_trajectory_weight_position
-        )
-        self.post_processing_bake_trajectory_weight_rotation = float(
-            post_processing_bake_trajectory_weight_rotation
-        )
+        self.post_processing_bake_trajectory_weight_position = float(post_processing_bake_trajectory_weight_position)
+        self.post_processing_bake_trajectory_weight_rotation = float(post_processing_bake_trajectory_weight_rotation)
         self.radiance_scale = float(radiance_scale)
         self.frames_per_second = frames_per_second
 
@@ -462,8 +455,7 @@ class USDExporter(ModelExporter):
         authored_ranges = [
             (ref_stage.stage.GetStartTimeCode(), ref_stage.stage.GetEndTimeCode())
             for ref_stage in referenced_stages
-            if getattr(ref_stage.stage, "HasAuthoredTimeCodeRange", None)
-            and ref_stage.stage.HasAuthoredTimeCodeRange()
+            if getattr(ref_stage.stage, "HasAuthoredTimeCodeRange", None) and ref_stage.stage.HasAuthoredTimeCodeRange()
         ]
         if authored_ranges:
             stage.SetStartTimeCode(min(start for start, _ in authored_ranges))
@@ -518,6 +510,11 @@ class USDExporter(ModelExporter):
             and self.export_post_processing
             and self.post_processing_export_mode == MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE
         )
+        if self.export_cameras and dataset is None:
+            raise ValueError(
+                "export_cameras=True requires a dataset so camera poses, intrinsics, "
+                "and RenderProducts can be authored. Pass a dataset or set export_cameras=False."
+            )
 
         if uses_baked_post_processing_export:
             from threedgrut.export.usd.post_processing_sh_bake import (
@@ -704,7 +701,7 @@ class USDExporter(ModelExporter):
                 )
                 logger.info(f"Exported {len(camera_prim_paths)} camera(s) from {len(poses)} frames")
             except (AttributeError, KeyError, ValueError) as e:
-                logger.warning(f"Failed to export cameras: {e}")
+                raise ValueError(f"Failed to export cameras: {e}") from e
 
         if self.export_cameras and validation_dataset is not None:
             try:
@@ -741,7 +738,7 @@ class USDExporter(ModelExporter):
                     f"from {len(validation_poses)} frames"
                 )
             except (AttributeError, KeyError, ValueError) as e:
-                logger.warning(f"Failed to export validation cameras: {e}")
+                raise ValueError(f"Failed to export validation cameras: {e}") from e
 
         if (
             self.export_cameras
@@ -749,7 +746,7 @@ class USDExporter(ModelExporter):
             and camera_prim_paths
             and not uses_omni_native_post_processing_export
         ):
-            self._create_camera_render_products(
+            camera_render_products = self._create_camera_render_products(
                 stage=scene_stage,
                 camera_names=camera_names,
                 frame_to_camera=frame_to_camera,
@@ -757,13 +754,18 @@ class USDExporter(ModelExporter):
                 camera_params=camera_params,
                 render_vars=(_DEFAULT_RENDER_PRODUCT_VAR,),
             )
+            if not camera_render_products:
+                raise ValueError(
+                    "export_cameras=True created cameras but no RenderProducts. "
+                    "Check that dataset intrinsics include native image resolution."
+                )
         if (
             self.export_cameras
             and validation_dataset is not None
             and validation_camera_prim_paths
             and not uses_omni_native_post_processing_export
         ):
-            self._create_camera_render_products(
+            validation_render_products = self._create_camera_render_products(
                 stage=scene_stage,
                 camera_names=validation_camera_names,
                 frame_to_camera=validation_frame_to_camera,
@@ -771,6 +773,11 @@ class USDExporter(ModelExporter):
                 camera_params=validation_camera_params,
                 render_vars=(_DEFAULT_RENDER_PRODUCT_VAR,),
             )
+            if not validation_render_products:
+                raise ValueError(
+                    "export_cameras=True created validation cameras but no validation RenderProducts. "
+                    "Check that validation dataset intrinsics include native image resolution."
+                )
 
         # Export background if requested
         envmap_bytes = None
@@ -806,9 +813,14 @@ class USDExporter(ModelExporter):
                 camera_prim_paths=camera_prim_paths,
                 camera_params=camera_params,
             )
+            if not render_product_entries:
+                raise ValueError(
+                    "export_cameras=True could not create PPISP RenderProducts. "
+                    "Check that dataset cameras and intrinsics are available."
+                )
             if render_product_entries is not None:
                 if validation_dataset is not None and validation_camera_prim_paths:
-                    self._create_camera_render_products(
+                    validation_render_products = self._create_camera_render_products(
                         stage=scene_stage,
                         camera_names=validation_camera_names,
                         frame_to_camera=validation_frame_to_camera,
@@ -816,6 +828,11 @@ class USDExporter(ModelExporter):
                         camera_params=validation_camera_params,
                         render_vars=(_PPISP_INPUT_RENDER_PRODUCT_VAR,),
                     )
+                    if not validation_render_products:
+                        raise ValueError(
+                            "export_cameras=True could not create validation PPISP RenderProducts. "
+                            "Check that validation dataset cameras and intrinsics are available."
+                        )
                 self._export_ppisp(
                     stage=scene_stage,
                     dataset=dataset,
@@ -844,8 +861,7 @@ class USDExporter(ModelExporter):
                         camera_frame_mapping=validation_mapping,
                         camera_time_mapping=validation_camera_time_mapping,
                         neutral_frame_params=(
-                            self.post_processing_camera_id is None
-                            and self.post_processing_frame_id is None
+                            self.post_processing_camera_id is None and self.post_processing_frame_id is None
                         ),
                     )
 
@@ -991,11 +1007,7 @@ class USDExporter(ModelExporter):
         # ignore_ppisp_controller forces the same fall-back even with animation,
         # so consumers that don't want runtime controller dispatch can ship the
         # optimized per-frame exposure / colour USD attributes instead.
-        use_controller = (
-            has_controller
-            and fixed_frame_id is None
-            and not self.ignore_ppisp_controller
-        )
+        use_controller = has_controller and fixed_frame_id is None and not self.ignore_ppisp_controller
         if has_controller and fixed_frame_id is not None:
             logger.info(
                 "PPISP controller present but fixed_frame_id is set; using static "

@@ -62,7 +62,12 @@ export_usd:
   post-processing-camera-id: null
   post-processing-frame-id: null
   # Achromatic PPISP responsivity default authored on omni-native SPG shaders.
+  # To rescale asset radiance by k while preserving the PPISP input magnitude,
+  # set radiance-scale: k and ppisp-responsivity: 1/k.
   ppisp-responsivity: 1.0
+  # Controller-trained PPISP checkpoints use the omni-native controller export
+  # path by default. Set true to force the static/time-sampled PPISP fallback.
+  ignore-ppisp-controller: false
   # Number of sequential passes over the train/reference set used for fitting.
   post-processing-bake-epochs: 7
   post-processing-bake-learning-rate: 0.0025
