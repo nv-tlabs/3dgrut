@@ -51,8 +51,8 @@ from threedgrut.export.usd.nurec.serializer import (
     write_to_usdz,
 )
 from threedgrut.export.usd.nurec.templates import NamedSerialized, fill_3dgut_template
-from threedgrut.export.usd.writers.render_product import create_render_products
 from threedgrut.export.usd.writers.camera import export_cameras_to_usd
+from threedgrut.export.usd.writers.render_product import create_render_products
 from threedgrut.utils.logger import logger
 
 _DEFAULT_RENDER_PRODUCT_VAR = "LdrColor"
@@ -172,6 +172,11 @@ class NuRecExporter(ModelExporter):
             and self.export_post_processing
             and self.post_processing_export_mode == MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE
         )
+        if self.export_cameras and dataset is None:
+            raise ValueError(
+                "export_cameras=True requires a dataset so camera poses, intrinsics, "
+                "and RenderProducts can be authored. Pass a dataset or set export_cameras=False."
+            )
 
         if uses_baked_post_processing_export:
             from threedgrut.export.usd.post_processing_sh_bake import (
@@ -293,31 +298,71 @@ class NuRecExporter(ModelExporter):
             normalizing_transform,
             apply_coordinate_transform=apply_coordinate_transform,
         )
-        train_cameras = self._export_dataset_cameras(
-            gauss_usd.stage,
-            dataset=dataset,
-            normalizing_transform=normalizing_transform,
-            apply_transform=apply_transform,
-        )
-        validation_cameras = self._export_dataset_cameras(
-            gauss_usd.stage,
-            dataset=validation_dataset,
-            normalizing_transform=normalizing_transform,
-            apply_transform=apply_transform,
-            validation=True,
-        )
+        train_cameras = None
+        validation_cameras = None
+        if self.export_cameras:
+            train_cameras = self._export_dataset_cameras(
+                gauss_usd.stage,
+                dataset=dataset,
+                normalizing_transform=normalizing_transform,
+                apply_transform=apply_transform,
+            )
+            if train_cameras is None:
+                raise ValueError(
+                    "export_cameras=True could not export NuRec cameras. "
+                    "Check that dataset poses and intrinsics are available."
+                )
+            if validation_dataset is not None:
+                validation_cameras = self._export_dataset_cameras(
+                    gauss_usd.stage,
+                    dataset=validation_dataset,
+                    normalizing_transform=normalizing_transform,
+                    apply_transform=apply_transform,
+                    validation=True,
+                )
+                if validation_cameras is None:
+                    raise ValueError(
+                        "export_cameras=True could not export NuRec validation cameras. "
+                        "Check that validation dataset poses and intrinsics are available."
+                    )
         extra_files: list[NamedSerialized] = []
-        if not uses_omni_native_post_processing_export:
-            self._create_camera_render_products(gauss_usd.stage, train_cameras, (_DEFAULT_RENDER_PRODUCT_VAR,))
-            self._create_camera_render_products(gauss_usd.stage, validation_cameras, (_DEFAULT_RENDER_PRODUCT_VAR,))
-        else:
+        if self.export_cameras and not uses_omni_native_post_processing_export:
+            render_products = self._create_camera_render_products(
+                gauss_usd.stage, train_cameras, (_DEFAULT_RENDER_PRODUCT_VAR,)
+            )
+            if not render_products:
+                raise ValueError(
+                    "export_cameras=True created NuRec cameras but no RenderProducts. "
+                    "Check that dataset intrinsics include native image resolution."
+                )
+            if validation_cameras is not None:
+                validation_render_products = self._create_camera_render_products(
+                    gauss_usd.stage, validation_cameras, (_DEFAULT_RENDER_PRODUCT_VAR,)
+                )
+                if not validation_render_products:
+                    raise ValueError(
+                        "export_cameras=True created NuRec validation cameras but no validation RenderProducts. "
+                        "Check that validation dataset intrinsics include native image resolution."
+                    )
+        elif self.export_cameras:
             render_products = self._create_camera_render_products(
                 gauss_usd.stage, train_cameras, (_PPISP_INPUT_RENDER_PRODUCT_VAR,)
             )
-            if render_products is not None:
-                self._create_camera_render_products(
-                    gauss_usd.stage, validation_cameras, (_PPISP_INPUT_RENDER_PRODUCT_VAR,)
+            if not render_products:
+                raise ValueError(
+                    "export_cameras=True could not create NuRec PPISP RenderProducts. "
+                    "Check that dataset cameras and intrinsics are available."
                 )
+            if render_products is not None:
+                if validation_cameras is not None:
+                    validation_render_products = self._create_camera_render_products(
+                        gauss_usd.stage, validation_cameras, (_PPISP_INPUT_RENDER_PRODUCT_VAR,)
+                    )
+                    if not validation_render_products:
+                        raise ValueError(
+                            "export_cameras=True could not create NuRec validation PPISP RenderProducts. "
+                            "Check that validation dataset cameras and intrinsics are available."
+                        )
                 self._export_ppisp(
                     stage=gauss_usd.stage,
                     dataset=dataset,
@@ -343,8 +388,7 @@ class NuRecExporter(ModelExporter):
                         camera_frame_mapping=validation_mapping,
                         camera_time_mapping=validation_time_mapping,
                         neutral_frame_params=(
-                            self.post_processing_camera_id is None
-                            and self.post_processing_frame_id is None
+                            self.post_processing_camera_id is None and self.post_processing_frame_id is None
                         ),
                     )
         default_usd = serialize_usd_default_layer(gauss_usd)
@@ -401,7 +445,9 @@ class NuRecExporter(ModelExporter):
             logger.warning(f"Failed to export {camera_kind}cameras to NuRec USD: {exc}")
             return None
 
-    def _create_camera_render_products(self, stage, camera_info: dict | None, render_vars: tuple[str, ...]) -> dict | None:
+    def _create_camera_render_products(
+        self, stage, camera_info: dict | None, render_vars: tuple[str, ...]
+    ) -> dict | None:
         if camera_info is None:
             return None
         camera_prim_paths = camera_info["camera_prim_paths"]
@@ -457,11 +503,7 @@ class NuRecExporter(ModelExporter):
         has_controller = (
             bool(getattr(ppisp_config, "use_controller", False)) and controllers is not None and len(controllers) > 0
         )
-        use_controller = (
-            has_controller
-            and self.post_processing_frame_id is None
-            and not self.ignore_ppisp_controller
-        )
+        use_controller = has_controller and self.post_processing_frame_id is None and not self.ignore_ppisp_controller
 
         from threedgrut.export.usd.ppisp_spg import get_ppisp_spg_files
         from threedgrut.export.usd.writers.ppisp_writer import (

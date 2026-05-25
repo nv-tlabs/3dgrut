@@ -174,6 +174,12 @@ class MockMultiCameraDataset(MockCameraDataset):
         return frame_idx % 2
 
 
+class MockCameraDatasetNoIntrinsics(MockCameraDataset):
+    """Camera dataset with poses but no native image resolution metadata."""
+
+    intrinsics = None
+
+
 class TestPLYExportImport:
     """Test PLY export from ExportableModel and import back."""
 
@@ -523,7 +529,7 @@ class TestUSDExportColorSpace:
     def test_usd_export_color_space_from_config(self):
         """Export via from_config with linear_srgb in config sets correct color space."""
         model = MockGaussianModel(num_gaussians=5, sh_degree=3)
-        conf = SimpleNamespace(export_usd=SimpleNamespace(linear_srgb=True))
+        conf = SimpleNamespace(export_usd=SimpleNamespace(linear_srgb=True, export_cameras=False))
         with tempfile.TemporaryDirectory() as tmpdir:
             usd_path = Path(tmpdir) / "test.usdz"
             exporter = USDExporter.from_config(conf)
@@ -556,6 +562,37 @@ class TestUSDExportColorSpace:
             assert stage.GetEndTimeCode() == 1.0
             _assert_default_camera_render_product(stage)
             _assert_default_camera_render_product(stage, "camera_0000_val")
+
+    def test_usd_export_requires_dataset_when_cameras_enabled(self):
+        """Camera-enabled exports must not silently produce camera-less USD."""
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usda"
+            with pytest.raises(ValueError, match="export_cameras=True requires a dataset"):
+                USDExporter(
+                    half_precision=False,
+                    export_cameras=True,
+                    export_background=False,
+                    apply_normalizing_transform=False,
+                ).export(model, usd_path, validate_usd=False)
+
+    def test_usd_export_requires_render_product_resolution(self):
+        """Camera-enabled exports must author RenderProducts, not only cameras."""
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usda"
+            with pytest.raises(ValueError, match="no RenderProducts"):
+                USDExporter(
+                    half_precision=False,
+                    export_cameras=True,
+                    export_background=False,
+                    apply_normalizing_transform=False,
+                ).export(
+                    model,
+                    usd_path,
+                    dataset=MockCameraDatasetNoIntrinsics(),
+                    validate_usd=False,
+                )
 
     def test_multi_camera_time_codes_are_global_dataset_indices(self):
         """Multi-camera exports use GLOBAL dataset frame indices as USD time codes.
@@ -712,6 +749,19 @@ class TestNuRecExport:
             gauss = self._open_gauss_layer(usd_path, tmp_path)
             _assert_default_camera_render_product(gauss)
             _assert_default_camera_render_product(gauss, "camera_0000_val")
+
+    def test_nurec_export_requires_dataset_when_cameras_enabled(self):
+        """NuRec camera-enabled exports must not silently omit camera data."""
+        from threedgrut.export.usd.nurec.exporter import NuRecExporter
+
+        model = MockGaussianModel(num_gaussians=8, sh_degree=3)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usdz"
+            with pytest.raises(ValueError, match="export_cameras=True requires a dataset"):
+                NuRecExporter(
+                    export_cameras=True,
+                    export_post_processing=False,
+                ).export(model, usd_path)
 
     def test_nurec_export_multi_camera_uses_global_dataset_indices_as_time_codes(self):
         """Multi-camera NuRec exports keep the OVRTX-vs-PyTorch basename match."""
