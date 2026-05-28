@@ -81,6 +81,7 @@ def serialize_nurec_usd(
     source_gaussian_transform: USDTransformSamples | None = None,
     author_render_settings: bool = True,
     invert_registered_compositing: bool = True,
+    skip_gaussian_tonemapping: bool = False,
 ) -> NamedUSDStage:
     """
     Create a USD file for the 3DGS model.
@@ -93,6 +94,8 @@ def serialize_nurec_usd(
         source_gaussian_transform: Optional source USD Gaussian transform to preserve during transcode
         author_render_settings: If True, author NuRec default renderer settings
         invert_registered_compositing: Value for registered compositing inverse tone/color settings
+        skip_gaussian_tonemapping: If True, disable Kit's Gaussian skip-tonemapping
+            path for runtime PPISP/SPG, matching the ParticleField export settings.
 
     Returns:
         NamedUSDStage object containing the USD stage
@@ -126,6 +129,8 @@ def serialize_nurec_usd(
             "rtx:raytracing:fractionalCutoutOpacity": False,
             "rtx:matteObject:visibility:secondaryRays": True,
         }
+        if skip_gaussian_tonemapping:
+            render_settings["rtx:rtpt:gaussian:skipTonemapping:enabled"] = False
         stage.SetMetadataByDictKey("customLayerData", "renderSettings", render_settings)
 
     # Define UsdVol::Volume

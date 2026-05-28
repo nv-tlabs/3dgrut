@@ -353,6 +353,7 @@ class NuRecExporter(ModelExporter):
             invert_registered_compositing=not (
                 uses_omni_native_post_processing_export or copied_source_has_post_processing
             ),
+            skip_gaussian_tonemapping=uses_omni_native_post_processing_export or copied_source_has_post_processing,
         )
         train_cameras = None
         validation_cameras = None

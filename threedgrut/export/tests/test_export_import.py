@@ -585,6 +585,52 @@ class TestUSDExportColorSpace:
             assert stage.GetEndTimeCode() == 1.0
             _assert_default_camera_render_product(stage)
             _assert_default_camera_render_product(stage, "camera_0000_val")
+            render_settings = stage.GetRootLayer().customLayerData["renderSettings"]
+            assert render_settings == {"rtx:post:tonemap:op": 2}
+
+    @pytest.mark.parametrize("suffix", [".usda", ".usdz"])
+    def test_usd_export_authors_nre_borel_render_settings_without_runtime_ppisp(self, suffix: str):
+        """ParticleField exports match nre-borel default render settings without PPISP."""
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        dataset = MockCameraDataset()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / f"test{suffix}"
+            USDExporter(
+                half_precision=False,
+                export_cameras=True,
+                export_background=False,
+                apply_normalizing_transform=False,
+            ).export(model, usd_path, dataset=dataset, validate_usd=False)
+
+            stage = Usd.Stage.Open(str(usd_path))
+            assert stage
+            render_settings = stage.GetRootLayer().customLayerData["renderSettings"]
+            assert render_settings == {"rtx:post:tonemap:op": 2}
+
+    def test_usd_export_with_native_ppisp_disables_gaussian_skip_tonemapping(self, monkeypatch):
+        """Runtime PPISP consumes HDR Gaussian output, so Kit must not skip tonemapping."""
+        from threedgrut.export.usd.exporter import (
+            MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE,
+        )
+
+        PPISP = _install_fake_ppisp_module(monkeypatch)
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        dataset = MockCameraDataset()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usdz"
+            USDExporter(
+                half_precision=False,
+                export_cameras=True,
+                export_background=False,
+                apply_normalizing_transform=False,
+                post_processing_export_mode=MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE,
+            ).export(model, usd_path, dataset=dataset, post_processing=PPISP(), validate_usd=False)
+
+            stage = Usd.Stage.Open(str(usd_path))
+            assert stage
+            render_settings = stage.GetRootLayer().customLayerData["renderSettings"]
+            assert render_settings["rtx:post:tonemap:op"] == 2
+            assert render_settings["rtx:rtpt:gaussian:skipTonemapping:enabled"] is False
 
     def test_usd_export_requires_dataset_when_cameras_enabled(self):
         """Camera-enabled exports must not silently produce camera-less USD."""
@@ -746,6 +792,7 @@ class TestNuRecExport:
             render_settings = composed.GetRootLayer().customLayerData["renderSettings"]
             assert render_settings["rtx:post:registeredCompositing:invertToneMap"] is True
             assert render_settings["rtx:post:registeredCompositing:invertColorCorrection"] is True
+            assert "rtx:rtpt:gaussian:skipTonemapping:enabled" not in render_settings
 
             gauss = self._open_gauss_layer(usd_path, tmp_path)
             assert gauss.GetPrimAtPath("/World/Cameras/camera_0000").IsValid()
@@ -776,6 +823,7 @@ class TestNuRecExport:
             render_settings = composed.GetRootLayer().customLayerData["renderSettings"]
             assert render_settings["rtx:post:registeredCompositing:invertToneMap"] is False
             assert render_settings["rtx:post:registeredCompositing:invertColorCorrection"] is False
+            assert render_settings["rtx:rtpt:gaussian:skipTonemapping:enabled"] is False
 
             product = composed.GetPrimAtPath("/Render/camera_0000")
             assert product.GetRelationship("camera").GetTargets() == [
