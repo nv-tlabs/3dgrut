@@ -71,6 +71,8 @@ _DEFAULT_RENDER_SCOPE_PATH = "/Render"
 _DEFAULT_RENDER_PRODUCT_VAR = "LdrColor"
 _PPISP_INPUT_RENDER_PRODUCT_VAR = "HdrColor"
 _VALIDATION_CAMERA_SUFFIX = "_val"
+_RENDER_SETTING_TONEMAP_OP = "rtx:post:tonemap:op"
+_RENDER_SETTING_SKIP_GAUSSIAN_TONEMAPPING = "rtx:rtpt:gaussian:skipTonemapping:enabled"
 MODE_POST_PROCESSING_EXPORT_BAKED_SH = "baked-sh"
 MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE = "omni-native"
 POST_PROCESSING_EXPORT_MODES = {
@@ -309,6 +311,14 @@ def _build_frame_time_codes_from_grouping(camera_names: List[str], frame_to_came
     return [float(i) for i in range(len(frame_to_camera))]
 
 
+def _particle_field_render_settings(*, has_runtime_ppisp: bool) -> Dict[str, Any]:
+    """Render settings shared with the nre-borel Gaussian USD export."""
+    render_settings: Dict[str, Any] = {_RENDER_SETTING_TONEMAP_OP: 2}
+    if has_runtime_ppisp:
+        render_settings[_RENDER_SETTING_SKIP_GAUSSIAN_TONEMAPPING] = False
+    return render_settings
+
+
 class USDExporter(ModelExporter):
     """
     Exporter for OpenUSD format using ParticleField3DGaussianSplat schema.
@@ -445,12 +455,22 @@ class USDExporter(ModelExporter):
         self.radiance_scale = float(radiance_scale)
         self.frames_per_second = frames_per_second
 
-    def _create_default_stage(self, referenced_stages: List[NamedUSDStage]) -> NamedUSDStage:
+    def _create_default_stage(
+        self,
+        referenced_stages: List[NamedUSDStage],
+        *,
+        has_runtime_ppisp: bool = False,
+    ) -> NamedUSDStage:
         """
         Create a default.usda that references the data stages.
         """
         stage = initialize_usd_stage(up_axis="Y")
         stage.SetTimeCodesPerSecond(self.frames_per_second)
+        stage.SetMetadataByDictKey(
+            "customLayerData",
+            "renderSettings",
+            _particle_field_render_settings(has_runtime_ppisp=has_runtime_ppisp),
+        )
         authored_ranges = [
             (ref_stage.stage.GetStartTimeCode(), ref_stage.stage.GetEndTimeCode())
             for ref_stage in referenced_stages
@@ -621,8 +641,17 @@ class USDExporter(ModelExporter):
         gaussians_stage = NamedUSDStage(filename="gaussians.usdc", stage=stage)
         default_stage_wrapped: Optional[NamedUSDStage] = None
         if package_as_usdz:
-            default_stage_wrapped = self._create_default_stage([gaussians_stage])
+            default_stage_wrapped = self._create_default_stage(
+                [gaussians_stage],
+                has_runtime_ppisp=uses_omni_native_post_processing_export,
+            )
         scene_stage = default_stage_wrapped.stage if default_stage_wrapped is not None else stage
+        if not package_as_usdz:
+            scene_stage.SetMetadataByDictKey(
+                "customLayerData",
+                "renderSettings",
+                _particle_field_render_settings(has_runtime_ppisp=uses_omni_native_post_processing_export),
+            )
 
         files: List[NamedSerialized] = []
 
@@ -864,7 +893,10 @@ class USDExporter(ModelExporter):
         # Package
         if suffix == ".usdz":
             if default_stage_wrapped is None:
-                default_stage_wrapped = self._create_default_stage([gaussians_stage])
+                default_stage_wrapped = self._create_default_stage(
+                    [gaussians_stage],
+                    has_runtime_ppisp=uses_omni_native_post_processing_export,
+                )
             write_to_usdz(output_path, [default_stage_wrapped, gaussians_stage], files if files else None)
             written_path = output_path
         elif suffix in [".usda", ".usd", ".usdc"]:
@@ -875,7 +907,10 @@ class USDExporter(ModelExporter):
         else:
             usdz_path = output_path.with_suffix(".usdz")
             if default_stage_wrapped is None:
-                default_stage_wrapped = self._create_default_stage([gaussians_stage])
+                default_stage_wrapped = self._create_default_stage(
+                    [gaussians_stage],
+                    has_runtime_ppisp=uses_omni_native_post_processing_export,
+                )
             write_to_usdz(usdz_path, [default_stage_wrapped, gaussians_stage], files if files else None)
             written_path = usdz_path
 

@@ -367,6 +367,7 @@ class TestCrossFormatTranscode:
             render_settings = stage.GetRootLayer().customLayerData["renderSettings"]
             assert render_settings["rtx:post:registeredCompositing:invertToneMap"] is True
             assert render_settings["rtx:post:registeredCompositing:invertColorCorrection"] is True
+            assert "rtx:rtpt:gaussian:skipTonemapping:enabled" not in render_settings
             with zipfile.ZipFile(output_path) as zf:
                 names = set(zf.namelist())
             assert {"default.usda", "gauss.usda", "output.nurec"} <= names
@@ -556,6 +557,7 @@ class TestCrossFormatTranscode:
             render_settings = stage.GetRootLayer().customLayerData["renderSettings"]
             assert render_settings["rtx:post:registeredCompositing:invertToneMap"] is False
             assert render_settings["rtx:post:registeredCompositing:invertColorCorrection"] is False
+            assert render_settings["rtx:rtpt:gaussian:skipTonemapping:enabled"] is False
             with zipfile.ZipFile(output_path) as zf:
                 names = set(zf.namelist())
                 gauss_usda = zf.read("gauss.usda").decode("utf-8")
@@ -563,6 +565,7 @@ class TestCrossFormatTranscode:
             assert "renderSettings" in gauss_usda
             assert "rtx:post:registeredCompositing:invertToneMap" in gauss_usda
             assert "rtx:post:registeredCompositing:invertColorCorrection" in gauss_usda
+            assert "rtx:rtpt:gaussian:skipTonemapping:enabled" in gauss_usda
 
     def test_transcode_api_usd_to_nurec_preserves_source_gaussian_pose(self):
         """USD→NuRec transcode preserves the source Gaussian local-to-world pose."""
