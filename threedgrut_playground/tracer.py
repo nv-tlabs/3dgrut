@@ -128,7 +128,11 @@ class Tracer:
 
             # NOTE: disable background
             pred_features, pred_opacity = gaussians.background(
-                gpu_batch["poses"].contiguous(), gpu_batch["rays_d_cam"].contiguous(), pred_features, pred_opacity, train
+                gpu_batch["poses"].contiguous(),
+                gpu_batch["rays_d_cam"].contiguous(),
+                pred_features,
+                pred_opacity,
+                train,
             )
 
         return {

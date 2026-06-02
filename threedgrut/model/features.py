@@ -21,7 +21,8 @@ class Features:
 
     class Type(IntEnum):
         """Feature representation mode: integer value used directly in C preprocessor defines."""
-        SH  = 0  # Spherical harmonics
+
+        SH = 0  # Spherical harmonics
         NHT = 1  # Neural harmonic texture
 
         @classmethod
@@ -33,19 +34,19 @@ class Features:
             raise ValueError(f"Invalid feature_type: '{value}'. Must be one of {[m.name.lower() for m in cls]}")
 
     class ActivationType(IntEnum):
-        NONE   = 0
-        SIREN  = 1
+        NONE = 0
+        SIREN = 1
         SINCOS = 2
-        RELU   = 3
+        RELU = 3
 
     class InterpolationType(IntEnum):
         CENTER = 0
         BEZIER = 1
 
     class InterpolationSupport(IntEnum):
-        CENTER     = 0
+        CENTER = 0
         TETRAHEDRA = 1
-        TRIANGLE   = 2
+        TRIANGLE = 2
 
     def __init__(self, conf):
         self._conf = conf
@@ -111,7 +112,11 @@ class Features:
             return Features.InterpolationSupport.CENTER
         if v == "barycentric":
             primitive = getattr(self._conf.render, "primitive_type", "instances")
-            return Features.InterpolationSupport.TRIANGLE if primitive == "trisurfel" else Features.InterpolationSupport.TETRAHEDRA
+            return (
+                Features.InterpolationSupport.TRIANGLE
+                if primitive == "trisurfel"
+                else Features.InterpolationSupport.TETRAHEDRA
+            )
         raise ValueError(f"Unknown nht_features.interpolation_type: {v}")
 
     @property

@@ -770,16 +770,16 @@ __forceinline__ __device__ float3 tetraV0() {
 // Scaled inward face normals N_k = d(w_k)/dP from the GSplat reference tetrahedron.
 // Verified: w_k = 1 exactly at v_k, 0 at the other vertices, sum_k w_k = 1.
 __forceinline__ __device__ float3 tetraN0() {
-    return make_float3( 0.20412414523193154f, -0.11785113019775792f, -0.08333333333333333f);
+    return make_float3(0.20412414523193154f, -0.11785113019775792f, -0.08333333333333333f);
 }
 __forceinline__ __device__ float3 tetraN1() {
     return make_float3(-0.20412414523193154f, -0.11785113019775792f, -0.08333333333333333f);
 }
 __forceinline__ __device__ float3 tetraN2() {
-    return make_float3( 0.00000000000000000f,  0.23570226039551587f, -0.08333333333333333f);
+    return make_float3(0.00000000000000000f, 0.23570226039551587f, -0.08333333333333333f);
 }
 __forceinline__ __device__ float3 tetraN3() {
-    return make_float3( 0.00000000000000000f,  0.00000000000000000f,  0.25000000000000000f);
+    return make_float3(0.00000000000000000f, 0.00000000000000000f, 0.25000000000000000f);
 }
 
 // Mirrors neuralHarmonicFeaturesParticle.slang's FeatureActivationType_*.
@@ -828,16 +828,16 @@ template <int InterpPointFeatureDim,
           int ActivationType,
           typename TFeatElem>
 __forceinline__ __device__ void featuresIntegrateBwdToLocalGrad(
-    const float3&    canonicalIntersection,
-    float3&          canonicalIntersectionGrad,
-    float            alpha,
-    float&           alphaGrad,
-    uint32_t         particleIdx,
-    const float*     features,                 // [RayFeatureDim] read-only
-    float*           integratedFeatures,       // [RayFeatureDim] inout (→ acc_prev)
-    float*           integratedFeaturesGrad,   // [RayFeatureDim] inout (→ d(acc_prev))
-    const TFeatElem* particleFeatureBufPtr,    // [N * 4*IPFD]
-    float*           featureLocalGrad) {       // [4*IPFD] inout (+= accumulator)
+    const float3& canonicalIntersection,
+    float3& canonicalIntersectionGrad,
+    float alpha,
+    float& alphaGrad,
+    uint32_t particleIdx,
+    const float* features,                  // [RayFeatureDim] read-only
+    float* integratedFeatures,              // [RayFeatureDim] inout (→ acc_prev)
+    float* integratedFeaturesGrad,          // [RayFeatureDim] inout (→ d(acc_prev))
+    const TFeatElem* particleFeatureBufPtr, // [N * 4*IPFD]
+    float* featureLocalGrad) {              // [4*IPFD] inout (+= accumulator)
 
     static_assert(ActivationType >= 0 && ActivationType <= 3,
                   "unsupported FEATURE_ACTIVATION_TYPE for NHT CUDA backward");
@@ -866,8 +866,8 @@ __forceinline__ __device__ void featuresIntegrateBwdToLocalGrad(
     for (int i = 0; i < kRFD; ++i) {
         const float dy_i      = integratedFeaturesGrad[i];
         const float accPrev_i = (integratedFeatures[i] - features[i] * alpha) * invOneMinusAlpha;
-        dFeatures[i]              = alpha * dy_i;
-        dAlphaAcc                += (features[i] - accPrev_i) * dy_i;
+        dFeatures[i]          = alpha * dy_i;
+        dAlphaAcc += (features[i] - accPrev_i) * dy_i;
         integratedFeatures[i]     = accPrev_i;
         integratedFeaturesGrad[i] = oneMinusAlpha * dy_i;
     }
@@ -883,10 +883,10 @@ __forceinline__ __device__ void featuresIntegrateBwdToLocalGrad(
         const float3 d  = make_float3(canonicalIntersection.x - v0.x,
                                       canonicalIntersection.y - v0.y,
                                       canonicalIntersection.z - v0.z);
-        w[1] = d.x * N1.x + d.y * N1.y + d.z * N1.z;
-        w[2] = d.x * N2.x + d.y * N2.y + d.z * N2.z;
-        w[3] = d.x * N3.x + d.y * N3.y + d.z * N3.z;
-        w[0] = 1.0f - w[1] - w[2] - w[3];
+        w[1]            = d.x * N1.x + d.y * N1.y + d.z * N1.z;
+        w[2]            = d.x * N2.x + d.y * N2.y + d.z * N2.z;
+        w[3]            = d.x * N3.x + d.y * N3.y + d.z * N3.z;
+        w[0]            = 1.0f - w[1] - w[2] - w[3];
     }
 
     // Load all 4 vertex feature blocks once (fp16 → fp32 if applicable).
@@ -966,7 +966,7 @@ __forceinline__ __device__ void featuresIntegrateBwdToLocalGrad(
 #pragma unroll
         for (int i = 0; i < kIPFD; ++i) {
             featureLocalGrad[k * kIPFD + i] += w[k] * dBase[i];
-            dw_k                            += vert[k][i] * dBase[i];
+            dw_k += vert[k][i] * dBase[i];
         }
         const float3 Nk = (k == 0)   ? tetraN0()
                           : (k == 1) ? tetraN1()

@@ -156,7 +156,7 @@ struct GUTKBufferRenderer : Params {
         TFeaturesVec* __restrict__ particleFeaturesGradient) {
 
         if constexpr (Backward) {
-            float hitAlphaGrad = 0.f;
+            float hitAlphaGrad               = 0.f;
             float3 canonicalIntersectionGrad = make_float3(0.f, 0.f, 0.f);
             if constexpr (Params::PerRayParticleFeatures) {
                 particles.featuresIntegrateBwdToBuffer<false>(ray.direction,
@@ -216,7 +216,8 @@ struct GUTKBufferRenderer : Params {
                                               ray.features);
             }
 
-            if (hitWeight > 0.0f) ray.countHit();
+            if (hitWeight > 0.0f)
+                ray.countHit();
         }
 
         if (ray.transmittance < Particles::MinTransmittanceThreshold) {
@@ -407,26 +408,26 @@ struct GUTKBufferRenderer : Params {
             if (!ray.isAlive())
                 break;
 
-            float hitAlpha = 0.0f;
+            float hitAlpha                  = 0.0f;
             float3 hitCanonicalIntersection = make_float3(0.f, 0.f, 0.f);
-            float hitT = 0.0f;
-            TFeaturesVec hitFeatures = TFeaturesVec::zero();
-            bool validHit = false;
+            float hitT                      = 0.0f;
+            TFeaturesVec hitFeatures        = TFeaturesVec::zero();
+            bool validHit                   = false;
 
             // Step 1: Each thread tests one Gaussian intersection
             if (j < tileNumParticlesToProcess) {
                 const uint32_t toProcessSortedIndex = tileParticleRangeIndices.x + j;
-                const uint32_t particleIdx = sortedTileParticleIdxPtr[toProcessSortedIndex];
+                const uint32_t particleIdx          = sortedTileParticleIdxPtr[toProcessSortedIndex];
 
                 if (particleIdx != GUTParameters::InvalidParticleIdx) {
                     auto densityParams = particles.fetchDensityParameters(particleIdx);
 
                     if (particles.densityHit(ray.origin,
-                                           ray.direction,
-                                           densityParams,
-                                           hitAlpha,
-                                           hitT,
-                                           hitCanonicalIntersection) &&
+                                             ray.direction,
+                                             densityParams,
+                                             hitAlpha,
+                                             hitT,
+                                             hitCanonicalIntersection) &&
                         (hitT > ray.tMinMax.x) &&
                         (hitT < ray.tMinMax.y)) {
 
@@ -493,7 +494,7 @@ struct GUTKBufferRenderer : Params {
                 for (int featIdx = 0; featIdx < Particles::RayFeatureDim; ++featIdx) {
                     accumulatedFeatures[featIdx] = hitFeatures[featIdx] * hitWeight;
                 }
-                accumulatedHitT = hitT * hitWeight;
+                accumulatedHitT     = hitT * hitWeight;
                 accumulatedHitCount = (hitWeight > 0.0f) ? 1 : 0;
             }
 
@@ -586,43 +587,43 @@ struct GUTKBufferRenderer : Params {
                     float featureLocalGrad[Particles::ParticleFeatureDim] = {};
 
                     if (ray.isAlive()) {
-                        float hitAlpha = 0.f;
-                        float hitT     = 0.f;
+                        float hitAlpha               = 0.f;
+                        float hitT                   = 0.f;
                         float3 canonicalIntersection = make_float3(0.f, 0.f, 0.f);
 
                         if (particles.densityHit(ray.origin, ray.direction, particleData.densityParameters,
-                                                  hitAlpha, hitT, canonicalIntersection) &&
+                                                 hitAlpha, hitT, canonicalIntersection) &&
                             (hitT > ray.tMinMax.x) &&
                             (hitT < ray.tMinMax.y)) {
                             // Re-evaluate NHT features at canonical intersection point (cheap: barycentric interp)
                             const TFeaturesVec hitFeatures = particles.featuresFromBuffer(particleData.idx, ray.direction, canonicalIntersection);
 
-                            float hitAlphaGrad = 0.f;
+                            float hitAlphaGrad               = 0.f;
                             float3 canonicalIntersectionGrad = make_float3(0.f, 0.f, 0.f);
 
                             // Write feature grad to thread-private local buffer (no atomics); warp reduction follows below.
                             particles.featuresIntegrateBwdToLocalGrad(ray.direction,
-                                                                       canonicalIntersection,
-                                                                       canonicalIntersectionGrad,
-                                                                       hitAlpha,
-                                                                       hitAlphaGrad,
-                                                                       particleData.idx,
-                                                                       hitFeatures,
-                                                                       ray.featuresBackward,
-                                                                       ray.featuresGradient,
-                                                                       featureLocalGrad);
+                                                                      canonicalIntersection,
+                                                                      canonicalIntersectionGrad,
+                                                                      hitAlpha,
+                                                                      hitAlphaGrad,
+                                                                      particleData.idx,
+                                                                      hitFeatures,
+                                                                      ray.featuresBackward,
+                                                                      ray.featuresGradient,
+                                                                      featureLocalGrad);
 
                             particles.template densityProcessHitBwdToBuffer<false>(ray.origin,
-                                                                                    ray.direction,
-                                                                                    particleData.idx,
-                                                                                    hitAlpha,
-                                                                                    hitAlphaGrad,
-                                                                                    ray.transmittanceBackward,
-                                                                                    ray.transmittanceGradient,
-                                                                                    hitT,
-                                                                                    ray.hitTBackward,
-                                                                                    ray.hitTGradient,
-                                                                                    canonicalIntersectionGrad);
+                                                                                   ray.direction,
+                                                                                   particleData.idx,
+                                                                                   hitAlpha,
+                                                                                   hitAlphaGrad,
+                                                                                   ray.transmittanceBackward,
+                                                                                   ray.transmittanceGradient,
+                                                                                   hitT,
+                                                                                   ray.hitTBackward,
+                                                                                   ray.hitTGradient,
+                                                                                   canonicalIntersectionGrad);
 
                             ray.transmittance *= (1.0f - hitAlpha);
                         }
@@ -654,8 +655,8 @@ struct GUTKBufferRenderer : Params {
                     const uint32_t particleIdx = sortedTileParticleIdxPtr[toProcessSortedIndex];
                     if (particleIdx != GUTParameters::InvalidParticleIdx) {
                         prefetchedRawParticlesData[tileThreadIdx].densityParameters = particles.fetchDensityRawParameters(particleIdx);
-                        prefetchedRawParticlesData[tileThreadIdx].features = tcnn::max(particleFeaturesBuffer[particleIdx], 0.f);
-                        prefetchedRawParticlesData[tileThreadIdx].idx = particleIdx;
+                        prefetchedRawParticlesData[tileThreadIdx].features          = tcnn::max(particleFeaturesBuffer[particleIdx], 0.f);
+                        prefetchedRawParticlesData[tileThreadIdx].idx               = particleIdx;
                     } else {
                         prefetchedRawParticlesData[tileThreadIdx].idx = GUTParameters::InvalidParticleIdx;
                     }

@@ -236,8 +236,7 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
     template <bool exclusiveGradient>
     __forceinline__ __device__ void densityIncidentDirectionBwdToBuffer(uint32_t particlesIdx,
                                                                         const tcnn::vec3& sourcePosition,
-                                                                        const tcnn::vec3& incidentDirectionGrad)
-    {
+                                                                        const tcnn::vec3& incidentDirectionGrad) {
         if constexpr (TDifferentiable) {
             particleDensityIncidentDirectionBwdToBuffer(
                 particlesIdx,
@@ -249,7 +248,7 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
         }
     }
 
-    using TFeaturesVec       = typename tcnn::vec<ExtParams::RayFeatureDim>;
+    using TFeaturesVec = typename tcnn::vec<ExtParams::RayFeatureDim>;
 #if PARTICLE_FEATURE_HALF
     using TFeatureRawParamPtr = __half;
 #else
@@ -302,10 +301,10 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
                                                               const tcnn::vec3& incidentDirection) const {
         if constexpr (!ExtParams::PerRayParticleFeatures) {
             threedgut::radianceFromSpHBwd<Atomic>(m_featureActiveShDegree,
-                                        *reinterpret_cast<const float3*>(&incidentDirection),
-                                        *reinterpret_cast<const float3*>(&featuresGrad),
-                                        reinterpret_cast<float3*>(&m_featureRawParameters.gradPtr[particleIdx * ExtParams::RadianceMaxNumSphCoefficients * 3]),
-                                        *reinterpret_cast<const float3*>(&features));
+                                                  *reinterpret_cast<const float3*>(&incidentDirection),
+                                                  *reinterpret_cast<const float3*>(&featuresGrad),
+                                                  reinterpret_cast<float3*>(&m_featureRawParameters.gradPtr[particleIdx * ExtParams::RadianceMaxNumSphCoefficients * 3]),
+                                                  *reinterpret_cast<const float3*>(&features));
         }
     }
 
@@ -338,12 +337,12 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
                                                                    float weight,
                                                                    uint32_t particleIdx, TFeaturesVec& integratedFeatures) const {
         particleFeaturesIntegrateFwdFromBuffer(*reinterpret_cast<const float3*>(&incidentDirection),
-                                              make_float3(0.f, 0.f, 0.f),
-                                              weight,
-                                              particleIdx,
-                                              reinterpret_cast<TFeatureRawParamPtr*>(m_featureRawParameters.ptr),
-                                              m_featureActiveShDegree,
-                                              reinterpret_cast<FixedArray<float, RAY_FEATURE_DIM>*>(&integratedFeatures));
+                                               make_float3(0.f, 0.f, 0.f),
+                                               weight,
+                                               particleIdx,
+                                               reinterpret_cast<TFeatureRawParamPtr*>(m_featureRawParameters.ptr),
+                                               m_featureActiveShDegree,
+                                               reinterpret_cast<FixedArray<float, RAY_FEATURE_DIM>*>(&integratedFeatures));
     }
 
     __forceinline__ __device__ void featuresIntegrateBwd(float alpha,
@@ -394,15 +393,15 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
     // featureLocalGrad must be zero-initialized (size ExtParams::ParticleFeatureDim) before calling.
     // Follow with featureLocalGradWarpReduceAndWrite (called by ALL warp threads) to write to global buffer.
     __forceinline__ __device__ void featuresIntegrateBwdToLocalGrad(const tcnn::vec3& incidentDirection,
-                                                                     const float3& canonicalIntersection,
-                                                                     float3& canonicalIntersectionGrad,
-                                                                     float alpha,
-                                                                     float& alphaGrad,
-                                                                     uint32_t particleIdx,
-                                                                     const TFeaturesVec& features,
-                                                                     TFeaturesVec& integratedFeatures,
-                                                                     TFeaturesVec& integratedFeaturesGrad,
-                                                                     float* featureLocalGrad) const {
+                                                                    const float3& canonicalIntersection,
+                                                                    float3& canonicalIntersectionGrad,
+                                                                    float alpha,
+                                                                    float& alphaGrad,
+                                                                    uint32_t particleIdx,
+                                                                    const TFeaturesVec& features,
+                                                                    TFeaturesVec& integratedFeatures,
+                                                                    TFeaturesVec& integratedFeaturesGrad,
+                                                                    float* featureLocalGrad) const {
 #if NHT_FEATURES_BWD_LOCAL_GRAD_CUDA
         if constexpr (TDifferentiable) {
             static_assert(ExtParams::FeatureTransformType == 1,
@@ -452,9 +451,9 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
                 &alphaGrad,
                 particleIdx,
                 reinterpret_cast<TFeatureRawParamPtr*>(m_featureRawParameters.ptr),
-                featureLocalGrad - particleOffset,   // shifted: writes to featureLocalGrad[0..ParticleFeatureDim-1]
+                featureLocalGrad - particleOffset, // shifted: writes to featureLocalGrad[0..ParticleFeatureDim-1]
                 m_featureActiveShDegree,
-                true,                                // exclusiveGradient=true → += without atomics
+                true, // exclusiveGradient=true → += without atomics
                 *reinterpret_cast<const FixedArray<float, RAY_FEATURE_DIM>*>(&features),
                 reinterpret_cast<FixedArray<float, RAY_FEATURE_DIM>*>(&integratedFeatures),
                 reinterpret_cast<FixedArray<float, RAY_FEATURE_DIM>*>(&integratedFeaturesGrad));
@@ -466,8 +465,8 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
     // MUST be called by ALL threads in the warp (including non-hitting threads with featureLocalGrad=0)
     // to satisfy __shfl_xor_sync requirements.
     __forceinline__ __device__ void featureLocalGradWarpReduceAndWrite(uint32_t particleIdx,
-                                                                        float* featureLocalGrad,
-                                                                        uint32_t tileThreadIdx) const {
+                                                                       float* featureLocalGrad,
+                                                                       uint32_t tileThreadIdx) const {
         if constexpr (TDifferentiable) {
 #pragma unroll
             for (int mask = 1; mask < warpSize; mask *= 2) {
@@ -632,5 +631,5 @@ private:
         m_densityRawParameters;
 
     int m_featureActiveShDegree = 0;
-    ShRadiativeGaussianParticlesBuffer<float, TDifferentiable> m_featureRawParameters;  // gradPtr always fp32; ptr cast to TFeatureRawParamPtr for reads
+    ShRadiativeGaussianParticlesBuffer<float, TDifferentiable> m_featureRawParameters; // gradPtr always fp32; ptr cast to TFeatureRawParamPtr for reads
 };

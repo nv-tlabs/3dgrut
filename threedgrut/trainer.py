@@ -39,7 +39,11 @@ from threedgrut.render import Renderer
 from threedgrut.strategy.base import BaseStrategy
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import check_step_condition, create_summary_writer, jet_map
-from threedgrut.utils.render import apply_background, apply_feature_decoder, apply_post_processing
+from threedgrut.utils.render import (
+    apply_background,
+    apply_feature_decoder,
+    apply_post_processing,
+)
 from threedgrut.utils.timer import CudaTimer
 
 
@@ -573,8 +577,7 @@ class Trainer3DGRUT:
         if ema_decay > 0:
             logger.info(f"🎨 FeatureDecoder EMA: decay={ema_decay}, start_step={ema_start_step}")
         logger.info(
-            f"🎨 FeatureDecoder optimizer: lr={lr}, "
-            f"weight_decay={weight_decay}, scheduler={scheduler_conf.type}"
+            f"🎨 FeatureDecoder optimizer: lr={lr}, " f"weight_decay={weight_decay}, scheduler={scheduler_conf.type}"
         )
 
     @torch.cuda.nvtx.range("get_metrics")

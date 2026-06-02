@@ -185,7 +185,7 @@ extern "C" __global__ void __raygen__rg() {
                         canonicalIntersection,
                         &hitFeatures);
 
-                    float hitAlphaGrad = 0.f;
+                    float hitAlphaGrad               = 0.f;
                     float3 canonicalIntersectionGrad = make_float3(0.f);
                     particleFeaturesIntegrateBwdToBuffer(rayDirection,
                                                          canonicalIntersection,
@@ -196,7 +196,7 @@ extern "C" __global__ void __raygen__rg() {
                                                          const_cast<TParticleFeatureElem*>(params.particleFeatures),
                                                          const_cast<float*>(params.particleFeaturesGrad),
                                                          (int)params.sphDegree,
-                                                         false,  // exclusiveGradient: multiple rays can hit same particle
+                                                         false, // exclusiveGradient: multiple rays can hit same particle
                                                          hitFeatures,
                                                          &rayFeatures,
                                                          &rayFeaturesGrad);

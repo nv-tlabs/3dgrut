@@ -29,7 +29,11 @@ from threedgrut.model.model import MixtureOfGaussians
 from threedgrut.utils.color_correct import color_correct_affine
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import create_summary_writer
-from threedgrut.utils.render import apply_background, apply_feature_decoder, apply_post_processing
+from threedgrut.utils.render import (
+    apply_background,
+    apply_feature_decoder,
+    apply_post_processing,
+)
 
 
 class Renderer:
@@ -162,8 +166,8 @@ class Renderer:
         # Load feature decoder for nht models
         feature_decoder = None
         if "feature_decoder" in checkpoint:
-            from threedgrut.model.features import Features
             from threedgrut.model.feature_decoder import FeatureDecoder
+            from threedgrut.model.features import Features
 
             if model.feature_type == Features.Type.NHT:
                 conf_model = conf.model

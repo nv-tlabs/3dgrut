@@ -887,7 +887,7 @@ OptixTracer::trace(uint32_t frameNumber,
                    int sphDegree,
                    float minTransmittance) {
 
-    const torch::TensorOptions opts  = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
+    const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
 #if FEATURE_OUTPUT_HALF
     const torch::TensorOptions rayFeatOpts = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA);
 #else

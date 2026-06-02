@@ -30,6 +30,7 @@ from threedgrut.datasets.protocols import Batch
 from threedgrut.datasets.utils import read_colmap_points3D_text, read_next_bytes
 from threedgrut.export import PLYExporter
 from threedgrut.export.base import ExportableModel
+from threedgrut.model.features import Features
 from threedgrut.model.geometry import k_nearest_neighbors, nearest_neighbor_dist_cpuKD
 from threedgrut.optimizers import SelectiveAdam
 from threedgrut.utils.logger import logger
@@ -42,8 +43,8 @@ from threedgrut.utils.misc import (
     to_np,
     to_torch,
 )
-from threedgrut.model.features import Features
 from threedgrut.utils.render import RGB2SH
+
 
 class MixtureOfGaussians(torch.nn.Module, ExportableModel):
     """ """
@@ -77,13 +78,17 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         if self.feature_type == Features.Type.SH:
             return self.features_albedo
         else:
-            raise AttributeError(f"features_albedo not available in feature_type='{self.feature_type.name.lower()}' mode")
+            raise AttributeError(
+                f"features_albedo not available in feature_type='{self.feature_type.name.lower()}' mode"
+            )
 
     def get_features_specular(self) -> torch.Tensor:
         if self.feature_type == Features.Type.SH:
             return self.features_specular
         else:
-            raise AttributeError(f"features_specular not available in feature_type='{self.feature_type.name.lower()}' mode")
+            raise AttributeError(
+                f"features_specular not available in feature_type='{self.feature_type.name.lower()}' mode"
+            )
 
     def get_features(self):
         if self.feature_type == Features.Type.SH:
@@ -395,7 +400,9 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
 
     def init_from_pretrained_point_cloud(self, pc_path: str, set_optimizable_parameters: bool = True):
         if self.feature_type != Features.Type.SH:
-            raise NotImplementedError(f"init_from_pretrained_point_cloud only supports feature_type='sh', got '{self.feature_type.name.lower()}'")
+            raise NotImplementedError(
+                f"init_from_pretrained_point_cloud only supports feature_type='sh', got '{self.feature_type.name.lower()}'"
+            )
         data = PlyData.read(pc_path)
         num_gaussians = len(data["vertex"])
         self.positions = torch.nn.Parameter(
@@ -559,7 +566,8 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
             init_max = float(getattr(self.conf.model.nht_features, "init_max", 5.0))
             features = (
                 torch.rand((num_gaussians, self.particle_feature_dim), dtype=dtype, device=self.device)
-                * (init_max - init_min) + init_min
+                * (init_max - init_min)
+                + init_min
             )
 
         dist = torch.clamp_min(nearest_neighbor_dist_cpuKD(fused_point_cloud), 1e-3)
@@ -592,7 +600,9 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         if "feature_type" not in checkpoint and "features_albedo" in checkpoint:
             logger.info("Loading legacy checkpoint - auto-detecting feature_type='sh'")
             checkpoint["feature_type"] = "sh"
-            checkpoint["particle_feature_dim"] = checkpoint["features_albedo"].shape[1] + checkpoint["features_specular"].shape[1]
+            checkpoint["particle_feature_dim"] = (
+                checkpoint["features_albedo"].shape[1] + checkpoint["features_specular"].shape[1]
+            )
             checkpoint["ray_feature_dim"] = 3
 
         # Load features based on feature_type (convert string to enum)
@@ -735,7 +745,8 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
             init_max = float(getattr(self.conf.model.nht_features, "init_max", 5.0))
             features = (
                 torch.rand((N, self.particle_feature_dim), dtype=dtype, device=self.device, generator=rng)
-                * (init_max - init_min) + init_min
+                * (init_max - init_min)
+                + init_min
             )
 
         self.positions = torch.nn.Parameter(positions.to(dtype=dtype, device=self.device))
@@ -758,7 +769,9 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         for name, args in self.conf.optimizer.params.items():
             # Skip parameters that don't exist (e.g., 'features' in SH mode or 'features_albedo' in learned mode)
             if not hasattr(self, name):
-                logger.info(f"Skipping optimizer parameter '{name}' - not present in {self.feature_type.name.lower()} mode")
+                logger.info(
+                    f"Skipping optimizer parameter '{name}' - not present in {self.feature_type.name.lower()} mode"
+                )
                 continue
 
             module = getattr(self, name)
@@ -876,9 +889,7 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         optimizable_tensors = self.replace_tensor_to_optimizer(updated_densities, "density")
         self.density = optimizable_tensors["density"]
 
-    def forward(
-        self, batch: Batch, train=False, frame_id=0
-    ) -> dict[str, torch.Tensor]:
+    def forward(self, batch: Batch, train=False, frame_id=0) -> dict[str, torch.Tensor]:
         """
         Args:
             batch: a Batch structure containing the input data
@@ -910,7 +921,9 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
     @torch.no_grad()
     def init_from_ply(self, mogt_path: str, init_model=True):
         if self.feature_type != Features.Type.SH:
-            raise NotImplementedError(f"init_from_ply only supports feature_type='sh', got '{self.feature_type.name.lower()}'")
+            raise NotImplementedError(
+                f"init_from_ply only supports feature_type='sh', got '{self.feature_type.name.lower()}'"
+            )
         plydata = PlyData.read(mogt_path)
 
         mogt_pos = np.stack(

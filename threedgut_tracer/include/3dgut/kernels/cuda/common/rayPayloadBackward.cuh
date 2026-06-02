@@ -45,11 +45,11 @@ __device__ __inline__ RayPayloadT initializeBackwardRay(const threedgut::RenderP
 
     if (ray.isAlive()) {
         constexpr uint32_t stride = RayPayloadT::FeatDim + 1;
-        const uint32_t base = ray.idx * stride;
+        const uint32_t base       = ray.idx * stride;
         // Forward features: fp16 when FEATURE_OUTPUT_HALF=1, fp32 otherwise.
         // Gradient buffer: always fp32 — keeps backward numerically stable regardless of forward dtype.
 #if FEATURE_OUTPUT_HALF
-        #pragma unroll
+#pragma unroll
         for (int i = 0; i < RayPayloadT::FeatDim; ++i) {
             ray.featuresBackward[i] = __half2float(featuresDensityPtr[base + i]);
             ray.featuresGradient[i] = featuresDensityGradientPtr[base + i];
@@ -57,7 +57,7 @@ __device__ __inline__ RayPayloadT initializeBackwardRay(const threedgut::RenderP
         ray.transmittanceBackward = 1.f - __half2float(featuresDensityPtr[base + RayPayloadT::FeatDim]);
         ray.transmittanceGradient = -1.f * featuresDensityGradientPtr[base + RayPayloadT::FeatDim];
 #else
-        #pragma unroll
+#pragma unroll
         for (int i = 0; i < RayPayloadT::FeatDim; ++i) {
             ray.featuresBackward[i] = featuresDensityPtr[base + i];
             ray.featuresGradient[i] = featuresDensityGradientPtr[base + i];
