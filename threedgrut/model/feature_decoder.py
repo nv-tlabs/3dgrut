@@ -95,6 +95,8 @@ class FeatureDecoder(nn.Module):
             encoding_config=composite_encoding_config,
             network_config=network_config,
         )
+        if hasattr(tcnn, "supports_jit_fusion"):
+            self.network.jit_fusion = tcnn.supports_jit_fusion()
 
         if self._ema_decay > 0:
             for name, param in self.named_parameters():

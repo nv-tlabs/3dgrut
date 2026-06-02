@@ -289,7 +289,13 @@ class Renderer:
             # Compute the outputs of a single batch
             outputs = self.model(gpu_batch)
             if self.feature_decoder is not None:
-                outputs = apply_feature_decoder(self.feature_decoder, outputs, gpu_batch, training=False)
+                outputs = apply_feature_decoder(
+                    self.feature_decoder,
+                    outputs,
+                    gpu_batch,
+                    training=False,
+                    center_ray_encoding=bool(getattr(self.conf.model.nht_decoder, "center_ray_encoding", False)),
+                )
             outputs = apply_background(self.model.background, outputs, gpu_batch, training=False)
 
             # Apply post-processing

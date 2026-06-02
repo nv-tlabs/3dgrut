@@ -55,6 +55,7 @@ def setup_3dgut(conf):
         f"-DFEATURE_ACTIVATION_TYPE={feat.activation_type}",
         f"-DFEATURE_ACTIVATION_NUM_FREQUENCIES={feat.activation_num_frequencies}",
         f"-DINTERP_POINT_FEATURE_DIM={feat.interp_point_feature_dim}",
+        f"-DNHT_FEATURES_BWD_LOCAL_GRAD_CUDA={int(os.environ.get('NHT_FEATURES_BWD_LOCAL_GRAD_CUDA', '1'))}",
     ]
     half_defines = [
         f"-DPARTICLE_FEATURE_HALF={1 if conf.render.particle_feature_half else 0}",

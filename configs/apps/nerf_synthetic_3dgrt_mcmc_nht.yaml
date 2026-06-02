@@ -12,6 +12,8 @@ model:
   feature_type: "nht"
 
 render:
+  particle_feature_half: true
+  feature_output_half: true
   pipeline_type: referenceSlang
   backward_pipeline_type: referenceSlangBwd
   particle_kernel_max_alpha: 0.999

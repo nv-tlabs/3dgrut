@@ -11,7 +11,11 @@ defaults:
 model:
   feature_type: "nht"
 
+val_frequency: 999999 # never validate during reference-style training
+
 render:
+  particle_feature_half: true
+  feature_output_half: true
   particle_kernel_max_alpha: 0.999
 
 loss:

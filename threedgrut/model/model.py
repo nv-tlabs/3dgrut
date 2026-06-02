@@ -236,16 +236,22 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
 
         self.background = background.make(self.conf.model.background.name, self.conf.model.background)
 
-        # Check if we would like to do progressive training
-        self.n_active_features = min(self.conf.model.progressive_training.init_n_features, sh_degree)
-        self.max_n_features = (
-            sh_degree  # For SH, this is the SH degree (clamped if > render.particle_radiance_sph_degree)
-        )
-        self.progressive_training = False
-        if self.n_active_features < self.max_n_features:
-            self.feature_dim_increase_interval = self.conf.model.progressive_training.increase_frequency
-            self.feature_dim_increase_step = self.conf.model.progressive_training.increase_step
-            self.progressive_training = True
+        # Progressive feature training is SH-specific. NHT renders the full learned
+        # harmonic feature vector from the first step, matching the reference.
+        if self.feature_type == Features.Type.NHT:
+            self.n_active_features = self.ray_feature_dim
+            self.max_n_features = self.ray_feature_dim
+            self.progressive_training = False
+        else:
+            self.n_active_features = min(self.conf.model.progressive_training.init_n_features, sh_degree)
+            self.max_n_features = (
+                sh_degree  # For SH, this is the SH degree (clamped if > render.particle_radiance_sph_degree)
+            )
+            self.progressive_training = False
+            if self.n_active_features < self.max_n_features:
+                self.feature_dim_increase_interval = self.conf.model.progressive_training.increase_frequency
+                self.feature_dim_increase_step = self.conf.model.progressive_training.increase_step
+                self.progressive_training = True
 
         if conf.render.method == "3dgrt":
             self.renderer = threedgrt_tracer.Tracer(conf)
@@ -643,6 +649,9 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         elif checkpoint_feature_type == Features.Type.NHT:
             self.features = checkpoint["features"]
             self.nht_num_interpolation_points = Features(self.conf).num_interpolation_points
+            self.n_active_features = self.ray_feature_dim
+            self.max_n_features = self.ray_feature_dim
+            self.progressive_training = False
         else:
             raise ValueError(f"Unknown feature_type in checkpoint: {checkpoint_feature_type}")
 
@@ -768,8 +777,10 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
                     params.append({"params": [module], "name": name, **args})
 
         if self.conf.optimizer.type == "adam":
-            self.optimizer = torch.optim.Adam(params, lr=self.conf.optimizer.lr, eps=self.conf.optimizer.eps)
-            logger.info("🔆 Using Adam optimizer")
+            self.optimizer = torch.optim.Adam(
+                params, lr=self.conf.optimizer.lr, eps=self.conf.optimizer.eps, fused=True
+            )
+            logger.info("🔆 Using fused Adam optimizer")
         elif self.conf.optimizer.type == "selective_adam":
             self.optimizer = SelectiveAdam(params, lr=self.conf.optimizer.lr, eps=self.conf.optimizer.eps)
             logger.info("🔆 Using Selective Adam optimizer")
