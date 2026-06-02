@@ -552,7 +552,7 @@ class Trainer3DGRUT:
         )
 
         scheduler_conf = dec.scheduler
-        max_steps = getattr(conf, "n_iterations", 30000)
+        max_steps = int(getattr(scheduler_conf, "max_steps", getattr(conf, "n_iterations", 30000)))
         decay_final = float(getattr(scheduler_conf, "decay_final", 0.001))
         if scheduler_conf.type == "exponential":
             gamma = decay_final ** (1.0 / max_steps)
@@ -1128,7 +1128,13 @@ class Trainer3DGRUT:
         if self.feature_decoder is not None:
             with torch.cuda.nvtx.range(f"train_{global_step}_feature_decoder"):
                 profilers["feature_decoder"].start()
-                outputs = apply_feature_decoder(self.feature_decoder, outputs, gpu_batch, training=True)
+                outputs = apply_feature_decoder(
+                    self.feature_decoder,
+                    outputs,
+                    gpu_batch,
+                    training=True,
+                    center_ray_encoding=bool(getattr(self.conf.model.nht_decoder, "center_ray_encoding", False)),
+                )
                 profilers["feature_decoder"].end()
         outputs = apply_background(self.model.background, outputs, gpu_batch, training=True)
 
@@ -1140,13 +1146,6 @@ class Trainer3DGRUT:
         # Compute the losses of a single batch
         with torch.cuda.nvtx.range(f"train_{global_step}_loss"):
             batch_losses = self.get_losses(gpu_batch, outputs)
-
-            # Add feature decoder regularization loss
-            if self.feature_decoder is not None and "decoder_reg_loss" in outputs:
-                decoder_reg_weight = conf.model.nht_decoder.reg_weight
-                decoder_reg_loss = decoder_reg_weight * outputs["decoder_reg_loss"]
-                batch_losses["total_loss"] = batch_losses["total_loss"] + decoder_reg_loss
-                batch_losses["decoder_reg_loss"] = decoder_reg_loss
 
             # Add post-processing regularization loss
             if self.post_processing is not None:
@@ -1328,7 +1327,13 @@ class Trainer3DGRUT:
                 outputs = self.model(gpu_batch, train=False)
                 # Apply feature decoder to convert N-dimensional features to RGB
                 if self.feature_decoder is not None:
-                    outputs = apply_feature_decoder(self.feature_decoder, outputs, gpu_batch, training=False)
+                    outputs = apply_feature_decoder(
+                        self.feature_decoder,
+                        outputs,
+                        gpu_batch,
+                        training=False,
+                        center_ray_encoding=bool(getattr(self.conf.model.nht_decoder, "center_ray_encoding", False)),
+                    )
                 outputs = apply_background(self.model.background, outputs, gpu_batch, training=False)
                 # Apply post-processing for validation (novel view mode)
                 if self.post_processing is not None:

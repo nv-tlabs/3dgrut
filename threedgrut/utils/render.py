@@ -56,6 +56,7 @@ def apply_feature_decoder(
     outputs: dict,
     gpu_batch,
     training: bool = False,
+    center_ray_encoding: bool = False,
 ) -> dict:
     """Apply feature decoder to N-dimensional feature map."""
     if feature_decoder is None:
@@ -67,8 +68,15 @@ def apply_feature_decoder(
 
     R = gpu_batch.T_to_world[:, :3, :3]  # [B, 3, 3] c2w rotation
     rays_dir_cam = gpu_batch.rays_dir  # [B, H, W, 3]
-    rays_dir_world = torch.einsum("bij,bhwj->bhwi", R, rays_dir_cam)
-    rays_dir_world = torch.nn.functional.normalize(rays_dir_world, dim=-1)
+    if center_ray_encoding:
+        # center-ray mode uses the camera optical axis, i.e. row 2 of the
+        # world-to-camera view matrix, which is equivalent to column 2 of
+        # camera-to-world for OpenCV convention.
+        center_ray_world = torch.nn.functional.normalize(R[:, :, 2], dim=-1)
+        rays_dir_world = center_ray_world.view(B, 1, 1, 3).expand(B, H, W, 3)
+    else:
+        rays_dir_world = torch.einsum("bij,bhwj->bhwi", R, rays_dir_cam)
+        rays_dir_world = torch.nn.functional.normalize(rays_dir_world, dim=-1)
 
     features_flat = feature_map.contiguous().view(-1, N)
     ray_dir_flat = rays_dir_world.contiguous().view(-1, 3)
@@ -78,9 +86,6 @@ def apply_feature_decoder(
 
     rgb_flat = feature_decoder(features_flat, ray_dir_flat, alpha=alpha_flat)
     outputs["pred_features"] = rgb_flat.view(B, H, W, 3)
-
-    if training and hasattr(feature_decoder, "regularization_loss"):
-        outputs["decoder_reg_loss"] = feature_decoder.regularization_loss()
 
     return outputs
 

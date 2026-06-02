@@ -109,6 +109,7 @@ model:
     dir_encoding: "SphericalHarmonics"
     dir_encoding_degree: 3
     sh_scale: 3.0
+    center_ray_encoding: false
     output_activation: "Sigmoid"
     unpremultiply_alpha: false
     learning_rate: 0.00068

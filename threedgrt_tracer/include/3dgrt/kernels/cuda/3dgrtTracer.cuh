@@ -50,7 +50,7 @@ struct RayData {
         // Zero-initialize all features
         #pragma unroll
         for (int i = 0; i < RAY_FEATURE_DIM; ++i) {
-            radiance[i] = 0.0f;
+            features[i] = 0.0f;
         }
         density = 0.0;
         normal = make_float3(0.f);
