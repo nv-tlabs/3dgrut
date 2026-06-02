@@ -50,16 +50,16 @@ struct PipelineParameters {
     PackedTensorAccessor32<float, 4> rayOrigin;    ///< ray origin
     PackedTensorAccessor32<float, 4> rayDirection; ///< ray direction
 
-    const ParticleDensity* particleDensity;         ///< position, scale, quaternions, density
-    const TParticleFeatureElem* particleFeatures;   ///< per-particle features (fp16 when PARTICLE_FEATURE_HALF)
-    const void* particleExtendedData;               ///< pipeline specific particle data
-    int32_t* particleVisibility;                    ///< pipeline specific particle data
+    const ParticleDensity* particleDensity;       ///< position, scale, quaternions, density
+    const TParticleFeatureElem* particleFeatures; ///< per-particle features (fp16 when PARTICLE_FEATURE_HALF)
+    const void* particleExtendedData;             ///< pipeline specific particle data
+    int32_t* particleVisibility;                  ///< pipeline specific particle data
 
     PackedTensorAccessor32<TRayFeatureElem, 4> rayFeatures; ///< integrated ray features (fp16 when FEATURE_OUTPUT_HALF)
-    PackedTensorAccessor32<float, 4> rayDensity;     ///< output integrated ray density
-    PackedTensorAccessor32<float, 4> rayHitDistance; ///< output integrated ray hit distance
-    PackedTensorAccessor32<float, 4> rayNormal;      ///< output integrated ray normal
-    PackedTensorAccessor32<float, 4> rayHitsCount;   ///< output (only in AH pipeline) number of hits per ray
+    PackedTensorAccessor32<float, 4> rayDensity;            ///< output integrated ray density
+    PackedTensorAccessor32<float, 4> rayHitDistance;        ///< output integrated ray hit distance
+    PackedTensorAccessor32<float, 4> rayNormal;             ///< output integrated ray normal
+    PackedTensorAccessor32<float, 4> rayHitsCount;          ///< output (only in AH pipeline) number of hits per ray
 
     OptixTraversableHandle handle;
     OptixAabb aabb;
@@ -72,7 +72,7 @@ struct PipelineParameters {
 
     // Feature-based radiance dimensions
     static constexpr unsigned int ParticleFeatureDim   = PARTICLE_FEATURE_DIM;   ///< Total feature dim per particle (buffer stride K)
-    static constexpr unsigned int RayFeatureDim        = RAY_FEATURE_DIM;       ///< Per-ray (decoder input N)
+    static constexpr unsigned int RayFeatureDim        = RAY_FEATURE_DIM;        ///< Per-ray (decoder input N)
     static constexpr unsigned int FeatureTransformType = FEATURE_TRANSFORM_TYPE; ///< 0=SH, 1=learned
 
     uint2 frameBounds;

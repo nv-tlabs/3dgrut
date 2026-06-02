@@ -172,13 +172,13 @@ __device__ __inline__ void finalizeRay(const TRayPayload& ray,
     static_assert(RAY_FEATURE_DIM == TRayPayload::FeatDim, "RAY_FEATURE_DIM must equal TRayPayload::FeatDim");
     const uint32_t base = ray.idx * (RAY_FEATURE_DIM + 1);
 #if FEATURE_OUTPUT_HALF
-    #pragma unroll
+#pragma unroll
     for (int i = 0; i < TRayPayload::FeatDim; ++i) {
         featureDensityPtr[base + i] = __float2half(ray.features[i]);
     }
     featureDensityPtr[base + RAY_FEATURE_DIM] = __float2half(1.0f - ray.transmittance);
 #else
-    #pragma unroll
+#pragma unroll
     for (int i = 0; i < TRayPayload::FeatDim; ++i) {
         featureDensityPtr[base + i] = ray.features[i];
     }

@@ -30,9 +30,9 @@ struct model_InternalParams {
 
 struct model_ExternalParams {
     // Feature-based radiance dimensions (from compile-time defines)
-    static constexpr int ParticleFeatureDim          = PARTICLE_FEATURE_DIM;
-    static constexpr int RayFeatureDim               = RAY_FEATURE_DIM;
-    static constexpr int FeatureTransformType        = FEATURE_TRANSFORM_TYPE; // 0=SH, 1=nht
+    static constexpr int ParticleFeatureDim   = PARTICLE_FEATURE_DIM;
+    static constexpr int RayFeatureDim        = RAY_FEATURE_DIM;
+    static constexpr int FeatureTransformType = FEATURE_TRANSFORM_TYPE; // 0=SH, 1=nht
     // NHT requires per-ray evaluation (interpolation); SH can use precomputed features
     static constexpr bool PerRayParticleFeatures = (FEATURE_TRANSFORM_TYPE != 0);
 

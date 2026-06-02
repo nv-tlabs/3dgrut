@@ -324,9 +324,11 @@ class Tracer:
                 gaussians.get_rotation().contiguous(),
                 gaussians.get_scale().contiguous(),
                 gaussians.get_density().contiguous(),
-                gaussians.get_features().contiguous().half()
-                if self.conf.render.particle_feature_half
-                else gaussians.get_features().contiguous(),
+                (
+                    gaussians.get_features().contiguous().half()
+                    if self.conf.render.particle_feature_half
+                    else gaussians.get_features().contiguous()
+                ),
                 sensor,
                 poses,
             )

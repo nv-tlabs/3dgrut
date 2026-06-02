@@ -15,8 +15,8 @@
 
 import os
 
-from threedgrut.utils import jit
 from threedgrut.model.features import Features
+from threedgrut.utils import jit
 
 
 # ----------------------------------------------------------------------------

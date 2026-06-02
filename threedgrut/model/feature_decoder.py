@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import tinycudann as tcnn
 import torch
 import torch.nn as nn
-import tinycudann as tcnn
 
 
 class FeatureDecoder(nn.Module):
@@ -161,7 +161,12 @@ class FeatureDecoder(nn.Module):
 
         if len(features_shape) == 4:  # [B, H, W, N]
             B, H, W, N = features_shape
-            assert ray_dirs_shape == (B, H, W, 3), f"Ray directions shape mismatch: expected {(B, H, W, 3)}, got {ray_dirs_shape}"
+            assert ray_dirs_shape == (
+                B,
+                H,
+                W,
+                3,
+            ), f"Ray directions shape mismatch: expected {(B, H, W, 3)}, got {ray_dirs_shape}"
             assert N == self.ray_feature_dim, f"Expected {self.ray_feature_dim} features, got {N}"
 
             features_flat = features.reshape(B * H * W, N)

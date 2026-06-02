@@ -47,16 +47,16 @@ struct RayData {
     float hitCount; // TODO (operel): convert to uint32
 
     __device__ void initialize() {
-        // Zero-initialize all features
-        #pragma unroll
+// Zero-initialize all features
+#pragma unroll
         for (int i = 0; i < RAY_FEATURE_DIM; ++i) {
             features[i] = 0.0f;
         }
-        density = 0.0;
-        normal = make_float3(0.f);
-        hitDistance = 0.f;
+        density            = 0.0;
+        normal             = make_float3(0.f);
+        hitDistance        = 0.f;
         rayLastHitDistance = 0.f;
-        hitCount = 0.f;
+        hitCount           = 0.f;
     }
 };
 
@@ -147,10 +147,10 @@ static __device__ __inline__ void traceVolumetricGS(
     }
 
     float rayTransmittance = 1.0f - rayData.density;
-    float2 minMaxT       = intersectAABB(params.aabb, rayOrigin, rayDirection);
-    minMaxT.x = fmaxf(minMaxT.x, tmin);
-    minMaxT.y = fminf(minMaxT.y, tmax);
-    constexpr float epsT = 1e-9;
+    float2 minMaxT         = intersectAABB(params.aabb, rayOrigin, rayDirection);
+    minMaxT.x              = fmaxf(minMaxT.x, tmin);
+    minMaxT.y              = fminf(minMaxT.y, tmax);
+    constexpr float epsT   = 1e-9;
 
     float rayLastHitDistance = fmaxf(0.0f, minMaxT.x - epsT);
     RayPayload rayPayload;
@@ -186,9 +186,9 @@ static __device__ __inline__ void traceVolumetricGS(
                     rayDirection,
                     hitWeight,
                     rayHit.particleId,
-                    params.particleFeatures,      // void* - generic buffer pointer
-                    params.sphDegree,             // auxiliary parameter (sphDegree for SH, unused for learned)
-                    rayData.features);            // float* - generic output array
+                    params.particleFeatures, // void* - generic buffer pointer
+                    params.sphDegree,        // auxiliary parameter (sphDegree for SH, unused for learned)
+                    rayData.features);       // float* - generic output array
 
                 rayLastHitDistance = fmaxf(rayLastHitDistance, rayHit.distance);
 
@@ -199,7 +199,7 @@ static __device__ __inline__ void traceVolumetricGS(
         }
     }
 
-    rayData.density = 1 - rayTransmittance;
+    rayData.density            = 1 - rayTransmittance;
     rayData.rayLastHitDistance = rayLastHitDistance;
 }
 

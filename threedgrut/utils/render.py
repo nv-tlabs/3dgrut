@@ -63,7 +63,7 @@ def apply_feature_decoder(
         return outputs
 
     feature_map = outputs["pred_features"]  # [B, H, W, N] alpha-blended features
-    alpha = outputs["pred_opacity"]    # [B, H, W] or [B, H, W, 1]
+    alpha = outputs["pred_opacity"]  # [B, H, W] or [B, H, W, 1]
     B, H, W, N = feature_map.shape
 
     R = gpu_batch.T_to_world[:, :3, :3]  # [B, 3, 3] c2w rotation

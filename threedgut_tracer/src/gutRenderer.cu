@@ -427,8 +427,8 @@ threedgut::Status threedgut::GUTRenderer::renderBackward(const RenderParameters&
                                                          const float* worldHitDistanceGradientCudaPtr,
                                                          const TFeatureDensityElem* featureDensityCudaPtr,
                                                          const float* featureDensityGradientCudaPtr,
-                                                         vec3* worldRayOriginGradientCudaPtr,          // TODO: not implemented yet
-                                                         vec3* worldRayDirectionGradientCudaPtr,       // TODO: not implemented yet
+                                                         vec3* worldRayOriginGradientCudaPtr,    // TODO: not implemented yet
+                                                         vec3* worldRayDirectionGradientCudaPtr, // TODO: not implemented yet
                                                          Parameters& parameters,
                                                          int cudaDeviceIndex,
                                                          cudaStream_t cudaStream) {
@@ -475,12 +475,12 @@ threedgut::Status threedgut::GUTRenderer::renderBackward(const RenderParameters&
             (const tcnn::vec3*)sensorRayOriginCudaPtr,
             (const tcnn::vec3*)sensorRayDirectionCudaPtr,
             sensorPoseToMat(sensorPoseInv),
-            (const float*)worldHitDistanceCudaPtr,             //
-            (const float*)worldHitDistanceGradientCudaPtr,     // TODO: not implemented yet
+            (const float*)worldHitDistanceCudaPtr,         //
+            (const float*)worldHitDistanceGradientCudaPtr, // TODO: not implemented yet
             featureDensityCudaPtr,
             featureDensityGradientCudaPtr,
-            (tcnn::vec3*)worldRayOriginGradientCudaPtr,        // TODO: not implemented yet
-            (tcnn::vec3*)worldRayDirectionGradientCudaPtr,     // TODO: not implemented yet
+            (tcnn::vec3*)worldRayOriginGradientCudaPtr,    // TODO: not implemented yet
+            (tcnn::vec3*)worldRayDirectionGradientCudaPtr, // TODO: not implemented yet
             (const tcnn::vec2*)m_forwardContext->particlesProjectedPosition.data(),
             (const tcnn::vec4*)m_forwardContext->particlesProjectedConicOpacity.data(),
             (const float*)m_forwardContext->particlesGlobalDepth.data(),

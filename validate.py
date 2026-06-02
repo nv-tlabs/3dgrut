@@ -27,15 +27,16 @@ import sys
 import time
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # NHT availability check
 # ---------------------------------------------------------------------------
+
 
 def _nht_available() -> bool:
     """Return True if this codebase has NHT support compiled in."""
     try:
         from threedgrut.model.features import Features
+
         _ = Features.Type.NHT
         return True
     except (ImportError, AttributeError):
@@ -45,6 +46,7 @@ def _nht_available() -> bool:
 # ---------------------------------------------------------------------------
 # Experiment definitions
 # ---------------------------------------------------------------------------
+
 
 def _experiments(args, nht_ok: bool):
     """Yield (name, renderer, feature_type, app_config) tuples."""
@@ -67,6 +69,7 @@ def _experiments(args, nht_ok: bool):
 # Train
 # ---------------------------------------------------------------------------
 
+
 def _find_latest(directory: Path, pattern: str):
     """Return the most recently modified file matching pattern under directory, or None."""
     matches = sorted(directory.glob(pattern), key=lambda p: p.stat().st_mtime)
@@ -87,7 +90,8 @@ def _train(name: str, app_config: str, feature_type: str, args) -> tuple[float, 
     exp_dir.mkdir(parents=True, exist_ok=True)
 
     cmd = [
-        sys.executable, "train.py",
+        sys.executable,
+        "train.py",
         f"--config-name={app_config}",
         f"path={args.data}",
         f"out_dir={args.out_dir}",
@@ -120,15 +124,19 @@ def _train(name: str, app_config: str, feature_type: str, args) -> tuple[float, 
 # Render / evaluate
 # ---------------------------------------------------------------------------
 
+
 def _render(name: str, ckpt: str, args) -> dict:
     """Run render.py and return the metrics dict."""
     eval_dir = Path(args.out_dir) / name / "eval"
     eval_dir.mkdir(parents=True, exist_ok=True)
 
     cmd = [
-        sys.executable, "render.py",
-        "--checkpoint", ckpt,
-        "--out-dir", str(eval_dir),
+        sys.executable,
+        "render.py",
+        "--checkpoint",
+        ckpt,
+        "--out-dir",
+        str(eval_dir),
     ]
 
     print(f"  $ {' '.join(cmd)}")
@@ -154,11 +162,11 @@ _HEADER = (
 
 
 def _row(name: str, m: dict, train_sec: float) -> str:
-    psnr  = f"{m.get('mean_psnr', float('nan')):.2f}"
-    ssim  = f"{m.get('mean_ssim', float('nan')):.4f}"
+    psnr = f"{m.get('mean_psnr', float('nan')):.2f}"
+    ssim = f"{m.get('mean_ssim', float('nan')):.4f}"
     lpips = f"{m.get('mean_lpips', float('nan')):.4f}"
     t_min = f"{train_sec / 60:.1f}" if train_sec > 0 else "—"
-    r_ms  = f"{m.get('mean_inference_time_ms', float('nan')):.2f}"
+    r_ms = f"{m.get('mean_inference_time_ms', float('nan')):.2f}"
     return f"| {name:<16} | {psnr:>9} | {ssim:>6} | {lpips:>6} | {t_min:>11} | {r_ms:>13} |\n"
 
 
@@ -190,13 +198,14 @@ def _write_report(rows: list[tuple], args, nht_ok: bool) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--data",         required=True, help="Path to the drums scene directory")
-    parser.add_argument("--out-dir",      default="runs/validate", help="Root output directory")
-    parser.add_argument("--nht",          action="store_true", help="Also run NHT experiments")
-    parser.add_argument("--iterations",   type=int, default=15000, help="Training iterations per experiment")
-    parser.add_argument("--particles",    type=int, default=100000, help="Initial particle count")
+    parser.add_argument("--data", required=True, help="Path to the drums scene directory")
+    parser.add_argument("--out-dir", default="runs/validate", help="Root output directory")
+    parser.add_argument("--nht", action="store_true", help="Also run NHT experiments")
+    parser.add_argument("--iterations", type=int, default=15000, help="Training iterations per experiment")
+    parser.add_argument("--particles", type=int, default=100000, help="Initial particle count")
     parser.add_argument("--skip-existing", action="store_true", help="Skip training if checkpoint exists")
     args = parser.parse_args()
 
@@ -227,10 +236,12 @@ def main():
             continue
 
         rows.append((name, metrics, train_sec))
-        print(f"\n  PSNR={metrics.get('mean_psnr', '?'):.2f} dB  "
-              f"SSIM={metrics.get('mean_ssim', '?'):.4f}  "
-              f"LPIPS={metrics.get('mean_lpips', '?'):.4f}  "
-              f"render={metrics.get('mean_inference_time_ms', '?'):.2f} ms/frame")
+        print(
+            f"\n  PSNR={metrics.get('mean_psnr', '?'):.2f} dB  "
+            f"SSIM={metrics.get('mean_ssim', '?'):.4f}  "
+            f"LPIPS={metrics.get('mean_lpips', '?'):.4f}  "
+            f"render={metrics.get('mean_inference_time_ms', '?'):.2f} ms/frame"
+        )
 
     print(f"\n{'='*60}")
     print("REPORT")

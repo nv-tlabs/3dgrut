@@ -360,7 +360,8 @@ HybridOptixTracer::traceHybrid(
   paramsHost.rayDirection = packed_accessor32<float, 4>(rayDir);
 
   paramsHost.particleDensity = getPtr<const ParticleDensity>(particleDensity);
-  paramsHost.particleFeatures = getPtr<const TParticleFeatureElem>(particleFeatures);
+  paramsHost.particleFeatures =
+      getPtr<const TParticleFeatureElem>(particleFeatures);
   paramsHost.particleExtendedData =
       reinterpret_cast<const void *>(_state->gPipelineParticleData);
 
