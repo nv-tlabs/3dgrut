@@ -818,7 +818,9 @@ class TestNuRecExport:
 
             composed = Usd.Stage.Open(str(usd_path))
             assert composed.GetPrimAtPath("/World/gauss/Cameras/camera_0000").IsValid()
-            assert composed.GetPrimAtPath("/World/gauss/Cameras/camera_0000_no_isp").IsValid()
+            ppisp_camera = composed.GetPrimAtPath("/World/gauss/Cameras/camera_0000_ppisp")
+            assert ppisp_camera.IsValid()
+            assert ppisp_camera.GetAttribute("ppisp:responsivity").IsValid()
             assert composed.GetPrimAtPath("/Render/camera_0000/PPISP").IsValid()
             render_settings = composed.GetRootLayer().customLayerData["renderSettings"]
             assert render_settings["rtx:post:registeredCompositing:invertToneMap"] is False
@@ -827,7 +829,7 @@ class TestNuRecExport:
 
             product = composed.GetPrimAtPath("/Render/camera_0000")
             assert product.GetRelationship("camera").GetTargets() == [
-                Sdf.Path("/World/gauss/Cameras/camera_0000_no_isp")
+                Sdf.Path("/World/gauss/Cameras/camera_0000_ppisp")
             ]
             ldr = composed.GetPrimAtPath("/Render/camera_0000/LdrColor")
             assert ldr.GetAttribute("omni:rtx:aov").GetConnections() == [

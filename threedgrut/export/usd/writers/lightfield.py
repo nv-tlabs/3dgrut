@@ -105,7 +105,9 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
 
         self.apply_color_space_to_prim(self.prim)
         if self.omni_usd:
-            from threedgrut.export.usd.writers.omni_material import bind_particlefield_emissive_material
+            from threedgrut.export.usd.writers.omni_material import (
+                bind_particlefield_emissive_material,
+            )
 
             bind_particlefield_emissive_material(
                 stage=self.stage,

@@ -19,7 +19,6 @@ import hashlib
 import os
 import tempfile
 import textwrap
-
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -83,9 +82,54 @@ def _extension_source(controller_cu_path: Path) -> str:
             }
         }
 
+        struct TextureArrayResource
+        {
+            cudaArray_t array = nullptr;
+            cudaTextureObject_t texture = 0;
+
+            TextureArrayResource() = default;
+            TextureArrayResource(const TextureArrayResource&) = delete;
+            TextureArrayResource& operator=(const TextureArrayResource&) = delete;
+
+            ~TextureArrayResource()
+            {
+                destroyUnchecked();
+            }
+
+            void destroyChecked()
+            {
+                if (texture)
+                {
+                    checkCuda(cudaDestroyTextureObject(texture), "cudaDestroyTextureObject");
+                    texture = 0;
+                }
+                if (array)
+                {
+                    checkCuda(cudaFreeArray(array), "cudaFreeArray");
+                    array = nullptr;
+                }
+            }
+
+            void destroyUnchecked() noexcept
+            {
+                if (texture)
+                {
+                    cudaDestroyTextureObject(texture);
+                    texture = 0;
+                }
+                if (array)
+                {
+                    cudaFreeArray(array);
+                    array = nullptr;
+                }
+            }
+        };
+
         torch::Tensor run_controller(
             torch::Tensor hdr,
             double priorExposure,
+            int tileCountX,
+            int tileCountY,
             int poolBlockX,
             int poolBlockY,
             int poolBlockZ,
@@ -108,22 +152,24 @@ def _extension_source(controller_cu_path: Path) -> str:
             TORCH_CHECK(poolGridX > 0 && poolGridY > 0 && poolGridZ > 0, "pool grid dimensions must be positive");
             TORCH_CHECK(mlpBlockX > 0 && mlpBlockY > 0 && mlpBlockZ > 0, "MLP block dimensions must be positive");
             TORCH_CHECK(mlpGridX > 0 && mlpGridY > 0 && mlpGridZ > 0, "MLP grid dimensions must be positive");
+            TORCH_CHECK(tileCountX > 0 && tileCountY > 0, "tile counts must be positive");
 
+            const int tileCount = tileCountX * tileCountY;
             const c10::cuda::CUDAGuard deviceGuard(hdr.device());
-            auto features = torch::empty({1, POOL_FEATURE_LEN}, hdr.options());
-            auto output = torch::empty({1, 9}, hdr.options());
+            auto features = torch::empty({1, POOL_FEATURE_LEN * tileCount}, hdr.options());
+            auto output = torch::empty({1, 9 * tileCount}, hdr.options());
 
             const int height = static_cast<int>(hdr.size(0));
             const int width = static_cast<int>(hdr.size(1));
             cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
             cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc(32, 32, 32, 32, cudaChannelFormatKindFloat);
-            cudaArray_t array = nullptr;
-            checkCuda(cudaMallocArray(&array, &channelDesc, static_cast<size_t>(width), static_cast<size_t>(height)),
+            TextureArrayResource textureResource;
+            checkCuda(cudaMallocArray(&textureResource.array, &channelDesc, static_cast<size_t>(width), static_cast<size_t>(height)),
                       "cudaMallocArray");
 
             checkCuda(cudaMemcpy2DToArrayAsync(
-                          array,
+                          textureResource.array,
                           0,
                           0,
                           hdr.data_ptr<float>(),
@@ -136,7 +182,7 @@ def _extension_source(controller_cu_path: Path) -> str:
 
             cudaResourceDesc resourceDesc{};
             resourceDesc.resType = cudaResourceTypeArray;
-            resourceDesc.res.array.array = array;
+            resourceDesc.res.array.array = textureResource.array;
 
             cudaTextureDesc textureDesc{};
             textureDesc.addressMode[0] = cudaAddressModeClamp;
@@ -145,13 +191,14 @@ def _extension_source(controller_cu_path: Path) -> str:
             textureDesc.readMode = cudaReadModeElementType;
             textureDesc.normalizedCoords = 0;
 
-            cudaTextureObject_t texture = 0;
-            checkCuda(cudaCreateTextureObject(&texture, &resourceDesc, &textureDesc, nullptr), "cudaCreateTextureObject");
+            checkCuda(cudaCreateTextureObject(&textureResource.texture, &resourceDesc, &textureDesc, nullptr), "cudaCreateTextureObject");
 
             controllerPoolProcess<<<dim3(poolGridX, poolGridY, poolGridZ), dim3(poolBlockX, poolBlockY, poolBlockZ), 0, stream>>>(
                 width,
                 height,
-                texture,
+                tileCountX,
+                tileCountY,
+                textureResource.texture,
                 features.data_ptr<float>());
             checkCuda(cudaGetLastError(), "controllerPoolProcess launch");
 
@@ -165,8 +212,7 @@ def _extension_source(controller_cu_path: Path) -> str:
             // before destroying it so the launched sidecar kernel has
             // finished consuming the object.
             checkCuda(cudaStreamSynchronize(stream), "controllerProcess synchronize");
-            checkCuda(cudaDestroyTextureObject(texture), "cudaDestroyTextureObject");
-            checkCuda(cudaFreeArray(array), "cudaFreeArray");
+            textureResource.destroyChecked();
 
             return output;
         }
@@ -227,15 +273,66 @@ class ExportedEmbeddedCudaController:
         self._dims = default_controller_launch_dims()
         self._extension = _load_extension(source_text)
 
-    def __call__(self, hdr: torch.Tensor, prior_exposure: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(
+        self,
+        hdr: torch.Tensor,
+        prior_exposure: torch.Tensor,
+        *,
+        tile_count_x: int = 1,
+        tile_count_y: int = 1,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        if int(tile_count_x) * int(tile_count_y) != 1:
+            raise ValueError(
+                "tiled outputs not supported by __call__ (returns tile 0 only); "
+                "set tile_count_x=tile_count_y=1, or use run_tiled_params for the per-tile params"
+            )
         hdr4 = _hdr_rgb_to_float4(hdr)
         prior = float(prior_exposure.reshape(-1)[0].item())
+        tile_count = int(tile_count_x) * int(tile_count_y)
+        # One pool-feature column and one MLP block per tile (untiled = 1).
+        pool_grid = (self._dims.pool.grid[0], tile_count, self._dims.pool.grid[2])
+        mlp_grid = (tile_count, self._dims.mlp.grid[1], self._dims.mlp.grid[2])
         output = self._extension.run_controller(
             hdr4,
             prior,
+            int(tile_count_x),
+            int(tile_count_y),
             *self._dims.pool.block,
-            *self._dims.pool.grid,
+            *pool_grid,
             *self._dims.mlp.block,
-            *self._dims.mlp.grid,
+            *mlp_grid,
         )
         return output[0, 0], output[0, 1:9]
+
+    def run_tiled_params(
+        self,
+        hdr: torch.Tensor,
+        prior_exposure: torch.Tensor,
+        *,
+        tile_count_x: int = 1,
+        tile_count_y: int = 1,
+    ) -> torch.Tensor:
+        """Pool + MLP over a tiled atlas, returning the flat per-tile params.
+
+        The atlas holds ``tile_count_y x tile_count_x`` tiles laid out
+        row-major; the returned 1-D tensor is the concatenation of each
+        tile's 9 floats (exposure + 8 color latents) in the same
+        ``tile = ty * tile_count_x + tx`` order consumed by the auto-PPISP
+        image shader, so it can be fed directly to ``ExportedCudaPPISP.run_auto``.
+        """
+        hdr4 = _hdr_rgb_to_float4(hdr)
+        prior = float(prior_exposure.reshape(-1)[0].item())
+        tile_count = int(tile_count_x) * int(tile_count_y)
+        pool_grid = (self._dims.pool.grid[0], tile_count, self._dims.pool.grid[2])
+        mlp_grid = (tile_count, self._dims.mlp.grid[1], self._dims.mlp.grid[2])
+        output = self._extension.run_controller(
+            hdr4,
+            prior,
+            int(tile_count_x),
+            int(tile_count_y),
+            *self._dims.pool.block,
+            *pool_grid,
+            *self._dims.mlp.block,
+            *mlp_grid,
+        )
+        return output.reshape(-1)

@@ -9,6 +9,9 @@ def Shader "PPISP"
     uniform asset info:spg:sourceAsset = @./ppisp_usd_spg.cu@
     uniform token info:spg:sourceAsset:subIdentifier = "ppispProcess"
 
+    int inputs:tileCountX = 1
+    int inputs:tileCountY = 1
+
     float inputs:responsivity = 1.0
 
     float inputs:exposureOffset = 0.0

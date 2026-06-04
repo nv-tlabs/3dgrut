@@ -182,10 +182,7 @@ Examples:
         "--ppisp-responsivity",
         type=float,
         default=None,
-        help=(
-            "Achromatic PPISP responsivity default authored on omni-native "
-            "SPG shaders. Default is 1.0."
-        ),
+        help=("Achromatic PPISP responsivity default authored on omni-native " "SPG shaders. Default is 1.0."),
     )
     parser.add_argument(
         "--ignore-ppisp-controller",

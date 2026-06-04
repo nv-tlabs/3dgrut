@@ -1,5 +1,5 @@
--- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
--- SPDX-License-Identifier: Apache-2.0
+-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+-- All rights reserved. SPDX-License-Identifier: Apache-2.0
 
 -- PPISP SPG CUDA launcher.
 
@@ -14,6 +14,15 @@ function ppispProcess(inputs, outputs)
     local function getFloat(name, default)
         return cuda.float(inputs[name] or default).value
     end
+
+    local function getInt(name, default)
+        return cuda.int(inputs[name] or default).value
+    end
+
+    -- Tile grid for tiled RenderProduct atlases (default 1x1 = untiled).
+    -- Clamp to >= 1 so non-positive overrides cannot break the tile math.
+    local tileCountX = math.max(1, getInt("tileCountX", 1))
+    local tileCountY = math.max(1, getInt("tileCountY", 1))
 
     local function getFloat2(name)
         local value = inputs[name]
@@ -72,6 +81,8 @@ function ppispProcess(inputs, outputs)
         args = {
             cuda.int(width),
             cuda.int(height),
+            cuda.int(tileCountX),
+            cuda.int(tileCountY),
             cuda.TextureObject(in_hdr),
             cuda.array(params, cuda.float),
             cuda.SurfaceObject(outputs["PPISPColor"]),

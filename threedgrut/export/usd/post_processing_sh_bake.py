@@ -153,8 +153,8 @@ def bake_post_processing_into_sh(
     ``len(train_dataloader)`` so total step count is unchanged.
     """
     from threedgrut.export.usd.post_processing_view_interpolation import (
-        InterpolatedViewSampler,
         VIEW_SAMPLING_TRAINING,
+        InterpolatedViewSampler,
         normalize_view_sampling_mode,
     )
 
@@ -186,11 +186,13 @@ def bake_post_processing_into_sh(
 
     _set_sh_fit_parameters(baked_model)
     baked_model.density.requires_grad_(True)
-    optimizer = torch.optim.Adam([
-        {"params": [baked_model.features_albedo], "lr": learning_rate},
-        {"params": [baked_model.features_specular], "lr": learning_rate_specular},
-        {"params": [baked_model.density], "lr": learning_rate_density},
-    ])
+    optimizer = torch.optim.Adam(
+        [
+            {"params": [baked_model.features_albedo], "lr": learning_rate},
+            {"params": [baked_model.features_specular], "lr": learning_rate_specular},
+            {"params": [baked_model.density], "lr": learning_rate_density},
+        ]
+    )
     train_dataloader = _create_train_dataloader(conf, train_dataset)
     steps_per_epoch = len(train_dataloader)
 
@@ -432,7 +434,8 @@ class PPISPPostProcessingBakeAdapter(PostProcessingBakeAdapter):
         logger.info(
             "PPISP SH bake init: applying simple_bake (camera=%d, frame=%d, "
             "higher_order=False, apply_srgb_to_linear=False) before fitting.",
-            self.camera_id, self.frame_id,
+            self.camera_id,
+            self.frame_id,
         )
         simple_bake(
             baked_model,

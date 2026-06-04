@@ -108,7 +108,9 @@ def test_filter_cameras_unknown_camera_id_raises_with_available_list() -> None:
 
 def test_filter_cameras_unknown_camera_name_raises_with_available_list() -> None:
     dataset = _multi_rig_dataset(camera_names=["middle"])
-    with pytest.raises(ValueError, match=r"camera_names \['middle'\].*Available camera_names: \['aux', 'left', 'right'\]"):
+    with pytest.raises(
+        ValueError, match=r"camera_names \['middle'\].*Available camera_names: \['aux', 'left', 'right'\]"
+    ):
         dataset._filter_cameras()
 
 

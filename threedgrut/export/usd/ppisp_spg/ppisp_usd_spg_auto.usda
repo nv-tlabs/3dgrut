@@ -9,6 +9,9 @@ def Shader "PPISPAuto"
     uniform asset info:spg:sourceAsset = @./ppisp_usd_spg_auto.cu@
     uniform token info:spg:sourceAsset:subIdentifier = "ppispProcessAuto"
 
+    int inputs:tileCountX = 1
+    int inputs:tileCountY = 1
+
     float inputs:responsivity = 1.0
 
     float2 inputs:vignettingCenterR = (0.0, 0.0)

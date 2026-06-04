@@ -49,10 +49,7 @@ VIEW_SAMPLING_MODES = {
 def normalize_view_sampling_mode(mode: Optional[str]) -> str:
     normalized = VIEW_SAMPLING_TRAINING if mode is None else str(mode).strip().lower()
     if normalized not in VIEW_SAMPLING_MODES:
-        raise ValueError(
-            f"Unsupported view sampling mode '{mode}'. "
-            f"Expected one of: {sorted(VIEW_SAMPLING_MODES)}"
-        )
+        raise ValueError(f"Unsupported view sampling mode '{mode}'. " f"Expected one of: {sorted(VIEW_SAMPLING_MODES)}")
     return normalized
 
 
@@ -95,11 +92,14 @@ def _R_to_quat(R: np.ndarray) -> np.ndarray:
 
 def _quat_to_R(q: np.ndarray) -> np.ndarray:
     qw, qx, qy, qz = (q / np.linalg.norm(q)).tolist()
-    return np.array([
-        [1 - 2*(qy*qy + qz*qz), 2*(qx*qy - qz*qw),     2*(qx*qz + qy*qw)],
-        [2*(qx*qy + qz*qw),     1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qx*qw)],
-        [2*(qx*qz - qy*qw),     2*(qy*qz + qx*qw),     1 - 2*(qx*qx + qy*qy)],
-    ], dtype=np.float64)
+    return np.array(
+        [
+            [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
+            [2 * (qx * qy + qz * qw), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * qw)],
+            [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx * qx + qy * qy)],
+        ],
+        dtype=np.float64,
+    )
 
 
 def _slerp_quat(q0: np.ndarray, q1: np.ndarray, s: float) -> np.ndarray:
@@ -152,8 +152,8 @@ def _pose_distance_matrix(
 ) -> np.ndarray:
     """``D[i, j]`` = weighted (position L2 + 1 - cos(forward angle))."""
     n = poses.shape[0]
-    pos = poses[:, :3, 3]                     # (N, 3)
-    fwd = poses[:, :3, 2]                     # (N, 3)  RDF: +Z = forward
+    pos = poses[:, :3, 3]  # (N, 3)
+    fwd = poses[:, :3, 2]  # (N, 3)  RDF: +Z = forward
     fwd = fwd / np.maximum(np.linalg.norm(fwd, axis=1, keepdims=True), 1e-12)
 
     # vectorised pairwise position distance
@@ -198,7 +198,7 @@ def _two_opt(order: List[int], D: np.ndarray, max_passes: int = 50) -> List[int]
                 # original edges (a,b) + (c,d)
                 # candidate after reverse: (a,c) + (b,d)
                 if D[a, c] + D[b, d] + 1e-12 < D[a, b] + D[c, d]:
-                    order[i:j + 1] = order[i:j + 1][::-1]
+                    order[i : j + 1] = order[i : j + 1][::-1]
                     improved = True
         if not improved:
             break

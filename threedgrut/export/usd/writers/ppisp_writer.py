@@ -32,10 +32,9 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import numpy as np
-
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
 
 if TYPE_CHECKING:
@@ -46,6 +45,14 @@ log = logging.getLogger(__name__)
 NUM_CHANNELS = 3
 COLOR_PARAMS_PER_FRAME = 8
 CHANNEL_SUFFIXES = ["R", "G", "B"]
+COLOR_LATENT_INPUT_NAMES = ("colorLatentBlue", "colorLatentRed", "colorLatentGreen", "colorLatentNeutral")
+
+DEFAULT_PPISP_RESPONSIVITY = 1.0
+PPISP_RESPONSIVITY_INPUT_NAME = "responsivity"
+PPISP_CAMERA_SUFFIX = "_ppisp"
+PPISP_ATTR_NAMESPACE = "ppisp:"
+PPISP_TILE_COUNT_INPUT_NAMES = ("tileCountX", "tileCountY")
+DEFAULT_PPISP_TILE_COUNT = 1
 
 PPISP_SPG_USDA_FILE = "ppisp_usd_spg.usda"
 PPISP_SPG_CU_FILE = "ppisp_usd_spg.cu"
@@ -55,7 +62,7 @@ PPISP_OUTPUT_RENDER_VAR = "PPISPColor"
 LDR_COLOR_RENDER_VAR = "LdrColor"
 PPISP_CAMERA_EXPOSURE = 0.0
 PPISP_CAMERA_EXPOSURE_FSTOP = 1.0
-PPISP_CAMERA_EXPOSURE_ISO = 100.0
+PPISP_CAMERA_EXPOSURE_ISO = 0.0
 PPISP_CAMERA_EXPOSURE_RESPONSIVITY = 1.0
 PPISP_CAMERA_EXPOSURE_TIME = 1.0
 PPISP_CAMERA_AUTO_EXPOSURE_ENABLED = False
@@ -243,7 +250,13 @@ def _set_responsivity_params(shader: UsdShade.Shader, responsivity: float) -> No
     of the PPISP pipeline runs; consumers can override the values per-camera
     in the USD asset without re-running the export."""
     _validate_ppisp_responsivity(responsivity)
-    shader.CreateInput("responsivity", Sdf.ValueTypeNames.Float).Set(float(responsivity))
+    shader.CreateInput(PPISP_RESPONSIVITY_INPUT_NAME, Sdf.ValueTypeNames.Float).Set(float(responsivity))
+
+
+def _set_tile_count_params(shader: UsdShade.Shader) -> None:
+    """Author untiled-default ``inputs:tileCount{X,Y}`` = 1 on the shader."""
+    for name in PPISP_TILE_COUNT_INPUT_NAMES:
+        shader.CreateInput(name, Sdf.ValueTypeNames.Int).Set(DEFAULT_PPISP_TILE_COUNT)
 
 
 def _validate_ppisp_responsivity(responsivity: object) -> None:
@@ -361,9 +374,8 @@ def _set_animated_color_params(
     valid_indices = [i for i, _ in valid]
     mean_color = np.mean(color[valid_indices], axis=0) if valid_indices else np.zeros(8)
 
-    control_point_names = ["colorLatentBlue", "colorLatentRed", "colorLatentGreen", "colorLatentNeutral"]
     attrs = []
-    for i, name in enumerate(control_point_names):
+    for i, name in enumerate(COLOR_LATENT_INPUT_NAMES):
         inp = shader.CreateInput(name, Sdf.ValueTypeNames.Float2)
         attr = inp.GetAttr()
         attr.Set(Gf.Vec2f(float(mean_color[i * 2]), float(mean_color[i * 2 + 1])))
@@ -389,8 +401,7 @@ def _set_static_color_params(
         raise ValueError(f"frame_index must be in [0, {len(color) - 1}], got {frame_index}.")
 
     frame_color = color[frame_index]
-    control_point_names = ["colorLatentBlue", "colorLatentRed", "colorLatentGreen", "colorLatentNeutral"]
-    for i, name in enumerate(control_point_names):
+    for i, name in enumerate(COLOR_LATENT_INPUT_NAMES):
         shader.CreateInput(name, Sdf.ValueTypeNames.Float2).Set(
             Gf.Vec2f(float(frame_color[i * 2]), float(frame_color[i * 2 + 1]))
         )
@@ -399,8 +410,151 @@ def _set_static_color_params(
 def _set_neutral_frame_params(shader: UsdShade.Shader) -> None:
     """Write default exposure/color state for validation or novel-view products."""
     shader.CreateInput("exposureOffset", Sdf.ValueTypeNames.Float).Set(0.0)
-    for name in ("colorLatentBlue", "colorLatentRed", "colorLatentGreen", "colorLatentNeutral"):
+    for name in COLOR_LATENT_INPUT_NAMES:
         shader.CreateInput(name, Sdf.ValueTypeNames.Float2).Set(Gf.Vec2f(0.0, 0.0))
+
+
+# ---------------------------------------------------------------------------
+# Camera source-of-truth authoring
+# ---------------------------------------------------------------------------
+
+
+def _ppisp_camera_attr(camera_prim: Usd.Prim, input_name: str, value_type: Sdf.ValueTypeName) -> Usd.Attribute:
+    """Create or fetch a namespaced ``ppisp:<input_name>`` custom attribute."""
+    return camera_prim.CreateAttribute(f"{PPISP_ATTR_NAMESPACE}{input_name}", value_type, custom=True)
+
+
+def _author_camera_vignetting(camera_prim: Usd.Prim, ppisp: PPISP, camera_index: int) -> None:
+    """Author per-camera vignetting parameters as ``ppisp:*`` attributes."""
+    vig = ppisp.vignetting_params[camera_index].detach().cpu().numpy()
+    for ch in range(NUM_CHANNELS):
+        suffix = CHANNEL_SUFFIXES[ch]
+        _ppisp_camera_attr(camera_prim, f"vignettingCenter{suffix}", Sdf.ValueTypeNames.Float2).Set(
+            Gf.Vec2f(float(vig[ch, 0]), float(vig[ch, 1]))
+        )
+        _ppisp_camera_attr(camera_prim, f"vignettingAlpha1{suffix}", Sdf.ValueTypeNames.Float).Set(float(vig[ch, 2]))
+        _ppisp_camera_attr(camera_prim, f"vignettingAlpha2{suffix}", Sdf.ValueTypeNames.Float).Set(float(vig[ch, 3]))
+        _ppisp_camera_attr(camera_prim, f"vignettingAlpha3{suffix}", Sdf.ValueTypeNames.Float).Set(float(vig[ch, 4]))
+
+
+def _author_camera_crf(camera_prim: Usd.Prim, ppisp: PPISP, camera_index: int) -> None:
+    """Author per-camera CRF parameters as ``ppisp:*`` attributes."""
+    crf = ppisp.crf_params[camera_index].detach().cpu().numpy()
+    for ch in range(NUM_CHANNELS):
+        suffix = CHANNEL_SUFFIXES[ch]
+        _ppisp_camera_attr(camera_prim, f"crfToe{suffix}", Sdf.ValueTypeNames.Float).Set(float(crf[ch, 0]))
+        _ppisp_camera_attr(camera_prim, f"crfShoulder{suffix}", Sdf.ValueTypeNames.Float).Set(float(crf[ch, 1]))
+        _ppisp_camera_attr(camera_prim, f"crfGamma{suffix}", Sdf.ValueTypeNames.Float).Set(float(crf[ch, 2]))
+        _ppisp_camera_attr(camera_prim, f"crfCenter{suffix}", Sdf.ValueTypeNames.Float).Set(float(crf[ch, 3]))
+
+
+def _normalized_time_codes(frame_indices: List[int], time_codes: List[float] | None) -> List[float]:
+    if time_codes is None:
+        return [float(i) for i in frame_indices]
+    if len(time_codes) != len(frame_indices):
+        raise ValueError("time_codes length must match frame_indices length")
+    return [float(t) for t in time_codes]
+
+
+def _author_camera_animated_exposure(
+    camera_prim: Usd.Prim,
+    ppisp: PPISP,
+    frame_indices: List[int],
+    time_codes: List[float] | None,
+) -> None:
+    """Author time-sampled ``ppisp:exposureOffset`` with per-camera mean as default."""
+    exposure = ppisp.exposure_params.detach().cpu().numpy()
+    resolved_times = _normalized_time_codes(frame_indices, time_codes)
+    valid = [(i, t) for i, t in zip(frame_indices, resolved_times) if i < len(exposure)]
+    valid_indices = [i for i, _ in valid]
+    mean_exposure = float(np.mean(exposure[valid_indices])) if valid_indices else 0.0
+    attr = _ppisp_camera_attr(camera_prim, "exposureOffset", Sdf.ValueTypeNames.Float)
+    attr.Set(mean_exposure)
+    for frame_idx, time_code in valid:
+        attr.Set(float(exposure[frame_idx]), float(time_code))
+
+
+def _author_camera_animated_color(
+    camera_prim: Usd.Prim,
+    ppisp: PPISP,
+    frame_indices: List[int],
+    time_codes: List[float] | None,
+) -> None:
+    """Author time-sampled ``ppisp:colorLatent*`` attributes with mean defaults."""
+    color = ppisp.color_params.detach().cpu().numpy()
+    resolved_times = _normalized_time_codes(frame_indices, time_codes)
+    valid = [(i, t) for i, t in zip(frame_indices, resolved_times) if i < len(color)]
+    valid_indices = [i for i, _ in valid]
+    mean_color = np.mean(color[valid_indices], axis=0) if valid_indices else np.zeros(COLOR_PARAMS_PER_FRAME)
+
+    attrs: List[Usd.Attribute] = []
+    for i, name in enumerate(COLOR_LATENT_INPUT_NAMES):
+        attr = _ppisp_camera_attr(camera_prim, name, Sdf.ValueTypeNames.Float2)
+        attr.Set(Gf.Vec2f(float(mean_color[i * 2]), float(mean_color[i * 2 + 1])))
+        attrs.append(attr)
+
+    for frame_idx, time_code in valid:
+        frame_color = color[frame_idx]
+        for i, attr in enumerate(attrs):
+            attr.Set(Gf.Vec2f(float(frame_color[i * 2]), float(frame_color[i * 2 + 1])), float(time_code))
+
+
+def _author_camera_static_exposure(camera_prim: Usd.Prim, ppisp: PPISP, frame_index: int) -> None:
+    """Author one fixed ``ppisp:exposureOffset`` sample."""
+    exposure = ppisp.exposure_params.detach().cpu().numpy()
+    if frame_index < 0 or frame_index >= len(exposure):
+        raise ValueError(f"frame_index must be in [0, {len(exposure) - 1}], got {frame_index}.")
+    _ppisp_camera_attr(camera_prim, "exposureOffset", Sdf.ValueTypeNames.Float).Set(float(exposure[frame_index]))
+
+
+def _author_camera_static_color(camera_prim: Usd.Prim, ppisp: PPISP, frame_index: int) -> None:
+    """Author the four fixed ``ppisp:colorLatent*`` attributes."""
+    color = ppisp.color_params.detach().cpu().numpy()
+    if frame_index < 0 or frame_index >= len(color):
+        raise ValueError(f"frame_index must be in [0, {len(color) - 1}], got {frame_index}.")
+    frame_color = color[frame_index]
+    for i, name in enumerate(COLOR_LATENT_INPUT_NAMES):
+        _ppisp_camera_attr(camera_prim, name, Sdf.ValueTypeNames.Float2).Set(
+            Gf.Vec2f(float(frame_color[i * 2]), float(frame_color[i * 2 + 1]))
+        )
+
+
+def _author_camera_neutral_frame_params(camera_prim: Usd.Prim) -> None:
+    """Author neutral exposure/color PPISP frame attributes."""
+    _ppisp_camera_attr(camera_prim, "exposureOffset", Sdf.ValueTypeNames.Float).Set(0.0)
+    for name in COLOR_LATENT_INPUT_NAMES:
+        _ppisp_camera_attr(camera_prim, name, Sdf.ValueTypeNames.Float2).Set(Gf.Vec2f(0.0, 0.0))
+
+
+def _author_ppisp_camera_attributes(
+    stage: Usd.Stage,
+    camera_path: Sdf.Path,
+    ppisp: PPISP,
+    camera_index: int,
+    *,
+    responsivity: float,
+    frame_indices: List[int],
+    time_codes: List[float] | None,
+    fixed_frame_index: int | None,
+    neutral_frame_params: bool,
+) -> None:
+    """Author source-of-truth ``ppisp:*`` attributes on ``<cam>_ppisp``."""
+    camera_prim = stage.GetPrimAtPath(camera_path)
+    if not camera_prim.IsValid():
+        raise ValueError(f"PPISP camera prim not found at path: {camera_path}")
+
+    _ppisp_camera_attr(camera_prim, PPISP_RESPONSIVITY_INPUT_NAME, Sdf.ValueTypeNames.Float).Set(float(responsivity))
+    _author_camera_vignetting(camera_prim, ppisp, camera_index)
+    _author_camera_crf(camera_prim, ppisp, camera_index)
+
+    if neutral_frame_params:
+        _author_camera_neutral_frame_params(camera_prim)
+    elif fixed_frame_index is None:
+        _author_camera_animated_exposure(camera_prim, ppisp, frame_indices, time_codes)
+        _author_camera_animated_color(camera_prim, ppisp, frame_indices, time_codes)
+    else:
+        _author_camera_static_exposure(camera_prim, ppisp, fixed_frame_index)
+        _author_camera_static_color(camera_prim, ppisp, fixed_frame_index)
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +572,7 @@ def add_ppisp_shader_to_render_product(
     fixed_frame_index: int | None = None,
     responsivity: float = 1.0,
     neutral_frame_params: bool = False,
+    ppisp_camera_path: Optional[Sdf.Path] = None,
 ) -> Usd.Prim:
     """Add a PPISP Shader to a RenderProduct for one physical camera.
 
@@ -442,18 +597,33 @@ def add_ppisp_shader_to_render_product(
             shader as a user-overridable default.
         neutral_frame_params: If True, author exposure 0 and zero color
             latents instead of per-frame/fixed PPISP exposure/color state.
+        ppisp_camera_path: Optional path to the hidden ``<cam>_ppisp`` camera
+            that should receive matching source-of-truth ``ppisp:*`` attrs.
 
     Returns:
         The created PPISP Shader prim.
     """
-    assert camera_index < ppisp.num_cameras, (
-        f"camera_index {camera_index} >= ppisp.num_cameras {ppisp.num_cameras}"
-    )
+    assert camera_index < ppisp.num_cameras, f"camera_index {camera_index} >= ppisp.num_cameras {ppisp.num_cameras}"
     if not frame_indices and fixed_frame_index is None and not neutral_frame_params:
         log.warning(f"No frames for camera {camera_index} at {render_product_path}, skipping")
         return stage.GetPseudoRoot()
 
     shader = _create_shader_prim(stage, render_product_path)
+    _set_tile_count_params(shader)
+
+    if ppisp_camera_path is not None:
+        _author_ppisp_camera_attributes(
+            stage=stage,
+            camera_path=ppisp_camera_path,
+            ppisp=ppisp,
+            camera_index=camera_index,
+            responsivity=responsivity,
+            frame_indices=frame_indices,
+            time_codes=time_codes,
+            fixed_frame_index=fixed_frame_index,
+            neutral_frame_params=neutral_frame_params,
+        )
+
     _set_responsivity_params(shader, responsivity)
     _set_vignetting_params(shader, ppisp, camera_index)
     _set_crf_params(shader, ppisp, camera_index)
@@ -466,15 +636,12 @@ def add_ppisp_shader_to_render_product(
         _set_static_exposure_params(shader, ppisp, fixed_frame_index)
         _set_static_color_params(shader, ppisp, fixed_frame_index)
 
-    log.info(
-        f"Added PPISP shader to {render_product_path} "
-        f"(camera {camera_index}, {len(frame_indices)} frame(s))"
-    )
+    log.info(f"Added PPISP shader to {render_product_path} " f"(camera {camera_index}, {len(frame_indices)} frame(s))")
     return shader.GetPrim()
 
 
-def _create_ppisp_camera(stage: Usd.Stage, render_product: Usd.Prim) -> None:
-    """Create a hidden neutral-exposure camera shim as a sibling of the source camera.
+def _create_ppisp_camera(stage: Usd.Stage, render_product: Usd.Prim) -> Optional[Sdf.Path]:
+    """Create a hidden neutral-exposure ``<cam>_ppisp`` camera shim.
 
     Placing the shim next to the source camera preserves parent Xform motion
     authored on rig/camera parents. A child under ``/Render/<rp>`` would inherit
@@ -487,14 +654,14 @@ def _create_ppisp_camera(stage: Usd.Stage, render_product: Usd.Prim) -> None:
             "RenderProduct %s has no camera target; skipping PPISP camera override",
             render_product.GetPath(),
         )
-        return
+        return None
 
     source_camera_path = camera_targets[0]
-    if source_camera_path.name.endswith("_no_isp"):
-        return
+    if source_camera_path.name.endswith(PPISP_CAMERA_SUFFIX):
+        return source_camera_path
 
     shim_parent_path = source_camera_path.GetParentPath()
-    ppisp_camera_path = shim_parent_path.AppendChild(f"{source_camera_path.name}_no_isp")
+    ppisp_camera_path = shim_parent_path.AppendChild(f"{source_camera_path.name}{PPISP_CAMERA_SUFFIX}")
 
     stage.OverridePrim(shim_parent_path)
     ppisp_camera_prim = stage.DefinePrim(ppisp_camera_path, "Camera")
@@ -513,6 +680,7 @@ def _create_ppisp_camera(stage: Usd.Stage, render_product: Usd.Prim) -> None:
         PPISP_CAMERA_AUTO_EXPOSURE_ENABLED
     )
     camera_rel.SetTargets([ppisp_camera_path])
+    return ppisp_camera_path
 
 
 # ---------------------------------------------------------------------------
@@ -562,6 +730,7 @@ def add_ppisp_to_all_render_products(
         List of created PPISP Shader prims.
     """
     from threedgrut.export.usd.writers.camera import _make_usd_prim_name
+
     if use_controller:
         from threedgrut.export.usd.writers.ppisp_controller_writer import (
             add_ppisp_auto_shader_to_render_product,
@@ -599,7 +768,7 @@ def add_ppisp_to_all_render_products(
 
         frame_indices = camera_frame_mapping.get(camera_name, [])
         time_codes = None if camera_time_mapping is None else camera_time_mapping.get(camera_name)
-        _create_ppisp_camera(stage, child)
+        ppisp_camera_path = _create_ppisp_camera(stage, child)
 
         if use_controller:
             controllers = getattr(ppisp, "controllers", None)
@@ -607,7 +776,8 @@ def add_ppisp_to_all_render_products(
                 log.warning(
                     "PPISP controllers missing for camera %s (idx=%d); falling back to "
                     "static parameters for this RenderProduct.",
-                    camera_name, int(camera_index),
+                    camera_name,
+                    int(camera_index),
                 )
             else:
                 shader_prim = add_ppisp_auto_shader_to_render_product(
@@ -617,6 +787,7 @@ def add_ppisp_to_all_render_products(
                     ppisp=ppisp,
                     controller=controllers[int(camera_index)],
                     responsivity=responsivity,
+                    ppisp_camera_path=ppisp_camera_path,
                 )
                 created.append(shader_prim)
                 continue
@@ -631,6 +802,7 @@ def add_ppisp_to_all_render_products(
             fixed_frame_index=fixed_frame_index,
             responsivity=responsivity,
             neutral_frame_params=neutral_frame_params,
+            ppisp_camera_path=ppisp_camera_path,
         )
         created.append(shader_prim)
 
