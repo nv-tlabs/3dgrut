@@ -9,21 +9,34 @@ from pathlib import Path
 import pytest
 import torch
 import torch.nn as nn
-
 from pxr import Gf, Sdf, Usd, UsdGeom
 
-from threedgrut.export.usd.ppisp_spg import get_ppisp_auto_spg_files, get_ppisp_spg_files
-from threedgrut.export.usd.writers.ppisp_controller_weights import EXPECTED_CONTROLLER_WEIGHTS_LEN
+from threedgrut.export.usd.ppisp_spg import (
+    get_ppisp_auto_spg_files,
+    get_ppisp_spg_files,
+)
+from threedgrut.export.usd.writers.ppisp_controller_weights import (
+    EXPECTED_CONTROLLER_WEIGHTS_LEN,
+)
 from threedgrut.export.usd.writers.ppisp_controller_writer import (
     CONTROLLER_FEATURES_RENDER_VAR,
     CONTROLLER_PARAMS_RENDER_VAR,
+    CONTROLLER_WEIGHTS_CAMERA_ATTR,
     EMBEDDED_CONTROLLER_WEIGHTS_MARKER,
     EMBEDDED_CONTROLLER_WEIGHTS_SYMBOL,
     PPISP_AUTO_PRIM_NAME,
+)
+from threedgrut.export.usd.writers.ppisp_controller_writer import (
+    PPISP_TILE_COUNT_INPUT_NAMES as AUTO_PPISP_TILE_COUNT_INPUT_NAMES,
+)
+from threedgrut.export.usd.writers.ppisp_controller_writer import (
     add_ppisp_auto_shader_to_render_product,
     get_ppisp_embedded_controller_spg_files,
 )
 from threedgrut.export.usd.writers.ppisp_writer import (
+    PPISP_ATTR_NAMESPACE,
+    PPISP_CAMERA_SUFFIX,
+    PPISP_TILE_COUNT_INPUT_NAMES,
     add_ppisp_shader_to_render_product,
     add_ppisp_to_all_render_products,
 )
@@ -111,6 +124,8 @@ def test_static_ppisp_shader_references_cuda_sidecar() -> None:
     shader = stage.GetPrimAtPath("/Render/camera_0/PPISP")
     assert shader.GetAttribute("info:spg:sourceAsset").Get().path == "ppisp_usd_spg.cu"
     assert shader.GetAttribute("info:spg:sourceAsset:subIdentifier").Get() == "ppispProcess"
+    for name in PPISP_TILE_COUNT_INPUT_NAMES:
+        assert shader.GetAttribute(f"inputs:{name}").Get() == 1
     ldr = stage.GetPrimAtPath("/Render/camera_0/LdrColor")
     assert ldr.GetAttribute("omni:rtx:aov").GetConnections() == [Sdf.Path("/Render/camera_0/PPISP.outputs:PPISPColor")]
 
@@ -145,6 +160,9 @@ def test_auto_ppisp_controller_graph_uses_embedded_cuda_no_weight_attr() -> None
     assert controller.GetAttribute("info:spg:sourceAsset").Get().path == "ppisp_controller_0.cu"
     assert auto.GetAttribute("info:spg:sourceAsset").Get().path == "ppisp_usd_spg_auto.cu"
     assert not controller.GetAttribute("inputs:weights").IsValid()
+    for prim in (pool, controller, auto):
+        for name in AUTO_PPISP_TILE_COUNT_INPUT_NAMES:
+            assert prim.GetAttribute(f"inputs:{name}").Get() == 1
     assert stage.GetPrimAtPath(f"/Render/camera_0/{CONTROLLER_FEATURES_RENDER_VAR}").IsValid()
     assert stage.GetPrimAtPath(f"/Render/camera_0/{CONTROLLER_PARAMS_RENDER_VAR}").IsValid()
 
@@ -158,9 +176,29 @@ def test_ppisp_camera_shim_is_sibling_of_source_camera() -> None:
         camera_frame_mapping={"camera_0": [0, 1, 2]},
     )
     product = stage.GetPrimAtPath("/Render/camera_0")
-    assert product.GetRelationship("camera").GetTargets() == [Sdf.Path("/World/Cameras/camera_0_no_isp")]
-    assert stage.GetPrimAtPath("/World/Cameras/camera_0_no_isp").IsValid()
-    assert not stage.GetPrimAtPath("/Render/camera_0/camera_0_no_isp").IsValid()
+    ppisp_camera_path = Sdf.Path(f"/World/Cameras/camera_0{PPISP_CAMERA_SUFFIX}")
+    assert product.GetRelationship("camera").GetTargets() == [ppisp_camera_path]
+    ppisp_camera = stage.GetPrimAtPath(ppisp_camera_path)
+    assert ppisp_camera.IsValid()
+    assert not stage.GetPrimAtPath(f"/Render/camera_0/camera_0{PPISP_CAMERA_SUFFIX}").IsValid()
+    assert ppisp_camera.GetAttribute(f"{PPISP_ATTR_NAMESPACE}responsivity").Get() == 1.0
+    assert ppisp_camera.GetAttribute(f"{PPISP_ATTR_NAMESPACE}exposureOffset").GetTimeSamples() == [0.0, 1.0, 2.0]
+    assert ppisp_camera.GetAttribute(f"{PPISP_ATTR_NAMESPACE}colorLatentBlue").IsValid()
+    assert ppisp_camera.GetAttribute(f"{PPISP_ATTR_NAMESPACE}vignettingCenterR").IsValid()
+
+
+def test_controller_export_authors_ppisp_camera_controller_weights() -> None:
+    stage = _make_stage()
+    add_ppisp_to_all_render_products(
+        stage=stage,
+        ppisp=_FakePPISP(use_controller=True),
+        camera_names=["camera_0"],
+        camera_frame_mapping={"camera_0": [0, 1, 2]},
+        use_controller=True,
+    )
+    ppisp_camera = stage.GetPrimAtPath(f"/World/Cameras/camera_0{PPISP_CAMERA_SUFFIX}")
+    weights = ppisp_camera.GetAttribute(f"{PPISP_ATTR_NAMESPACE}{CONTROLLER_WEIGHTS_CAMERA_ATTR}").Get()
+    assert len(weights) == EXPECTED_CONTROLLER_WEIGHTS_LEN
 
 
 def _requires_cuda_ppisp() -> None:
@@ -235,7 +273,10 @@ def _assert_exported_ldr_close(actual: torch.Tensor, expected_hdr_float: torch.T
 def test_exported_embedded_cuda_controller_matches_torch_controller() -> None:
     _requires_cuda_ppisp()
     from ppisp import PPISP, PPISPConfig  # type: ignore[import-not-found]
-    from threedgrut.export.tests.ppisp_cuda_controller_runtime import ExportedEmbeddedCudaController
+
+    from threedgrut.export.tests.ppisp_cuda_controller_runtime import (
+        ExportedEmbeddedCudaController,
+    )
 
     device = torch.device("cuda")
     ppisp = PPISP(num_cameras=1, num_frames=1, config=PPISPConfig(use_controller=True)).to(device).eval()
@@ -251,10 +292,40 @@ def test_exported_embedded_cuda_controller_matches_torch_controller() -> None:
     torch.testing.assert_close(cuda_color, torch_color, rtol=2.0e-5, atol=2.0e-5)
 
 
+def test_exported_embedded_cuda_controller_tiled_params_match_per_tile() -> None:
+    _requires_cuda_ppisp()
+    from ppisp import PPISP, PPISPConfig  # type: ignore[import-not-found]
+
+    from threedgrut.export.tests.ppisp_cuda_controller_runtime import (
+        ExportedEmbeddedCudaController,
+    )
+
+    device = torch.device("cuda")
+    ppisp = PPISP(num_cameras=1, num_frames=1, config=PPISPConfig(use_controller=True)).to(device).eval()
+    _randomize_controller(ppisp.controllers[0], seed=13)
+    source = get_ppisp_embedded_controller_spg_files(ppisp, [0])[0].serialized
+    runtime = ExportedEmbeddedCudaController(source, device=device)
+    prior = torch.tensor([0.17], device=device)
+    hdr0 = _make_gaussian_radiance_scene(39, 33, seed=210, device=device)
+    hdr1 = _make_gaussian_radiance_scene(39, 33, seed=211, device=device)
+    atlas = torch.cat((hdr0, hdr1), dim=1)
+
+    exp0, color0 = runtime(hdr0, prior)
+    exp1, color1 = runtime(hdr1, prior)
+    tiled = runtime.run_tiled_params(atlas, prior, tile_count_x=2, tile_count_y=1).reshape(2, 9)
+
+    torch.testing.assert_close(tiled[0], torch.cat((exp0.reshape(1), color0.reshape(-1))), rtol=2.0e-5, atol=2.0e-5)
+    torch.testing.assert_close(tiled[1], torch.cat((exp1.reshape(1), color1.reshape(-1))), rtol=2.0e-5, atol=2.0e-5)
+
+
 def test_exported_static_cuda_ppisp_matches_torch_ppisp() -> None:
     _requires_cuda_ppisp()
     from ppisp import PPISP, PPISPConfig  # type: ignore[import-not-found]
-    from threedgrut.export.tests.ppisp_cuda_ppisp_runtime import ExportedCudaPPISP, pack_static_ppisp_params
+
+    from threedgrut.export.tests.ppisp_cuda_ppisp_runtime import (
+        ExportedCudaPPISP,
+        pack_static_ppisp_params,
+    )
 
     device = torch.device("cuda")
     ppisp = PPISP(num_cameras=1, num_frames=1, config=PPISPConfig(use_controller=False)).to(device).eval()
@@ -283,21 +354,64 @@ def test_exported_static_cuda_ppisp_matches_torch_ppisp() -> None:
     _assert_exported_ldr_close(actual, expected)
 
 
+def test_exported_static_cuda_ppisp_tiled_atlas_matches_per_tile_untiled() -> None:
+    _requires_cuda_ppisp()
+    from ppisp import PPISP, PPISPConfig  # type: ignore[import-not-found]
+
+    from threedgrut.export.tests.ppisp_cuda_ppisp_runtime import (
+        ExportedCudaPPISP,
+        pack_static_ppisp_params,
+    )
+
+    device = torch.device("cuda")
+    ppisp = PPISP(num_cameras=1, num_frames=1, config=PPISPConfig(use_controller=False)).to(device).eval()
+    _randomize_ppisp_params(ppisp, seed=25)
+    stage = _make_stage()
+    shader_prim = add_ppisp_shader_to_render_product(
+        stage=stage,
+        render_product_path="/Render/camera_0",
+        camera_index=0,
+        ppisp=ppisp,
+        frame_indices=[0],
+        fixed_frame_index=0,
+    )
+    params = pack_static_ppisp_params(shader_prim).to(device=device)
+    hdr = _make_gaussian_radiance_scene(48, 40, seed=404, device=device)
+    runtime = ExportedCudaPPISP(device=device)
+
+    width = hdr.shape[1]
+    single = runtime.run_static(hdr, params)
+    atlas = torch.cat((hdr, hdr), dim=1)
+    tiled = runtime.run_static(atlas, params, tile_count_x=2, tile_count_y=1)
+
+    torch.testing.assert_close(tiled[:, :width], single, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(tiled[:, width:], single, rtol=0.0, atol=0.0)
+    untiled_atlas = runtime.run_static(atlas, params)
+    assert not torch.allclose(untiled_atlas[:, :width], single, rtol=0.0, atol=1.0 / 255.0)
+
+
 def test_exported_auto_cuda_ppisp_matches_torch_ppisp() -> None:
     _requires_cuda_ppisp()
     from ppisp import PPISP, PPISPConfig  # type: ignore[import-not-found]
-    from threedgrut.export.tests.ppisp_cuda_controller_runtime import ExportedEmbeddedCudaController
+
+    from threedgrut.export.tests.ppisp_cuda_controller_runtime import (
+        ExportedEmbeddedCudaController,
+    )
     from threedgrut.export.tests.ppisp_cuda_ppisp_runtime import (
         ExportedCudaPPISP,
         pack_auto_ppisp_params,
     )
 
     device = torch.device("cuda")
-    ppisp = PPISP(
-        num_cameras=1,
-        num_frames=1,
-        config=PPISPConfig(use_controller=True, controller_activation_ratio=0.0),
-    ).to(device).eval()
+    ppisp = (
+        PPISP(
+            num_cameras=1,
+            num_frames=1,
+            config=PPISPConfig(use_controller=True, controller_activation_ratio=0.0),
+        )
+        .to(device)
+        .eval()
+    )
     _randomize_ppisp_params(ppisp, seed=31)
     _randomize_controller(ppisp.controllers[0], seed=37)
     stage = _make_stage()
@@ -332,6 +446,51 @@ def test_exported_auto_cuda_ppisp_matches_torch_ppisp() -> None:
     _assert_exported_ldr_close(actual, expected)
 
 
+def test_exported_auto_cuda_ppisp_tiled_atlas_selects_per_tile_controller_params() -> None:
+    _requires_cuda_ppisp()
+    from ppisp import PPISP, PPISPConfig  # type: ignore[import-not-found]
+
+    from threedgrut.export.tests.ppisp_cuda_ppisp_runtime import (
+        ExportedCudaPPISP,
+        pack_auto_ppisp_params,
+    )
+
+    device = torch.device("cuda")
+    ppisp = (
+        PPISP(
+            num_cameras=1,
+            num_frames=1,
+            config=PPISPConfig(use_controller=True, controller_activation_ratio=0.0),
+        )
+        .to(device)
+        .eval()
+    )
+    _randomize_ppisp_params(ppisp, seed=33)
+    stage = _make_stage()
+    auto_prim = add_ppisp_auto_shader_to_render_product(
+        stage=stage,
+        render_product_path="/Render/camera_0",
+        camera_index=0,
+        ppisp=ppisp,
+        controller=ppisp.controllers[0],
+    )
+    params = pack_auto_ppisp_params(auto_prim).to(device=device)
+    runtime = ExportedCudaPPISP(device=device)
+
+    hdr = _make_gaussian_radiance_scene(44, 38, seed=505, device=device)
+    cp0 = torch.tensor([0.30, 0.10, -0.05, 0.20, 0.02, -0.12, 0.07, 0.15, -0.09], device=device)
+    cp1 = torch.tensor([-0.40, -0.18, 0.22, -0.03, 0.11, 0.25, -0.14, 0.04, 0.19], device=device)
+
+    width = hdr.shape[1]
+    single0 = runtime.run_auto(hdr, cp0, params)
+    single1 = runtime.run_auto(hdr, cp1, params)
+    atlas = torch.cat((hdr, hdr), dim=1)
+    tiled = runtime.run_auto(atlas, torch.cat((cp0, cp1), dim=0), params, tile_count_x=2, tile_count_y=1)
+
+    torch.testing.assert_close(tiled[:, :width], single0, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(tiled[:, width:], single1, rtol=0.0, atol=0.0)
+
+
 @pytest.mark.skipif(
     os.environ.get("THREEDGRUT_RUN_PPISP_EXPORTED_CUDA_PERF") != "1",
     reason="set THREEDGRUT_RUN_PPISP_EXPORTED_CUDA_PERF=1 to run exported CUDA performance sweep",
@@ -339,7 +498,10 @@ def test_exported_auto_cuda_ppisp_matches_torch_ppisp() -> None:
 def test_exported_cuda_ppisp_performance_smoke() -> None:
     _requires_cuda_ppisp()
     from ppisp import PPISP, PPISPConfig  # type: ignore[import-not-found]
-    from threedgrut.export.tests.ppisp_cuda_controller_runtime import ExportedEmbeddedCudaController
+
+    from threedgrut.export.tests.ppisp_cuda_controller_runtime import (
+        ExportedEmbeddedCudaController,
+    )
     from threedgrut.export.tests.ppisp_cuda_ppisp_runtime import (
         ExportedCudaPPISP,
         pack_auto_ppisp_params,
@@ -359,11 +521,15 @@ def test_exported_cuda_ppisp_performance_smoke() -> None:
     )
     static_params = pack_static_ppisp_params(shader_prim).to(device=device)
 
-    auto_ppisp = PPISP(
-        num_cameras=1,
-        num_frames=1,
-        config=PPISPConfig(use_controller=True, controller_activation_ratio=0.0),
-    ).to(device).eval()
+    auto_ppisp = (
+        PPISP(
+            num_cameras=1,
+            num_frames=1,
+            config=PPISPConfig(use_controller=True, controller_activation_ratio=0.0),
+        )
+        .to(device)
+        .eval()
+    )
     auto_stage = _make_stage()
     auto_prim = add_ppisp_auto_shader_to_render_product(
         stage=auto_stage,

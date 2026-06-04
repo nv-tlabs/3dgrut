@@ -16,23 +16,21 @@ import hashlib
 import os
 import tempfile
 import textwrap
-
 from functools import lru_cache
 from pathlib import Path
 from typing import Tuple
 
 import torch
+from pxr import Usd
 
 
 def add_ninja_to_path() -> None:
     """Compatibility shim for NRE's Bazel helper; uv/venv PATH is enough here."""
     return None
 
-from pxr import Usd
 
 from threedgrut.export.usd.ppisp_spg import _SPG_DIR as CONTROLLER_SPG_DIR
 from threedgrut.export.usd.ppisp_spg import _SPG_DIR as STATIC_SPG_DIR
-
 
 _STATIC_CU = STATIC_SPG_DIR / "ppisp_usd_spg.cu"
 _AUTO_CU = CONTROLLER_SPG_DIR / "ppisp_usd_spg_auto.cu"
@@ -147,6 +145,92 @@ def _extension_source(sidecar: Path, run_source: str, binding_name: str, binding
             cudaArray_t outputArray = nullptr;
             cudaTextureObject_t inputTexture = 0;
             cudaSurfaceObject_t outputSurface = 0;
+
+            TextureSurfacePair() = default;
+            TextureSurfacePair(const TextureSurfacePair&) = delete;
+            TextureSurfacePair& operator=(const TextureSurfacePair&) = delete;
+
+            TextureSurfacePair(TextureSurfacePair&& other) noexcept
+                : inputArray(other.inputArray),
+                  outputArray(other.outputArray),
+                  inputTexture(other.inputTexture),
+                  outputSurface(other.outputSurface)
+            {
+                other.inputArray = nullptr;
+                other.outputArray = nullptr;
+                other.inputTexture = 0;
+                other.outputSurface = 0;
+            }
+
+            TextureSurfacePair& operator=(TextureSurfacePair&& other) noexcept
+            {
+                if (this != &other)
+                {
+                    destroyUnchecked();
+                    inputArray = other.inputArray;
+                    outputArray = other.outputArray;
+                    inputTexture = other.inputTexture;
+                    outputSurface = other.outputSurface;
+                    other.inputArray = nullptr;
+                    other.outputArray = nullptr;
+                    other.inputTexture = 0;
+                    other.outputSurface = 0;
+                }
+                return *this;
+            }
+
+            ~TextureSurfacePair()
+            {
+                destroyUnchecked();
+            }
+
+            void destroyChecked()
+            {
+                if (outputSurface)
+                {
+                    checkCuda(cudaDestroySurfaceObject(outputSurface), "cudaDestroySurfaceObject output");
+                    outputSurface = 0;
+                }
+                if (inputTexture)
+                {
+                    checkCuda(cudaDestroyTextureObject(inputTexture), "cudaDestroyTextureObject input");
+                    inputTexture = 0;
+                }
+                if (outputArray)
+                {
+                    checkCuda(cudaFreeArray(outputArray), "cudaFreeArray output");
+                    outputArray = nullptr;
+                }
+                if (inputArray)
+                {
+                    checkCuda(cudaFreeArray(inputArray), "cudaFreeArray input");
+                    inputArray = nullptr;
+                }
+            }
+
+            void destroyUnchecked() noexcept
+            {
+                if (outputSurface)
+                {
+                    cudaDestroySurfaceObject(outputSurface);
+                    outputSurface = 0;
+                }
+                if (inputTexture)
+                {
+                    cudaDestroyTextureObject(inputTexture);
+                    inputTexture = 0;
+                }
+                if (outputArray)
+                {
+                    cudaFreeArray(outputArray);
+                    outputArray = nullptr;
+                }
+                if (inputArray)
+                {
+                    cudaFreeArray(inputArray);
+                    inputArray = nullptr;
+                }
+            }
         };
 
         static TextureSurfacePair createTextureSurface(torch::Tensor hdr, int width, int height, cudaStream_t stream)
@@ -206,22 +290,7 @@ def _extension_source(sidecar: Path, run_source: str, binding_name: str, binding
 
         static void destroyTextureSurface(TextureSurfacePair& pair)
         {
-            if (pair.outputSurface)
-            {
-                checkCuda(cudaDestroySurfaceObject(pair.outputSurface), "cudaDestroySurfaceObject output");
-            }
-            if (pair.inputTexture)
-            {
-                checkCuda(cudaDestroyTextureObject(pair.inputTexture), "cudaDestroyTextureObject input");
-            }
-            if (pair.outputArray)
-            {
-                checkCuda(cudaFreeArray(pair.outputArray), "cudaFreeArray output");
-            }
-            if (pair.inputArray)
-            {
-                checkCuda(cudaFreeArray(pair.inputArray), "cudaFreeArray input");
-            }
+            pair.destroyChecked();
         }
 
         static torch::Tensor copyOutput(TextureSurfacePair& pair, torch::Tensor hdr, int width, int height, cudaStream_t stream)
@@ -269,7 +338,7 @@ def _extension_source(sidecar: Path, run_source: str, binding_name: str, binding
 
 def _static_run_source() -> str:
     return r"""
-        torch::Tensor run_static_ppisp(torch::Tensor hdr, torch::Tensor params)
+        torch::Tensor run_static_ppisp(torch::Tensor hdr, torch::Tensor params, int tileCountX, int tileCountY)
         {
             validateHdr(hdr);
             TORCH_CHECK(params.is_cuda(), "params must be a CUDA tensor");
@@ -287,6 +356,8 @@ def _static_run_source() -> str:
             ppispProcess<<<dim3((width + 15) / 16, (height + 15) / 16, 1), dim3(16, 16, 1), 0, stream>>>(
                 width,
                 height,
+                tileCountX,
+                tileCountY,
                 pair.inputTexture,
                 p,
                 pair.outputSurface);
@@ -302,12 +373,13 @@ def _static_run_source() -> str:
 
 def _auto_run_source() -> str:
     return r"""
-        torch::Tensor run_auto_ppisp(torch::Tensor hdr, torch::Tensor controllerParams, torch::Tensor params)
+        torch::Tensor run_auto_ppisp(torch::Tensor hdr, torch::Tensor controllerParams, torch::Tensor params, int tileCountX, int tileCountY)
         {
             validateHdr(hdr);
             TORCH_CHECK(controllerParams.is_cuda(), "controllerParams must be a CUDA tensor");
             TORCH_CHECK(controllerParams.scalar_type() == torch::kFloat32, "controllerParams must be float32");
-            TORCH_CHECK(controllerParams.numel() == 9, "controllerParams must hold 9 floats");
+            TORCH_CHECK(controllerParams.numel() % 9 == 0 && controllerParams.numel() >= 9,
+                        "controllerParams must hold 9 floats per tile");
             TORCH_CHECK(params.is_cuda(), "params must be a CUDA tensor");
             TORCH_CHECK(params.scalar_type() == torch::kFloat32, "params must be float32");
             TORCH_CHECK(params.dim() == 1 && params.numel() == 28, "params must have shape [28]");
@@ -324,6 +396,8 @@ def _auto_run_source() -> str:
             ppispProcessAuto<<<dim3((width + 15) / 16, (height + 15) / 16, 1), dim3(16, 16, 1), 0, stream>>>(
                 width,
                 height,
+                tileCountX,
+                tileCountY,
                 pair.inputTexture,
                 controllerParams.data_ptr<float>(),
                 p,
@@ -438,18 +512,35 @@ class ExportedCudaPPISP:
     def __init__(self, *, device: torch.device) -> None:
         self._device = device
 
-    def run_static(self, hdr: torch.Tensor, params: torch.Tensor) -> torch.Tensor:
+    def run_static(
+        self,
+        hdr: torch.Tensor,
+        params: torch.Tensor,
+        *,
+        tile_count_x: int = 1,
+        tile_count_y: int = 1,
+    ) -> torch.Tensor:
         hdr4 = _hdr_rgb_to_float4(hdr)
         output_u8 = _load_extension("static").run_static_ppisp(
-            hdr4, params.to(device=self._device, dtype=torch.float32)
+            hdr4, params.to(device=self._device, dtype=torch.float32), int(tile_count_x), int(tile_count_y)
         )
         return output_u8[..., :3].to(dtype=torch.float32) / 255.0
 
-    def run_auto(self, hdr: torch.Tensor, controller_params: torch.Tensor, params: torch.Tensor) -> torch.Tensor:
+    def run_auto(
+        self,
+        hdr: torch.Tensor,
+        controller_params: torch.Tensor,
+        params: torch.Tensor,
+        *,
+        tile_count_x: int = 1,
+        tile_count_y: int = 1,
+    ) -> torch.Tensor:
         hdr4 = _hdr_rgb_to_float4(hdr)
         output_u8 = _load_extension("auto").run_auto_ppisp(
             hdr4,
             controller_params.reshape(-1).to(device=self._device, dtype=torch.float32),
             params.to(device=self._device, dtype=torch.float32),
+            int(tile_count_x),
+            int(tile_count_y),
         )
         return output_u8[..., :3].to(dtype=torch.float32) / 255.0

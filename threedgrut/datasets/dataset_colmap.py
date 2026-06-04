@@ -172,9 +172,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def _camera_names_by_id(self) -> dict[int, str]:
         sorted_camera_ids = sorted(self.cam_intrinsics.keys())
         camera_id_to_idx = {camera_id: idx for idx, camera_id in enumerate(sorted_camera_ids)}
-        names: dict[int, str] = {
-            camera_id: f"camera_{camera_id_to_idx[camera_id]}" for camera_id in sorted_camera_ids
-        }
+        names: dict[int, str] = {camera_id: f"camera_{camera_id_to_idx[camera_id]}" for camera_id in sorted_camera_ids}
 
         for extr in self.cam_extrinsics:
             parent_folder = os.path.dirname(extr.name)

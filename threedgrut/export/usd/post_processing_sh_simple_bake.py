@@ -144,7 +144,9 @@ def _apply_jacobian_to_specular(features_specular: torch.nn.Parameter, jacobian:
         logger.info(
             "Jacobian rotation clipped on %d/%d gaussians (|J|_F > %.1f or non-finite); "
             "their trained features_specular preserved.",
-            n_clipped, num_gaussians, JACOBIAN_FRO_NORM_CLIP,
+            n_clipped,
+            num_gaussians,
+            JACOBIAN_FRO_NORM_CLIP,
         )
 
     transformed = torch.einsum("nij,nkj->nki", jacobian_safe, specular_rgb)

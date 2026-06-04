@@ -39,9 +39,7 @@ DEFAULT_NEAR_CLIP = 0.001
 DEFAULT_FAR_CLIP = 10000000.0
 
 # Coordinate transform from 3DGRUT (right-down-front) to USD camera (right-up-back)
-_CAMERA_COORD_FLIP = np.array(
-    [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]], dtype=np.float64
-)
+_CAMERA_COORD_FLIP = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]], dtype=np.float64)
 
 
 def _make_usd_prim_name(name: str) -> str:
@@ -110,9 +108,7 @@ def _add_opencv_fisheye_camera_intrinsics(
     camera_prim.CreateAttribute("fthetaPolyC", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[2]))
     camera_prim.CreateAttribute("fthetaPolyD", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[3]))
 
-    camera_prim.CreateAttribute("fthetaMaxFov", Sdf.ValueTypeNames.Float).Set(
-        float(2.0 * np.rad2deg(params.max_angle))
-    )
+    camera_prim.CreateAttribute("fthetaMaxFov", Sdf.ValueTypeNames.Float).Set(float(2.0 * np.rad2deg(params.max_angle)))
 
 
 def export_cameras_to_usd(
@@ -216,9 +212,7 @@ def export_cameras_to_usd(
         stage.SetStartTimeCode(usd_start_time_code)
         stage.SetEndTimeCode(usd_end_time_code)
 
-    logger.info(
-        f"Exported {len(result)} camera(s) ({len(poses)} total frames) to {root_path}"
-    )
+    logger.info(f"Exported {len(result)} camera(s) ({len(poses)} total frames) to {root_path}")
     return result
 
 

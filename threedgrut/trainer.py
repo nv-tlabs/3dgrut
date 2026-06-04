@@ -422,7 +422,9 @@ class Trainer3DGRUT:
 
             logger.info(f"📷 {method.upper()} initialized: {num_cameras} cameras, {num_frames} frames")
         elif method == "linear-to-srgb":
-            from threedgrut.utils.post_processing_linear_to_srgb import LinearToSrgbPostProcessing
+            from threedgrut.utils.post_processing_linear_to_srgb import (
+                LinearToSrgbPostProcessing,
+            )
 
             self.post_processing = LinearToSrgbPostProcessing().to(self.device)
             self.post_processing_optimizers = []

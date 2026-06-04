@@ -75,9 +75,7 @@ def create_render_products(
         product_prim = stage.DefinePrim(product_path, "RenderProduct")
 
         # Resolution
-        product_prim.CreateAttribute("resolution", Sdf.ValueTypeNames.Int2).Set(
-            Gf.Vec2i(int(width), int(height))
-        )
+        product_prim.CreateAttribute("resolution", Sdf.ValueTypeNames.Int2).Set(Gf.Vec2i(int(width), int(height)))
 
         # Camera relationship
         camera_rel = product_prim.CreateRelationship("camera")

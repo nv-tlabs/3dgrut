@@ -100,7 +100,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-
 if TYPE_CHECKING:
     from ppisp import PPISP  # type: ignore[import-not-found]
 

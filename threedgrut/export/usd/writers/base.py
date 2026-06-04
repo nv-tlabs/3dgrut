@@ -27,7 +27,9 @@ import numpy as np
 from pxr import Gf, Usd, Vt
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
-from threedgrut.export.usd.particle_field_hints import DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT
+from threedgrut.export.usd.particle_field_hints import (
+    DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
+)
 
 logger = logging.getLogger(__name__)
 

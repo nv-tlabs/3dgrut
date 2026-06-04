@@ -39,7 +39,6 @@ from torchmetrics.image import StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 import threedgrut.datasets as datasets
-from threedgrut.render import Renderer
 from threedgrut.export.usd.post_processing_sh_bake import (
     MODE_PPISP_BAKE_VIGNETTING_NONE,
     FixedPPISP,
@@ -49,6 +48,7 @@ from threedgrut.export.usd.post_processing_sh_bake import (
     normalize_ppisp_bake_vignetting_mode,
 )
 from threedgrut.export.usd.post_processing_sh_simple_bake import simple_bake
+from threedgrut.render import Renderer
 from threedgrut.utils.logger import logger
 from threedgrut.utils.render import apply_post_processing
 

@@ -87,22 +87,19 @@ from __future__ import annotations
 
 import logging
 import math
-
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Sequence
+from typing import TYPE_CHECKING, List, Optional, Sequence
 
 import numpy as np
 import torch.nn as nn
+from pxr import Gf, Sdf, Usd, UsdShade, Vt
 
-from pxr import Gf, Sdf, Usd, UsdShade
-
+from threedgrut.export.usd.stage_utils import NamedSerialized
 from threedgrut.export.usd.writers.ppisp_controller_weights import (
     EXPECTED_CONTROLLER_WEIGHTS_LEN,
     flatten_controller_weights,
     select_camera_controller,
 )
-from threedgrut.export.usd.stage_utils import NamedSerialized
-
 
 if TYPE_CHECKING:
     from ppisp import PPISP  # type: ignore[import-not-found]
@@ -175,6 +172,20 @@ CHANNEL_SUFFIXES = ("R", "G", "B")
 DEFAULT_PRIOR_EXPOSURE = 0.0
 DEFAULT_RESPONSIVITY = 1.0
 
+# Namespace for source-of-truth PPISP attributes authored on the
+# ``<cam>_ppisp`` camera. Kept local to avoid a circular import with
+# ``ppisp_writer``.
+PPISP_ATTR_NAMESPACE = "ppisp:"
+# Controller weights are baked into the per-camera CUDA sidecar. They are also
+# mirrored onto the camera for documentation/downstream tools; runtime does not
+# read this attribute.
+CONTROLLER_WEIGHTS_CAMERA_ATTR = "controllerWeights"
+
+# Tiled-RenderProduct grid. Tiling is a RenderProduct property, so the grid is
+# authored as literal inputs on each shader node, not as camera attributes.
+PPISP_TILE_COUNT_INPUT_NAMES = ("tileCountX", "tileCountY")
+DEFAULT_PPISP_TILE_COUNT = 1
+
 
 # =============================================================================
 # Public API
@@ -190,6 +201,7 @@ def add_ppisp_auto_shader_to_render_product(
     *,
     responsivity: float = DEFAULT_RESPONSIVITY,
     prior_exposure: float = DEFAULT_PRIOR_EXPOSURE,
+    ppisp_camera_path: Optional[Sdf.Path] = None,
 ) -> Usd.Prim:
     """Author the controller + automatic-parameter PPISP graph on a RenderProduct.
 
@@ -226,6 +238,12 @@ def add_ppisp_auto_shader_to_render_product(
             on the controller shader's ``inputs:priorExposure``
             attribute. Defaults to 0.0 (matching training-time
             inference when no prior is wired).
+        ppisp_camera_path: Optional path to the ``<cam>_ppisp`` camera
+            that holds source-of-truth PPISP parameters as ``ppisp:*``
+            attributes. When set, responsivity, vignetting, CRF, and a
+            documentation mirror of the embedded controller weights are
+            authored on that camera. Exposure/color stay controller-driven
+            via the ``ControllerParams`` AOV.
     Returns:
         The auto-PPISP shader prim, mirroring the return type of
         :func:`threedgrut.export.usd.writers.ppisp_writer.add_ppisp_shader_to_render_product`.
@@ -285,12 +303,23 @@ def add_ppisp_auto_shader_to_render_product(
         controller_shader=controller_shader,
     )
 
+    if ppisp_camera_path is not None:
+        _author_auto_camera_attributes(
+            stage=stage,
+            camera_path=ppisp_camera_path,
+            ppisp=ppisp,
+            camera_index=camera_index,
+            responsivity=float(responsivity),
+            controller=controller,
+        )
+
     auto_shader = _create_auto_ppisp_shader(
         stage=stage,
         render_product_path=render_product_path,
         ppisp=ppisp,
         camera_index=camera_index,
         responsivity=float(responsivity),
+        ppisp_camera_path=ppisp_camera_path,
     )
 
     _create_ldr_color_render_var(
@@ -520,7 +549,12 @@ def _create_controller_pool_shader(
     camera_index: int,
     controller_source_file: str,
 ) -> UsdShade.Shader:
-    """Author the per-camera PPISP controller CNN/pool Shader prim."""
+    """Author the per-camera PPISP controller CNN/pool Shader prim.
+
+    ``gridDimY`` is authored as ``1`` for the untiled fallback. The Lua
+    launcher expands the launch grid to ``25 x tileCountX*tileCountY`` from
+    the tile-count inputs.
+    """
     shader_prim_name = CONTROLLER_POOL_PRIM_NAME_TEMPLATE.format(camera_index=camera_index)
     shader_path = f"{render_product_path}/{shader_prim_name}"
     shader = UsdShade.Shader.Define(stage, shader_path)
@@ -532,6 +566,8 @@ def _create_controller_pool_shader(
 
     shader.CreateOutput(CONTROLLER_POOL_OUTPUT, Sdf.ValueTypeNames.Opaque)
 
+    _author_tile_counts(shader)
+
     return shader
 
 
@@ -542,7 +578,12 @@ def _create_controller_shader(
     controller_source_file: str,
     prior_exposure: float,
 ) -> UsdShade.Shader:
-    """Author the per-camera PPISP controller Shader prim."""
+    """Author the per-camera PPISP controller Shader prim.
+
+    ``gridDimX`` is authored as ``1`` for the untiled fallback. The Lua
+    launcher expands the launch grid to one MLP block per tile from the
+    tile-count inputs.
+    """
     shader_prim_name = CONTROLLER_PRIM_NAME_TEMPLATE.format(camera_index=camera_index)
     shader_path = f"{render_product_path}/{shader_prim_name}"
     shader = UsdShade.Shader.Define(stage, shader_path)
@@ -555,6 +596,8 @@ def _create_controller_shader(
     shader.CreateOutput(CONTROLLER_OUTPUT, Sdf.ValueTypeNames.Opaque)
 
     shader.CreateInput(CONTROLLER_PRIOR_EXPOSURE_INPUT, Sdf.ValueTypeNames.Float).Set(float(prior_exposure))
+
+    _author_tile_counts(shader)
 
     return shader
 
@@ -605,8 +648,14 @@ def _create_auto_ppisp_shader(
     ppisp: "PPISP",
     camera_index: int,
     responsivity: float,
+    ppisp_camera_path: Optional[Sdf.Path] = None,
 ) -> UsdShade.Shader:
-    """Author the automatic-parameter PPISP Shader prim."""
+    """Author the automatic-parameter PPISP Shader prim.
+
+    Responsivity / vignetting / CRF are authored as literal shader inputs.
+    When a camera path is provided, the same values are also mirrored onto the
+    ``<cam>_ppisp`` camera by :func:`_author_auto_camera_attributes`.
+    """
     shader_path = f"{render_product_path}/{PPISP_AUTO_PRIM_NAME}"
     shader = UsdShade.Shader.Define(stage, shader_path)
     shader.GetPrim().GetReferences().AddReference(PPISP_AUTO_USDA_FILE)
@@ -623,6 +672,16 @@ def _create_auto_ppisp_shader(
     shader.CreateInput(PPISP_AUTO_RESPONSIVITY_INPUT, Sdf.ValueTypeNames.Float).Set(float(responsivity))
     _author_per_camera_vignetting(shader, ppisp, camera_index)
     _author_per_camera_crf(shader, ppisp, camera_index)
+    if ppisp_camera_path is not None:
+        # TODO(kit): connect these inputs to the <cam>_ppisp ppisp:* attrs
+        # once SPG can resolve dynamic params from the bound RenderProduct
+        # camera. The camera attrs are still authored as source-of-truth
+        # metadata for downstream workflows.
+        # _connect_input_to_camera(shader, PPISP_AUTO_RESPONSIVITY_INPUT, Sdf.ValueTypeNames.Float, ppisp_camera_path)
+        # _connect_per_camera_vignetting_crf_to_camera(shader, ppisp_camera_path)
+        pass
+
+    _author_tile_counts(shader)
 
     return shader
 
@@ -705,6 +764,79 @@ def _author_per_camera_crf(shader: UsdShade.Shader, ppisp: "PPISP", camera_index
         shader.CreateInput(f"crfShoulder{suffix}", Sdf.ValueTypeNames.Float).Set(float(crf[ch, 1]))
         shader.CreateInput(f"crfGamma{suffix}", Sdf.ValueTypeNames.Float).Set(float(crf[ch, 2]))
         shader.CreateInput(f"crfCenter{suffix}", Sdf.ValueTypeNames.Float).Set(float(crf[ch, 3]))
+
+
+def _ppisp_camera_attr(camera_prim: Usd.Prim, input_name: str, value_type: Sdf.ValueTypeName) -> Usd.Attribute:
+    """Create or fetch a namespaced ``ppisp:<input_name>`` custom attribute."""
+    return camera_prim.CreateAttribute(f"{PPISP_ATTR_NAMESPACE}{input_name}", value_type, custom=True)
+
+
+def _author_auto_camera_attributes(
+    stage: Usd.Stage,
+    camera_path: Sdf.Path,
+    ppisp: "PPISP",
+    camera_index: int,
+    responsivity: float,
+    controller: nn.Module,
+) -> None:
+    """Author auto-path PPISP source-of-truth attributes on ``<cam>_ppisp``."""
+    camera_prim = stage.GetPrimAtPath(camera_path)
+    if not camera_prim.IsValid():
+        raise ValueError(f"PPISP camera prim not found at path: {camera_path}")
+
+    _ppisp_camera_attr(camera_prim, PPISP_AUTO_RESPONSIVITY_INPUT, Sdf.ValueTypeNames.Float).Set(float(responsivity))
+
+    vig = ppisp.vignetting_params[camera_index].detach().cpu().numpy()  # type: ignore[attr-defined]
+    crf = ppisp.crf_params[camera_index].detach().cpu().numpy()  # type: ignore[attr-defined]
+    for ch in range(NUM_CHANNELS):
+        suffix = CHANNEL_SUFFIXES[ch]
+        _ppisp_camera_attr(camera_prim, f"vignettingCenter{suffix}", Sdf.ValueTypeNames.Float2).Set(
+            Gf.Vec2f(float(vig[ch, 0]), float(vig[ch, 1]))
+        )
+        _ppisp_camera_attr(camera_prim, f"vignettingAlpha1{suffix}", Sdf.ValueTypeNames.Float).Set(float(vig[ch, 2]))
+        _ppisp_camera_attr(camera_prim, f"vignettingAlpha2{suffix}", Sdf.ValueTypeNames.Float).Set(float(vig[ch, 3]))
+        _ppisp_camera_attr(camera_prim, f"vignettingAlpha3{suffix}", Sdf.ValueTypeNames.Float).Set(float(vig[ch, 4]))
+        _ppisp_camera_attr(camera_prim, f"crfToe{suffix}", Sdf.ValueTypeNames.Float).Set(float(crf[ch, 0]))
+        _ppisp_camera_attr(camera_prim, f"crfShoulder{suffix}", Sdf.ValueTypeNames.Float).Set(float(crf[ch, 1]))
+        _ppisp_camera_attr(camera_prim, f"crfGamma{suffix}", Sdf.ValueTypeNames.Float).Set(float(crf[ch, 2]))
+        _ppisp_camera_attr(camera_prim, f"crfCenter{suffix}", Sdf.ValueTypeNames.Float).Set(float(crf[ch, 3]))
+
+    flat_weights = flatten_controller_weights(controller).astype(np.float32, copy=False)
+    _ppisp_camera_attr(camera_prim, CONTROLLER_WEIGHTS_CAMERA_ATTR, Sdf.ValueTypeNames.FloatArray).Set(
+        Vt.FloatArray.FromNumpy(flat_weights)
+    )
+
+
+def _connect_input_to_camera(
+    shader: UsdShade.Shader,
+    input_name: str,
+    value_type: Sdf.ValueTypeName,
+    camera_path: Sdf.Path,
+) -> None:
+    """Declare a shader input and connect it to ``<camera>.ppisp:<input_name>``."""
+    shader_input = shader.CreateInput(input_name, value_type)
+    source = camera_path.AppendProperty(f"{PPISP_ATTR_NAMESPACE}{input_name}")
+    shader_input.GetAttr().SetConnections([source])
+
+
+def _author_tile_counts(shader: UsdShade.Shader) -> None:
+    """Author untiled-default ``inputs:tileCount{X,Y}`` = 1 on a shader."""
+    for name in PPISP_TILE_COUNT_INPUT_NAMES:
+        shader.CreateInput(name, Sdf.ValueTypeNames.Int).Set(DEFAULT_PPISP_TILE_COUNT)
+
+
+def _connect_per_camera_vignetting_crf_to_camera(shader: UsdShade.Shader, camera_path: Sdf.Path) -> None:
+    """Connect auto-PPISP vignetting / CRF inputs to camera ``ppisp:*`` attrs."""
+    for ch in range(NUM_CHANNELS):
+        suffix = CHANNEL_SUFFIXES[ch]
+        _connect_input_to_camera(shader, f"vignettingCenter{suffix}", Sdf.ValueTypeNames.Float2, camera_path)
+        _connect_input_to_camera(shader, f"vignettingAlpha1{suffix}", Sdf.ValueTypeNames.Float, camera_path)
+        _connect_input_to_camera(shader, f"vignettingAlpha2{suffix}", Sdf.ValueTypeNames.Float, camera_path)
+        _connect_input_to_camera(shader, f"vignettingAlpha3{suffix}", Sdf.ValueTypeNames.Float, camera_path)
+        _connect_input_to_camera(shader, f"crfToe{suffix}", Sdf.ValueTypeNames.Float, camera_path)
+        _connect_input_to_camera(shader, f"crfShoulder{suffix}", Sdf.ValueTypeNames.Float, camera_path)
+        _connect_input_to_camera(shader, f"crfGamma{suffix}", Sdf.ValueTypeNames.Float, camera_path)
+        _connect_input_to_camera(shader, f"crfCenter{suffix}", Sdf.ValueTypeNames.Float, camera_path)
 
 
 def _append_to_ordered_vars(render_product: Usd.Prim, var_path: str) -> None:
