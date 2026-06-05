@@ -376,7 +376,9 @@ Useful PPISP export flags:
 - `--post-processing-camera-id INT`, `--post-processing-frame-id INT`: select the PPISP
   camera/frame used by `baked-sh`, or pin `omni-native` static export to one camera/frame.
 - `--ppisp-responsivity FLOAT`: runtime achromatic HDR multiplier authored on `omni-native` PPISP
-  shaders. The default `1.0` is a no-op and can be overridden downstream in USD.
+  shaders. In controller mode, the same multiplier is authored on the controller pool so exposure
+  and color predictions use the same scaled HDR signal. The default `1.0` is a no-op and can be
+  overridden downstream in USD.
 - `--radiance-scale FLOAT`: multiplicative scale applied to exported SH radiance. For
   `omni-native` PPISP exports, setting `--ppisp-responsivity` to `1 / radiance_scale` preserves the
   training-time PPISP input magnitude while changing the asset radiance scale.

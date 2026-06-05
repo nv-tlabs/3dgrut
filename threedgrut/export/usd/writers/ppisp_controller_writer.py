@@ -279,6 +279,7 @@ def add_ppisp_auto_shader_to_render_product(
         render_product_path=render_product_path,
         camera_index=camera_index,
         controller_source_file=controller_source_file,
+        responsivity=float(responsivity),
     )
 
     _create_controller_features_render_var(
@@ -548,12 +549,17 @@ def _create_controller_pool_shader(
     render_product_path: str,
     camera_index: int,
     controller_source_file: str,
+    responsivity: float,
 ) -> UsdShade.Shader:
     """Author the per-camera PPISP controller CNN/pool Shader prim.
 
     ``gridDimY`` is authored as ``1`` for the untiled fallback. The Lua
     launcher expands the launch grid to ``25 x tileCountX*tileCountY`` from
     the tile-count inputs.
+
+    ``inputs:responsivity`` mirrors the achromatic HDR multiplier authored on
+    the auto-PPISP shader so the controller pools features from the same
+    responsivity-scaled radiance the image shader processes.
     """
     shader_prim_name = CONTROLLER_POOL_PRIM_NAME_TEMPLATE.format(camera_index=camera_index)
     shader_path = f"{render_product_path}/{shader_prim_name}"
@@ -565,6 +571,8 @@ def _create_controller_pool_shader(
     hdr_input.GetAttr().SetConnections([Sdf.Path(f"../{HDR_COLOR_RENDER_VAR}.omni:rtx:aov")])
 
     shader.CreateOutput(CONTROLLER_POOL_OUTPUT, Sdf.ValueTypeNames.Opaque)
+
+    shader.CreateInput(PPISP_AUTO_RESPONSIVITY_INPUT, Sdf.ValueTypeNames.Float).Set(float(responsivity))
 
     _author_tile_counts(shader)
 

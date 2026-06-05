@@ -21,6 +21,7 @@ from threedgrut.export.usd.writers.ppisp_controller_weights import (
 from threedgrut.export.usd.writers.ppisp_controller_writer import (
     CONTROLLER_FEATURES_RENDER_VAR,
     CONTROLLER_PARAMS_RENDER_VAR,
+    CONTROLLER_POOL_PRIM_NAME_TEMPLATE,
     CONTROLLER_WEIGHTS_CAMERA_ATTR,
     EMBEDDED_CONTROLLER_WEIGHTS_MARKER,
     EMBEDDED_CONTROLLER_WEIGHTS_SYMBOL,
@@ -160,11 +161,29 @@ def test_auto_ppisp_controller_graph_uses_embedded_cuda_no_weight_attr() -> None
     assert controller.GetAttribute("info:spg:sourceAsset").Get().path == "ppisp_controller_0.cu"
     assert auto.GetAttribute("info:spg:sourceAsset").Get().path == "ppisp_usd_spg_auto.cu"
     assert not controller.GetAttribute("inputs:weights").IsValid()
+    assert pool.GetAttribute("inputs:responsivity").Get() == 1.0
     for prim in (pool, controller, auto):
         for name in AUTO_PPISP_TILE_COUNT_INPUT_NAMES:
             assert prim.GetAttribute(f"inputs:{name}").Get() == 1
     assert stage.GetPrimAtPath(f"/Render/camera_0/{CONTROLLER_FEATURES_RENDER_VAR}").IsValid()
     assert stage.GetPrimAtPath(f"/Render/camera_0/{CONTROLLER_PARAMS_RENDER_VAR}").IsValid()
+
+
+def test_auto_ppisp_controller_graph_authors_controller_pool_responsivity() -> None:
+    stage = _make_stage()
+    ppisp = _FakePPISP(use_controller=True)
+    add_ppisp_auto_shader_to_render_product(
+        stage=stage,
+        render_product_path="/Render/camera_0",
+        camera_index=0,
+        ppisp=ppisp,
+        controller=ppisp.controllers[0],
+        responsivity=2.5,
+    )
+    pool = stage.GetPrimAtPath(f"/Render/camera_0/{CONTROLLER_POOL_PRIM_NAME_TEMPLATE.format(camera_index=0)}")
+    auto = stage.GetPrimAtPath(f"/Render/camera_0/{PPISP_AUTO_PRIM_NAME}")
+    assert pool.GetAttribute("inputs:responsivity").Get() == 2.5
+    assert auto.GetAttribute("inputs:responsivity").Get() == 2.5
 
 
 def test_ppisp_camera_shim_is_sibling_of_source_camera() -> None:
@@ -224,11 +243,18 @@ def _randomize_ppisp_params(ppisp: nn.Module, *, seed: int) -> None:
         ppisp.crf_params.add_(torch.empty_like(ppisp.crf_params).normal_(0.0, 0.08, generator=generator))
 
 
-def _randomize_controller(controller: nn.Module, *, seed: int) -> None:
+def _randomize_controller(
+    controller: nn.Module,
+    *,
+    seed: int,
+    weight_scale: float = 0.03,
+    bias_scale: float = 0.03,
+) -> None:
     generator = torch.Generator(device="cuda").manual_seed(seed)
     with torch.no_grad():
-        for param in controller.parameters():
-            param.copy_(torch.empty_like(param).normal_(0.0, 0.03, generator=generator))
+        for name, param in controller.named_parameters():
+            scale = weight_scale if "weight" in name else bias_scale
+            param.copy_(torch.empty_like(param).normal_(0.0, scale, generator=generator))
 
 
 def _pixel_coords(height: int, width: int, *, device: torch.device) -> torch.Tensor:
@@ -290,6 +316,35 @@ def test_exported_embedded_cuda_controller_matches_torch_controller() -> None:
         cuda_exposure, cuda_color = runtime(hdr, prior)
     torch.testing.assert_close(cuda_exposure, torch_exposure, rtol=2.0e-5, atol=2.0e-5)
     torch.testing.assert_close(cuda_color, torch_color, rtol=2.0e-5, atol=2.0e-5)
+
+
+def test_exported_embedded_cuda_controller_responsivity_matches_prescaled_hdr() -> None:
+    _requires_cuda_ppisp()
+    from ppisp import PPISP, PPISPConfig  # type: ignore[import-not-found]
+
+    from threedgrut.export.tests.ppisp_cuda_controller_runtime import (
+        ExportedEmbeddedCudaController,
+    )
+
+    device = torch.device("cuda")
+    ppisp = PPISP(num_cameras=1, num_frames=1, config=PPISPConfig(use_controller=True)).to(device).eval()
+    # Use an input-sensitive controller so non-unit responsivity changes the
+    # prediction instead of passing only through near-zero weights.
+    _randomize_controller(ppisp.controllers[0], seed=11, weight_scale=0.15, bias_scale=0.005)
+    source = get_ppisp_embedded_controller_spg_files(ppisp, [0])[0].serialized
+    runtime = ExportedEmbeddedCudaController(source, device=device)
+    hdr = _make_gaussian_radiance_scene(73, 67, seed=101, device=device)
+    prior = torch.tensor([0.23], device=device, dtype=torch.float32)
+
+    responsivity = 1.7
+    scaled_exposure, scaled_color = runtime(hdr, prior, responsivity=responsivity)
+    prescaled_exposure, prescaled_color = runtime(hdr * responsivity, prior)
+
+    torch.testing.assert_close(scaled_exposure, prescaled_exposure, rtol=2.0e-5, atol=2.0e-5)
+    torch.testing.assert_close(scaled_color, prescaled_color, rtol=2.0e-5, atol=2.0e-5)
+
+    base_exposure, _ = runtime(hdr, prior)
+    assert float((scaled_exposure - base_exposure).abs().item()) > 1.0e-4
 
 
 def test_exported_embedded_cuda_controller_tiled_params_match_per_tile() -> None:
