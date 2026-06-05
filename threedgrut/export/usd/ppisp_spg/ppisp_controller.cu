@@ -132,8 +132,9 @@ conv3ForwardChunk(const float fin[32], const float *__restrict__ weights,
 
 static __device__ __forceinline__ void cnnForwardAtDownsampledPixelChunk(
     int ox, int oy, int tileW, int tileH, int inW, int inH, int dx, int dy,
-    cudaTextureObject_t inHdrColor, const float *__restrict__ weights,
-    int firstChannel, float featChunk[CNN_FEATURE_CHUNK]) {
+    float responsivity, cudaTextureObject_t inHdrColor,
+    const float *__restrict__ weights, int firstChannel,
+    float featChunk[CNN_FEATURE_CHUNK]) {
   // (dx, dy) are tile-local downsampled coordinates; map them back to
   // absolute atlas pixels within this tile's [ox, ox+tileW) x
   // [oy, oy+tileH) sub-region (also clamped to the atlas bounds).
@@ -151,8 +152,12 @@ static __device__ __forceinline__ void cnnForwardAtDownsampledPixelChunk(
   for (int yy = y0; yy < y1; ++yy) {
     for (int xx = x0; xx < x1; ++xx) {
       float4 sample = tex2D<float4>(inHdrColor, xx, yy);
+      // Match the image PPISP shader: scale HDR radiance by the
+      // achromatic responsivity before feature extraction so controller
+      // predictions see the same signal PPISP will process.
       float conv1Out[16];
-      conv1Forward(sample.x, sample.y, sample.z, weights, conv1Out);
+      conv1Forward(sample.x * responsivity, sample.y * responsivity,
+                   sample.z * responsivity, weights, conv1Out);
 #pragma unroll
       for (int c = 0; c < 16; ++c) {
         pooled[c] = fmaxf(pooled[c], conv1Out[c]);
@@ -182,7 +187,7 @@ static __device__ __forceinline__ void cnnForwardAtDownsampledPixelChunk(
 // ---------------------------------------------------------------------------
 extern "C" __global__ void
 controllerPoolProcess(int inW, int inH, int tileCountX, int tileCountY,
-                      cudaTextureObject_t inHdrColor,
+                      float responsivity, cudaTextureObject_t inHdrColor,
                       float *__restrict__ outControllerFeatures) {
   const float *__restrict__ weights = kControllerWeights;
   __shared__ float gsReduce[POOL_THREAD_GROUP_SIZE];
@@ -246,8 +251,8 @@ controllerPoolProcess(int inW, int inH, int tileCountX, int tileCountY,
 
       float featChunk[CNN_FEATURE_CHUNK];
       cnnForwardAtDownsampledPixelChunk(ox, oy, tileW, tileH, inW, inH, dx, dy,
-                                        inHdrColor, weights, firstChannel,
-                                        featChunk);
+                                        responsivity, inHdrColor, weights,
+                                        firstChannel, featChunk);
 
 #pragma unroll
       for (int c = 0; c < CNN_FEATURE_CHUNK; ++c) {

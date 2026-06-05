@@ -27,6 +27,10 @@ function controllerPoolProcess(inputs, outputs)
     local tileCountY = getTileCount(inputs, "tileCountY")
     local tileCount = tileCountX * tileCountY
 
+    -- Achromatic HDR multiplier; scales the controller input radiance to
+    -- match the image PPISP shader (default 1.0 = no scaling).
+    local responsivity = cuda.float(inputs["responsivity"] or 1.0).value
+
     outputs["ControllerFeatures"] = cuda.empty({ 1, 1600 * tileCount }, cuda.float)
 
     return cuda.kernel({
@@ -35,6 +39,7 @@ function controllerPoolProcess(inputs, outputs)
             cuda.int(in_hdr.shape[1]),                      -- inH
             cuda.int(tileCountX),                           -- tileCountX
             cuda.int(tileCountY),                           -- tileCountY
+            cuda.float(responsivity),                       -- responsivity
             cuda.TextureObject(in_hdr),                     -- inHdrColor
             cuda.array(outputs["ControllerFeatures"]),      -- outControllerFeatures
         },

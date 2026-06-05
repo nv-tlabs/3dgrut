@@ -130,6 +130,7 @@ def _extension_source(controller_cu_path: Path) -> str:
             double priorExposure,
             int tileCountX,
             int tileCountY,
+            double responsivity,
             int poolBlockX,
             int poolBlockY,
             int poolBlockZ,
@@ -198,6 +199,7 @@ def _extension_source(controller_cu_path: Path) -> str:
                 height,
                 tileCountX,
                 tileCountY,
+                static_cast<float>(responsivity),
                 textureResource.texture,
                 features.data_ptr<float>());
             checkCuda(cudaGetLastError(), "controllerPoolProcess launch");
@@ -280,6 +282,7 @@ class ExportedEmbeddedCudaController:
         *,
         tile_count_x: int = 1,
         tile_count_y: int = 1,
+        responsivity: float = 1.0,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if int(tile_count_x) * int(tile_count_y) != 1:
             raise ValueError(
@@ -297,6 +300,7 @@ class ExportedEmbeddedCudaController:
             prior,
             int(tile_count_x),
             int(tile_count_y),
+            float(responsivity),
             *self._dims.pool.block,
             *pool_grid,
             *self._dims.mlp.block,
@@ -311,6 +315,7 @@ class ExportedEmbeddedCudaController:
         *,
         tile_count_x: int = 1,
         tile_count_y: int = 1,
+        responsivity: float = 1.0,
     ) -> torch.Tensor:
         """Pool + MLP over a tiled atlas, returning the flat per-tile params.
 
@@ -319,6 +324,9 @@ class ExportedEmbeddedCudaController:
         tile's 9 floats (exposure + 8 color latents) in the same
         ``tile = ty * tile_count_x + tx`` order consumed by the auto-PPISP
         image shader, so it can be fed directly to ``ExportedCudaPPISP.run_auto``.
+
+        ``responsivity`` scales the HDR input before feature extraction to
+        match the image PPISP shader (default 1.0 = no scaling).
         """
         hdr4 = _hdr_rgb_to_float4(hdr)
         prior = float(prior_exposure.reshape(-1)[0].item())
@@ -330,6 +338,7 @@ class ExportedEmbeddedCudaController:
             prior,
             int(tile_count_x),
             int(tile_count_y),
+            float(responsivity),
             *self._dims.pool.block,
             *pool_grid,
             *self._dims.mlp.block,
