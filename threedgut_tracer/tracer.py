@@ -176,7 +176,7 @@ class Tracer:
             particle_density = torch.concat(
                 [mog_pos, mog_dns, mog_rot, mog_scl, torch.zeros_like(mog_dns)], dim=1
             ).contiguous()
-            particle_features = mog_sph.contiguous()  # dtype set by caller (fp16 when particle_feature_half=true)
+            particle_features = mog_sph.contiguous()
 
             ray_time = (
                 torch.ones(
@@ -324,11 +324,7 @@ class Tracer:
                 gaussians.get_rotation().contiguous(),
                 gaussians.get_scale().contiguous(),
                 gaussians.get_density().contiguous(),
-                (
-                    gaussians.get_features().contiguous().half()
-                    if self.conf.render.particle_feature_half
-                    else gaussians.get_features().contiguous()
-                ),
+                gaussians.get_features().contiguous(),
                 sensor,
                 poses,
             )

@@ -50,6 +50,16 @@ void contextLogCB(unsigned int level, const char* tag, const char* message, void
     std::cerr << "[" << std::setw(2) << level << "][" << std::setw(12) << tag << "]: " << message << "\n";
 }
 
+torch::Tensor particleFeaturesKernelTensor(const torch::Tensor& particleFeatures) {
+#if PARTICLE_FEATURE_HALF
+    return particleFeatures.scalar_type() == torch::kHalf ? particleFeatures.contiguous()
+                                                          : particleFeatures.to(torch::kHalf).contiguous();
+#else
+    return particleFeatures.scalar_type() == torch::kFloat32 ? particleFeatures.contiguous()
+                                                             : particleFeatures.to(torch::kFloat32).contiguous();
+#endif
+}
+
 bool readSourceFile(std::string& str, const std::string& filename) {
     // Try to open file
     std::ifstream file(filename.c_str(), std::ios::binary);
@@ -893,12 +903,13 @@ OptixTracer::trace(uint32_t frameNumber,
 #else
     const torch::TensorOptions rayFeatOpts = opts;
 #endif
-    torch::Tensor rayFeat            = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), static_cast<int64_t>(PipelineParameters::RayFeatureDim)}, rayFeatOpts);
-    torch::Tensor rayDns             = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 1}, opts);
-    torch::Tensor rayHit             = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 2}, opts);
-    torch::Tensor rayNrm             = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 3}, opts);
-    torch::Tensor rayHitsCount       = torch::zeros({rayOri.size(0), rayOri.size(1), rayOri.size(2), 1}, opts);
-    torch::Tensor particleVisibility = torch::zeros({particleDensity.size(0), 1}, opts);
+    torch::Tensor rayFeat                = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), static_cast<int64_t>(PipelineParameters::RayFeatureDim)}, rayFeatOpts);
+    torch::Tensor rayDns                 = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 1}, opts);
+    torch::Tensor rayHit                 = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 2}, opts);
+    torch::Tensor rayNrm                 = torch::empty({rayOri.size(0), rayOri.size(1), rayOri.size(2), 3}, opts);
+    torch::Tensor rayHitsCount           = torch::zeros({rayOri.size(0), rayOri.size(1), rayOri.size(2), 1}, opts);
+    torch::Tensor particleVisibility     = torch::zeros({particleDensity.size(0), 1}, opts);
+    torch::Tensor particleFeaturesKernel = particleFeaturesKernelTensor(particleFeatures);
 
     PipelineParameters paramsHost;
     paramsHost.handle = _state->gasHandle;
@@ -919,7 +930,7 @@ OptixTracer::trace(uint32_t frameNumber,
     paramsHost.rayDirection = packed_accessor32<float, 4>(rayDir);
 
     paramsHost.particleDensity      = getPtr<const ParticleDensity>(particleDensity);
-    paramsHost.particleFeatures     = getPtr<const TParticleFeatureElem>(particleFeatures);
+    paramsHost.particleFeatures     = getPtr<const TParticleFeatureElem>(particleFeaturesKernel);
     paramsHost.particleExtendedData = reinterpret_cast<const void*>(_state->gPipelineParticleData);
     paramsHost.particleVisibility   = getPtr<int32_t>(particleVisibility);
 
@@ -963,9 +974,10 @@ OptixTracer::traceBwd(uint32_t frameNumber,
                       int sphDegree,
                       float minTransmittance) {
 
-    const torch::TensorOptions opts    = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
-    torch::Tensor particleDensityGrad  = torch::zeros({particleDensity.size(0), particleDensity.size(1)}, opts);
-    torch::Tensor particleFeaturesGrad = torch::zeros({particleFeatures.size(0), particleFeatures.size(1)}, opts);
+    const torch::TensorOptions opts      = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
+    torch::Tensor particleDensityGrad    = torch::zeros({particleDensity.size(0), particleDensity.size(1)}, opts);
+    torch::Tensor particleFeaturesGrad   = torch::zeros({particleFeatures.size(0), particleFeatures.size(1)}, opts);
+    torch::Tensor particleFeaturesKernel = particleFeaturesKernelTensor(particleFeatures);
 
     PipelineBackwardParameters paramsHost;
     paramsHost.handle = _state->gasHandle;
@@ -986,7 +998,7 @@ OptixTracer::traceBwd(uint32_t frameNumber,
     paramsHost.rayDirection = packed_accessor32<float, 4>(rayDir);
 
     paramsHost.particleDensity      = getPtr<const ParticleDensity>(particleDensity);
-    paramsHost.particleFeatures     = getPtr<const TParticleFeatureElem>(particleFeatures);
+    paramsHost.particleFeatures     = getPtr<const TParticleFeatureElem>(particleFeaturesKernel);
     paramsHost.particleExtendedData = reinterpret_cast<const void*>(_state->gPipelineParticleData);
 
     paramsHost.rayFeatures    = packed_accessor32<TRayFeatureElem, 4>(rayFeat);
