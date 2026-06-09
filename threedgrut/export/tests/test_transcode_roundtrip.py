@@ -324,7 +324,6 @@ class TestCrossFormatTranscode:
                 output_path=usd_path,
                 output_format="lightfield",
                 render_order_hint="rayHitDistance",
-                linear_srgb=True,
                 validate_usd=False,
             )
 

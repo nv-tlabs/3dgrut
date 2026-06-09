@@ -21,6 +21,7 @@ Produces USDZ files by default for maximum compatibility.
 """
 
 import logging
+import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -51,6 +52,11 @@ from threedgrut.export.usd.post_processing_sh_bake import (
     MODE_PPISP_BAKE_VIGNETTING_NONE,
     scale_sh_output,
 )
+from threedgrut.export.usd.ppisp_spg import (
+    ppisp_has_controller,
+    resolve_ppisp_controller_export_enabled,
+    select_spg_files_for_export,
+)
 from threedgrut.export.usd.stage_utils import (
     NamedSerialized,
     NamedUSDStage,
@@ -78,14 +84,6 @@ VALID_PPISP_INTEGRATION_MODES = (
     PPISP_INTEGRATION_MODE_SPG_RUNTIME,
     PPISP_INTEGRATION_MODE_SH_OPTIMIZED,
 )
-_LEGACY_PPISP_INTEGRATION_MODE_ALIASES = {
-    "omni-native": PPISP_INTEGRATION_MODE_SPG_RUNTIME,
-    "baked-sh": PPISP_INTEGRATION_MODE_SH_OPTIMIZED,
-}
-
-# Backward-compatible names for existing Python callers.
-MODE_POST_PROCESSING_EXPORT_BAKED_SH = PPISP_INTEGRATION_MODE_SH_OPTIMIZED
-MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE = PPISP_INTEGRATION_MODE_SPG_RUNTIME
 
 
 def _is_ppisp_post_processing(post_processing: Any) -> bool:
@@ -98,17 +96,11 @@ def _is_ppisp_post_processing(post_processing: Any) -> bool:
 
 def normalize_ppisp_integration_mode(mode: str | None) -> str:
     normalized = PPISP_INTEGRATION_MODE_SPG_RUNTIME if mode is None else str(mode).strip().lower()
-    normalized = _LEGACY_PPISP_INTEGRATION_MODE_ALIASES.get(normalized, normalized)
     if normalized not in VALID_PPISP_INTEGRATION_MODES:
         raise ValueError(
             f"Unsupported PPISP integration mode '{mode}'. " f"Expected one of: {list(VALID_PPISP_INTEGRATION_MODES)}"
         )
     return normalized
-
-
-def normalize_post_processing_export_mode(mode: str | None) -> str:
-    """Compatibility wrapper for the old generic export-mode name."""
-    return normalize_ppisp_integration_mode(mode)
 
 
 def compute_runtime_post_processing(
@@ -130,6 +122,27 @@ def _get_export_config_value(export_conf, hyphen_name: str, attr_name: str, defa
     return getattr(export_conf, attr_name, default)
 
 
+def _normalize_positive_finite_float(name: str, value: Any, default: float | None = None) -> float:
+    if value is None:
+        if default is None:
+            raise TypeError(f"{name} must be a real number, got None")
+        return float(default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{name} must be a real number, got {type(value).__name__}")
+    value = float(value)
+    if not (value > 0.0):
+        raise ValueError(f"{name} must be strictly positive, got {value!r}")
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be finite, got {value!r}")
+    return value
+
+
+def _resolve_enable_ppisp_controller_export(enable_ppisp_controller_export: bool | None) -> bool | None:
+    if enable_ppisp_controller_export is None:
+        return None
+    return bool(enable_ppisp_controller_export)
+
+
 def _normalize_ppisp_responsivity(value: Any) -> float:
     if value is None:
         return 1.0
@@ -137,7 +150,7 @@ def _normalize_ppisp_responsivity(value: Any) -> float:
         if len(value) != 1:
             raise ValueError(f"ppisp_responsivity must be a single achromatic value, got {value!r}")
         value = value[0]
-    return float(value)
+    return _normalize_positive_finite_float("ppisp_responsivity", value)
 
 
 def _extract_camera_params_from_dataset(dataset) -> Optional[List]:
@@ -370,24 +383,14 @@ class USDExporter(ModelExporter):
         export_background: bool = True,
         apply_normalizing_transform: bool = True,
         sorting_mode_hint: str = DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
-        linear_srgb: bool = False,
         export_post_processing: bool = True,
-        post_processing_export_mode: str | None = None,
         ppisp_integration_mode: str | None = None,
-        post_processing_camera_id: int | None = None,
-        post_processing_frame_id: int | None = None,
+        ppisp_reference_camera_id: int | None = None,
+        ppisp_reference_frame_id: int | None = None,
         ppisp_responsivity: Any = 1.0,
-        ignore_ppisp_controller: bool = False,
-        post_processing_bake_epochs: int = 7,
-        post_processing_bake_learning_rate: float = 2.5e-3,
-        post_processing_bake_learning_rate_specular: float | None = None,
-        post_processing_bake_learning_rate_density: float = 5.0e-2,
-        ppisp_bake_vignetting_mode: str = MODE_PPISP_BAKE_VIGNETTING_NONE,
-        post_processing_bake_view_mode: str = "training",
-        post_processing_bake_view_seed: int | None = None,
-        post_processing_bake_trajectory_weight_position: float = 1.0,
-        post_processing_bake_trajectory_weight_rotation: float = 0.5,
-        radiance_scale: float = 1.0,
+        enable_ppisp_controller_export: bool | None = None,
+        sh_optimization_num_iterations: int | None = None,
+        scene_radiance_scale: float | None = None,
         frames_per_second: float = 1.0,
     ):
         """
@@ -401,49 +404,27 @@ class USDExporter(ModelExporter):
             export_background: Include background/environment in export.
             apply_normalizing_transform: Apply transform to normalize scene orientation.
             sorting_mode_hint: Sorting hint for rendering ("zDepth", "cameraDistance", "rayHitDistance").
-            linear_srgb: Manual non-PPISP override for prim color space. Runtime
-                PPISP export derives this automatically from ppisp_integration_mode.
             export_post_processing: If True, export the checkpoint post-processing
                 module with the selected export mode.
             ppisp_integration_mode: "spg-runtime" authors PPISP as Omniverse SPG
                 shaders applied at render time. "sh-optimized" bakes one fixed
                 PPISP transform into Gaussian SH coefficients. Matches nre-borel.
-            post_processing_export_mode: Legacy alias for ppisp_integration_mode.
-            post_processing_camera_id: Optional fixed PPISP camera index.
+            ppisp_reference_camera_id: Optional fixed PPISP camera index.
                 sh-optimized defaults unset values to 0; spg-runtime keeps
-                per-camera RenderProduct behavior when unset.
-            post_processing_frame_id: Optional fixed PPISP frame index.
+                per-camera RenderProduct behavior when unset. Matches nre-borel.
+            ppisp_reference_frame_id: Optional fixed PPISP frame index.
                 sh-optimized defaults unset values to 0; spg-runtime keeps
-                animated frame inputs when unset.
+                animated frame inputs when unset. Matches nre-borel.
             ppisp_responsivity: Achromatic input HDR multiplier authored on
                 PPISP spg-runtime shaders as a user-overridable default.
-            ignore_ppisp_controller: If True, skip the PPISP controller export
-                even when the checkpoint has trained controllers, and fall back
-                to time-sampled exposure / colour USD attributes derived from
-                ``ppisp.exposure_params`` and ``ppisp.color_params``. No effect
-                on checkpoints that were trained without a controller.
-            post_processing_bake_epochs: Number of sequential passes over the train/reference set.
-            post_processing_bake_learning_rate: Adam learning rate for features_albedo
-                (default 2.5e-3, matches 3DGS).
-            post_processing_bake_learning_rate_specular: Adam learning rate for
-                features_specular. Defaults to ``learning_rate / 20`` (the 3DGS ratio).
-            post_processing_bake_learning_rate_density: Adam learning rate for density
-                (default 5e-2, matches 3DGS). Optimising density alongside SH absorbs
-                spatial frequencies the SH alone aliases as colour rainbow fringes.
-            ppisp_bake_vignetting_mode: "none" (default) -- bake produces gamma-space
-                SH coefficients with no vignetting; the asset format aligns with
-                no-PPISP exports. "achromatic-fit" is retained for backwards
-                compatibility but no longer the recommended mode.
-            post_processing_bake_view_mode: which views the bake fit sees per step.
-                "training" (default) iterates the train dataloader. "trajectory"
-                orders the training views along an NN+2-opt camera path,
-                parameterises arc-length on [0, 1], and samples a random t per step.
-            post_processing_bake_view_seed: optional RNG seed for the interpolation
-                samplers. None (default) leaves it non-deterministic.
-            post_processing_bake_trajectory_weight_position: trajectory mode only.
-                Weight on the (mean-normalised) position term in the pose distance.
-            post_processing_bake_trajectory_weight_rotation: trajectory mode only.
-                Weight on the (1 - cos(angle)) rotation term in the pose distance.
+            enable_ppisp_controller_export: nre-borel tri-state controller
+                export setting. None exports controllers only when the PPISP
+                module has them; True requires controller export; False forces
+                the static/time-sampled PPISP fallback.
+            sh_optimization_num_iterations: nre-borel SH-match step budget
+                for sh-optimized export. Defaults to 3000.
+            scene_radiance_scale: nre-borel asset-level multiplicative scale
+                applied to exported SH radiance.
             frames_per_second: Sets stage.timeCodesPerSecond. Multi-camera
                 camera exports use compact per-camera-local frame time codes, so
                 this controls playback speed. Default 1.0 means 1 frame per
@@ -458,42 +439,34 @@ class USDExporter(ModelExporter):
         self.export_background = export_background
         self.apply_normalizing_transform = apply_normalizing_transform
         self.sorting_mode_hint = normalize_particle_field_sorting_mode_hint(sorting_mode_hint)
-        self.linear_srgb = linear_srgb
         self.export_post_processing = export_post_processing
-        if ppisp_integration_mode is not None and post_processing_export_mode is not None:
-            normalized_ppisp_mode = normalize_ppisp_integration_mode(ppisp_integration_mode)
-            normalized_legacy_mode = normalize_post_processing_export_mode(post_processing_export_mode)
-            if normalized_ppisp_mode != normalized_legacy_mode:
-                raise ValueError(
-                    "ppisp_integration_mode and post_processing_export_mode specify different modes: "
-                    f"{ppisp_integration_mode!r} vs {post_processing_export_mode!r}"
-                )
-            self.ppisp_integration_mode = normalized_ppisp_mode
-        else:
-            self.ppisp_integration_mode = normalize_ppisp_integration_mode(
-                ppisp_integration_mode if ppisp_integration_mode is not None else post_processing_export_mode
-            )
-        self.post_processing_export_mode = self.ppisp_integration_mode
-        self.post_processing_camera_id = None if post_processing_camera_id is None else int(post_processing_camera_id)
-        self.post_processing_frame_id = None if post_processing_frame_id is None else int(post_processing_frame_id)
+        self.ppisp_integration_mode = normalize_ppisp_integration_mode(ppisp_integration_mode)
+        self.ppisp_reference_camera_id = None if ppisp_reference_camera_id is None else int(ppisp_reference_camera_id)
+        self.ppisp_reference_frame_id = None if ppisp_reference_frame_id is None else int(ppisp_reference_frame_id)
         self.ppisp_responsivity = _normalize_ppisp_responsivity(ppisp_responsivity)
-        self.ignore_ppisp_controller = bool(ignore_ppisp_controller)
-        self.post_processing_bake_epochs = int(post_processing_bake_epochs)
-        self.post_processing_bake_learning_rate = float(post_processing_bake_learning_rate)
-        self.post_processing_bake_learning_rate_specular = (
-            None
-            if post_processing_bake_learning_rate_specular is None
-            else float(post_processing_bake_learning_rate_specular)
+        self.enable_ppisp_controller_export = _resolve_enable_ppisp_controller_export(enable_ppisp_controller_export)
+        if (
+            self.enable_ppisp_controller_export is True
+            and self.ppisp_integration_mode == PPISP_INTEGRATION_MODE_SH_OPTIMIZED
+        ):
+            raise ValueError(
+                "enable_ppisp_controller_export is incompatible with ppisp_integration_mode='sh-optimized'"
+            )
+        self.sh_optimization_num_iterations = 3000
+        if sh_optimization_num_iterations is not None:
+            if isinstance(sh_optimization_num_iterations, bool) or not isinstance(sh_optimization_num_iterations, int):
+                raise TypeError(
+                    "sh_optimization_num_iterations must be int, "
+                    f"got {type(sh_optimization_num_iterations).__name__}"
+                )
+            if sh_optimization_num_iterations < 1:
+                raise ValueError(f"sh_optimization_num_iterations must be >= 1, got {sh_optimization_num_iterations}.")
+            self.sh_optimization_num_iterations = int(sh_optimization_num_iterations)
+        self.scene_radiance_scale = _normalize_positive_finite_float(
+            "scene_radiance_scale",
+            scene_radiance_scale,
+            default=1.0,
         )
-        self.post_processing_bake_learning_rate_density = float(post_processing_bake_learning_rate_density)
-        self.ppisp_bake_vignetting_mode = str(ppisp_bake_vignetting_mode)
-        self.post_processing_bake_view_mode = str(post_processing_bake_view_mode)
-        self.post_processing_bake_view_seed = (
-            None if post_processing_bake_view_seed is None else int(post_processing_bake_view_seed)
-        )
-        self.post_processing_bake_trajectory_weight_position = float(post_processing_bake_trajectory_weight_position)
-        self.post_processing_bake_trajectory_weight_rotation = float(post_processing_bake_trajectory_weight_rotation)
-        self.radiance_scale = float(radiance_scale)
         self.frames_per_second = frames_per_second
 
     def _create_default_stage(
@@ -575,6 +548,19 @@ class USDExporter(ModelExporter):
             and self.export_post_processing
             and self.ppisp_integration_mode == PPISP_INTEGRATION_MODE_SPG_RUNTIME
         )
+        enable_ppisp_controller_export = False
+        if uses_omni_native_post_processing_export:
+            if self.enable_ppisp_controller_export is True and not ppisp_has_controller(post_processing):
+                raise ValueError("enable_ppisp_controller_export=True requires a PPISP module with trained controllers")
+            enable_ppisp_controller_export = resolve_ppisp_controller_export_enabled(
+                requested=self.enable_ppisp_controller_export,
+                ppisp_module=post_processing,
+                ppisp_integration_mode=self.ppisp_integration_mode,
+            )
+            if enable_ppisp_controller_export and (
+                self.ppisp_reference_camera_id is not None or self.ppisp_reference_frame_id is not None
+            ):
+                logger.warning("PPISP controller export is enabled; ppisp_reference_camera_id/frame_id are ignored.")
         if self.export_cameras and dataset is None:
             raise ValueError(
                 "export_cameras=True requires a dataset so camera poses, intrinsics, "
@@ -589,12 +575,12 @@ class USDExporter(ModelExporter):
 
             if not has_ppisp_module:
                 raise ValueError("sh-optimized post-processing export currently supports PPISP post-processing only.")
-            bake_camera_id = 0 if self.post_processing_camera_id is None else self.post_processing_camera_id
-            bake_frame_id = 0 if self.post_processing_frame_id is None else self.post_processing_frame_id
+            bake_camera_id = 0 if self.ppisp_reference_camera_id is None else self.ppisp_reference_camera_id
+            bake_frame_id = 0 if self.ppisp_reference_frame_id is None else self.ppisp_reference_frame_id
             adapter = PPISPPostProcessingBakeAdapter(
                 camera_id=bake_camera_id,
                 frame_id=bake_frame_id,
-                vignetting_mode=self.ppisp_bake_vignetting_mode,
+                vignetting_mode=MODE_PPISP_BAKE_VIGNETTING_NONE,
             )
             logger.info(
                 "Baking post-processing into Gaussian SH coefficients before export "
@@ -606,14 +592,7 @@ class USDExporter(ModelExporter):
                 train_dataset=dataset,
                 conf=conf,
                 adapter=adapter,
-                epochs=self.post_processing_bake_epochs,
-                learning_rate=self.post_processing_bake_learning_rate,
-                learning_rate_specular=self.post_processing_bake_learning_rate_specular,
-                learning_rate_density=self.post_processing_bake_learning_rate_density,
-                view_sampling_mode=self.post_processing_bake_view_mode,
-                interpolated_views_seed=self.post_processing_bake_view_seed,
-                trajectory_weight_position=self.post_processing_bake_trajectory_weight_position,
-                trajectory_weight_rotation=self.post_processing_bake_trajectory_weight_rotation,
+                num_iterations=self.sh_optimization_num_iterations,
             )
         if uses_omni_native_post_processing_export and not has_ppisp_module:
             raise ValueError("spg-runtime post-processing export currently supports PPISP post-processing only.")
@@ -621,9 +600,9 @@ class USDExporter(ModelExporter):
         # User-requested constant radiance scale, applied uniformly to the
         # SH output regardless of bake / colour-space mode. The DC offset
         # baked into RGB2SH is compensated so a forward eval reproduces
-        # radiance_scale * (original SH-evaluated RGB).
-        if self.radiance_scale != 1.0:
-            scale_sh_output(model, self.radiance_scale)
+        # scene_radiance_scale * (original SH-evaluated RGB).
+        if self.scene_radiance_scale != 1.0:
+            scale_sh_output(model, self.scene_radiance_scale)
 
         # Get model data via accessor
         accessor = GaussianExportAccessor(model, conf)
@@ -663,9 +642,6 @@ class USDExporter(ModelExporter):
         )
 
         # Write Gaussians
-        effective_linear_srgb = (
-            runtime_post_processing if post_processing is not None and self.export_post_processing else self.linear_srgb
-        )
         writer = create_gaussian_writer(
             stage=stage,
             capabilities=caps,
@@ -673,7 +649,7 @@ class USDExporter(ModelExporter):
             half_geometry=self.half_geometry,
             half_features=self.half_features,
             sorting_mode_hint=self.sorting_mode_hint,
-            linear_srgb=effective_linear_srgb,
+            linear_srgb=runtime_post_processing,
             omni_usd=runtime_post_processing,
             has_post_processing=runtime_post_processing,
         )
@@ -910,10 +886,11 @@ class USDExporter(ModelExporter):
                     camera_names=camera_names,
                     post_processing=post_processing,
                     files=files,
-                    fixed_camera_id=self.post_processing_camera_id,
-                    fixed_frame_id=self.post_processing_frame_id,
+                    fixed_camera_id=None if enable_ppisp_controller_export else self.ppisp_reference_camera_id,
+                    fixed_frame_id=None if enable_ppisp_controller_export else self.ppisp_reference_frame_id,
                     responsivity=self.ppisp_responsivity,
                     camera_time_mapping=camera_time_mapping,
+                    enable_ppisp_controller_export=enable_ppisp_controller_export,
                 )
                 if validation_dataset is not None and validation_camera_names is not None:
                     validation_mapping = _build_camera_frame_mapping_from_grouping(
@@ -926,14 +903,15 @@ class USDExporter(ModelExporter):
                         camera_names=validation_camera_names,
                         post_processing=post_processing,
                         files=files,
-                        fixed_camera_id=self.post_processing_camera_id,
-                        fixed_frame_id=self.post_processing_frame_id,
+                        fixed_camera_id=None if enable_ppisp_controller_export else self.ppisp_reference_camera_id,
+                        fixed_frame_id=None if enable_ppisp_controller_export else self.ppisp_reference_frame_id,
                         responsivity=self.ppisp_responsivity,
                         camera_frame_mapping=validation_mapping,
                         camera_time_mapping=validation_camera_time_mapping,
                         neutral_frame_params=(
-                            self.post_processing_camera_id is None and self.post_processing_frame_id is None
+                            self.ppisp_reference_camera_id is None and self.ppisp_reference_frame_id is None
                         ),
+                        enable_ppisp_controller_export=enable_ppisp_controller_export,
                     )
 
         # Package
@@ -1056,6 +1034,7 @@ class USDExporter(ModelExporter):
         camera_frame_mapping: Dict[str, List[int]] | None = None,
         camera_time_mapping: Dict[str, List[float]] | None = None,
         neutral_frame_params: bool = False,
+        enable_ppisp_controller_export: bool = False,
     ) -> None:
         """Attach PPISP SPG shaders to existing RenderProducts."""
         try:
@@ -1071,32 +1050,6 @@ class USDExporter(ModelExporter):
             )
             return
 
-        ppisp_config = getattr(post_processing, "config", None)
-        controllers = getattr(post_processing, "controllers", None)
-        has_controller = (
-            bool(getattr(ppisp_config, "use_controller", False)) and controllers is not None and len(controllers) > 0
-        )
-        # The static-frame override modes (fixed_frame_id) intentionally bypass
-        # the controller because the goal is to bake one specific frame's
-        # corrections, not to predict them at runtime.
-        # ignore_ppisp_controller forces the same fall-back even with animation,
-        # so consumers that don't want runtime controller dispatch can ship the
-        # optimized per-frame exposure / colour USD attributes instead.
-        use_controller = has_controller and fixed_frame_id is None and not self.ignore_ppisp_controller
-        if has_controller and fixed_frame_id is not None:
-            logger.info(
-                "PPISP controller present but fixed_frame_id is set; using static "
-                "exposure/color from frame %d instead of the controller.",
-                fixed_frame_id,
-            )
-        elif has_controller and self.ignore_ppisp_controller:
-            logger.info(
-                "PPISP controller present but ignore_ppisp_controller is set; "
-                "exporting time-sampled exposure/color from optimized PPISP parameters "
-                "instead of the runtime controller."
-            )
-
-        from threedgrut.export.usd.ppisp_spg import get_ppisp_spg_files
         from threedgrut.export.usd.writers.ppisp_writer import (
             add_ppisp_to_all_render_products,
             build_camera_frame_mapping,
@@ -1108,6 +1061,13 @@ class USDExporter(ModelExporter):
         if camera_time_mapping is None:
             _, camera_time_mapping = build_camera_time_mapping(dataset)
 
+        if not enable_ppisp_controller_export and fixed_frame_id is not None and fixed_camera_id is None:
+            raise ValueError(
+                "ppisp_reference_frame_id was set without ppisp_reference_camera_id "
+                "in spg-runtime export mode. Set ppisp_reference_camera_id as well, "
+                "or leave both unset for time-sampled SPG authoring."
+            )
+
         try:
             add_ppisp_to_all_render_products(
                 stage=stage,
@@ -1117,27 +1077,23 @@ class USDExporter(ModelExporter):
                 camera_time_mapping=camera_time_mapping,
                 fixed_camera_index=fixed_camera_id,
                 fixed_frame_index=fixed_frame_id,
-                use_controller=use_controller,
+                use_controller=enable_ppisp_controller_export,
                 responsivity=responsivity,
-                neutral_frame_params=neutral_frame_params and not use_controller,
+                neutral_frame_params=neutral_frame_params and not enable_ppisp_controller_export,
             )
+        except ValueError:
+            raise
         except Exception as e:
             logger.warning(f"Failed to add PPISP shaders: {e}")
             return
 
-        if use_controller:
-            from threedgrut.export.usd.writers.ppisp_controller_writer import (
-                get_ppisp_auto_spg_files,
-                get_ppisp_embedded_controller_spg_files,
-            )
-
-            spg_files = list(get_ppisp_auto_spg_files())
-            camera_indices = range(len(getattr(post_processing, "controllers", [])))
-            for s in get_ppisp_embedded_controller_spg_files(post_processing, camera_indices):
-                if not any(f.filename == s.filename for f in spg_files):
-                    spg_files.append(s)
-        else:
-            spg_files = get_ppisp_spg_files()
+        spg_files = select_spg_files_for_export(
+            enable_ppisp_controller_export=enable_ppisp_controller_export,
+            ppisp_module=post_processing if enable_ppisp_controller_export else None,
+            camera_indices=(
+                range(len(getattr(post_processing, "controllers", []))) if enable_ppisp_controller_export else None
+            ),
+        )
 
         for spg_file in spg_files:
             if not any(f.filename == spg_file.filename for f in files):
@@ -1146,7 +1102,7 @@ class USDExporter(ModelExporter):
         logger.info(
             "PPISP spg-runtime export complete: %d sidecar(s) added (controller=%s)",
             len(files),
-            use_controller,
+            enable_ppisp_controller_export,
         )
 
     @classmethod
@@ -1168,7 +1124,6 @@ class USDExporter(ModelExporter):
             export_background=getattr(export_conf, "export_background", True),
             apply_normalizing_transform=getattr(export_conf, "apply_normalizing_transform", True),
             sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT),
-            linear_srgb=getattr(export_conf, "linear_srgb", False),
             export_post_processing=_get_export_config_value(
                 export_conf,
                 "export-post-processing",
@@ -1181,22 +1136,16 @@ class USDExporter(ModelExporter):
                 "ppisp_integration_mode",
                 None,
             ),
-            post_processing_export_mode=_get_export_config_value(
+            ppisp_reference_camera_id=_get_export_config_value(
                 export_conf,
-                "post-processing-export-mode",
-                "post_processing_export_mode",
+                "ppisp-reference-camera-id",
+                "ppisp_reference_camera_id",
                 None,
             ),
-            post_processing_camera_id=_get_export_config_value(
+            ppisp_reference_frame_id=_get_export_config_value(
                 export_conf,
-                "post-processing-camera-id",
-                "post_processing_camera_id",
-                None,
-            ),
-            post_processing_frame_id=_get_export_config_value(
-                export_conf,
-                "post-processing-frame-id",
-                "post_processing_frame_id",
+                "ppisp-reference-frame-id",
+                "ppisp_reference_frame_id",
                 None,
             ),
             ppisp_responsivity=_get_export_config_value(
@@ -1205,71 +1154,23 @@ class USDExporter(ModelExporter):
                 "ppisp_responsivity",
                 1.0,
             ),
-            ignore_ppisp_controller=_get_export_config_value(
+            enable_ppisp_controller_export=_get_export_config_value(
                 export_conf,
-                "ignore-ppisp-controller",
-                "ignore_ppisp_controller",
-                False,
-            ),
-            post_processing_bake_epochs=_get_export_config_value(
-                export_conf,
-                "post-processing-bake-epochs",
-                "post_processing_bake_epochs",
-                7,
-            ),
-            post_processing_bake_learning_rate=_get_export_config_value(
-                export_conf,
-                "post-processing-bake-learning-rate",
-                "post_processing_bake_learning_rate",
-                2.5e-3,
-            ),
-            post_processing_bake_learning_rate_specular=_get_export_config_value(
-                export_conf,
-                "post-processing-bake-learning-rate-specular",
-                "post_processing_bake_learning_rate_specular",
+                "enable-ppisp-controller-export",
+                "enable_ppisp_controller_export",
                 None,
             ),
-            post_processing_bake_learning_rate_density=_get_export_config_value(
+            sh_optimization_num_iterations=_get_export_config_value(
                 export_conf,
-                "post-processing-bake-learning-rate-density",
-                "post_processing_bake_learning_rate_density",
-                5.0e-2,
-            ),
-            ppisp_bake_vignetting_mode=_get_export_config_value(
-                export_conf,
-                "ppisp-bake-vignetting-mode",
-                "ppisp_bake_vignetting_mode",
-                MODE_PPISP_BAKE_VIGNETTING_NONE,
-            ),
-            post_processing_bake_view_mode=_get_export_config_value(
-                export_conf,
-                "post-processing-bake-view-mode",
-                "post_processing_bake_view_mode",
-                "training",
-            ),
-            post_processing_bake_view_seed=_get_export_config_value(
-                export_conf,
-                "post-processing-bake-view-seed",
-                "post_processing_bake_view_seed",
+                "sh-optimization-num-iterations",
+                "sh_optimization_num_iterations",
                 None,
             ),
-            post_processing_bake_trajectory_weight_position=_get_export_config_value(
+            scene_radiance_scale=_get_export_config_value(
                 export_conf,
-                "post-processing-bake-trajectory-weight-position",
-                "post_processing_bake_trajectory_weight_position",
-                1.0,
-            ),
-            post_processing_bake_trajectory_weight_rotation=_get_export_config_value(
-                export_conf,
-                "post-processing-bake-trajectory-weight-rotation",
-                "post_processing_bake_trajectory_weight_rotation",
-                0.5,
-            ),
-            radiance_scale=_get_export_config_value(
-                export_conf,
-                "radiance-scale",
-                "radiance_scale",
-                1.0,
+                "scene-radiance-scale",
+                "scene_radiance_scale",
+                None,
             ),
             frames_per_second=_get_export_config_value(
                 export_conf,

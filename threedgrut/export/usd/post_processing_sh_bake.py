@@ -117,6 +117,7 @@ def bake_post_processing_into_sh(
     *,
     adapter: PostProcessingBakeAdapter,
     epochs: int = 7,
+    num_iterations: int | None = None,
     learning_rate: float = 2.5e-3,
     learning_rate_specular: float | None = None,
     learning_rate_density: float = 5.0e-2,
@@ -166,6 +167,11 @@ def bake_post_processing_into_sh(
         raise ValueError("Post-processing SH bake export requires a post_processing module.")
     if epochs < 1:
         raise ValueError(f"epochs must be >= 1, got {epochs}.")
+    if num_iterations is not None:
+        if isinstance(num_iterations, bool) or not isinstance(num_iterations, int):
+            raise TypeError(f"num_iterations must be int, got {type(num_iterations).__name__}")
+        if num_iterations < 1:
+            raise ValueError(f"num_iterations must be >= 1, got {num_iterations}.")
     view_sampling_mode = normalize_view_sampling_mode(view_sampling_mode)
 
     adapter.validate(post_processing)
@@ -213,11 +219,13 @@ def bake_post_processing_into_sh(
             weight_rotation=trajectory_weight_rotation,
         )
 
+    total_steps = num_iterations if num_iterations is not None else epochs * steps_per_epoch
+    num_epochs = max(1, (total_steps + steps_per_epoch - 1) // steps_per_epoch)
     logger.info(
-        "Fitting %s SH bake: mode=%s epochs=%s steps_per_epoch=%s%s",
+        "Fitting %s SH bake: mode=%s iterations=%s steps_per_epoch=%s%s",
         adapter.name,
         view_sampling_mode,
-        epochs,
+        total_steps,
         steps_per_epoch,
         adapter.log_context(),
     )
@@ -232,9 +240,10 @@ def bake_post_processing_into_sh(
 
     with torch.enable_grad():
         global_step = 0
-        total_steps = epochs * steps_per_epoch
-        for epoch in range(epochs):
+        for epoch in range(num_epochs):
             for gpu_batch in _gpu_batches():
+                if global_step >= total_steps:
+                    break
                 global_step += 1
                 reference_rgb = _render_reference(reference_model, fixed_post_processing, gpu_batch)
 
@@ -255,11 +264,13 @@ def bake_post_processing_into_sh(
                         "%s SH bake epoch %s/%s step %s/%s loss=%.6g",
                         adapter.name,
                         epoch + 1,
-                        epochs,
+                        num_epochs,
                         global_step,
                         total_steps,
                         float(loss.detach()),
                     )
+            if global_step >= total_steps:
+                break
 
     for parameter in baked_model.parameters():
         parameter.requires_grad_(False)

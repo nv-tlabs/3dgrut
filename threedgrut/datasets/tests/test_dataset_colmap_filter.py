@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 from threedgrut.datasets.dataset_colmap import ColmapDataset
+from threedgrut.datasets.dataset_scannetpp import ScannetppDataset
 
 
 def _extr(camera_id: int, name: str) -> SimpleNamespace:
@@ -126,3 +127,16 @@ def test_filter_cameras_falls_back_to_synthetic_names_when_extrinsic_has_no_fold
     frame_indices = dataset._filter_cameras()
     assert frame_indices == [1]
     assert set(dataset.cam_intrinsics.keys()) == {11}
+
+
+def test_scannetpp_dataset_accepts_colmap_camera_filters(monkeypatch) -> None:
+    monkeypatch.setattr(ColmapDataset, "reload", lambda self: None)
+
+    dataset = ScannetppDataset(
+        "/tmp/scannetpp",
+        camera_names=["iphone"],
+        camera_ids=[2],
+    )
+
+    assert dataset.camera_names == ["iphone"]
+    assert dataset.camera_ids == [2]

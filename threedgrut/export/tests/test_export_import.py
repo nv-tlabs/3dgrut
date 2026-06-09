@@ -527,12 +527,69 @@ class TestPPISPRuntimeMode:
         assert compute_runtime_post_processing(True, ppisp, PPISP_INTEGRATION_MODE_SH_OPTIMIZED) is False
         assert compute_runtime_post_processing(True, ppisp, PPISP_INTEGRATION_MODE_SPG_RUNTIME) is True
 
+    def test_usd_exporter_accepts_borel_setting_names_from_config(self):
+        conf = SimpleNamespace(
+            export_usd={
+                "ppisp-integration-mode": "spg-runtime",
+                "ppisp-reference-camera-id": 1,
+                "ppisp-reference-frame-id": 2,
+                "enable-ppisp-controller-export": False,
+                "sh-optimization-num-iterations": 11,
+                "scene-radiance-scale": 1.25,
+                "export_cameras": False,
+            }
+        )
+
+        exporter = USDExporter.from_config(conf)
+
+        assert exporter.ppisp_integration_mode == "spg-runtime"
+        assert exporter.ppisp_reference_camera_id == 1
+        assert exporter.ppisp_reference_frame_id == 2
+        assert exporter.enable_ppisp_controller_export is False
+        assert exporter.sh_optimization_num_iterations == 11
+        assert exporter.scene_radiance_scale == pytest.approx(1.25)
+
+    def test_usd_exporter_rejects_branch_local_mode_aliases(self):
+        with pytest.raises(ValueError, match="Unsupported PPISP integration mode"):
+            USDExporter(ppisp_integration_mode="baked-sh")
+        with pytest.raises(ValueError, match="Unsupported PPISP integration mode"):
+            USDExporter(ppisp_integration_mode="omni-native")
+
+    def test_usd_exporter_ignores_branch_local_config_aliases(self):
+        conf = SimpleNamespace(
+            export_usd={
+                "post-processing-camera-id": 3,
+                "post-processing-frame-id": 4,
+                "ignore-ppisp-controller": True,
+                "post-processing-bake-epochs": 2,
+                "radiance-scale": 1.5,
+                "export_cameras": False,
+            }
+        )
+
+        exporter = USDExporter.from_config(conf)
+
+        assert exporter.ppisp_reference_camera_id is None
+        assert exporter.ppisp_reference_frame_id is None
+        assert exporter.enable_ppisp_controller_export is None
+        assert exporter.sh_optimization_num_iterations == 3000
+        assert exporter.scene_radiance_scale == pytest.approx(1.0)
+
+    def test_controller_export_is_rejected_for_sh_optimized(self):
+        from threedgrut.export.usd.exporter import PPISP_INTEGRATION_MODE_SH_OPTIMIZED
+
+        with pytest.raises(ValueError, match="enable_ppisp_controller_export"):
+            USDExporter(
+                ppisp_integration_mode=PPISP_INTEGRATION_MODE_SH_OPTIMIZED,
+                enable_ppisp_controller_export=True,
+            )
+
 
 class TestUSDExportColorSpace:
     """Test that USD export applies ColorSpaceAPI with correct color space name."""
 
     def test_usd_export_color_space_default_srgb(self):
-        """Export with linear_srgb=False (default) sets color space to srgb_rec709_display."""
+        """Standard export sets color space to srgb_rec709_display."""
         model = MockGaussianModel(num_gaussians=5, sh_degree=3)
         with tempfile.TemporaryDirectory() as tmpdir:
             usd_path = Path(tmpdir) / "test.usdz"
@@ -541,7 +598,6 @@ class TestUSDExportColorSpace:
                 export_cameras=False,
                 export_background=False,
                 apply_normalizing_transform=False,
-                linear_srgb=False,
             ).export(model, usd_path)
             stage = Usd.Stage.Open(str(usd_path))
             assert stage
@@ -551,42 +607,6 @@ class TestUSDExportColorSpace:
             attr = api.GetColorSpaceNameAttr()
             assert attr, "ColorSpaceName attribute missing"
             assert attr.Get() == "srgb_rec709_display"
-
-    def test_usd_export_color_space_linear_srgb(self):
-        """Export with linear_srgb=True sets color space to lin_rec709_scene."""
-        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            usd_path = Path(tmpdir) / "test.usdz"
-            USDExporter(
-                half_precision=False,
-                export_cameras=False,
-                export_background=False,
-                apply_normalizing_transform=False,
-                linear_srgb=True,
-            ).export(model, usd_path)
-            stage = Usd.Stage.Open(str(usd_path))
-            assert stage
-            prim = _find_prim_with_color_space_api(stage)
-            assert prim is not None, "No prim with ColorSpaceAPI found"
-            api = Usd.ColorSpaceAPI(prim)
-            attr = api.GetColorSpaceNameAttr()
-            assert attr, "ColorSpaceName attribute missing"
-            assert attr.Get() == "lin_rec709_scene"
-
-    def test_usd_export_color_space_from_config(self):
-        """Export via from_config with linear_srgb in config sets correct color space."""
-        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
-        conf = SimpleNamespace(export_usd=SimpleNamespace(linear_srgb=True, export_cameras=False))
-        with tempfile.TemporaryDirectory() as tmpdir:
-            usd_path = Path(tmpdir) / "test.usdz"
-            exporter = USDExporter.from_config(conf)
-            exporter.export(model, usd_path)
-            stage = Usd.Stage.Open(str(usd_path))
-            assert stage
-            prim = _find_prim_with_color_space_api(stage)
-            assert prim is not None, "No prim with ColorSpaceAPI found"
-            api = Usd.ColorSpaceAPI(prim)
-            assert api.GetColorSpaceNameAttr().Get() == "lin_rec709_scene"
 
     def test_usdz_export_camera_is_composed_from_root_stage(self):
         """USDZ camera prims are authored where the package root composes them."""
@@ -660,6 +680,43 @@ class TestUSDExportColorSpace:
             render_settings = stage.GetRootLayer().customLayerData["renderSettings"]
             assert render_settings["rtx:post:tonemap:op"] == 2
             assert render_settings["rtx:rtpt:gaussian:skipTonemapping:enabled"] is False
+
+    def test_runtime_ppisp_rejects_frame_reference_without_camera_reference(self, monkeypatch):
+        """spg-runtime follows nre-borel: frame-only static PPISP export is ambiguous."""
+        from threedgrut.export.usd.exporter import PPISP_INTEGRATION_MODE_SPG_RUNTIME
+
+        PPISP = _install_fake_ppisp_module(monkeypatch)
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        dataset = MockCameraDataset()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usdz"
+            with pytest.raises(ValueError, match="ppisp_reference_frame_id was set without ppisp_reference_camera_id"):
+                USDExporter(
+                    half_precision=False,
+                    export_cameras=True,
+                    export_background=False,
+                    apply_normalizing_transform=False,
+                    ppisp_integration_mode=PPISP_INTEGRATION_MODE_SPG_RUNTIME,
+                    ppisp_reference_frame_id=1,
+                ).export(model, usd_path, dataset=dataset, post_processing=PPISP(), validate_usd=False)
+
+    def test_enabling_controller_export_requires_trained_controller(self, monkeypatch):
+        from threedgrut.export.usd.exporter import PPISP_INTEGRATION_MODE_SPG_RUNTIME
+
+        PPISP = _install_fake_ppisp_module(monkeypatch)
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        dataset = MockCameraDataset()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usdz"
+            with pytest.raises(ValueError, match="trained controllers"):
+                USDExporter(
+                    half_precision=False,
+                    export_cameras=True,
+                    export_background=False,
+                    apply_normalizing_transform=False,
+                    ppisp_integration_mode=PPISP_INTEGRATION_MODE_SPG_RUNTIME,
+                    enable_ppisp_controller_export=True,
+                ).export(model, usd_path, dataset=dataset, post_processing=PPISP(), validate_usd=False)
 
     def test_usd_export_requires_dataset_when_cameras_enabled(self):
         """Camera-enabled exports must not silently produce camera-less USD."""
@@ -739,7 +796,7 @@ class TestUSDSampleExports:
                 export_background=False,
                 apply_normalizing_transform=False,
                 frames_per_second=24.0,
-                radiance_scale=1.25,
+                scene_radiance_scale=1.25,
             ).export(model, usd_path, dataset=dataset, validate_usd=False)
 
             assert usd_path.exists()

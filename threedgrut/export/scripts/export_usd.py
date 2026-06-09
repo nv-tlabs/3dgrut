@@ -125,11 +125,6 @@ Examples:
         help="Skip normalizing transform",
     )
     parser.add_argument(
-        "--linear-srgb",
-        action="store_true",
-        help="Set prim color space to lin_rec709_scene (linear). Default is srgb_rec709_display.",
-    )
-    parser.add_argument(
         "--sorting-mode-hint",
         type=str,
         choices=PARTICLE_FIELD_SORTING_MODE_HINTS,
@@ -164,15 +159,8 @@ Examples:
         ),
     )
     parser.add_argument(
-        "--post-processing-export-mode",
-        dest="ppisp_integration_mode",
-        type=str,
-        choices=[*VALID_PPISP_INTEGRATION_MODES, "baked-sh", "omni-native"],
-        default=None,
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument(
-        "--post-processing-camera-id",
+        "--ppisp-reference-camera-id",
+        dest="ppisp_reference_camera_id",
         type=int,
         default=None,
         help=(
@@ -181,7 +169,8 @@ Examples:
         ),
     )
     parser.add_argument(
-        "--post-processing-frame-id",
+        "--ppisp-reference-frame-id",
+        dest="ppisp_reference_frame_id",
         type=int,
         default=None,
         help=(
@@ -195,86 +184,35 @@ Examples:
         default=None,
         help=("Achromatic PPISP responsivity default authored on spg-runtime SPG shaders. Default is 1.0."),
     )
-    parser.add_argument(
-        "--ignore-ppisp-controller",
+    controller_group = parser.add_mutually_exclusive_group()
+    controller_group.add_argument(
+        "--enable-ppisp-controller-export",
+        dest="enable_ppisp_controller_export",
         action="store_true",
-        help=(
-            "If the checkpoint contains trained PPISP controllers, ignore them and "
-            "export the optimized per-frame exposure/color parameters as time-sampled "
-            "USD attributes instead. Has no effect when the checkpoint has no controllers."
-        ),
+        default=None,
+        help="Require PPISP controller export for controller-trained spg-runtime checkpoints.",
+    )
+    controller_group.add_argument(
+        "--disable-ppisp-controller-export",
+        dest="enable_ppisp_controller_export",
+        action="store_false",
+        help="Force static/time-sampled PPISP shader parameters instead of controller export.",
     )
     parser.add_argument(
-        "--post-processing-bake-epochs",
+        "--sh-optimization-num-iterations",
         type=int,
         default=None,
-        help="Number of sequential passes over the train/reference set for post-processing baked-SH export.",
+        help="Number of optimizer steps for sh-optimized PPISP export. Default is 3000.",
     )
     parser.add_argument(
-        "--post-processing-bake-learning-rate",
-        type=float,
-        default=None,
-        help="Adam learning rate for features_albedo (default 2.5e-3, matches 3DGS).",
-    )
-    parser.add_argument(
-        "--post-processing-bake-learning-rate-specular",
-        type=float,
-        default=None,
-        help="Adam learning rate for features_specular (default = albedo lr / 20, matches 3DGS).",
-    )
-    parser.add_argument(
-        "--post-processing-bake-learning-rate-density",
-        type=float,
-        default=None,
-        help="Adam learning rate for density (default 5e-2, matches 3DGS).",
-    )
-    parser.add_argument(
-        "--ppisp-bake-vignetting-mode",
-        type=str,
-        choices=["none", "achromatic-fit"],
-        default=None,
-        help=(
-            "Vignetting handling for PPISP baked-SH fitting. 'none' disables PPISP vignetting; "
-            "'achromatic-fit' uses chromatic PPISP reference and an achromatic fit-only vignette."
-        ),
-    )
-    parser.add_argument(
-        "--post-processing-bake-view-mode",
-        type=str,
-        choices=["training", "trajectory"],
-        default=None,
-        help=(
-            "Which views the bake fit sees per step. 'training' (default) iterates "
-            "the train dataloader. 'trajectory' orders views along an NN+2-opt "
-            "camera path and samples random t in [0,1]."
-        ),
-    )
-    parser.add_argument(
-        "--post-processing-bake-view-seed",
-        type=int,
-        default=None,
-        help="Optional RNG seed for the interpolation samplers (None = non-deterministic).",
-    )
-    parser.add_argument(
-        "--post-processing-bake-trajectory-weight-position",
-        type=float,
-        default=None,
-        help="Trajectory mode only: weight on the (mean-normalised) position term in pose distance.",
-    )
-    parser.add_argument(
-        "--post-processing-bake-trajectory-weight-rotation",
-        type=float,
-        default=None,
-        help="Trajectory mode only: weight on the (1 - cos(angle)) rotation term in pose distance.",
-    )
-    parser.add_argument(
-        "--radiance-scale",
+        "--scene-radiance-scale",
+        dest="scene_radiance_scale",
         type=float,
         default=None,
         help=(
             "Multiplicative scale applied to the SH-evaluated RGB output of the "
             "exported asset. Default 1.0 (no-op). The DC offset is compensated so "
-            "rendered output equals radiance-scale x original eval. Useful for "
+            "rendered output equals scene-radiance-scale x original eval. Useful for "
             "matching downstream tonemap exposure."
         ),
     )
@@ -436,11 +374,39 @@ def main():
         "ppisp_integration_mode",
         None,
     )
-    legacy_post_processing_export_mode = _arg_or_conf(
-        None,
+    ppisp_reference_camera_id = _arg_or_conf(
+        args.ppisp_reference_camera_id,
         export_conf,
-        "post-processing-export-mode",
-        "post_processing_export_mode",
+        "ppisp-reference-camera-id",
+        "ppisp_reference_camera_id",
+        None,
+    )
+    ppisp_reference_frame_id = _arg_or_conf(
+        args.ppisp_reference_frame_id,
+        export_conf,
+        "ppisp-reference-frame-id",
+        "ppisp_reference_frame_id",
+        None,
+    )
+    enable_ppisp_controller_export = _arg_or_conf(
+        args.enable_ppisp_controller_export,
+        export_conf,
+        "enable-ppisp-controller-export",
+        "enable_ppisp_controller_export",
+        None,
+    )
+    scene_radiance_scale = _arg_or_conf(
+        args.scene_radiance_scale,
+        export_conf,
+        "scene-radiance-scale",
+        "scene_radiance_scale",
+        1.0,
+    )
+    sh_optimization_num_iterations = _arg_or_conf(
+        args.sh_optimization_num_iterations,
+        export_conf,
+        "sh-optimization-num-iterations",
+        "sh_optimization_num_iterations",
         None,
     )
     # Load dataset for camera export and for train-split post-processing SH baking.
@@ -483,21 +449,8 @@ def main():
             export_cameras=not args.no_cameras,
             export_post_processing=export_post_processing,
             ppisp_integration_mode=ppisp_integration_mode,
-            post_processing_export_mode=legacy_post_processing_export_mode,
-            post_processing_camera_id=_arg_or_conf(
-                args.post_processing_camera_id,
-                export_conf,
-                "post-processing-camera-id",
-                "post_processing_camera_id",
-                None,
-            ),
-            post_processing_frame_id=_arg_or_conf(
-                args.post_processing_frame_id,
-                export_conf,
-                "post-processing-frame-id",
-                "post_processing_frame_id",
-                None,
-            ),
+            ppisp_reference_camera_id=ppisp_reference_camera_id,
+            ppisp_reference_frame_id=ppisp_reference_frame_id,
             ppisp_responsivity=_arg_or_conf(
                 args.ppisp_responsivity,
                 export_conf,
@@ -505,77 +458,9 @@ def main():
                 "ppisp_responsivity",
                 1.0,
             ),
-            ignore_ppisp_controller=args.ignore_ppisp_controller,
-            post_processing_bake_epochs=_arg_or_conf(
-                args.post_processing_bake_epochs,
-                export_conf,
-                "post-processing-bake-epochs",
-                "post_processing_bake_epochs",
-                7,
-            ),
-            post_processing_bake_learning_rate=_arg_or_conf(
-                args.post_processing_bake_learning_rate,
-                export_conf,
-                "post-processing-bake-learning-rate",
-                "post_processing_bake_learning_rate",
-                2.5e-3,
-            ),
-            post_processing_bake_learning_rate_specular=_arg_or_conf(
-                args.post_processing_bake_learning_rate_specular,
-                export_conf,
-                "post-processing-bake-learning-rate-specular",
-                "post_processing_bake_learning_rate_specular",
-                None,
-            ),
-            post_processing_bake_learning_rate_density=_arg_or_conf(
-                args.post_processing_bake_learning_rate_density,
-                export_conf,
-                "post-processing-bake-learning-rate-density",
-                "post_processing_bake_learning_rate_density",
-                5.0e-2,
-            ),
-            ppisp_bake_vignetting_mode=_arg_or_conf(
-                args.ppisp_bake_vignetting_mode,
-                export_conf,
-                "ppisp-bake-vignetting-mode",
-                "ppisp_bake_vignetting_mode",
-                "none",
-            ),
-            post_processing_bake_view_mode=_arg_or_conf(
-                args.post_processing_bake_view_mode,
-                export_conf,
-                "post-processing-bake-view-mode",
-                "post_processing_bake_view_mode",
-                "training",
-            ),
-            post_processing_bake_view_seed=_arg_or_conf(
-                args.post_processing_bake_view_seed,
-                export_conf,
-                "post-processing-bake-view-seed",
-                "post_processing_bake_view_seed",
-                None,
-            ),
-            post_processing_bake_trajectory_weight_position=_arg_or_conf(
-                args.post_processing_bake_trajectory_weight_position,
-                export_conf,
-                "post-processing-bake-trajectory-weight-position",
-                "post_processing_bake_trajectory_weight_position",
-                1.0,
-            ),
-            post_processing_bake_trajectory_weight_rotation=_arg_or_conf(
-                args.post_processing_bake_trajectory_weight_rotation,
-                export_conf,
-                "post-processing-bake-trajectory-weight-rotation",
-                "post_processing_bake_trajectory_weight_rotation",
-                0.5,
-            ),
-            radiance_scale=_arg_or_conf(
-                args.radiance_scale,
-                export_conf,
-                "radiance-scale",
-                "radiance_scale",
-                1.0,
-            ),
+            enable_ppisp_controller_export=enable_ppisp_controller_export,
+            sh_optimization_num_iterations=sh_optimization_num_iterations,
+            scene_radiance_scale=scene_radiance_scale,
         )
         logger.info("Using NuRec format (Omniverse compatible)")
     else:
@@ -594,102 +479,20 @@ def main():
                 "sorting_mode_hint",
                 DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
             ),
-            linear_srgb=args.linear_srgb or getattr(export_conf, "linear_srgb", False),
             export_post_processing=export_post_processing,
             ppisp_integration_mode=ppisp_integration_mode,
-            post_processing_export_mode=legacy_post_processing_export_mode,
-            post_processing_camera_id=_arg_or_conf(
-                args.post_processing_camera_id,
-                export_conf,
-                "post-processing-camera-id",
-                "post_processing_camera_id",
-                None,
-            ),
-            post_processing_frame_id=_arg_or_conf(
-                args.post_processing_frame_id,
-                export_conf,
-                "post-processing-frame-id",
-                "post_processing_frame_id",
-                None,
-            ),
+            ppisp_reference_camera_id=ppisp_reference_camera_id,
+            ppisp_reference_frame_id=ppisp_reference_frame_id,
             ppisp_responsivity=_arg_or_conf(
                 args.ppisp_responsivity,
                 export_conf,
                 "ppisp-responsivity",
                 "ppisp_responsivity",
-                (1.0, 1.0, 1.0),
-            ),
-            ignore_ppisp_controller=args.ignore_ppisp_controller,
-            post_processing_bake_epochs=_arg_or_conf(
-                args.post_processing_bake_epochs,
-                export_conf,
-                "post-processing-bake-epochs",
-                "post_processing_bake_epochs",
-                7,
-            ),
-            post_processing_bake_learning_rate=_arg_or_conf(
-                args.post_processing_bake_learning_rate,
-                export_conf,
-                "post-processing-bake-learning-rate",
-                "post_processing_bake_learning_rate",
-                2.5e-3,
-            ),
-            post_processing_bake_learning_rate_specular=_arg_or_conf(
-                args.post_processing_bake_learning_rate_specular,
-                export_conf,
-                "post-processing-bake-learning-rate-specular",
-                "post_processing_bake_learning_rate_specular",
-                None,
-            ),
-            post_processing_bake_learning_rate_density=_arg_or_conf(
-                args.post_processing_bake_learning_rate_density,
-                export_conf,
-                "post-processing-bake-learning-rate-density",
-                "post_processing_bake_learning_rate_density",
-                5.0e-2,
-            ),
-            ppisp_bake_vignetting_mode=_arg_or_conf(
-                args.ppisp_bake_vignetting_mode,
-                export_conf,
-                "ppisp-bake-vignetting-mode",
-                "ppisp_bake_vignetting_mode",
-                "none",
-            ),
-            post_processing_bake_view_mode=_arg_or_conf(
-                args.post_processing_bake_view_mode,
-                export_conf,
-                "post-processing-bake-view-mode",
-                "post_processing_bake_view_mode",
-                "training",
-            ),
-            post_processing_bake_view_seed=_arg_or_conf(
-                args.post_processing_bake_view_seed,
-                export_conf,
-                "post-processing-bake-view-seed",
-                "post_processing_bake_view_seed",
-                None,
-            ),
-            post_processing_bake_trajectory_weight_position=_arg_or_conf(
-                args.post_processing_bake_trajectory_weight_position,
-                export_conf,
-                "post-processing-bake-trajectory-weight-position",
-                "post_processing_bake_trajectory_weight_position",
                 1.0,
             ),
-            post_processing_bake_trajectory_weight_rotation=_arg_or_conf(
-                args.post_processing_bake_trajectory_weight_rotation,
-                export_conf,
-                "post-processing-bake-trajectory-weight-rotation",
-                "post_processing_bake_trajectory_weight_rotation",
-                0.5,
-            ),
-            radiance_scale=_arg_or_conf(
-                args.radiance_scale,
-                export_conf,
-                "radiance-scale",
-                "radiance_scale",
-                1.0,
-            ),
+            enable_ppisp_controller_export=enable_ppisp_controller_export,
+            sh_optimization_num_iterations=sh_optimization_num_iterations,
+            scene_radiance_scale=scene_radiance_scale,
             frames_per_second=_arg_or_conf(
                 args.frames_per_second,
                 export_conf,

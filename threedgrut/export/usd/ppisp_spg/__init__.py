@@ -22,7 +22,7 @@ USDA definition) that must be packaged alongside the exported USDZ.
 
 import logging
 from pathlib import Path
-from typing import List
+from typing import Any, List, Optional, Sequence
 
 from threedgrut.export.usd.stage_utils import NamedSerialized
 
@@ -66,3 +66,65 @@ def get_ppisp_auto_spg_files() -> List[NamedSerialized]:
 def get_ppisp_spg_dyn_files() -> List[NamedSerialized]:
     """Backward-compatible alias for automatic-parameter CUDA SPG sidecars."""
     return get_ppisp_auto_spg_files()
+
+
+def ppisp_has_controller(ppisp_module: Any | None) -> bool:
+    """Return whether the loaded PPISP module exposes trained controllers."""
+    if ppisp_module is None:
+        return False
+
+    use_controller = getattr(getattr(ppisp_module, "config", None), "use_controller", None)
+    if use_controller is not None and not bool(use_controller):
+        return False
+
+    controllers = getattr(ppisp_module, "controllers", None)
+    if controllers is None:
+        return False
+
+    try:
+        return len(controllers) > 0
+    except TypeError:
+        return False
+
+
+def resolve_ppisp_controller_export_enabled(
+    *,
+    requested: Optional[bool],
+    ppisp_module: Any | None,
+    ppisp_integration_mode: str,
+) -> bool:
+    """Resolve the nre-borel tri-state PPISP controller export setting."""
+    if ppisp_integration_mode != "spg-runtime":
+        return False
+    if requested is not None:
+        return bool(requested)
+    return ppisp_has_controller(ppisp_module)
+
+
+def select_spg_files_for_export(
+    *,
+    enable_ppisp_controller_export: bool,
+    ppisp_module: Any | None = None,
+    camera_indices: Sequence[int] | None = None,
+) -> List[NamedSerialized]:
+    """Choose static or controller PPISP SPG sidecars for packaging."""
+    if not enable_ppisp_controller_export:
+        if ppisp_module is not None or camera_indices is not None:
+            raise ValueError(
+                "ppisp_module and camera_indices must be omitted when enable_ppisp_controller_export=False"
+            )
+        return list(get_ppisp_spg_files())
+
+    if ppisp_module is None or camera_indices is None:
+        raise ValueError("ppisp_module and camera_indices are required when enable_ppisp_controller_export=True")
+
+    from threedgrut.export.usd.writers.ppisp_controller_writer import (
+        get_ppisp_embedded_controller_spg_files,
+    )
+
+    files = list(get_ppisp_auto_spg_files())
+    deduped_camera_indices = list(dict.fromkeys(camera_indices))
+    for sidecar in get_ppisp_embedded_controller_spg_files(ppisp_module, deduped_camera_indices):
+        if not any(file.filename == sidecar.filename for file in files):
+            files.append(sidecar)
+    return files

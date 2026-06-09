@@ -48,9 +48,6 @@ export_usd:
   export_background: true
   # zDepth | cameraDistance | rayHitDistance
   sorting_mode_hint: cameraDistance
-  # Manual non-PPISP override for Gaussian prim ColorSpaceAPI. Runtime PPISP
-  # export derives this automatically from ppisp-integration-mode.
-  linear_srgb: false
   # Enable post-processing export when the checkpoint contains a supported module.
   # Defaults to true; ppisp-integration-mode controls how PPISP is exported.
   export_post_processing: true
@@ -60,24 +57,19 @@ export_usd:
   ppisp-integration-mode: spg-runtime
   # Optional fixed PPISP camera/frame. sh-optimized defaults unset values to 0;
   # spg-runtime keeps dynamic per-camera/per-frame behavior when unset.
-  post-processing-camera-id: null
-  post-processing-frame-id: null
+  ppisp-reference-camera-id: null
+  ppisp-reference-frame-id: null
   # Achromatic PPISP responsivity default authored on spg-runtime SPG shaders.
   # To rescale asset radiance by k while preserving the PPISP input magnitude,
-  # set radiance-scale: k and ppisp-responsivity: 1/k.
+  # set scene-radiance-scale: k and ppisp-responsivity: 1/k.
   ppisp-responsivity: 1.0
-  # Controller-trained PPISP checkpoints use the spg-runtime controller export
-  # path by default. Set true to force the static/time-sampled PPISP fallback.
-  ignore-ppisp-controller: false
-  # Number of sequential passes over the train/reference set used for fitting.
-  post-processing-bake-epochs: 7
-  post-processing-bake-learning-rate: 0.0025
-  # none: disable PPISP vignetting during bake. achromatic-fit: chromatic PPISP reference
-  # with an achromatic fit-only vignette; the achromatic vignette is not exported.
-  # none | achromatic-fit
-  ppisp-bake-vignetting-mode: none
+  # null = auto-export controllers when the PPISP checkpoint has them.
+  # true = require controller export; false = force static/time-sampled fallback.
+  enable-ppisp-controller-export: null
+  # Number of optimizer steps for sh-optimized export. null uses the Borel default (3000).
+  sh-optimization-num-iterations: null
   # Multiplicative scale applied to exported SH radiance.
-  radiance-scale: 1.0
+  scene-radiance-scale: 1.0
   # USD timeCodesPerSecond; time codes are bare frame indices so this sets playback speed
   frames_per_second: 1.0
 
