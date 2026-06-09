@@ -504,6 +504,30 @@ def _find_prim_with_color_space_api(stage: Usd.Stage):
     return None
 
 
+def _find_prim_with_attribute(stage: Usd.Stage, attr_name: str):
+    for prim in Usd.PrimRange(stage.GetPseudoRoot()):
+        if prim.GetAttribute(attr_name).IsValid():
+            return prim
+    return None
+
+
+class TestPPISPRuntimeMode:
+    """Pin the nre-borel mapping from PPISP integration mode to runtime color handling."""
+
+    def test_compute_runtime_post_processing(self):
+        from threedgrut.export.usd.exporter import (
+            PPISP_INTEGRATION_MODE_SH_OPTIMIZED,
+            PPISP_INTEGRATION_MODE_SPG_RUNTIME,
+            compute_runtime_post_processing,
+        )
+
+        ppisp = object()
+        assert compute_runtime_post_processing(False, None, PPISP_INTEGRATION_MODE_SPG_RUNTIME) is False
+        assert compute_runtime_post_processing(True, None, PPISP_INTEGRATION_MODE_SPG_RUNTIME) is False
+        assert compute_runtime_post_processing(True, ppisp, PPISP_INTEGRATION_MODE_SH_OPTIMIZED) is False
+        assert compute_runtime_post_processing(True, ppisp, PPISP_INTEGRATION_MODE_SPG_RUNTIME) is True
+
+
 class TestUSDExportColorSpace:
     """Test that USD export applies ColorSpaceAPI with correct color space name."""
 
@@ -609,9 +633,7 @@ class TestUSDExportColorSpace:
 
     def test_usd_export_with_native_ppisp_disables_gaussian_skip_tonemapping(self, monkeypatch):
         """Runtime PPISP consumes HDR Gaussian output, so Kit must not skip tonemapping."""
-        from threedgrut.export.usd.exporter import (
-            MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE,
-        )
+        from threedgrut.export.usd.exporter import PPISP_INTEGRATION_MODE_SPG_RUNTIME
 
         PPISP = _install_fake_ppisp_module(monkeypatch)
         model = MockGaussianModel(num_gaussians=5, sh_degree=3)
@@ -623,11 +645,18 @@ class TestUSDExportColorSpace:
                 export_cameras=True,
                 export_background=False,
                 apply_normalizing_transform=False,
-                post_processing_export_mode=MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE,
+                ppisp_integration_mode=PPISP_INTEGRATION_MODE_SPG_RUNTIME,
             ).export(model, usd_path, dataset=dataset, post_processing=PPISP(), validate_usd=False)
 
             stage = Usd.Stage.Open(str(usd_path))
             assert stage
+            prim = _find_prim_with_color_space_api(stage)
+            assert prim is not None
+            assert Usd.ColorSpaceAPI(prim).GetColorSpaceNameAttr().Get() == "lin_rec709_scene"
+            shader_prim = _find_prim_with_attribute(stage, "inputs:apply_srgb_linear")
+            assert shader_prim is not None
+            assert shader_prim.GetAttribute("inputs:apply_srgb_linear").Get() is False
+            assert shader_prim.GetAttribute("inputs:apply_inverse_tonemap").Get() is False
             render_settings = stage.GetRootLayer().customLayerData["renderSettings"]
             assert render_settings["rtx:post:tonemap:op"] == 2
             assert render_settings["rtx:rtpt:gaussian:skipTonemapping:enabled"] is False
@@ -800,9 +829,7 @@ class TestNuRecExport:
 
     def test_nurec_export_with_native_ppisp_authors_root_spg_and_ppisp_render_settings(self, monkeypatch):
         """Native NuRec PPISP export exposes the SPG graph and disables registered-compositing inversions."""
-        from threedgrut.export.usd.exporter import (
-            MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE,
-        )
+        from threedgrut.export.usd.exporter import PPISP_INTEGRATION_MODE_SPG_RUNTIME
         from threedgrut.export.usd.nurec.exporter import NuRecExporter
 
         PPISP = _install_fake_ppisp_module(monkeypatch)
@@ -813,7 +840,7 @@ class TestNuRecExport:
             NuRecExporter(
                 export_cameras=True,
                 export_post_processing=True,
-                post_processing_export_mode=MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE,
+                ppisp_integration_mode=PPISP_INTEGRATION_MODE_SPG_RUNTIME,
             ).export(model, usd_path, dataset=dataset, post_processing=PPISP())
 
             composed = Usd.Stage.Open(str(usd_path))

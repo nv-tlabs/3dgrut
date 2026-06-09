@@ -72,12 +72,20 @@ _PPISP_INPUT_RENDER_PRODUCT_VAR = "HdrColor"
 _VALIDATION_CAMERA_SUFFIX = "_val"
 _RENDER_SETTING_TONEMAP_OP = "rtx:post:tonemap:op"
 _RENDER_SETTING_SKIP_GAUSSIAN_TONEMAPPING = "rtx:rtpt:gaussian:skipTonemapping:enabled"
-MODE_POST_PROCESSING_EXPORT_BAKED_SH = "baked-sh"
-MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE = "omni-native"
-POST_PROCESSING_EXPORT_MODES = {
-    MODE_POST_PROCESSING_EXPORT_BAKED_SH,
-    MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE,
+PPISP_INTEGRATION_MODE_SPG_RUNTIME = "spg-runtime"
+PPISP_INTEGRATION_MODE_SH_OPTIMIZED = "sh-optimized"
+VALID_PPISP_INTEGRATION_MODES = (
+    PPISP_INTEGRATION_MODE_SPG_RUNTIME,
+    PPISP_INTEGRATION_MODE_SH_OPTIMIZED,
+)
+_LEGACY_PPISP_INTEGRATION_MODE_ALIASES = {
+    "omni-native": PPISP_INTEGRATION_MODE_SPG_RUNTIME,
+    "baked-sh": PPISP_INTEGRATION_MODE_SH_OPTIMIZED,
 }
+
+# Backward-compatible names for existing Python callers.
+MODE_POST_PROCESSING_EXPORT_BAKED_SH = PPISP_INTEGRATION_MODE_SH_OPTIMIZED
+MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE = PPISP_INTEGRATION_MODE_SPG_RUNTIME
 
 
 def _is_ppisp_post_processing(post_processing: Any) -> bool:
@@ -88,14 +96,32 @@ def _is_ppisp_post_processing(post_processing: Any) -> bool:
     )
 
 
-def normalize_post_processing_export_mode(mode: str | None) -> str:
-    normalized = MODE_POST_PROCESSING_EXPORT_BAKED_SH if mode is None else str(mode).strip().lower()
-    if normalized not in POST_PROCESSING_EXPORT_MODES:
+def normalize_ppisp_integration_mode(mode: str | None) -> str:
+    normalized = PPISP_INTEGRATION_MODE_SPG_RUNTIME if mode is None else str(mode).strip().lower()
+    normalized = _LEGACY_PPISP_INTEGRATION_MODE_ALIASES.get(normalized, normalized)
+    if normalized not in VALID_PPISP_INTEGRATION_MODES:
         raise ValueError(
-            f"Unsupported post-processing export mode '{mode}'. "
-            f"Expected one of: {sorted(POST_PROCESSING_EXPORT_MODES)}"
+            f"Unsupported PPISP integration mode '{mode}'. " f"Expected one of: {list(VALID_PPISP_INTEGRATION_MODES)}"
         )
     return normalized
+
+
+def normalize_post_processing_export_mode(mode: str | None) -> str:
+    """Compatibility wrapper for the old generic export-mode name."""
+    return normalize_ppisp_integration_mode(mode)
+
+
+def compute_runtime_post_processing(
+    model_has_postprocessing: bool,
+    ppisp_module: Any | None,
+    ppisp_integration_mode: str,
+) -> bool:
+    """Return True iff a runtime PPISP SPG stage will be authored."""
+    return (
+        model_has_postprocessing
+        and ppisp_module is not None
+        and ppisp_integration_mode == PPISP_INTEGRATION_MODE_SPG_RUNTIME
+    )
 
 
 def _get_export_config_value(export_conf, hyphen_name: str, attr_name: str, default: Any) -> Any:
@@ -346,7 +372,8 @@ class USDExporter(ModelExporter):
         sorting_mode_hint: str = DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
         linear_srgb: bool = False,
         export_post_processing: bool = True,
-        post_processing_export_mode: str = MODE_POST_PROCESSING_EXPORT_BAKED_SH,
+        post_processing_export_mode: str | None = None,
+        ppisp_integration_mode: str | None = None,
         post_processing_camera_id: int | None = None,
         post_processing_frame_id: int | None = None,
         ppisp_responsivity: Any = 1.0,
@@ -374,20 +401,22 @@ class USDExporter(ModelExporter):
             export_background: Include background/environment in export.
             apply_normalizing_transform: Apply transform to normalize scene orientation.
             sorting_mode_hint: Sorting hint for rendering ("zDepth", "cameraDistance", "rayHitDistance").
-            linear_srgb: If True, set prim color space to lin_rec709_scene.
+            linear_srgb: Manual non-PPISP override for prim color space. Runtime
+                PPISP export derives this automatically from ppisp_integration_mode.
             export_post_processing: If True, export the checkpoint post-processing
                 module with the selected export mode.
-            post_processing_export_mode: "baked-sh" bakes one fixed transform
-                into Gaussian SH coefficients. "omni-native" uses the module's
-                Omniverse-native path; currently PPISP SPG.
+            ppisp_integration_mode: "spg-runtime" authors PPISP as Omniverse SPG
+                shaders applied at render time. "sh-optimized" bakes one fixed
+                PPISP transform into Gaussian SH coefficients. Matches nre-borel.
+            post_processing_export_mode: Legacy alias for ppisp_integration_mode.
             post_processing_camera_id: Optional fixed PPISP camera index.
-                Baked-SH defaults unset values to 0; omni-native keeps
+                sh-optimized defaults unset values to 0; spg-runtime keeps
                 per-camera RenderProduct behavior when unset.
             post_processing_frame_id: Optional fixed PPISP frame index.
-                Baked-SH defaults unset values to 0; omni-native keeps
+                sh-optimized defaults unset values to 0; spg-runtime keeps
                 animated frame inputs when unset.
             ppisp_responsivity: Achromatic input HDR multiplier authored on
-                PPISP omni-native SPG shaders as a user-overridable default.
+                PPISP spg-runtime shaders as a user-overridable default.
             ignore_ppisp_controller: If True, skip the PPISP controller export
                 even when the checkpoint has trained controllers, and fall back
                 to time-sampled exposure / colour USD attributes derived from
@@ -431,7 +460,20 @@ class USDExporter(ModelExporter):
         self.sorting_mode_hint = normalize_particle_field_sorting_mode_hint(sorting_mode_hint)
         self.linear_srgb = linear_srgb
         self.export_post_processing = export_post_processing
-        self.post_processing_export_mode = normalize_post_processing_export_mode(post_processing_export_mode)
+        if ppisp_integration_mode is not None and post_processing_export_mode is not None:
+            normalized_ppisp_mode = normalize_ppisp_integration_mode(ppisp_integration_mode)
+            normalized_legacy_mode = normalize_post_processing_export_mode(post_processing_export_mode)
+            if normalized_ppisp_mode != normalized_legacy_mode:
+                raise ValueError(
+                    "ppisp_integration_mode and post_processing_export_mode specify different modes: "
+                    f"{ppisp_integration_mode!r} vs {post_processing_export_mode!r}"
+                )
+            self.ppisp_integration_mode = normalized_ppisp_mode
+        else:
+            self.ppisp_integration_mode = normalize_ppisp_integration_mode(
+                ppisp_integration_mode if ppisp_integration_mode is not None else post_processing_export_mode
+            )
+        self.post_processing_export_mode = self.ppisp_integration_mode
         self.post_processing_camera_id = None if post_processing_camera_id is None else int(post_processing_camera_id)
         self.post_processing_frame_id = None if post_processing_frame_id is None else int(post_processing_frame_id)
         self.ppisp_responsivity = _normalize_ppisp_responsivity(ppisp_responsivity)
@@ -518,15 +560,20 @@ class USDExporter(ModelExporter):
         post_processing = kwargs.get("post_processing")
         validation_dataset = kwargs.get("validation_dataset")
         has_ppisp_module = _is_ppisp_post_processing(post_processing)
+        runtime_post_processing = compute_runtime_post_processing(
+            model_has_postprocessing=post_processing is not None and self.export_post_processing,
+            ppisp_module=post_processing if has_ppisp_module else None,
+            ppisp_integration_mode=self.ppisp_integration_mode,
+        )
         uses_baked_post_processing_export = (
             post_processing is not None
             and self.export_post_processing
-            and self.post_processing_export_mode == MODE_POST_PROCESSING_EXPORT_BAKED_SH
+            and self.ppisp_integration_mode == PPISP_INTEGRATION_MODE_SH_OPTIMIZED
         )
         uses_omni_native_post_processing_export = (
             post_processing is not None
             and self.export_post_processing
-            and self.post_processing_export_mode == MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE
+            and self.ppisp_integration_mode == PPISP_INTEGRATION_MODE_SPG_RUNTIME
         )
         if self.export_cameras and dataset is None:
             raise ValueError(
@@ -541,7 +588,7 @@ class USDExporter(ModelExporter):
             )
 
             if not has_ppisp_module:
-                raise ValueError("Baked-SH post-processing export currently supports PPISP post-processing only.")
+                raise ValueError("sh-optimized post-processing export currently supports PPISP post-processing only.")
             bake_camera_id = 0 if self.post_processing_camera_id is None else self.post_processing_camera_id
             bake_frame_id = 0 if self.post_processing_frame_id is None else self.post_processing_frame_id
             adapter = PPISPPostProcessingBakeAdapter(
@@ -569,7 +616,7 @@ class USDExporter(ModelExporter):
                 trajectory_weight_rotation=self.post_processing_bake_trajectory_weight_rotation,
             )
         if uses_omni_native_post_processing_export and not has_ppisp_module:
-            raise ValueError("Omniverse-native post-processing export currently supports PPISP post-processing only.")
+            raise ValueError("spg-runtime post-processing export currently supports PPISP post-processing only.")
 
         # User-requested constant radiance scale, applied uniformly to the
         # SH output regardless of bake / colour-space mode. The DC offset
@@ -616,6 +663,9 @@ class USDExporter(ModelExporter):
         )
 
         # Write Gaussians
+        effective_linear_srgb = (
+            runtime_post_processing if post_processing is not None and self.export_post_processing else self.linear_srgb
+        )
         writer = create_gaussian_writer(
             stage=stage,
             capabilities=caps,
@@ -623,9 +673,9 @@ class USDExporter(ModelExporter):
             half_geometry=self.half_geometry,
             half_features=self.half_features,
             sorting_mode_hint=self.sorting_mode_hint,
-            linear_srgb=self.linear_srgb,
-            omni_usd=uses_omni_native_post_processing_export,
-            has_post_processing=uses_omni_native_post_processing_export,
+            linear_srgb=effective_linear_srgb,
+            omni_usd=runtime_post_processing,
+            has_post_processing=runtime_post_processing,
         )
         writer.create_prim(attrs.num_gaussians)
         writer.write_attributes(attrs)
@@ -639,14 +689,14 @@ class USDExporter(ModelExporter):
         if package_as_usdz:
             default_stage_wrapped = self._create_default_stage(
                 [gaussians_stage],
-                has_runtime_ppisp=uses_omni_native_post_processing_export,
+                has_runtime_ppisp=runtime_post_processing,
             )
         scene_stage = default_stage_wrapped.stage if default_stage_wrapped is not None else stage
         if not package_as_usdz:
             scene_stage.SetMetadataByDictKey(
                 "customLayerData",
                 "renderSettings",
-                _particle_field_render_settings(has_runtime_ppisp=uses_omni_native_post_processing_export),
+                _particle_field_render_settings(has_runtime_ppisp=runtime_post_processing),
             )
 
         files: List[NamedSerialized] = []
@@ -891,7 +941,7 @@ class USDExporter(ModelExporter):
             if default_stage_wrapped is None:
                 default_stage_wrapped = self._create_default_stage(
                     [gaussians_stage],
-                    has_runtime_ppisp=uses_omni_native_post_processing_export,
+                    has_runtime_ppisp=runtime_post_processing,
                 )
             write_to_usdz(output_path, [default_stage_wrapped, gaussians_stage], files if files else None)
             written_path = output_path
@@ -905,7 +955,7 @@ class USDExporter(ModelExporter):
             if default_stage_wrapped is None:
                 default_stage_wrapped = self._create_default_stage(
                     [gaussians_stage],
-                    has_runtime_ppisp=uses_omni_native_post_processing_export,
+                    has_runtime_ppisp=runtime_post_processing,
                 )
             write_to_usdz(usdz_path, [default_stage_wrapped, gaussians_stage], files if files else None)
             written_path = usdz_path
@@ -926,7 +976,7 @@ class USDExporter(ModelExporter):
         camera_prim_paths: Dict[str, str],
         camera_params,
     ):
-        """Create /Render RenderProducts for PPISP Omniverse-native export."""
+        """Create /Render RenderProducts for PPISP spg-runtime export."""
         if dataset is None or not camera_prim_paths:
             logger.warning("No camera prims available for PPISP RenderProduct wiring, skipping")
             return None
@@ -1094,7 +1144,7 @@ class USDExporter(ModelExporter):
                 files.append(spg_file)
 
         logger.info(
-            "PPISP Omniverse-native export complete: %d sidecar(s) added (controller=%s)",
+            "PPISP spg-runtime export complete: %d sidecar(s) added (controller=%s)",
             len(files),
             use_controller,
         )
@@ -1125,11 +1175,17 @@ class USDExporter(ModelExporter):
                 "export_post_processing",
                 True,
             ),
+            ppisp_integration_mode=_get_export_config_value(
+                export_conf,
+                "ppisp-integration-mode",
+                "ppisp_integration_mode",
+                None,
+            ),
             post_processing_export_mode=_get_export_config_value(
                 export_conf,
                 "post-processing-export-mode",
                 "post_processing_export_mode",
-                MODE_POST_PROCESSING_EXPORT_BAKED_SH,
+                None,
             ),
             post_processing_camera_id=_get_export_config_value(
                 export_conf,

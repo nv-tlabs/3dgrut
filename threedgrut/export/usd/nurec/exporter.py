@@ -40,8 +40,8 @@ from threedgrut.export.usd.camera_copy import (
     stage_has_ppisp_post_processing_effects,
 )
 from threedgrut.export.usd.exporter import (
-    MODE_POST_PROCESSING_EXPORT_BAKED_SH,
-    MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE,
+    PPISP_INTEGRATION_MODE_SH_OPTIMIZED,
+    PPISP_INTEGRATION_MODE_SPG_RUNTIME,
     _build_camera_frame_mapping_from_grouping,
     _build_camera_time_mapping_from_grouping,
     _build_frame_time_codes_from_grouping,
@@ -50,6 +50,8 @@ from threedgrut.export.usd.exporter import (
     _extract_camera_resolutions,
     _is_ppisp_post_processing,
     _suffix_camera_names,
+    normalize_post_processing_export_mode,
+    normalize_ppisp_integration_mode,
 )
 from threedgrut.export.usd.nurec.serializer import (
     serialize_nurec_usd,
@@ -140,7 +142,8 @@ class NuRecExporter(ModelExporter):
         *,
         export_cameras: bool = True,
         export_post_processing: bool = True,
-        post_processing_export_mode: str = MODE_POST_PROCESSING_EXPORT_BAKED_SH,
+        post_processing_export_mode: str | None = None,
+        ppisp_integration_mode: str | None = None,
         post_processing_camera_id: int | None = None,
         post_processing_frame_id: int | None = None,
         ppisp_responsivity: float = 1.0,
@@ -158,7 +161,20 @@ class NuRecExporter(ModelExporter):
     ) -> None:
         self.export_cameras = export_cameras
         self.export_post_processing = export_post_processing
-        self.post_processing_export_mode = post_processing_export_mode
+        if ppisp_integration_mode is not None and post_processing_export_mode is not None:
+            normalized_ppisp_mode = normalize_ppisp_integration_mode(ppisp_integration_mode)
+            normalized_legacy_mode = normalize_post_processing_export_mode(post_processing_export_mode)
+            if normalized_ppisp_mode != normalized_legacy_mode:
+                raise ValueError(
+                    "ppisp_integration_mode and post_processing_export_mode specify different modes: "
+                    f"{ppisp_integration_mode!r} vs {post_processing_export_mode!r}"
+                )
+            self.ppisp_integration_mode = normalized_ppisp_mode
+        else:
+            self.ppisp_integration_mode = normalize_ppisp_integration_mode(
+                ppisp_integration_mode if ppisp_integration_mode is not None else post_processing_export_mode
+            )
+        self.post_processing_export_mode = self.ppisp_integration_mode
         self.post_processing_camera_id = post_processing_camera_id
         self.post_processing_frame_id = post_processing_frame_id
         self.ppisp_responsivity = ppisp_responsivity
@@ -202,12 +218,12 @@ class NuRecExporter(ModelExporter):
         uses_baked_post_processing_export = (
             post_processing is not None
             and self.export_post_processing
-            and self.post_processing_export_mode == MODE_POST_PROCESSING_EXPORT_BAKED_SH
+            and self.ppisp_integration_mode == PPISP_INTEGRATION_MODE_SH_OPTIMIZED
         )
         uses_omni_native_post_processing_export = (
             post_processing is not None
             and self.export_post_processing
-            and self.post_processing_export_mode == MODE_POST_PROCESSING_EXPORT_OMNI_NATIVE
+            and self.ppisp_integration_mode == PPISP_INTEGRATION_MODE_SPG_RUNTIME
         )
         if self.export_cameras and dataset is None:
             raise ValueError(
@@ -222,7 +238,7 @@ class NuRecExporter(ModelExporter):
             )
 
             if not has_ppisp_module:
-                raise ValueError("Baked-SH post-processing export currently supports PPISP post-processing only.")
+                raise ValueError("sh-optimized post-processing export currently supports PPISP post-processing only.")
             bake_camera_id = 0 if self.post_processing_camera_id is None else self.post_processing_camera_id
             bake_frame_id = 0 if self.post_processing_frame_id is None else self.post_processing_frame_id
             adapter = PPISPPostProcessingBakeAdapter(
@@ -250,7 +266,7 @@ class NuRecExporter(ModelExporter):
                 trajectory_weight_rotation=self.post_processing_bake_trajectory_weight_rotation,
             )
         if uses_omni_native_post_processing_export and not has_ppisp_module:
-            raise ValueError("Omniverse-native post-processing export currently supports PPISP post-processing only.")
+            raise ValueError("spg-runtime post-processing export currently supports PPISP post-processing only.")
 
         if self.radiance_scale != 1.0:
             from threedgrut.export.usd.post_processing_sh_bake import scale_sh_output
