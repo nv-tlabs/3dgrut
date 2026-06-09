@@ -81,7 +81,7 @@ jobs:
           git config --global --add safe.directory "$(pwd)"
           ./install_env_uv.sh
         env:
-          TORCH_CUDA_ARCH_LIST: "9.0" # random arch for testing install
+          TORCH_CUDA_ARCH_LIST: "9.0" # single arch for CI install/build smoke test
           CUDA_VERSION: ${{ matrix.cuda_version }}
 
       - name: Smoketest - python train.py --help # better (smoke) testing requires a GPU

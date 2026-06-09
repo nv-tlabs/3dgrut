@@ -1,0 +1,2 @@
+# NHT feature decoder: install Python bindings from the pinned submodule.
+./thirdparty/tiny-cuda-nn/bindings/torch
