@@ -72,6 +72,7 @@ protected:
 
         float particleKernelDegree;
         float particleKernelMinResponse;
+        float particleKernelMaxAlpha;
         bool particleKernelDensityClamping;
         int particleRadianceSphDegree;
 
@@ -132,6 +133,7 @@ public:
         const std::string& primitive,
         float particleKernelDegree,
         float particleKernelMinResponse,
+        float particleKernelMaxAlpha,
         bool particleKernelDensityClamping,
         int particleRadianceSphDegree,
         bool enableNormals,

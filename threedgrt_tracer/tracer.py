@@ -185,6 +185,7 @@ class Tracer:
             self.conf.render.primitive_type,
             self.conf.render.particle_kernel_degree,
             self.conf.render.particle_kernel_min_response,
+            self.conf.render.particle_kernel_max_alpha,
             self.conf.render.particle_kernel_density_clamping,
             self.conf.render.particle_radiance_sph_degree,
             self.conf.render.enable_normals,
