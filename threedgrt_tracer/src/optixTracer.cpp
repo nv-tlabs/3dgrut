@@ -225,6 +225,7 @@ std::vector<std::string> OptixTracer::generateDefines(
         defines.emplace_back("-DSPH_MAX_NUM_COEFFS=" + std::to_string((_state->particleRadianceSphDegree + 1) * (_state->particleRadianceSphDegree + 1)));
         defines.emplace_back("-DPARTICLE_PRIMITIVE_TYPE=" + std::to_string(_state->gPrimType));
         defines.emplace_back("-DPARTICLE_PRIMITIVE_CLAMPED=" + std::to_string(particleKernelDensityClamping ? 1 : 0));
+        defines.emplace_back("-DGAUSSIAN_PARTICLE_MAX_ALPHA=" + std::to_string(_state->particleKernelMaxAlpha));
         // Feature dims: use C++ defines so JIT OptiX pipeline sees same values as extension build
         defines.emplace_back("-DPARTICLE_FEATURE_DIM=" + std::to_string(PipelineParameters::ParticleFeatureDim));
         defines.emplace_back("-DRAY_FEATURE_DIM=" + std::to_string(PipelineParameters::RayFeatureDim));
@@ -250,6 +251,7 @@ OptixTracer::OptixTracer(
     const std::string& primitive,
     float particleKernelDegree,
     float particleKernelMinResponse,
+    float particleKernelMaxAlpha,
     bool particleKernelDensityClamping,
     int particleRadianceSphDegree,
     bool enableNormals,
@@ -280,6 +282,7 @@ OptixTracer::OptixTracer(
     _state->particleRadianceSphDegree     = particleRadianceSphDegree;
     _state->particleKernelDegree          = particleKernelDegree;
     _state->particleKernelMinResponse     = particleKernelMinResponse;
+    _state->particleKernelMaxAlpha        = particleKernelMaxAlpha;
     _state->particleKernelDensityClamping = particleKernelDensityClamping;
     _state->gNum                          = 0;
     _state->gPrimType                     = primitiveTypeFromStr(primitive);
