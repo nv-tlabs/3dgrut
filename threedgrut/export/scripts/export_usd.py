@@ -36,7 +36,7 @@ from pathlib import Path
 
 import torch
 
-from threedgrut.export.usd.exporter import USDExporter
+from threedgrut.export.usd.exporter import VALID_PPISP_INTEGRATION_MODES, USDExporter
 from threedgrut.export.usd.nurec.exporter import NuRecExporter
 from threedgrut.export.usd.particle_field_hints import (
     DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
@@ -154,19 +154,30 @@ Examples:
         help="Skip post-processing export even when the checkpoint contains a supported post-processing module.",
     )
     parser.add_argument(
-        "--post-processing-export-mode",
+        "--ppisp-integration-mode",
         type=str,
-        choices=["baked-sh", "omni-native"],
+        choices=VALID_PPISP_INTEGRATION_MODES,
         default=None,
-        help="Post-processing export mode. 'omni-native' uses PPISP SPG and Omniverse material authoring.",
+        help=(
+            "How PPISP effects appear in the USD asset. 'spg-runtime' authors PPISP "
+            "as Omniverse SPG shaders; 'sh-optimized' folds PPISP into Gaussian SH."
+        ),
+    )
+    parser.add_argument(
+        "--post-processing-export-mode",
+        dest="ppisp_integration_mode",
+        type=str,
+        choices=[*VALID_PPISP_INTEGRATION_MODES, "baked-sh", "omni-native"],
+        default=None,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--post-processing-camera-id",
         type=int,
         default=None,
         help=(
-            "Optional fixed PPISP camera id. Baked-SH defaults unset values to 0; "
-            "omni-native keeps per-camera behavior when unset."
+            "Optional fixed PPISP camera id. sh-optimized defaults unset values to 0; "
+            "spg-runtime keeps per-camera behavior when unset."
         ),
     )
     parser.add_argument(
@@ -174,15 +185,15 @@ Examples:
         type=int,
         default=None,
         help=(
-            "Optional fixed PPISP frame id. Baked-SH defaults unset values to 0; "
-            "omni-native keeps animated frame inputs when unset."
+            "Optional fixed PPISP frame id. sh-optimized defaults unset values to 0; "
+            "spg-runtime keeps animated frame inputs when unset."
         ),
     )
     parser.add_argument(
         "--ppisp-responsivity",
         type=float,
         default=None,
-        help=("Achromatic PPISP responsivity default authored on omni-native " "SPG shaders. Default is 1.0."),
+        help=("Achromatic PPISP responsivity default authored on spg-runtime SPG shaders. Default is 1.0."),
     )
     parser.add_argument(
         "--ignore-ppisp-controller",
@@ -418,12 +429,19 @@ def main():
         export_post_processing = True
     else:
         export_post_processing = bool(_get_export_post_processing_default(export_conf))
-    post_processing_export_mode = _arg_or_conf(
-        args.post_processing_export_mode,
+    ppisp_integration_mode = _arg_or_conf(
+        args.ppisp_integration_mode,
+        export_conf,
+        "ppisp-integration-mode",
+        "ppisp_integration_mode",
+        None,
+    )
+    legacy_post_processing_export_mode = _arg_or_conf(
+        None,
         export_conf,
         "post-processing-export-mode",
         "post_processing_export_mode",
-        "baked-sh",
+        None,
     )
     # Load dataset for camera export and for train-split post-processing SH baking.
     dataset = None
@@ -464,7 +482,8 @@ def main():
         exporter = NuRecExporter(
             export_cameras=not args.no_cameras,
             export_post_processing=export_post_processing,
-            post_processing_export_mode=post_processing_export_mode,
+            ppisp_integration_mode=ppisp_integration_mode,
+            post_processing_export_mode=legacy_post_processing_export_mode,
             post_processing_camera_id=_arg_or_conf(
                 args.post_processing_camera_id,
                 export_conf,
@@ -577,7 +596,8 @@ def main():
             ),
             linear_srgb=args.linear_srgb or getattr(export_conf, "linear_srgb", False),
             export_post_processing=export_post_processing,
-            post_processing_export_mode=post_processing_export_mode,
+            ppisp_integration_mode=ppisp_integration_mode,
+            post_processing_export_mode=legacy_post_processing_export_mode,
             post_processing_camera_id=_arg_or_conf(
                 args.post_processing_camera_id,
                 export_conf,
