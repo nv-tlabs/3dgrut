@@ -31,12 +31,11 @@ from ncore.data import (
     OpenCVPinholeCameraModelParameters,
     ShutterType,
 )
-from pxr import Usd, UsdGeom
+from pxr import Usd
 
 from threedgrut.export.accessor import GaussianExportAccessor
 from threedgrut.export.base import ExportableModel, ModelExporter
 from threedgrut.export.transforms import (
-    apply_usd_transform_samples,
     estimate_normalizing_transform,
     get_3dgrut_to_usdz_coordinate_transform,
 )
@@ -613,10 +612,7 @@ class USDExporter(ModelExporter):
             root_path="/World/Gaussians",
             normalizing_transform=normalizing_transform if self.apply_normalizing_transform else None,
             coordinate_transform=coordinate_transform,
-        )
-        apply_usd_transform_samples(
-            UsdGeom.Xformable(stage.GetPrimAtPath(gaussians_root)),
-            kwargs.get("source_gaussian_transform"),
+            source_transform_samples=kwargs.get("source_gaussian_transform"),
         )
 
         # Write Gaussians

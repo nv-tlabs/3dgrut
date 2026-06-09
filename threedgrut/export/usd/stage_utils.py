@@ -32,7 +32,11 @@ from typing import List, Optional, Union
 import numpy as np
 from pxr import Gf, Usd, UsdGeom
 
-from threedgrut.export.transforms import column_vector_4x4_to_usd_matrix
+from threedgrut.export.transforms import (
+    USDTransformSamples,
+    apply_usd_transform_samples,
+    column_vector_4x4_to_usd_matrix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +142,7 @@ def create_gaussian_model_root(
     root_path: str = "/World/Gaussians",
     normalizing_transform: np.ndarray = None,
     coordinate_transform: np.ndarray = None,
+    source_transform_samples: Optional[USDTransformSamples] = None,
 ) -> str:
     """
     Create the root Xform for Gaussian content with optional coordinate transforms.
@@ -150,11 +155,14 @@ def create_gaussian_model_root(
         root_path: USD path for the root prim
         normalizing_transform: Optional 4x4 normalizing transform matrix
         coordinate_transform: Optional 4x4 (e.g. 3DGRUT-to-USDZ). Applied after normalizing and scale.
+        source_transform_samples: Optional source Gaussian local-to-world transform samples,
+            authored before normalization / coordinate transform to match the NuRec exporter.
 
     Returns:
         The root path string
     """
     root_xform = UsdGeom.Xform.Define(stage, root_path)
+    apply_usd_transform_samples(root_xform, source_transform_samples)
 
     # Build scale matrix for axis flipping
     scale_x = -1.0 if flip_x_axis else 1.0

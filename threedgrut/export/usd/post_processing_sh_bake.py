@@ -339,11 +339,11 @@ def estimate_achromatic_vignetting(
         raise ValueError("PPISP-like module is missing vignetting_params.")
 
     width, height = resolution
-    del height
+    max_res = float(max(width, height))
     vig_params = ppisp.vignetting_params[int(camera_id)].to(device=pixel_coords.device, dtype=pixel_coords.dtype)
 
-    u = (pixel_coords[..., 0] - float(width) * 0.5) / float(width)
-    v = (pixel_coords[..., 1] - float(resolution[1]) * 0.5) / float(width)
+    u = (pixel_coords[..., 0] - float(width) * 0.5) / max_res
+    v = (pixel_coords[..., 1] - float(height) * 0.5) / max_res
     uv = torch.stack([u, v], dim=-1)
 
     channel_falloff = []
