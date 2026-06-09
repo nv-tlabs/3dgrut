@@ -18,7 +18,7 @@ PPISP USD Writer.
 
 Export PPISP (Physically Plausible Image Signal Processing) as a UsdShade
 Shader prim on each camera's RenderProduct. Adapted from
-nre-fermat/nre/utils/io/export/ppisp_usd_writer.py, replacing the
+nre-borel/nre/utils/io/export/ppisp_export, replacing the
 rig/timestamp frame-mapping with 3DGRUT integer frame indices.
 
 PPISP pipeline stages:

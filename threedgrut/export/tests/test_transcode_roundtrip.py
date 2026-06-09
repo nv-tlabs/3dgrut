@@ -121,6 +121,10 @@ def _assert_usd_matrices_close(actual: Gf.Matrix4d, expected: Gf.Matrix4d) -> No
     assert np.allclose(usd_matrix_to_numpy(actual), usd_matrix_to_numpy(expected), atol=1e-6)
 
 
+def _xform_op_order(prim: Usd.Prim) -> list[str]:
+    return [str(token) for token in prim.GetAttribute("xformOpOrder").Get()]
+
+
 def create_test_attributes(num_gaussians: int = 100, sh_degree: int = 3) -> GaussianAttributes:
     """Create synthetic test Gaussian attributes.
 
@@ -602,6 +606,60 @@ class TestCrossFormatTranscode:
             output_prim = _find_nurec_volume_prim(output_stage)
             output_matrix = UsdGeom.Xformable(output_prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
             _assert_usd_matrices_close(output_matrix, expected_matrix)
+
+    def test_transcode_coordinate_transform_order_matches_nurec(self):
+        """USD→USD and USD→NuRec compose source pose and coordinate transform identically."""
+        attrs = create_test_attributes(32, sh_degree=3)
+        caps = create_test_capabilities(32, sh_degree=3)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            input_path = tmp_path / "input.usda"
+            output_lightfield_path = tmp_path / "output_lightfield.usda"
+            output_nurec_path = tmp_path / "output_nurec.usdz"
+
+            adapter = AttributesExportAdapter(attrs, caps, is_preactivation=True)
+            USDExporter(
+                export_cameras=False,
+                export_background=False,
+                apply_normalizing_transform=False,
+            ).export(adapter, input_path, validate_usd=False)
+
+            stage = Usd.Stage.Open(str(input_path))
+            assert stage
+            _set_source_gaussian_root_transform(stage)
+            stage.GetRootLayer().Export(str(input_path))
+
+            transcode(
+                input_path=input_path,
+                output_path=output_lightfield_path,
+                output_format="lightfield",
+                apply_coordinate_transform=True,
+                validate_usd=False,
+            )
+            transcode(
+                input_path=input_path,
+                output_path=output_nurec_path,
+                output_format="nurec",
+                apply_coordinate_transform=True,
+                validate_usd=False,
+            )
+
+            lightfield_stage = Usd.Stage.Open(str(output_lightfield_path))
+            assert lightfield_stage
+            lightfield_prim = _find_particlefield_prim(lightfield_stage)
+            lightfield_root = lightfield_prim.GetParent()
+
+            nurec_stage = Usd.Stage.Open(str(output_nurec_path))
+            assert nurec_stage
+            nurec_prim = _find_nurec_volume_prim(nurec_stage)
+
+            assert _xform_op_order(lightfield_root) == ["xformOp:transform:sourcePose", "xformOp:transform"]
+            assert _xform_op_order(nurec_prim) == ["xformOp:transform:sourcePose", "xformOp:transform"]
+
+            lightfield_matrix = UsdGeom.Xformable(lightfield_prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            nurec_matrix = UsdGeom.Xformable(nurec_prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            _assert_usd_matrices_close(lightfield_matrix, nurec_matrix)
 
     def test_ply_to_usd_to_ply(self):
         """Test PLY → USD LightField → PLY transcode chain."""
