@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+USER_TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-}"
+
 # ------------------------------------------
 # Step 1: Resolve CUDA major version to full version and config
 # ------------------------------------------
@@ -64,6 +66,9 @@ export CUDA_CONDA_CHANNEL="nvidia/label/cuda-${CUDA_FULL_VERSION}"
 # PyTorch release URL for the given CUDA version
 export TORCH_INDEX_URL="https://download.pytorch.org/whl/cu${CUDA_MAJOR_TARGET}${CUDA_MINOR_TARGET}"
 export TORCH_VERSION=${TORCH_VERSION:-}
+if [ -n "$USER_TORCH_CUDA_ARCH_LIST" ]; then
+    export TORCH_CUDA_ARCH_LIST="$USER_TORCH_CUDA_ARCH_LIST"
+fi
 # export TORCHVISION_VERSION=${TORCHVISION_VERSION:-}
 # export TORCHAUDIO_VERSION=${TORCHAUDIO_VERSION:-}
 
@@ -99,4 +104,3 @@ echo ""
 
 export GCC_PATH
 export GXX_PATH
-

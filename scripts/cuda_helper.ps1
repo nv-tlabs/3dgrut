@@ -20,6 +20,7 @@
 # Reference: https://github.com/pytorch/pytorch/blob/main/.ci/manywheel/build_cuda.sh#L54
 
 $ErrorActionPreference = "Stop"
+$UserTorchCudaArchList = $env:TORCH_CUDA_ARCH_LIST
 
 switch -Regex ($env:CUDA_VERSION) {
     "^(11\.8\.0|11\.8|11)$" {
@@ -62,5 +63,8 @@ $env:CUDA_MINOR_TARGET = $parts[1]
 
 $env:TORCH_INDEX_URL = "https://download.pytorch.org/whl/cu$($env:CUDA_MAJOR_TARGET)$($env:CUDA_MINOR_TARGET)"
 $env:TORCH_VERSION   = $script:TORCH_VERSION
+if ($UserTorchCudaArchList) {
+    $env:TORCH_CUDA_ARCH_LIST = $UserTorchCudaArchList
+}
 
 Write-Host ""
