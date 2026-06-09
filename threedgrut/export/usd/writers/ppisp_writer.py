@@ -735,6 +735,12 @@ def add_ppisp_to_all_render_products(
         from threedgrut.export.usd.writers.ppisp_controller_writer import (
             add_ppisp_auto_shader_to_render_product,
         )
+    elif fixed_frame_index is not None and fixed_camera_index is None:
+        raise ValueError(
+            "ppisp_reference_frame_id was set without ppisp_reference_camera_id "
+            "in spg-runtime export mode. Frame-only fixing is ambiguous because "
+            "vignetting and CRF live on the camera axis."
+        )
 
     render_scope = stage.GetPrimAtPath(render_scope_path)
     if not render_scope.IsValid():

@@ -1,3 +1,5 @@
 type: scannetpp
 downsample_factor: 1
 test_split_interval: 8
+camera_names: null  # Optional folder-name filter, same semantics as COLMAP.
+camera_ids: null    # Optional COLMAP numeric camera id filter, same semantics as COLMAP.

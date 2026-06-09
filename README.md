@@ -339,10 +339,10 @@ When a checkpoint contains a supported PPISP module, USD export includes post-pr
 With `spg-runtime`, controller-trained checkpoints use the PPISP controller path by default. The
 exporter writes a per-camera controller graph plus generated CUDA sidecars with embedded controller
 weights, and connects the automatic-parameter PPISP shader to the RenderProduct `LdrColor` output.
-Use `--ignore-ppisp-controller` to force the static fallback path, which authors optimized exposure
-and color parameters as USD attributes instead of running the controller. Setting a fixed PPISP frame
-also selects the static path, because a fixed-frame export intentionally represents one specific
-PPISP state.
+Use `--disable-ppisp-controller-export` to force the static fallback path, which authors optimized
+exposure and color parameters as USD attributes instead of running the controller. Use
+`--enable-ppisp-controller-export` to fail loudly if the checkpoint does not contain trained
+controllers. When controller export is enabled, PPISP reference camera/frame IDs are ignored.
 
 The equivalent training-config keys live under `export_usd`:
 
@@ -350,11 +350,12 @@ The equivalent training-config keys live under `export_usd`:
 export_usd:
   export_post_processing: true
   ppisp-integration-mode: spg-runtime   # spg-runtime | sh-optimized
-  post-processing-camera-id: null
-  post-processing-frame-id: null
+  ppisp-reference-camera-id: null
+  ppisp-reference-frame-id: null
   ppisp-responsivity: 1.0
-  ignore-ppisp-controller: false
-  radiance-scale: 1.0
+  enable-ppisp-controller-export: null
+  sh-optimization-num-iterations: null
+  scene-radiance-scale: 1.0
 ```
 
 The standalone exporter exposes the same controls:
@@ -373,20 +374,20 @@ Useful PPISP export flags:
   post-processing effects.
 - `--ppisp-integration-mode {spg-runtime,sh-optimized}`: choose runtime Omniverse SPG export or
   SH-optimized export.
-- `--post-processing-camera-id INT`, `--post-processing-frame-id INT`: select the PPISP
+- `--ppisp-reference-camera-id INT`, `--ppisp-reference-frame-id INT`: select the PPISP
   camera/frame used by `sh-optimized`, or pin `spg-runtime` static export to one camera/frame.
 - `--ppisp-responsivity FLOAT`: runtime achromatic HDR multiplier authored on `spg-runtime` PPISP
   shaders. In controller mode, the same multiplier is authored on the controller pool so exposure
   and color predictions use the same scaled HDR signal. The default `1.0` is a no-op and can be
   overridden downstream in USD.
-- `--radiance-scale FLOAT`: multiplicative scale applied to exported SH radiance. For
-  `spg-runtime` PPISP exports, setting `--ppisp-responsivity` to `1 / radiance_scale` preserves the
-  training-time PPISP input magnitude while changing the asset radiance scale.
-- `--ignore-ppisp-controller`: disable controller export for controller-trained checkpoints and
-  use static/time-sampled PPISP parameters instead.
-- `--post-processing-bake-epochs`, `--post-processing-bake-learning-rate`,
-  `--post-processing-bake-learning-rate-specular`, `--post-processing-bake-learning-rate-density`,
-  and `--ppisp-bake-vignetting-mode`: tune the `sh-optimized` fit.
+- `--scene-radiance-scale FLOAT`: multiplicative scale applied to exported SH radiance. For
+  `spg-runtime` PPISP exports, setting `--ppisp-responsivity` to `1 / scene_radiance_scale`
+  preserves the training-time PPISP input magnitude while changing the asset radiance scale.
+- `--enable-ppisp-controller-export` / `--disable-ppisp-controller-export`: require controller
+  export or force static/time-sampled PPISP parameters. Unset auto-enables controller export only
+  when the PPISP checkpoint has trained controllers.
+- `--sh-optimization-num-iterations INT`: override the `sh-optimized` optimizer step budget.
+  Unset uses the nre-borel default of 3000 iterations.
 
 For `spg-runtime`, the exporter also authors the nre-borel render-setting gate that keeps Gaussian
 tonemapping enabled before PPISP consumes the HDR RenderVar.

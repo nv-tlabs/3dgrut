@@ -113,12 +113,16 @@ def make(name: str, config, ray_jitter):
                 ray_jitter=ray_jitter,
                 downsample_factor=config.dataset.downsample_factor,
                 test_split_interval=config.dataset.test_split_interval,
+                camera_names=config.dataset.get("camera_names", None),
+                camera_ids=config.dataset.get("camera_ids", None),
             )
             val_dataset = ScannetppDataset(
                 config.path,
                 split="val",
                 downsample_factor=config.dataset.downsample_factor,
                 test_split_interval=config.dataset.test_split_interval,
+                camera_names=config.dataset.get("camera_names", None),
+                camera_ids=config.dataset.get("camera_ids", None),
             )
         case "ncore":
             train_dataset = NCoreDataset(
@@ -221,6 +225,8 @@ def make_test(name: str, config):
                 split="val",
                 downsample_factor=config.dataset.downsample_factor,
                 test_split_interval=config.dataset.test_split_interval,
+                camera_names=config.dataset.get("camera_names", None),
+                camera_ids=config.dataset.get("camera_ids", None),
             )
         case "ncore":
             # Inherit temporal window from training by default
