@@ -31,7 +31,7 @@ For projects that require a fast, modular, and production-ready Gaussian Splatti
 > __[Project page](https://research.nvidia.com/labs/sil/projects/neural-harmonic-textures/)&nbsp;/ [Paper](https://research.nvidia.com/labs/sil/projects/neural-harmonic-textures/assets/neural_harmonic_textures.pdf)&nbsp;/ [Video](https://research.nvidia.com/labs/sil/projects/neural-harmonic-textures/videos/video_nht_titleless.mp4)&nbsp;/ [BibTeX](assets/nht2026.bib)__
 
 ## 🔥 News
-- ✅[2026/06] Neural Harmonic Textures support.
+- ✅[2026/06] 3DGRUT v2.0.0: Neural Harmonic Textures support.
 - ✅[2026/03] NCore v4: Support for training from NCore v4 datasets ([NCore](https://github.com/NVIDIA/ncore), [commands](#training-on-ncore-v4-datasets)).
 - ✅[2026/01] Physically-Plausible ISP support.
 - ✅[2025/08] Support for the 3DGRT and 3DGS/3DGRT pipelines is now available with the Vulkan API as part of the [Vulkan Gaussian Splatting Project](https://github.com/nvpro-samples/vk_gaussian_splatting). 3DGUT will also be available soon.
