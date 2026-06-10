@@ -1,2 +1,2 @@
-ppisp @ git+https://github.com/nv-tlabs/ppisp@64d45972241a0ec5ac004b0ad255c9f721e3190c
+ppisp @ git+https://github.com/nv-tlabs/ppisp@41f3331b567ef366e4c261171007771f85f59e46
 fused-ssim @ git+https://github.com/rahul-goel/fused-ssim@1272e21a282342e89537159e4bad508b19b34157
