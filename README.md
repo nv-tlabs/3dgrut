@@ -491,35 +491,60 @@ bash ./benchmark/scannetpp_render.sh results/scannetpp
 </details>
 
 <details>
-<summary><strong><a name="nht-benchmark">Neural Harmonic Textures Results Produced on NVIDIA L40</a></strong></summary>
+<summary><strong><a name="gut-nht-benchmark">3DGUT / NHT Results Produced on L40</a></strong></summary>
 <br/>
 
 **MipNeRF360 Dataset**
 
 ```bash
-# 3DGUT + SH baseline
-RESULT_DIR=results/mipnerf360_3dgut_mcmc \
-    bash ./benchmark/mipnerf360.sh apps/colmap_3dgut_mcmc.yaml
-
-# 3DGRT + SH baseline
-RESULT_DIR=results/mipnerf360_3dgrt_mcmc \
-    bash ./benchmark/mipnerf360.sh apps/colmap_3dgrt_mcmc.yaml
-
-# 3DGUT + NHT
-DATA_ROOT=data/mipnerf360 RESULT_DIR=results/mipnerf360_3dgut_nht FEATURE_DIM=48 \
-    bash ./benchmark/mipnerf360_nht.sh apps/colmap_3dgut_mcmc_nht
-
-# 3DGRT + NHT
-DATA_ROOT=data/mipnerf360 RESULT_DIR=results/mipnerf360_3dgrt_nht FEATURE_DIM=48 \
-    bash ./benchmark/mipnerf360_nht.sh apps/colmap_3dgrt_mcmc_nht
+RESULT_DIR=results/mipnerf360_3dgut_nht \
+    bash ./benchmark/mipnerf360.sh apps/colmap_3dgut_mcmc_nht.yaml
+bash ./benchmark/mipnerf360_render.sh results/mipnerf360_3dgut_nht
 ```
 
-| Method      | PSNR | SSIM | Train (s) | FPS |
-|-------------|------|------|-----------|-----|
-| 3DGUT + SH  | TBD  | TBD  | TBD       | TBD |
-| 3DGUT + NHT | TBD  | TBD  | TBD       | TBD |
-| 3DGRT + SH  | TBD  | TBD  | TBD       | TBD |
-| 3DGRT + NHT | TBD  | TBD  | TBD       | TBD |
+Current validation uses 1M primitives, 30k iterations, MCMC, and 48 NHT features.
+
+|           | PSNR  | SSIM  | Train (s) | FPS   |
+|-----------|-------|-------|-----------|-------|
+| Bicycle   | 25.32 | 0.767 | 3177.5    | 230.9 |
+| Bonsai    | 33.65 | 0.951 | 5583.5    | 141.4 |
+| Counter   | 29.99 | 0.919 | 7229.4    | 120.5 |
+| Flowers   | 21.52 | 0.606 | 3916.8    | 179.3 |
+| Garden    | 27.52 | 0.859 | 3054.4    | 311.2 |
+| Kitchen   | 32.44 | 0.934 | 5852.5    | 162.3 |
+| Room      | 32.61 | 0.931 | 5827.3    | 139.6 |
+| Stump     | 26.68 | 0.779 | 3155.7    | 213.6 |
+| Treehill  | 23.02 | 0.653 | 3225.3    | 219.2 |
+| *Average* | 28.08 | 0.822 | 4558.0    | 190.9 |
+
+</details>
+
+<details>
+<summary><strong><a name="grt-nht-benchmark">3DGRT / NHT Results Produced on L40</a></strong></summary>
+<br/>
+
+**MipNeRF360 Dataset**
+
+```bash
+RESULT_DIR=results/mipnerf360_3dgrt_nht \
+    bash ./benchmark/mipnerf360.sh apps/colmap_3dgrt_mcmc_nht.yaml
+bash ./benchmark/mipnerf360_render.sh results/mipnerf360_3dgrt_nht
+```
+
+Current validation uses 1M primitives, 30k iterations, MCMC, and 48 NHT features.
+
+|           | PSNR  | SSIM  | Train (s) | FPS  |
+|-----------|-------|-------|-----------|------|
+| Bicycle   | 25.21 | 0.762 | 3187.1    | 58.1 |
+| Bonsai    | 33.11 | 0.949 | 6470.9    | 27.4 |
+| Counter   | 29.41 | 0.915 | 9095.5    | 18.6 |
+| Flowers   | 21.42 | 0.604 | 3676.9    | 50.9 |
+| Garden    | 27.12 | 0.850 | 2864.2    | 67.4 |
+| Kitchen   | 31.47 | 0.930 | 6025.1    | 26.6 |
+| Room      | 31.61 | 0.929 | 7548.5    | 30.5 |
+| Stump     | 25.61 | 0.744 | 2751.5    | 49.1 |
+| Treehill  | 23.05 | 0.653 | 3405.5    | 55.9 |
+| *Average* | 27.56 | 0.815 | 5002.8    | 42.7 |
 
 </details>
 
