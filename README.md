@@ -25,9 +25,14 @@ For projects that require a fast, modular, and production-ready Gaussian Splatti
 > _CVPR 2025 (Oral)_
 > __[Project page](https://research.nvidia.com/labs/toronto-ai/3DGUT)&nbsp;/ [Paper](https://research.nvidia.com/labs/toronto-ai/3DGUT/res/3DGUT_ready_main.pdf)&nbsp;/ [Video](https://research.nvidia.com/labs/toronto-ai/3DGUT/#supp_video)&nbsp;/ [BibTeX](assets/3dgut2025.bib)__
 
+> __Neural Harmonic Textures for High-Quality Primitive Based Neural Reconstruction__
+> Jorge Condor, Nicolas Moenne-Loccoz, Merlin Nimier-David, Piotr Didyk, Zan Gojcic, Qi Wu
+> _arXiv 2026_
+> __[Project page](https://research.nvidia.com/labs/sil/projects/neural-harmonic-textures/)&nbsp;/ [Paper](https://research.nvidia.com/labs/sil/projects/neural-harmonic-textures/assets/neural_harmonic_textures.pdf)&nbsp;/ [Video](https://research.nvidia.com/labs/sil/projects/neural-harmonic-textures/videos/video_nht_titleless.mp4)&nbsp;/ [BibTeX](assets/nht2026.bib)__
 
 ## 🔥 News
-- ✅[2026/03] **NCore v4:** Support for training from NCore v4 datasets ([NCore](https://github.com/NVIDIA/ncore), [commands](#training-on-ncore-v4-datasets)).
+- ✅[2026/06] Neural Harmonic Textures support.
+- ✅[2026/03] NCore v4: Support for training from NCore v4 datasets ([NCore](https://github.com/NVIDIA/ncore), [commands](#training-on-ncore-v4-datasets)).
 - ✅[2026/01] Physically-Plausible ISP support.
 - ✅[2025/08] Support for the 3DGRT and 3DGS/3DGRT pipelines is now available with the Vulkan API as part of the [Vulkan Gaussian Splatting Project](https://github.com/nvpro-samples/vk_gaussian_splatting). 3DGUT will also be available soon.
 - ✅[2025/07] Support for datasets with multiple sensors (only for COLMAP-style datasets).
@@ -49,6 +54,7 @@ For projects that require a fast, modular, and production-ready Gaussian Splatti
   - [Running with Docker](#running-with-docker)
 - [💻 2. Train 3DGRT or 3DGUT scenes](#-2-train-3dgrt-or-3dgut-scenes)
   - [Training on NCore v4 datasets](#training-on-ncore-v4-datasets)
+  - [Training with Neural Harmonic Textures (NHT)](#training-with-neural-harmonic-textures-nht)
   - [Using image masks](#using-image-masks)
   - [Exporting trained scenes (USD, PLY, NuRec)](#exporting-trained-scenes-usd-ply-nurec)
 - [🎥 3. Rendering from Checkpoints](#-3-rendering-from-checkpoints)
@@ -228,6 +234,14 @@ To enable MCMC, use:
 ```bash
 python train.py --config-name apps/colmap_3dgrt_mcmc.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgrt dataset.downsample_factor=2
 python train.py --config-name apps/colmap_3dgut_mcmc.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgut dataset.downsample_factor=2
+```
+
+### Training with Neural Harmonic Textures (NHT)
+
+To enable Neural Harmonic Textures (NHT), use:
+```bash
+python train.py --config-name apps/colmap_3dgrt_mcmc_nht.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgrt_nht dataset.downsample_factor=2
+python train.py --config-name apps/colmap_3dgut_mcmc_nht.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgut_nht dataset.downsample_factor=2
 ```
 
 To enable selective Adam, use:
@@ -476,6 +490,39 @@ bash ./benchmark/scannetpp_render.sh results/scannetpp
 
 </details>
 
+<details>
+<summary><strong><a name="nht-benchmark">Neural Harmonic Textures Results Produced on NVIDIA L40</a></strong></summary>
+<br/>
+
+**MipNeRF360 Dataset**
+
+```bash
+# 3DGUT + SH baseline
+RESULT_DIR=results/mipnerf360_3dgut_mcmc \
+    bash ./benchmark/mipnerf360.sh apps/colmap_3dgut_mcmc.yaml
+
+# 3DGRT + SH baseline
+RESULT_DIR=results/mipnerf360_3dgrt_mcmc \
+    bash ./benchmark/mipnerf360.sh apps/colmap_3dgrt_mcmc.yaml
+
+# 3DGUT + NHT
+DATA_ROOT=data/mipnerf360 RESULT_DIR=results/mipnerf360_3dgut_nht FEATURE_DIM=48 \
+    bash ./benchmark/mipnerf360_nht.sh apps/colmap_3dgut_mcmc_nht
+
+# 3DGRT + NHT
+DATA_ROOT=data/mipnerf360 RESULT_DIR=results/mipnerf360_3dgrt_nht FEATURE_DIM=48 \
+    bash ./benchmark/mipnerf360_nht.sh apps/colmap_3dgrt_mcmc_nht
+```
+
+| Method      | PSNR | SSIM | Train (s) | FPS |
+|-------------|------|------|-----------|-----|
+| 3DGUT + SH  | TBD  | TBD  | TBD       | TBD |
+| 3DGUT + NHT | TBD  | TBD  | TBD       | TBD |
+| 3DGRT + SH  | TBD  | TBD  | TBD       | TBD |
+| 3DGRT + NHT | TBD  | TBD  | TBD       | TBD |
+
+</details>
+
 ## 🛝 5. Interactive Playground GUI
 
 The playground allows interactive exploration of pretrained scenes, with ray-tracing effects such as inserted objects,
@@ -515,6 +562,15 @@ Formatting uses `black` and `isort`. Please run
     author={Wu, Qi and Martinez Esturo, Janick and Mirzaei, Ashkan and Moenne-Loccoz, Nicolas and Gojcic, Zan},
     journal = {Conference on Computer Vision and Pattern Recognition (CVPR)},
     year={2025}
+}
+```
+
+```
+@article{condor2026nht,
+    title={Neural Harmonic Textures for High-Quality Primitive Based Neural Reconstruction},
+    author={Condor, Jorge and Moenne-Loccoz, Nicolas and Nimier-David, Merlin and Didyk, Piotr and Gojcic, Zan and Wu, Qi},
+    journal = {arXiv preprint arXiv:2604.01204},
+    year={2026}
 }
 ```
 
