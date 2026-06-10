@@ -283,7 +283,20 @@ echo ""
 echo "Verifying the installation..."
 python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}')"
 python -c "import kaolin; print(f'Kaolin: {kaolin.__version__}')"
-python -c "import tinycudann; print('tiny-cuda-nn: ready')"
+python - <<'PY'
+import importlib.util
+import torch
+
+if importlib.util.find_spec("tinycudann") is None:
+    raise SystemExit("tiny-cuda-nn: package not found")
+
+if not torch.cuda.is_available():
+    print("tiny-cuda-nn: installed (runtime import skipped; no CUDA device visible)")
+else:
+    import tinycudann
+
+    print("tiny-cuda-nn: ready")
+PY
 python -c "import ppisp; print(f'PPISP: {ppisp.__version__}')"
 python -c "from fused_ssim import fused_ssim; print(f'Fused-SSIM: ready')"
 

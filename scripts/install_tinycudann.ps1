@@ -83,5 +83,19 @@ $InstallExitCode = $LASTEXITCODE
 Pop-Location
 if ($InstallExitCode -ne 0) { exit $InstallExitCode }
 
-& $PythonExe -c "import tinycudann; print('tiny-cuda-nn: ready')"
+$VerifyScript = @'
+import importlib.util
+import torch
+
+if importlib.util.find_spec("tinycudann") is None:
+    raise SystemExit("tiny-cuda-nn: package not found after installation")
+
+if not torch.cuda.is_available():
+    print("tiny-cuda-nn: installed (runtime import skipped; no CUDA device visible)")
+else:
+    import tinycudann
+
+    print("tiny-cuda-nn: ready")
+'@
+& $PythonExe -c $VerifyScript
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

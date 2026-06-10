@@ -80,4 +80,17 @@ else
 fi
 popd > /dev/null
 
-"${PYTHON_BIN}" -c "import tinycudann; print('tiny-cuda-nn: ready')"
+"${PYTHON_BIN}" - <<'PY'
+import importlib.util
+import torch
+
+if importlib.util.find_spec("tinycudann") is None:
+    raise SystemExit("tiny-cuda-nn: package not found after installation")
+
+if not torch.cuda.is_available():
+    print("tiny-cuda-nn: installed (runtime import skipped; no CUDA device visible)")
+else:
+    import tinycudann
+
+    print("tiny-cuda-nn: ready")
+PY
