@@ -13,6 +13,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import tomllib
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
+
 from . import gui
 
-__all__ = ["gui"]
+UNKNOWN_VERSION = "0.0.0+unknown"
+
+
+def _read_version() -> str:
+    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    if pyproject_path.exists():
+        with pyproject_path.open("rb") as f:
+            return tomllib.load(f)["project"]["version"]
+
+    try:
+        return version("threedgrut")
+    except PackageNotFoundError:
+        return UNKNOWN_VERSION
+
+
+__version__ = _read_version()
+
+__all__ = ["gui", "__version__"]

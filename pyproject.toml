@@ -19,9 +19,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "threedgrut"
-version = "0.0.2"
+version = "1.1.0"
 description = "Official implementation of 3DGRT and 3DGUT"
+authors = [
+    { name = "Nicolas Moenne-Loccoz, et al.", email = "nicolasm@nvidia.com" },
+]
 requires-python = ">=3.11"
+classifiers = [
+    "Operating System :: OS Independent",
+]
 
 dependencies = [
     "setuptools==78.1.1",
