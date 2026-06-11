@@ -153,7 +153,7 @@ def bake_post_processing_into_sh(
     the interpolated pose. ``steps_per_epoch`` matches
     ``len(train_dataloader)`` so total step count is unchanged.
     """
-    from threedgrut.export.usd.post_processing_view_interpolation import (
+    from threedgrut.export.usd.post_processing.view_interpolation import (
         VIEW_SAMPLING_TRAINING,
         InterpolatedViewSampler,
         normalize_view_sampling_mode,
@@ -440,7 +440,7 @@ class PPISPPostProcessingBakeAdapter(PostProcessingBakeAdapter):
         epochs on bonsai, see tools/ppisp_export benchmark).
         """
         # Late import: avoid pulling ppisp into modules that don't need it.
-        from threedgrut.export.usd.post_processing_sh_simple_bake import simple_bake
+        from threedgrut.export.usd.post_processing.sh_simple_bake import simple_bake
 
         logger.info(
             "PPISP SH bake init: applying simple_bake (camera=%d, frame=%d, "

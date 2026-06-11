@@ -61,7 +61,7 @@ from threedgrut.export.usd.nurec.serializer import (
     write_to_usdz,
 )
 from threedgrut.export.usd.nurec.templates import NamedSerialized, fill_3dgut_template
-from threedgrut.export.usd.ppisp_spg import (
+from threedgrut.export.usd.post_processing.ppisp_spg import (
     ppisp_has_controller,
     resolve_ppisp_controller_export_enabled,
     select_spg_files_for_export,
@@ -242,7 +242,7 @@ class NuRecExporter(ModelExporter):
             )
 
         if uses_baked_post_processing_export:
-            from threedgrut.export.usd.post_processing_sh_bake import (
+            from threedgrut.export.usd.post_processing.sh_bake import (
                 MODE_PPISP_BAKE_VIGNETTING_NONE,
                 PPISPPostProcessingBakeAdapter,
                 bake_post_processing_into_sh,
@@ -273,7 +273,7 @@ class NuRecExporter(ModelExporter):
             raise ValueError("spg-runtime post-processing export currently supports PPISP post-processing only.")
 
         if self.scene_radiance_scale != 1.0:
-            from threedgrut.export.usd.post_processing_sh_bake import scale_sh_output
+            from threedgrut.export.usd.post_processing.sh_bake import scale_sh_output
 
             scale_sh_output(model, self.scene_radiance_scale)
 
@@ -598,7 +598,7 @@ class NuRecExporter(ModelExporter):
             )
             return
 
-        from threedgrut.export.usd.writers.ppisp_writer import (
+        from threedgrut.export.usd.post_processing.ppisp_writer import (
             add_ppisp_to_all_render_products,
             build_camera_frame_mapping,
             build_camera_time_mapping,

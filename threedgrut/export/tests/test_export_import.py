@@ -29,6 +29,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
+
+pytest.importorskip("pxr", reason="usd-core (pxr) is only available on linux x86_64")
+
 from pxr import Sdf, Usd
 
 from threedgrut.export.base import ExportableModel

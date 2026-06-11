@@ -9,16 +9,15 @@ from pathlib import Path
 import pytest
 import torch
 import torch.nn as nn
+
+pytest.importorskip("pxr", reason="usd-core (pxr) is only available on linux x86_64")
+
 from pxr import Gf, Sdf, Usd, UsdGeom
 
-from threedgrut.export.usd.ppisp_spg import (
-    get_ppisp_auto_spg_files,
-    get_ppisp_spg_files,
-)
-from threedgrut.export.usd.writers.ppisp_controller_weights import (
+from threedgrut.export.usd.post_processing.ppisp_controller_weights import (
     EXPECTED_CONTROLLER_WEIGHTS_LEN,
 )
-from threedgrut.export.usd.writers.ppisp_controller_writer import (
+from threedgrut.export.usd.post_processing.ppisp_controller_writer import (
     CONTROLLER_FEATURES_RENDER_VAR,
     CONTROLLER_PARAMS_RENDER_VAR,
     CONTROLLER_POOL_PRIM_NAME_TEMPLATE,
@@ -27,14 +26,18 @@ from threedgrut.export.usd.writers.ppisp_controller_writer import (
     EMBEDDED_CONTROLLER_WEIGHTS_SYMBOL,
     PPISP_AUTO_PRIM_NAME,
 )
-from threedgrut.export.usd.writers.ppisp_controller_writer import (
+from threedgrut.export.usd.post_processing.ppisp_controller_writer import (
     PPISP_TILE_COUNT_INPUT_NAMES as AUTO_PPISP_TILE_COUNT_INPUT_NAMES,
 )
-from threedgrut.export.usd.writers.ppisp_controller_writer import (
+from threedgrut.export.usd.post_processing.ppisp_controller_writer import (
     add_ppisp_auto_shader_to_render_product,
     get_ppisp_embedded_controller_spg_files,
 )
-from threedgrut.export.usd.writers.ppisp_writer import (
+from threedgrut.export.usd.post_processing.ppisp_spg import (
+    get_ppisp_auto_spg_files,
+    get_ppisp_spg_files,
+)
+from threedgrut.export.usd.post_processing.ppisp_writer import (
     PPISP_ATTR_NAMESPACE,
     PPISP_CAMERA_SUFFIX,
     PPISP_TILE_COUNT_INPUT_NAMES,

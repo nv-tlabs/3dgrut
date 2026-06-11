@@ -187,7 +187,7 @@ def _create_shader_prim(stage: Usd.Stage, render_product_path: str) -> UsdShade.
     """Create the static-parameter PPISP CUDA shader prim on a RenderProduct.
 
     The automatic/controller path is authored by
-    :func:`threedgrut.export.usd.writers.ppisp_controller_writer.add_ppisp_auto_shader_to_render_product`.
+    :func:`threedgrut.export.usd.post_processing.ppisp_controller_writer.add_ppisp_auto_shader_to_render_product`.
     This helper handles only the static CUDA shader whose exposure/color
     parameters are authored as USD inputs.
     """
@@ -732,7 +732,7 @@ def add_ppisp_to_all_render_products(
     from threedgrut.export.usd.writers.camera import _make_usd_prim_name
 
     if use_controller:
-        from threedgrut.export.usd.writers.ppisp_controller_writer import (
+        from threedgrut.export.usd.post_processing.ppisp_controller_writer import (
             add_ppisp_auto_shader_to_render_product,
         )
     elif fixed_frame_index is not None and fixed_camera_index is None:
