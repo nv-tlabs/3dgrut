@@ -110,7 +110,10 @@ jobs:
 
   ci-uv-windows:
     name: ci-uv-windows (CUDA ${{ matrix.cuda_version }})
-    runs-on: windows-latest
+    # Pinned to windows-2022 (VS 2022 / MSVC 14.4x). windows-latest moved to the
+    # VS 2026 / MSVC 14.51 toolset, whose headers crash CUDA 12.8's cudafe++
+    # ('cudafe++' died with status 0xC0000005). CUDA 12.8 officially supports VS 2022.
+    runs-on: windows-2022
  
     strategy:
       fail-fast: false
