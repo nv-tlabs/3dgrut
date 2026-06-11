@@ -515,7 +515,7 @@ def _find_prim_with_attribute(stage: Usd.Stage, attr_name: str):
 
 
 class TestPPISPRuntimeMode:
-    """Pin the nre-borel mapping from PPISP integration mode to runtime color handling."""
+    """Pin the mapping from PPISP integration mode to runtime color handling."""
 
     def test_compute_runtime_post_processing(self):
         from threedgrut.export.usd.exporter import (
@@ -636,8 +636,8 @@ class TestUSDExportColorSpace:
             assert render_settings == {"rtx:post:tonemap:op": 2}
 
     @pytest.mark.parametrize("suffix", [".usda", ".usdz"])
-    def test_usd_export_authors_nre_borel_render_settings_without_runtime_ppisp(self, suffix: str):
-        """ParticleField exports match nre-borel default render settings without PPISP."""
+    def test_usd_export_authors_default_render_settings_without_runtime_ppisp(self, suffix: str):
+        """ParticleField exports author the default render settings without PPISP."""
         model = MockGaussianModel(num_gaussians=5, sh_degree=3)
         dataset = MockCameraDataset()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -685,7 +685,7 @@ class TestUSDExportColorSpace:
             assert render_settings["rtx:rtpt:gaussian:skipTonemapping:enabled"] is False
 
     def test_runtime_ppisp_rejects_frame_reference_without_camera_reference(self, monkeypatch):
-        """spg-runtime follows nre-borel: frame-only static PPISP export is ambiguous."""
+        """spg-runtime: frame-only static PPISP export is ambiguous."""
         from threedgrut.export.usd.exporter import PPISP_INTEGRATION_MODE_SPG_RUNTIME
 
         PPISP = _install_fake_ppisp_module(monkeypatch)

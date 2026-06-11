@@ -93,7 +93,7 @@ def resolve_ppisp_controller_export_enabled(
     ppisp_module: Any | None,
     ppisp_integration_mode: str,
 ) -> bool:
-    """Resolve the nre-borel tri-state PPISP controller export setting."""
+    """Resolve the tri-state PPISP controller export setting."""
     if ppisp_integration_mode != "spg-runtime":
         return False
     if requested is not None:

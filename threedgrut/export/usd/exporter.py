@@ -350,7 +350,7 @@ def _build_frame_time_codes_from_grouping(camera_names: List[str], frame_to_came
 
 
 def _particle_field_render_settings(*, has_runtime_ppisp: bool) -> Dict[str, Any]:
-    """Render settings shared with the nre-borel Gaussian USD export."""
+    """Render settings for the Gaussian USD export."""
     render_settings: Dict[str, Any] = {_RENDER_SETTING_TONEMAP_OP: 2}
     if has_runtime_ppisp:
         render_settings[_RENDER_SETTING_SKIP_GAUSSIAN_TONEMAPPING] = False
@@ -408,22 +408,22 @@ class USDExporter(ModelExporter):
                 module with the selected export mode.
             ppisp_integration_mode: "spg-runtime" authors PPISP as Omniverse SPG
                 shaders applied at render time. "sh-optimized" bakes one fixed
-                PPISP transform into Gaussian SH coefficients. Matches nre-borel.
+                PPISP transform into Gaussian SH coefficients.
             ppisp_reference_camera_id: Optional fixed PPISP camera index.
                 sh-optimized defaults unset values to 0; spg-runtime keeps
-                per-camera RenderProduct behavior when unset. Matches nre-borel.
+                per-camera RenderProduct behavior when unset.
             ppisp_reference_frame_id: Optional fixed PPISP frame index.
                 sh-optimized defaults unset values to 0; spg-runtime keeps
-                animated frame inputs when unset. Matches nre-borel.
+                animated frame inputs when unset.
             ppisp_responsivity: Achromatic input HDR multiplier authored on
                 PPISP spg-runtime shaders as a user-overridable default.
-            enable_ppisp_controller_export: nre-borel tri-state controller
-                export setting. None exports controllers only when the PPISP
+            enable_ppisp_controller_export: Tri-state controller export
+                setting. None exports controllers only when the PPISP
                 module has them; True requires controller export; False forces
                 the static/time-sampled PPISP fallback.
-            sh_optimization_num_iterations: nre-borel SH-match step budget
+            sh_optimization_num_iterations: SH-match step budget
                 for sh-optimized export. Defaults to 3000.
-            scene_radiance_scale: nre-borel asset-level multiplicative scale
+            scene_radiance_scale: Asset-level multiplicative scale
                 applied to exported SH radiance.
             frames_per_second: Sets stage.timeCodesPerSecond. Multi-camera
                 camera exports use compact per-camera-local frame time codes, so
