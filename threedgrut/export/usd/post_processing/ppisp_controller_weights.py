@@ -4,46 +4,21 @@
 """
 PPISP controller weight flattening for USD export (EXPERIMENTAL).
 
-.. warning::
+Pure-Python (CPU/numpy/torch) half of the controller export. Provides:
 
-   The PPISP controller is the default mode used during training to
-   produce realistic novel views, but its USD export path is
-   **EXPERIMENTAL** and disabled by default.
+1. Architecture contract.
+   :data:`EXPECTED_CONTROLLER_ARCHITECTURE` defines the per-camera
+   CNN/MLP shape that the runtime SPG shader hard-codes via its
+   ``OFF_*`` / ``TOTAL_WEIGHTS`` constants.
 
-   * Omniverse SPG does not currently expose first-class neural-network
-     weight bindings. The controller export path flattens trained
-     weights so the writer can embed them directly into generated
-     per-camera CUDA sources.
-   * For production USD assets you should prefer either the
-     ``sh-optimized`` integration mode (PPISP folded into Gaussian SH
-     coefficients) or the ``spg-runtime`` mode with a fixed reference
-     ``(camera_id, frame_id)`` pair (time-sampled or single-frame
-     authoring.
-   * The controller export path should only be used for research and
-     experimental workflows that knowingly accept the runtime
-     compatibility risk.
+2. Weight validation.
+   :func:`validate_controller_architecture` raises on any shape
+   mismatch; :func:`validate_controller_weights_finite` raises on any
+   non-finite parameter.
 
-This module is the pure-Python (CPU/numpy/torch) half of the
-controller export. It is responsible for:
-
-1. **Locking the architecture contract.**
-   :data:`EXPECTED_CONTROLLER_ARCHITECTURE` is the single source of
-   truth for the per-camera CNN/MLP shape that the runtime SPG
-   shader hard-codes via its ``OFF_*`` / ``TOTAL_WEIGHTS`` constants.
-   Any change to the PPISP controller defaults requires a
-   matching update to the SPG shader and to this constant; a
-   mismatch is caught by :func:`validate_controller_architecture`
-   before any USD authoring runs.
-
-2. **Validating trained weights.**
-   :func:`validate_controller_architecture` fails loudly on any
-   shape mismatch and :func:`validate_controller_weights_finite`
-   rejects any non-finite parameter so a corrupt checkpoint never
-   reaches USD.
-
-3. **Flattening to the SPG-readable layout.**
+3. Flattening to the SPG-readable layout.
    :func:`flatten_controller_weights` returns a 1-D ``np.float32``
-   buffer in the exact concatenation order the SPG CUDA controller's
+   buffer in the concatenation order the SPG CUDA controller's
    ``OFF_*`` offsets expect:
 
    ===========================  ==========================  ================
@@ -68,27 +43,20 @@ controller export. It is responsible for:
    **Total**                                                 **241,961**
    ===========================  ==========================  ================
 
-   The MLP trunk layer count is found by scanning ``mlp_trunk`` for
-   ``nn.Linear`` modules in declaration order; the layer indices
-   into ``cnn_encoder`` are positional (matching the construction
-   order of the default ``ppisp._PPISPController`` ``nn.Sequential``).
-   The ``128 * 1601 = 204928`` multiplier reflects
-   ``cnn_feature_dim * pool_grid_h * pool_grid_w + 1`` (the trailing
-   ``+1`` is the per-frame prior-exposure scalar concatenated to
-   the CNN features before the trunk).
+   The trunk Linear layers are found by scanning ``mlp_trunk`` in
+   declaration order; ``cnn_encoder`` layers are accessed positionally.
+   The ``1601`` trunk input width is
+   ``cnn_feature_dim * pool_grid_h * pool_grid_w + 1``, where the
+   trailing ``+1`` is the per-frame prior-exposure scalar concatenated
+   to the CNN features before the trunk.
 
-4. **Selecting the per-camera controller.**
-   :func:`select_camera_controller` resolves a validated camera id
-   into the corresponding ``_PPISPController`` instance. This is
-   the boundary between the PPISP-module-level reference resolution
-   in the PPISP module and the
-   per-controller flattening here.
+4. Per-camera controller selection.
+   :func:`select_camera_controller` resolves a camera id into its
+   ``_PPISPController`` instance.
 
-This module is intentionally pure Python -- no USD, no Omniverse,
-no SPG asset references. The UsdShade authoring side (Shader prim
-creation, AOV wiring, RenderVar wiring) lives in
-:mod:`threedgrut.export.usd.post_processing.ppisp_controller_writer`, which consumes
-this module's flat buffer.
+The UsdShade authoring side lives in
+:mod:`threedgrut.export.usd.post_processing.ppisp_controller_writer`,
+which consumes this module's flat buffer.
 """
 
 from __future__ import annotations
@@ -114,38 +82,26 @@ _ModuleT = TypeVar("_ModuleT", bound=nn.Module)
 
 @dataclass(frozen=True)
 class ControllerArchitectureSpec:
-    """Hard-coded controller architecture sizes.
-
-    These mirror the default ``ppisp._PPISPController`` architecture
-    *and* the runtime SPG shader's ``OFF_*`` / ``TOTAL_WEIGHTS``
-    constants. The two must stay in lockstep; this dataclass exists
-    to make the contract explicit on the Python side and to centralize
-    the size used by :func:`validate_controller_architecture`.
+    """Controller architecture sizes.
 
     Attributes:
         input_downsampling: Stride/kernel of the CNN ``MaxPool2d``
-            applied right after the first 1x1 convolution. Used to
-            cross-check the controller's pooling layer.
+            applied after the first 1x1 convolution.
         cnn_in_channels: Number of input channels (RGB radiance image).
-        cnn_layer_1_channels: Output channel count of the first 1x1
-            conv. Locked to 16.
-        cnn_layer_2_channels: Output channel count of the second 1x1
-            conv. Locked to 32.
+        cnn_layer_1_channels: Output channel count of the first 1x1 conv.
+        cnn_layer_2_channels: Output channel count of the second 1x1 conv.
         cnn_feature_dim: Output channel count of the third 1x1 conv,
-            i.e. the per-spatial-location feature dimension. Locked
-            to 64.
+            i.e. the per-spatial-location feature dimension.
         pool_grid_size: Output spatial size of the
-            ``AdaptiveAvgPool2d`` that follows the CNN. Locked to
-            ``(5, 5)``.
+            ``AdaptiveAvgPool2d`` that follows the CNN.
         mlp_hidden_dim: Trunk hidden size and width of every trunk
-            ``Linear`` layer. Locked to 128.
-        num_mlp_trunk_layers: Number of ``Linear`` layers in the
-            trunk (each followed by a ReLU). Locked to 3.
-        color_params_per_frame: Output dimension of the color head;
-            mirrors ``ppisp.COLOR_PARAMS_PER_FRAME``. Locked to 8.
-        prior_exposure_dim: The trunk receives the flattened CNN
-            features concatenated with a per-frame prior exposure
-            scalar. This is always ``1``.
+            ``Linear`` layer.
+        num_mlp_trunk_layers: Number of ``Linear`` layers in the trunk,
+            each followed by a ReLU.
+        color_params_per_frame: Output dimension of the color head.
+        prior_exposure_dim: Per-frame prior exposure scalar
+            concatenated to the flattened CNN features at the trunk
+            input. Always ``1``.
     """
 
     input_downsampling: int = 3
@@ -169,9 +125,8 @@ class ControllerArchitectureSpec:
     def expected_weights_len(self) -> int:
         """Total number of float32 elements in the flattened weight buffer.
 
-        Computed from the architecture sizes; locks the SPG shader's
-        ``TOTAL_WEIGHTS`` constant. With the current defaults this
-        evaluates to 241,961.
+        Computed from the architecture sizes; 241,961 with the
+        defaults.
         """
         # Three 1x1 conv layers (weight + bias).
         conv1 = self.cnn_layer_1_channels * self.cnn_in_channels + self.cnn_layer_1_channels
@@ -191,15 +146,10 @@ class ControllerArchitectureSpec:
 
 
 EXPECTED_CONTROLLER_ARCHITECTURE = ControllerArchitectureSpec()
-"""Single source of truth for the controller export architecture.
-
-Locks the byte layout that the runtime SPG CUDA controller shader
-(``ppisp_controller.cu``) reads back.
-"""
+"""Controller export architecture; matches the byte layout the runtime
+SPG CUDA controller shader (``ppisp_controller.cu``) reads back."""
 
 
-# Convenience aliases for tests and the writer-side module. Computing
-# these here keeps the expected length out of any caller's hands.
 EXPECTED_CONTROLLER_WEIGHTS_LEN: int = EXPECTED_CONTROLLER_ARCHITECTURE.expected_weights_len
 
 
@@ -209,18 +159,11 @@ EXPECTED_CONTROLLER_WEIGHTS_LEN: int = EXPECTED_CONTROLLER_ARCHITECTURE.expected
 
 
 def select_camera_controller(ppisp_module: "PPISP", camera_id: int) -> nn.Module:
-    """Resolve ``ppisp_module.controllers[camera_id]`` with fail-loud guards.
-
-    The boundary between PPISP-module-level reference resolution
-    (see PPISP reference selection in the USD exporter)
-    and per-controller weight flattening (this module). Returns
-    the underlying ``_PPISPController`` ``nn.Module`` so the caller
-    can pass it to :func:`flatten_controller_weights`.
+    """Return the per-camera ``_PPISPController`` at ``ppisp_module.controllers[camera_id]``.
 
     Args:
         ppisp_module: Trained PPISP module exposing a ``controllers``
-            ``nn.ModuleList`` populated when the controller was
-            enabled at construction time.
+            ``nn.ModuleList``.
         camera_id: Index into ``ppisp_module.controllers``. Must
             satisfy ``0 <= camera_id < len(controllers)``.
 
@@ -229,12 +172,10 @@ def select_camera_controller(ppisp_module: "PPISP", camera_id: int) -> nn.Module
 
     Raises:
         TypeError: ``camera_id`` is not an ``int`` (``bool`` is
-            rejected explicitly), or ``ppisp_module`` does not
-            expose a ``controllers`` attribute.
-        ValueError: ``ppisp_module.controllers`` is empty (the
-            controller was disabled at construction time, i.e.
-            ``PPISPConfig.use_controller=False``), or ``camera_id``
-            is out of range.
+            rejected explicitly), or ``ppisp_module`` does not expose
+            a ``controllers`` attribute.
+        ValueError: ``ppisp_module.controllers`` is empty, or
+            ``camera_id`` is out of range.
     """
     if isinstance(camera_id, bool) or not isinstance(camera_id, int):
         raise TypeError(f"camera_id must be int, got {type(camera_id).__name__}")
@@ -264,23 +205,14 @@ def validate_controller_architecture(
     controller: nn.Module,
     spec: ControllerArchitectureSpec = EXPECTED_CONTROLLER_ARCHITECTURE,
 ) -> None:
-    """Fail loudly if ``controller`` does not match the expected architecture.
+    """Raise if ``controller`` does not match the expected architecture.
 
-    Each constraint raises a distinct :class:`ValueError` with a
-    precise message so users can diagnose architecture drift quickly.
-    The runtime SPG shader hard-codes the expected sizes via its
-    ``OFF_*`` constants; any mismatch here would cause silent
-    corruption at runtime, hence the fail-loud policy.
-
-    The check is structural (duck-typed): it does not require
-    ``controller`` to be the private ``ppisp._PPISPController``
-    class, only that it expose ``cnn_encoder`` (an
-    ``nn.Sequential`` whose elements at indices 0/1/3/5/6 are the
-    three 1x1 convs, the MaxPool, and the AdaptiveAvgPool2d in the
-    same construction order as the upstream implementation),
-    ``mlp_trunk`` (a module containing the trunk Linear layers in
-    declaration order, discoverable via iteration), ``exposure_head``
-    (a Linear) and ``color_head`` (a Linear).
+    The check is structural (duck-typed): ``controller`` must expose
+    ``cnn_encoder`` (an ``nn.Sequential`` whose elements at indices
+    0/1/3/5/6 are the three 1x1 convs, the MaxPool, and the
+    AdaptiveAvgPool2d), ``mlp_trunk`` (a module containing the trunk
+    Linear layers in declaration order), ``exposure_head`` (a Linear)
+    and ``color_head`` (a Linear).
 
     Args:
         controller: Per-camera controller to validate.
@@ -305,8 +237,8 @@ def validate_controller_architecture(
     conv2 = _require_sequential_layer(cnn_encoder, "cnn_encoder", 3, nn.Conv2d)
     conv3 = _require_sequential_layer(cnn_encoder, "cnn_encoder", 5, nn.Conv2d)
     avgpool = _require_sequential_layer(cnn_encoder, "cnn_encoder", 6, nn.AdaptiveAvgPool2d)
-    # Layout depends on conv biases being present; required since the
-    # SPG shader's OFF_*_BIAS offsets are non-skippable.
+    # All conv/head biases must be present; the flattened layout has no
+    # bias-skip slots.
     _require_layer_bias(conv1, "cnn_encoder[0]")
     _require_layer_bias(conv2, "cnn_encoder[3]")
     _require_layer_bias(conv3, "cnn_encoder[5]")
@@ -317,12 +249,8 @@ def validate_controller_architecture(
     _check_conv(conv2, "cnn_encoder[3]", spec.cnn_layer_1_channels, spec.cnn_layer_2_channels)
     _check_conv(conv3, "cnn_encoder[5]", spec.cnn_layer_2_channels, spec.cnn_feature_dim)
 
-    # ``nn.MaxPool2d`` stores ``kernel_size`` / ``stride`` exactly as passed in
-    # (no ``_pair`` normalization), so a controller built with the tuple form
-    # ``MaxPool2d(kernel_size=(k, k), stride=(k, k))`` would compare unequal to
-    # the scalar spec value even though the architecture is correct. Normalize
-    # both sides to ``(h, w)`` before comparing; keep the original messages and
-    # show the raw value in the "got" for easier debugging.
+    # Normalize MaxPool2d kernel_size/stride to (h, w) before comparing;
+    # error messages show the raw value.
     expected_downsampling_pair = (spec.input_downsampling, spec.input_downsampling)
     if _normalize_pool_int_pair(maxpool.kernel_size, "MaxPool2d kernel_size") != expected_downsampling_pair:
         raise ValueError(
@@ -366,21 +294,17 @@ def validate_controller_architecture(
 
 
 def validate_controller_weights_finite(controller: nn.Module) -> None:
-    """Reject any non-finite parameter in ``controller``.
+    """Raise if any parameter in ``controller`` is non-finite.
 
-    A NaN or Inf in the trained weights silently corrupts the
-    runtime SPG shader's predictions; we refuse to export rather
-    than ship a broken USD asset. Iterates over every parameter
-    (weights *and* biases) under ``controller``; the controller is
-    a small CNN so the cost is negligible.
+    Iterates over every parameter (weights and biases) under
+    ``controller``.
 
     Args:
-        controller: Per-camera controller whose parameters will be
-            scanned.
+        controller: Per-camera controller whose parameters are scanned.
 
     Raises:
-        ValueError: At least one parameter contains a NaN or Inf
-            value. The error message names the offending parameter.
+        ValueError: At least one parameter contains a NaN or Inf value.
+            The error message names the offending parameter.
     """
     for name, param in controller.named_parameters():
         if not torch.isfinite(param).all():
@@ -398,9 +322,9 @@ def flatten_controller_weights(
     """Concatenate trained controller weights into one float32 array.
 
     The flattened layout matches the runtime SPG controller shader's
-    ``OFF_*`` offsets (see this module's docstring for the full
-    table). Validates the architecture and the finiteness of every
-    parameter before flattening; both checks are fail-loud.
+    ``OFF_*`` offsets (see this module's docstring for the full table).
+    Validates the architecture and the finiteness of every parameter
+    before flattening.
 
     Args:
         controller: Per-camera controller to flatten.
@@ -422,9 +346,7 @@ def flatten_controller_weights(
     validate_controller_architecture(controller, spec)
     validate_controller_weights_finite(controller)
 
-    # Re-resolve handles via the same typed helpers used by validation
-    # so the navigation is mypy-narrowed end-to-end. The duplicated
-    # walks are negligible for a controller of this size.
+    # Re-resolve layer handles via the typed helpers.
     cnn_encoder = _require_attr(controller, "cnn_encoder", nn.Sequential)
     mlp_trunk = _require_attr(controller, "mlp_trunk", nn.Module)
     exposure_head = _require_attr(controller, "exposure_head", nn.Linear)
@@ -457,18 +379,13 @@ def flatten_controller_weights(
 
     expected = spec.expected_weights_len
     if flat.size != expected:
-        # Defensive: validate_controller_architecture should have
-        # already prevented this, but a layout/spec drift is the most
-        # damaging failure mode for this module.
         raise ValueError(
             f"flatten_controller_weights produced {flat.size} floats; expected "
             f"{expected}. The architecture spec and the actual controller layout "
             "have diverged."
         )
     if not np.all(np.isfinite(flat)):
-        # Defensive: validate_controller_weights_finite should have
-        # already caught this; the post-check guards against any
-        # numerical loss introduced by the float32 cast.
+        # Re-check after the float32 cast.
         raise ValueError("flattened controller weights contain NaN/Inf after float32 cast; refusing to export.")
 
     return flat
@@ -480,11 +397,11 @@ def flatten_controller_weights(
 
 
 def _require_attr(obj: object, name: str, kind: type[_ModuleT]) -> _ModuleT:
-    """Return ``getattr(obj, name)`` narrowed to the requested ``kind``.
+    """Return ``getattr(obj, name)`` narrowed to ``kind``.
 
-    Both the missing-attribute and wrong-type cases raise
-    :class:`TypeError` so callers can rely on a single exception
-    class for structural failures.
+    Raises:
+        TypeError: The attribute is missing or is not an instance of
+            ``kind``.
     """
     if not hasattr(obj, name):
         raise TypeError(
@@ -509,12 +426,7 @@ def _require_sequential_layer(
 
 
 def _require_layer_bias(layer: nn.Module, name: str) -> torch.Tensor:
-    """Return ``layer.bias`` and fail loudly if it is ``None``.
-
-    The flatten layout has no bias-skip slot; a layer constructed
-    with ``bias=False`` would silently shift the byte layout in the
-    SPG shader, so we refuse to export.
-    """
+    """Return ``layer.bias``; raise ``ValueError`` if it is not a tensor."""
     bias = getattr(layer, "bias", None)
     if not isinstance(bias, torch.Tensor):
         raise ValueError(f"{name} must have a bias parameter; got {type(bias).__name__}")
@@ -541,10 +453,8 @@ def _collect_trunk_linear_layers(mlp_trunk: nn.Module) -> List[nn.Linear]:
 def _normalize_avgpool_output_size(value: object) -> Tuple[int, int]:
     """Normalize ``AdaptiveAvgPool2d.output_size`` to a 2-tuple of ints.
 
-    PyTorch accepts either a scalar ``int`` (interpreted as a square
-    output) or a 2-tuple. ``None`` (or a tuple containing ``None``)
-    is rejected because the controller export needs a fixed
-    spatial size to size the trunk input.
+    A scalar ``int`` maps to ``(value, value)``. ``None`` or any
+    non-int output size is rejected with ``ValueError``.
     """
     if isinstance(value, bool):
         raise ValueError(f"AdaptiveAvgPool2d output_size must be int or (int, int), got {value!r}")
@@ -560,11 +470,9 @@ def _normalize_avgpool_output_size(value: object) -> Tuple[int, int]:
 def _normalize_pool_int_pair(value: object, kind: str) -> Tuple[int, int]:
     """Normalize an ``nn.MaxPool2d`` ``kernel_size`` / ``stride`` to ``(h, w)``.
 
-    Unlike ``nn.Conv2d``, ``nn.MaxPool2d`` stores these attributes exactly as
-    the caller passed them in (no ``_pair`` normalization), so equality
-    comparisons against a scalar spec value require us to canonicalize first.
-    ``kind`` is folded into the error message so callers don't need their
-    own wrapping (e.g. ``"MaxPool2d kernel_size"``).
+    A scalar ``int`` maps to ``(value, value)``; any other type raises
+    ``ValueError``. ``kind`` is folded into the error message
+    (e.g. ``"MaxPool2d kernel_size"``).
     """
     if isinstance(value, bool):
         raise ValueError(f"{kind} must be int or (int, int), got {value!r}")
@@ -585,9 +493,8 @@ def _to_numpy_flat(tensor: torch.Tensor) -> np.ndarray:
 def _conv_weight_to_np(conv: nn.Conv2d) -> np.ndarray:
     """Flatten a 1x1 conv weight ``[out, in, 1, 1]`` row-major to ``[out * in]``.
 
-    The runtime SPG shader interprets the flattened block as a
-    ``out_channels x in_channels`` matrix, so the reshape order
-    (``[out, in]``) is part of the export contract.
+    The flattened block is ordered as an ``out_channels x in_channels``
+    matrix.
     """
     weight = conv.weight
     return (

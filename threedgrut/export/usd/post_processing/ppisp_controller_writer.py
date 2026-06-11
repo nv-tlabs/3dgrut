@@ -4,29 +4,11 @@
 """
 PPISP automatic-parameter USD writer (EXPERIMENTAL).
 
-.. warning::
+Authors UsdShade shader prims for the PPISP controller export path. The
+export generates a per-camera CUDA sidecar with trained weights embedded
+as device constants.
 
-   This module authors USD shader prims for the **EXPERIMENTAL** PPISP
-   controller export path. The controller is the default mode used
-   during PPISP training to produce realistic novel views, but its
-   USD export is disabled by default in the gaussian USD asset
-   writer:
-
-   * Omniverse SPG does not currently expose first-class neural-network
-     weight bindings. The export path generates a per-camera CUDA
-     sidecar with trained weights embedded as device constants, so the
-     runtime does not upload a large weight asset every frame.
-   * External renderers consuming the asset may not resolve the
-     controller CUDA sidecars at all. For production USD assets,
-     prefer the SH-optimized integration mode (PPISP folded into
-     Gaussian SH coefficients) or the ``spg-runtime`` mode with a fixed
-     reference ``(camera_id, frame_id)`` pair.
-   * The controller export path should only be used for research
-     and experimental workflows that knowingly accept the runtime
-     compatibility risk.
-
-This module is the UsdShade authoring half of the controller
-export. It consumes:
+Consumes:
 
 * :func:`threedgrut.export.usd.post_processing.ppisp_controller_weights.flatten_controller_weights`
   to flatten per-camera CNN/MLP weights into generated CUDA source
@@ -36,8 +18,8 @@ export. It consumes:
   to resolve a validated PPISP camera id into the corresponding
   ``_PPISPController`` instance.
 
-Authoring contract: per RenderProduct, the writer creates **three**
-shader prims and two intermediate RenderVars:
+Per RenderProduct, the writer creates three shader prims and two
+intermediate RenderVars:
 
 1. ``<rp>/PPISPControllerPool_<cam>`` -- consumes ``HdrColor`` AOV
    and produces ``ControllerFeatures`` AOV via the generated
@@ -51,36 +33,24 @@ shader prims and two intermediate RenderVars:
    ``inputs:priorExposure`` only.
 4. ``<rp>/ControllerParams`` -- intermediate RenderVar with
    ``omni:rtx:aov`` connection to the controller's
-   ``outputs:ControllerParams``. Routing the controller outputs
-   through RenderVars (rather than direct UsdShade Shader ->
-   Shader connections) is required because Kit's runtime walks
-   AOV connections, not arbitrary UsdShade outputs.
+   ``outputs:ControllerParams``.
 5. ``<rp>/PPISPAuto`` -- references
    :file:`ppisp_usd_spg_auto.usda`. Authors
    ``inputs:responsivity`` and per-camera vignetting / CRF;
    consumes ``HdrColor`` and ``ControllerParams`` AOVs; produces
    ``PPISPColor`` AOV. ``LdrColor`` is wired to the
-   ``PPISPColor`` output so display-AOV consumers see the
-   processed result.
+   ``PPISPColor`` output as the display AOV.
 
-The combined :func:`add_ppisp_auto_shader_to_render_product`
-authors the entire controller + auto-PPISP graph in one call. There is no
-public API for authoring just the controller or just the
-auto-PPISP shader: splitting them would expose the AOV-graph
-wiring (the most fragile part of the port) to call sites, and
-nothing in the export pipeline needs the prims separately.
+:func:`add_ppisp_auto_shader_to_render_product` authors the entire
+controller + auto-PPISP graph in one call.
 
-Sidecar packaging is split between
-:func:`get_ppisp_embedded_controller_spg_files` (the per-camera
-generated ``ppisp_controller_<cam>.cu*`` files), and
-:func:`get_ppisp_auto_spg_files` (the three
-``ppisp_usd_spg_auto.cu*`` files). The two sets are
-complementary: the controller emits the
-``ControllerParams`` AOV that the auto-PPISP shader reads, so a
-consumer that ships one without the other will produce a runtime
-error. Higher-level packaging code is expected to call both when
-``enable_ppisp_controller_export=True``.
-
+Sidecar packaging:
+:func:`get_ppisp_embedded_controller_spg_files` returns the per-camera
+generated ``ppisp_controller_<cam>.cu*`` files;
+:func:`get_ppisp_auto_spg_files` returns the three
+``ppisp_usd_spg_auto.cu*`` files. The controller emits the
+``ControllerParams`` AOV read by the auto-PPISP shader, so both sets must
+be packaged together.
 """
 
 from __future__ import annotations
@@ -115,15 +85,12 @@ log = logging.getLogger(__name__)
 
 PPISP_SPG_DIR = Path(__file__).parent / "ppisp_spg"
 
-# Controller template files used to generate per-camera embedded-weight
-# sidecars.
+# Controller templates used to generate per-camera embedded-weight sidecars.
 CONTROLLER_CU_FILE = "ppisp_controller.cu"
 CONTROLLER_LUA_FILE = "ppisp_controller.cu.lua"
 
-# Each camera receives a generated CUDA source file whose file-scope device
-# constant contains that camera's flattened controller weights; the Lua
-# launcher has no weights input and the authored USD graph therefore does not
-# bind a weight asset.
+# Per-camera generated CUDA source: a file-scope device constant holds that
+# camera's flattened controller weights; the Lua launcher has no weights input.
 CONTROLLER_EMBEDDED_CU_FILE_TEMPLATE = "ppisp_controller_{camera_index}.cu"
 CONTROLLER_EMBEDDED_LUA_FILE_TEMPLATE = "ppisp_controller_{camera_index}.cu.lua"
 EMBEDDED_CONTROLLER_WEIGHTS_SYMBOL = "kControllerWeights"
@@ -134,15 +101,13 @@ PPISP_AUTO_CU_FILE = "ppisp_usd_spg_auto.cu"
 PPISP_AUTO_LUA_FILE = "ppisp_usd_spg_auto.cu.lua"
 PPISP_AUTO_USDA_FILE = "ppisp_usd_spg_auto.usda"
 
-# Sub-identifiers (must match the entry point names in the corresponding
-# controller CUDA and auto-PPISP CUDA files).
+# Sub-identifiers; must match the entry point names in the controller CUDA
+# and auto-PPISP CUDA files.
 CONTROLLER_POOL_SUB_IDENTIFIER = "controllerPoolProcess"
 CONTROLLER_SUB_IDENTIFIER = "controllerProcess"
 PPISP_AUTO_SUB_IDENTIFIER = "ppispProcessAuto"
 
-# RenderVar / AOV names. ``HdrColor`` and ``LdrColor`` mirror the
-# static-PPISP writer's conventions so the two paths are
-# indistinguishable to display-AOV consumers.
+# RenderVar / AOV names.
 HDR_COLOR_RENDER_VAR = "HdrColor"
 CONTROLLER_FEATURES_RENDER_VAR = "ControllerFeatures"
 CONTROLLER_PARAMS_RENDER_VAR = "ControllerParams"
@@ -172,17 +137,13 @@ CHANNEL_SUFFIXES = ("R", "G", "B")
 DEFAULT_PRIOR_EXPOSURE = 0.0
 DEFAULT_RESPONSIVITY = 1.0
 
-# Namespace for source-of-truth PPISP attributes authored on the
-# ``<cam>_ppisp`` camera. Kept local to avoid a circular import with
-# ``ppisp_writer``.
+# Namespace for PPISP attributes authored on the ``<cam>_ppisp`` camera.
 PPISP_ATTR_NAMESPACE = "ppisp:"
-# Controller weights are baked into the per-camera CUDA sidecar. They are also
-# mirrored onto the camera for documentation/downstream tools; runtime does not
-# read this attribute.
+# Camera attribute mirroring the controller weights for downstream tools;
+# runtime does not read it.
 CONTROLLER_WEIGHTS_CAMERA_ATTR = "controllerWeights"
 
-# Tiled-RenderProduct grid. Tiling is a RenderProduct property, so the grid is
-# authored as literal inputs on each shader node, not as camera attributes.
+# Tiled-RenderProduct grid, authored as literal inputs on each shader node.
 PPISP_TILE_COUNT_INPUT_NAMES = ("tileCountX", "tileCountY")
 DEFAULT_PPISP_TILE_COUNT = 1
 
@@ -210,43 +171,33 @@ def add_ppisp_auto_shader_to_render_product(
     together, and the ``LdrColor`` RenderVar that publishes the
     auto-PPISP output as the display AOV.
 
-    The combined function has no separately callable counterparts on
-    purpose: the AOV-graph wiring is the most fragile part of the
-    Omniverse SPG port, and exposing it to call sites would multiply
-    the integration risk surface.
-
     Args:
         stage: USD stage containing the RenderProduct.
         render_product_path: Path to the RenderProduct prim under
             which the shader prims will be authored.
-        camera_index: PPISP camera index. Used both to resolve
+        camera_index: PPISP camera index. Resolves
             ``ppisp.controllers[camera_index]`` (validated against the
-            supplied ``controller`` argument as a defensive check)
-            and to author the per-camera vignetting / CRF inputs from
-            ``ppisp.vignetting_params`` / ``ppisp.crf_params``.
+            supplied ``controller`` argument) and selects the per-camera
+            vignetting / CRF inputs from ``ppisp.vignetting_params`` /
+            ``ppisp.crf_params``.
         ppisp: Trained PPISP module exposing ``num_cameras``,
             ``vignetting_params`` (``[num_cameras, 3, 5]``) and
             ``crf_params`` (``[num_cameras, 3, 4]``).
         controller: Per-camera controller (typically obtained via
             :func:`threedgrut.export.usd.post_processing.ppisp_controller_weights.select_camera_controller`).
-            Validated and embedded into generated CUDA sidecars by the
-            exporter.
+            Embedded into the generated CUDA sidecar.
         responsivity: Achromatic HDR multiplier authored on the
             auto-PPISP shader's ``inputs:responsivity`` attribute.
             Must be a strictly positive finite number.
-        prior_exposure: EXIF-derived prior exposure scalar authored
-            on the controller shader's ``inputs:priorExposure``
-            attribute. Defaults to 0.0 (matching training-time
-            inference when no prior is wired).
+        prior_exposure: Prior exposure scalar authored on the controller
+            shader's ``inputs:priorExposure`` attribute. Defaults to 0.0.
         ppisp_camera_path: Optional path to the ``<cam>_ppisp`` camera
-            that holds source-of-truth PPISP parameters as ``ppisp:*``
-            attributes. When set, responsivity, vignetting, CRF, and a
-            documentation mirror of the embedded controller weights are
-            authored on that camera. Exposure/color stay controller-driven
-            via the ``ControllerParams`` AOV.
+            holding PPISP parameters as ``ppisp:*`` attributes. When set,
+            responsivity, vignetting, CRF, and a mirror of the embedded
+            controller weights are authored on that camera. Exposure/color
+            remain controller-driven via the ``ControllerParams`` AOV.
     Returns:
-        The auto-PPISP shader prim, mirroring the return type of
-        :func:`threedgrut.export.usd.post_processing.ppisp_writer.add_ppisp_shader_to_render_product`.
+        The auto-PPISP shader prim.
 
     Raises:
         TypeError: ``camera_index`` is not an int, or
@@ -396,8 +347,8 @@ def get_ppisp_auto_spg_files() -> List[NamedSerialized]:
     Returns:
         ``NamedSerialized`` entries for ``ppisp_usd_spg_auto.cu``,
         ``ppisp_usd_spg_auto.cu.lua``, and
-        ``ppisp_usd_spg_auto.usda``. Same skip-with-warning
-        behavior on missing files as the static PPISP sidecar loader.
+        ``ppisp_usd_spg_auto.usda``. Missing files are skipped with a
+        warning.
     """
     return _load_sidecars([PPISP_AUTO_CU_FILE, PPISP_AUTO_LUA_FILE, PPISP_AUTO_USDA_FILE])
 
@@ -534,9 +485,7 @@ def _render_embedded_controller_cuda_source_from_flat_weights(flat_weights: np.n
 def _mark_render_var_as_aov(stage: Usd.Stage, render_product_path: str, render_var_name: str) -> None:
     """Mark an existing input RenderVar's ``omni:rtx:aov`` as opaque.
 
-    No-op when the RenderVar prim does not exist; the caller may not
-    have populated ``orderedVars`` with an HdrColor entry. This
-    matches the static PPISP writer's defensive behavior.
+    No-op when the RenderVar prim does not exist.
     """
     var_path = f"{render_product_path}/{render_var_name}"
     var_prim = stage.GetPrimAtPath(var_path)
@@ -553,13 +502,10 @@ def _create_controller_pool_shader(
 ) -> UsdShade.Shader:
     """Author the per-camera PPISP controller CNN/pool Shader prim.
 
-    ``gridDimY`` is authored as ``1`` for the untiled fallback. The Lua
+    ``gridDimY`` is authored as ``1`` for the untiled fallback; the Lua
     launcher expands the launch grid to ``25 x tileCountX*tileCountY`` from
-    the tile-count inputs.
-
-    ``inputs:responsivity`` mirrors the achromatic HDR multiplier authored on
-    the auto-PPISP shader so the controller pools features from the same
-    responsivity-scaled radiance the image shader processes.
+    the tile-count inputs. Authors ``inputs:responsivity`` (achromatic HDR
+    multiplier).
     """
     shader_prim_name = CONTROLLER_POOL_PRIM_NAME_TEMPLATE.format(camera_index=camera_index)
     shader_path = f"{render_product_path}/{shader_prim_name}"
@@ -588,7 +534,7 @@ def _create_controller_shader(
 ) -> UsdShade.Shader:
     """Author the per-camera PPISP controller Shader prim.
 
-    ``gridDimX`` is authored as ``1`` for the untiled fallback. The Lua
+    ``gridDimX`` is authored as ``1`` for the untiled fallback; the Lua
     launcher expands the launch grid to one MLP block per tile from the
     tile-count inputs.
     """
@@ -635,11 +581,7 @@ def _create_controller_render_var(
     """Author the intermediate ``ControllerParams`` RenderVar.
 
     Routes the controller's ``outputs:ControllerParams`` through an
-    AOV-style RenderVar so Kit's runtime can resolve the connection
-    via the same mechanism it uses for ``HdrColor`` / ``LdrColor``.
-    Direct UsdShade Shader -> Shader connections are not enough here:
-    Kit's runtime walks AOV connections, not arbitrary UsdShade
-    outputs.
+    AOV-style RenderVar with an ``omni:rtx:aov`` connection.
     """
     var_path = f"{render_product_path}/{CONTROLLER_PARAMS_RENDER_VAR}"
     render_var = stage.DefinePrim(var_path, "RenderVar")
@@ -662,7 +604,7 @@ def _create_auto_ppisp_shader(
 
     Responsivity / vignetting / CRF are authored as literal shader inputs.
     When a camera path is provided, the same values are also mirrored onto the
-    ``<cam>_ppisp`` camera by :func:`_author_auto_camera_attributes`.
+    ``<cam>_ppisp`` camera via :func:`_author_auto_camera_attributes`.
     """
     shader_path = f"{render_product_path}/{PPISP_AUTO_PRIM_NAME}"
     shader = UsdShade.Shader.Define(stage, shader_path)
@@ -683,8 +625,7 @@ def _create_auto_ppisp_shader(
     if ppisp_camera_path is not None:
         # TODO(kit): connect these inputs to the <cam>_ppisp ppisp:* attrs
         # once SPG can resolve dynamic params from the bound RenderProduct
-        # camera. The camera attrs are still authored as source-of-truth
-        # metadata for downstream workflows.
+        # camera.
         # _connect_input_to_camera(shader, PPISP_AUTO_RESPONSIVITY_INPUT, Sdf.ValueTypeNames.Float, ppisp_camera_path)
         # _connect_per_camera_vignetting_crf_to_camera(shader, ppisp_camera_path)
         pass
@@ -700,12 +641,7 @@ def _create_ldr_color_render_var(
     render_product_path: str,
     auto_shader: UsdShade.Shader,
 ) -> Usd.Prim:
-    """Wire the ``LdrColor`` display AOV to the auto-PPISP output.
-
-    Mirrors the static PPISP writer's ``LdrColor`` wiring so display
-    consumers see the post-PPISP frame regardless of whether the
-    static or automatic-parameter variant was authored.
-    """
+    """Wire the ``LdrColor`` display AOV to the auto-PPISP output."""
     ldr_var_path = f"{render_product_path}/{LDR_COLOR_RENDER_VAR}"
     ldr_var = stage.DefinePrim(ldr_var_path, "RenderVar")
     ldr_var.CreateAttribute("sourceName", Sdf.ValueTypeNames.String).Set(LDR_COLOR_RENDER_VAR)
@@ -716,12 +652,10 @@ def _create_ldr_color_render_var(
 
 
 def _author_source_asset(shader: UsdShade.Shader, source_file: str, sub_identifier: str) -> None:
-    """Duplicate SPG sourceAsset metadata on the shader prim instance.
+    """Author SPG sourceAsset metadata on the shader prim instance.
 
-    Some Kit SPG / Fabric paths do not resolve referenced shader
-    metadata when opening packaged USDZ files; authoring on the
-    instance defends against that case (mirrors the static PPISP
-    writer's policy).
+    Sets ``info:implementationSource``, ``info:spg:sourceAsset``, and
+    ``info:spg:sourceAsset:subIdentifier``.
     """
     prim = shader.GetPrim()
     prim.CreateAttribute("info:implementationSource", Sdf.ValueTypeNames.Token, custom=False).Set("sourceAsset")

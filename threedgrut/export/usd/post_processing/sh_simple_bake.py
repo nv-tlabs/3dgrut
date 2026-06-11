@@ -28,11 +28,8 @@ from threedgrut.utils.render import RGB2SH, SH2RGB
 
 logger = logging.getLogger(__name__)
 
-# A handful of Gaussians sit at PPISP-saturation extremes where the chain
-# rule through pow() blows up (cond(J) > 1e8, |J|_F > 1e4). Their rotated
-# specular norms grow by 4+ orders of magnitude and dominate Adam's
-# variance estimate, stalling the fit. Past p99 of |J|_F (~3.4 on bonsai),
-# rotations are unreliable; ``5.0`` keeps a small safety margin.
+# Maximum Frobenius norm of a per-Gaussian Jacobian above which its specular
+# rotation is skipped.
 JACOBIAN_FRO_NORM_CLIP = 5.0
 
 
@@ -91,9 +88,11 @@ def _bake_dc_with_jacobian_through_ppisp(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Run PPISP forward and extract per-Gaussian RGB Jacobians.
 
-    When ``apply_srgb_to_linear`` is True, both the returned RGB and the
-    Jacobian correspond to ``srgb_to_linear(PPISP(X))`` so the higher-order
-    SH rotation stays in the same color space as the DC bake.
+    When ``apply_srgb_to_linear`` is True, the returned RGB and the Jacobian
+    both correspond to ``srgb_to_linear(PPISP(X))``.
+
+    Returns:
+        Tuple of (baked RGB, 3x3 per-Gaussian Jacobian).
     """
     rgb_in = dc_rgb_linear.detach().clone().requires_grad_(True)
     rgb_ppisp = _bake_dc_through_ppisp(
@@ -125,9 +124,8 @@ def _apply_jacobian_to_specular(features_specular: torch.nn.Parameter, jacobian:
     """In-place linearization of higher-order SH coefficients by ``jacobian``.
 
     Gaussians whose Jacobian is non-finite or has Frobenius norm above
-    :data:`JACOBIAN_FRO_NORM_CLIP` keep their trained specular (i.e. J is
-    replaced by the identity for them) -- avoids polluting Adam's variance
-    estimate with rare PPISP-saturation outliers.
+    :data:`JACOBIAN_FRO_NORM_CLIP` use the identity instead, keeping their
+    trained specular unchanged.
     """
     num_gaussians, total = features_specular.shape
     if total % 3 != 0:
@@ -163,15 +161,9 @@ def simple_bake(
 ) -> Tuple[float, torch.Tensor]:
     """Mutate SH coefficients with one fixed PPISP camera/frame transform.
 
-    PPISP outputs display-referred values (its CRF folds in gamma-like
-    encoding). Storing those directly in linear SH coefficients leaves the
-    asset double-encoded: downstream consumers that themselves apply a
-    linear→sRGB step (``threedgrut/utils/post_processing_linear_to_srgb``,
-    Kit's tonemap, etc.) will gamma-correct on top of an already-encoded
-    image. ``apply_srgb_to_linear=True`` runs an inverse sRGB on the PPISP
-    output before ``RGB2SH`` so the SH coefficients land in linear scene-
-    referred space and a downstream ``linear_to_srgb`` undoes the
-    transformation cleanly.
+    PPISP outputs display-referred values. When ``apply_srgb_to_linear`` is
+    True, an inverse sRGB is applied to the PPISP output before ``RGB2SH`` so
+    the SH coefficients land in linear scene-referred space.
     """
     exposure, color = get_fixed_frame_params(ppisp, frame_id)
 
@@ -190,8 +182,7 @@ def simple_bake(
                 apply_srgb_to_linear=apply_srgb_to_linear,
             )
         with torch.no_grad():
-            # dc_rgb_baked already includes srgb_to_linear when requested,
-            # so RGB2SH gets the right color space directly.
+            # dc_rgb_baked already includes srgb_to_linear when requested.
             model.features_albedo.copy_(RGB2SH(dc_rgb_baked))
             _apply_jacobian_to_specular(model.features_specular, jacobian)
     else:

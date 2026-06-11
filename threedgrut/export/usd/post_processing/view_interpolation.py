@@ -9,18 +9,13 @@
 
 """View samplers for SH-bake fitting.
 
-The default fit loop iterates the training dataloader, so the optimizer
-only sees the discrete set of training poses. The ``trajectory`` sampler
-orders the training views along a smooth path (nearest-neighbour + 2-opt
-on position+direction), arc-length-parameterises the path on ``[0, 1]``,
-then samples random ``t in [0, 1]`` and slerps inside the bracketing
-segment. Useful when training views are sparse and a residual fit needs
-to generalise to nearby novel views.
+The ``trajectory`` sampler orders the training views along a smooth path
+(nearest-neighbour + 2-opt on position+direction), arc-length-parameterises
+the path on ``[0, 1]``, then samples random ``t in [0, 1]`` and slerps inside
+the bracketing segment.
 
-The sampler reuses the dataset's per-intrinsic camera-space rays and
-pixel-coordinate grid -- only ``T_to_world`` changes per sample. PPISP's
-``FixedPPISP`` ignores the per-frame indices on the synthetic batch, so
-camera/frame indices on the template are kept as-is.
+Only ``T_to_world`` changes per sample; per-intrinsic camera-space rays, the
+pixel-coordinate grid, and camera/frame indices are reused from the template.
 """
 
 from __future__ import annotations
@@ -54,7 +49,7 @@ def normalize_view_sampling_mode(mode: Optional[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Pose interpolation primitives (numpy, double precision for stability)
+# Pose interpolation primitives (numpy, double precision)
 # ---------------------------------------------------------------------------
 
 
@@ -107,7 +102,7 @@ def _slerp_quat(q0: np.ndarray, q1: np.ndarray, s: float) -> np.ndarray:
     q0 = q0 / np.linalg.norm(q0)
     q1 = q1 / np.linalg.norm(q1)
     d = float(np.dot(q0, q1))
-    if d < 0.0:  # take the short arc
+    if d < 0.0:  # short arc
         q1 = -q1
         d = -d
     if d > 0.9995:
@@ -156,10 +151,9 @@ def _pose_distance_matrix(
     fwd = poses[:, :3, 2]  # (N, 3)  RDF: +Z = forward
     fwd = fwd / np.maximum(np.linalg.norm(fwd, axis=1, keepdims=True), 1e-12)
 
-    # vectorised pairwise position distance
     diff = pos[:, None, :] - pos[None, :, :]
     d_pos = np.linalg.norm(diff, axis=2)
-    # normalise by mean pairwise so the rotation term lives on a comparable scale
+    # mean pairwise position distance, used to normalise d_pos
     mean_pos = max(float(d_pos[d_pos > 0].mean()) if (d_pos > 0).any() else 1.0, 1e-9)
 
     cos_ang = np.clip(fwd @ fwd.T, -1.0, 1.0)
@@ -175,8 +169,7 @@ def _nearest_neighbour_order(D: np.ndarray, start: int = 0) -> List[int]:
     visited[start] = True
     while len(order) < n:
         last = order[-1]
-        # mask visited with +inf
-        candidates = np.where(visited, np.inf, D[last])
+        candidates = np.where(visited, np.inf, D[last])  # visited masked to +inf
         nxt = int(np.argmin(candidates))
         order.append(nxt)
         visited[nxt] = True
@@ -195,8 +188,7 @@ def _two_opt(order: List[int], D: np.ndarray, max_passes: int = 50) -> List[int]
             for j in range(i + 1, n - 1):
                 a, b = order[i - 1], order[i]
                 c, d = order[j], order[j + 1]
-                # original edges (a,b) + (c,d)
-                # candidate after reverse: (a,c) + (b,d)
+                # reverse order[i:j+1] if edges (a,c)+(b,d) are shorter than (a,b)+(c,d)
                 if D[a, c] + D[b, d] + 1e-12 < D[a, b] + D[c, d]:
                     order[i : j + 1] = order[i : j + 1][::-1]
                     improved = True
@@ -246,11 +238,9 @@ def order_views_along_trajectory(
 class InterpolatedViewSampler:
     """Yields ``Batch`` objects with synthetic interpolated poses.
 
-    The sampler grabs one template batch from the training dataset to
-    cache the per-intrinsic camera-space rays, pixel coords and any
-    intrinsic dictionaries; only ``T_to_world`` (and ``T_to_world_end``,
-    which we set to the same pose -- no rolling shutter on synthetic
-    poses) changes per sample.
+    Each batch reuses the template's per-intrinsic camera-space rays, pixel
+    coords and intrinsic dictionaries; only ``T_to_world`` and
+    ``T_to_world_end`` (set to the same pose) change per sample.
 
     Args:
         train_dataset: must implement
@@ -333,7 +323,7 @@ class InterpolatedViewSampler:
         device = self._template.T_to_world.device
         dtype = self._template.T_to_world.dtype
         T = torch.from_numpy(pose_np).to(device=device, dtype=dtype).unsqueeze(0)
-        # Same pose for start and end -- no rolling shutter on synthetic views.
+        # Same pose for start and end.
         return replace(self._template, T_to_world=T, T_to_world_end=T)
 
     # ------------------------------------------------------------------

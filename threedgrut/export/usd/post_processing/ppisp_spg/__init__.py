@@ -64,7 +64,7 @@ def get_ppisp_auto_spg_files() -> List[NamedSerialized]:
 
 
 def get_ppisp_spg_dyn_files() -> List[NamedSerialized]:
-    """Backward-compatible alias for automatic-parameter CUDA SPG sidecars."""
+    """Load automatic-parameter PPISP CUDA SPG sidecar files."""
     return get_ppisp_auto_spg_files()
 
 

@@ -105,14 +105,10 @@ def build_camera_frame_mapping(dataset) -> Tuple[List[str], Dict[str, List[int]]
 
 
 def build_camera_time_mapping(dataset) -> Tuple[List[str], Dict[str, List[float]]]:
-    """Build per-camera USD time-code lists keyed by GLOBAL dataset frame index.
+    """Build per-camera USD time-code lists keyed by global dataset frame index.
 
     Each camera's time-code list is the subsequence of global frame indices
-    that belong to that camera, matching the convention used by
-    ``USDExporter._build_camera_time_mapping_from_grouping``. Keeping camera
-    xform time samples and PPISP shader time samples on the same global
-    indexing avoids the runtime desync that would otherwise happen when the
-    renderer reads both at the same USD time code.
+    that belong to that camera.
     """
     num_frames = len(dataset)
 
@@ -185,25 +181,20 @@ def _append_ordered_var_target_once(
 def _create_shader_prim(stage: Usd.Stage, render_product_path: str) -> UsdShade.Shader:
     """Create the static-parameter PPISP CUDA shader prim on a RenderProduct.
 
-    The automatic/controller path is authored by
-    :func:`threedgrut.export.usd.post_processing.ppisp_controller_writer.add_ppisp_auto_shader_to_render_product`.
-    This helper handles only the static CUDA shader whose exposure/color
-    parameters are authored as USD inputs.
+    Authors the static CUDA shader whose exposure/color parameters are USD inputs.
     """
     render_product = stage.GetPrimAtPath(render_product_path)
     if not render_product.IsValid():
         raise ValueError(f"RenderProduct not found at path: {render_product_path}")
 
-    # PPISP needs HdrColor as shader input even when the default camera
-    # RenderProduct only exposes LdrColor.
+    # HdrColor shader input RenderVar
     _ensure_render_var(stage, render_product_path, PPISP_INPUT_RENDER_VAR)
 
     # PPISP Shader prim referencing the SPG asset definition
     ppisp_shader_path = f"{render_product_path}/PPISP"
     shader = UsdShade.Shader.Define(stage, ppisp_shader_path)
     shader.GetPrim().GetReferences().AddReference(PPISP_SPG_USDA_FILE)
-    # Duplicate the source metadata on the instance. Some Kit SPG/Fabric paths
-    # do not resolve referenced shader metadata when opening packaged USDZ files.
+    # Duplicate the source metadata on the instance.
     shader.GetPrim().CreateAttribute("info:implementationSource", Sdf.ValueTypeNames.Token, custom=False).Set(
         "sourceAsset"
     )
@@ -221,8 +212,7 @@ def _create_shader_prim(stage: Usd.Stage, render_product_path: str) -> UsdShade.
     # PPISPColor opaque output
     shader.CreateOutput(PPISP_OUTPUT_RENDER_VAR, Sdf.ValueTypeNames.Opaque)
 
-    # LdrColor RenderVar connected to the PPISP output. This intentionally
-    # replaces the display AOV with PPISP's LDR output.
+    # LdrColor RenderVar connected to the PPISP output, replacing the display AOV.
     ppisp_output_path = shader.GetPath().AppendProperty(f"outputs:{PPISP_OUTPUT_RENDER_VAR}")
     ldr_var_path = _add_ldr_color_render_var(stage, render_product_path, ppisp_output_path)
 
@@ -244,10 +234,11 @@ def _create_shader_prim(stage: Usd.Stage, render_product_path: str) -> UsdShade.
 
 
 def _set_responsivity_params(shader: UsdShade.Shader, responsivity: float) -> None:
-    """Author the user-overridable achromatic responsivity input (default
-    1.0). The shader premultiplies it with the input HDR before the rest
-    of the PPISP pipeline runs; consumers can override the values per-camera
-    in the USD asset without re-running the export."""
+    """Author the achromatic ``inputs:responsivity`` input.
+
+    The shader premultiplies it with the input HDR before the rest of the
+    PPISP pipeline runs.
+    """
     _validate_ppisp_responsivity(responsivity)
     shader.CreateInput(PPISP_RESPONSIVITY_INPUT_NAME, Sdf.ValueTypeNames.Float).Set(float(responsivity))
 
@@ -313,9 +304,7 @@ def _set_animated_exposure_params(
     """Write time-sampled exposure offset; default = mean across this camera's frames.
 
     ppisp.exposure_params has shape [num_frames].
-    Time codes default to float(frame_idx), but multi-camera exports pass
-    per-camera-local time codes so all physical cameras share a compact stage
-    animation range.
+    Time codes default to float(frame_idx).
     """
     exposure = ppisp.exposure_params.detach().cpu().numpy()  # [num_frames]
 
@@ -358,9 +347,7 @@ def _set_animated_color_params(
 
     ppisp.color_params has shape [num_frames, 8]:
     [db_r, db_g, dr_r, dr_g, dg_r, dg_g, dgray_r, dgray_g].
-    Written as 4 float2 attributes.
-    Time codes default to float(frame_idx), but multi-camera exports pass
-    per-camera-local time codes.
+    Written as 4 float2 attributes. Time codes default to float(frame_idx).
     """
     color = ppisp.color_params.detach().cpu().numpy()  # [num_frames, 8]
 
@@ -640,12 +627,8 @@ def add_ppisp_shader_to_render_product(
 
 
 def _create_ppisp_camera(stage: Usd.Stage, render_product: Usd.Prim) -> Optional[Sdf.Path]:
-    """Create a hidden neutral-exposure ``<cam>_ppisp`` camera shim.
-
-    Placing the shim next to the source camera preserves parent Xform motion
-    authored on rig/camera parents. A child under ``/Render/<rp>`` would inherit
-    camera intrinsics but lose animated parent transforms in common rig layouts.
-    """
+    """Create a hidden neutral-exposure ``<cam>_ppisp`` camera shim as a sibling
+    of the source camera, inheriting from it, and retarget the RenderProduct."""
     camera_rel = render_product.GetRelationship("camera")
     camera_targets = camera_rel.GetTargets() if camera_rel else []
     if not camera_targets:
@@ -717,8 +700,7 @@ def add_ppisp_to_all_render_products(
             inputs instead of authoring animated exposure/color samples.
         use_controller: If True, author a per-camera PPISP controller shader
             and wire its output into the PPISP shader, replacing the static /
-            time-sampled exposure & colour inputs. Requires the controller
-            sidecars to be packaged alongside the USD output.
+            time-sampled exposure & colour inputs.
         responsivity: Achromatic input HDR multiplier authored on every PPISP
             shader as a user-overridable default.
         neutral_frame_params: If True, author exposure 0 and zero color
@@ -753,9 +735,8 @@ def add_ppisp_to_all_render_products(
         if child.GetTypeName() != "RenderProduct":
             continue
 
-        # RenderProduct prim name matches _make_usd_prim_name(camera_name)
+        # Reverse-lookup camera_name whose _make_usd_prim_name matches the prim name
         prim_name = child.GetName()
-        # Reverse-lookup original camera_name by prim name
         camera_name = next(
             (n for n in camera_names if _make_usd_prim_name(n) == prim_name),
             None,
