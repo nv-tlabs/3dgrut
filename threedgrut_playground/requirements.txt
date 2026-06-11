@@ -1,6 +1,5 @@
 argparse
 tqdm
-libigl
 pygltflib
 polyscope>=2.3.0
 -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.2_cu118.html

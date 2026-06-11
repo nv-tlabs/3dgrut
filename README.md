@@ -65,7 +65,7 @@ For projects that require a fast, modular, and production-ready Gaussian Splatti
 - For good performance with 3DGRT, we recommend using an NVIDIA GPU with Ray Tracing (RT) cores.
 - Both Linux and Windows are supported via UV install scripts.
 
-### Option A: Using UV (Recommended)
+### Using UV
 
 (Kindly contributed by [@MasahiroOgawa](https://github.com/MasahiroOgawa))
 
@@ -76,6 +76,7 @@ git clone --recursive https://github.com/nv-tlabs/3dgrut.git
 cd 3dgrut
 ```
 
+<br/>
 <details open>
 <summary><strong>Linux</strong></summary>
 
@@ -120,6 +121,7 @@ source .venv/bin/activate
 
 </details>
 
+<br/>
 <details>
 <summary><strong>Windows</strong></summary>
 
@@ -152,32 +154,6 @@ After installation, **activate the virtual environment** (required for every new
 
 This also sets the build environment variables (`TORCH_CUDA_ARCH_LIST`, `CUDA_HOME`, VS Build Tools paths, etc.) that were persisted during installation.
 
-</details>
-
-### Option B: Using Legacy Conda Script
-
-<details>
-<summary>Legacy Conda Installation via <code>install_env.sh</code> (CUDA 11.8.0 / 12.8.1 only)</summary>
-</br>
-
-> [!NOTE]
-> `install_env.sh` is a legacy script that only supports CUDA 11.8.0 and 12.8.1 and requires
-> manual GCC management. For new setups, prefer **Sub-option A1** above, which supports more
-> CUDA versions and handles GCC compatibility automatically.
-
-```bash
-git clone --recursive https://github.com/nv-tlabs/3dgrut.git
-cd 3dgrut
-chmod +x install_env.sh
-./install_env.sh 3dgrut
-conda activate 3dgrut
-```
-
-If your system GCC is newer than 11, install `gcc-11` first and pass the `WITH_GCC11` flag:
-```sh
-sudo apt-get install gcc-11 g++-11
-./install_env.sh 3dgrut WITH_GCC11
-```
 </details>
 
 ### Blackwell / RTX 50 series Support

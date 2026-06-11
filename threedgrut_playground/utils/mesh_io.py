@@ -18,7 +18,6 @@ import logging
 import warnings
 from pathlib import Path
 
-import igl
 import numpy as np
 import PIL
 import torch
@@ -50,6 +49,24 @@ def _to_tensor(mat_data, is_normalize=False, is_pad_to_float4=False, device=None
         pad = mat_tensor.new_ones(1)
         mat_tensor = torch.cat([mat_tensor, pad], dim=-1)
     return mat_tensor.float()
+
+
+def _compute_vertex_normals(vertices: torch.Tensor, faces: torch.Tensor) -> torch.Tensor:
+    """Compute area-weighted vertex normals for a triangular mesh."""
+    if vertices.numel() == 0 or faces.numel() == 0:
+        return torch.zeros_like(vertices)
+
+    faces = faces.to(device=vertices.device, dtype=torch.long)
+    face_vertices = vertices[faces]
+    face_normals = torch.cross(
+        face_vertices[:, 1] - face_vertices[:, 0],
+        face_vertices[:, 2] - face_vertices[:, 0],
+        dim=1,
+    )
+
+    vertex_normals = torch.zeros_like(vertices)
+    vertex_normals.index_add_(0, faces.reshape(-1), face_normals.repeat_interleave(3, dim=0))
+    return torch.nn.functional.normalize(vertex_normals, dim=1, eps=1e-12)
 
 
 @torch.no_grad()
@@ -167,8 +184,7 @@ def load_mesh(path: str, device):
 
     # Compute vertex normals if needed
     if not mesh.has_attribute("vertex_normals") or len(mesh.vertex_normals) == 0:
-        vertex_normals = igl.per_vertex_normals(mesh.vertices.numpy(), mesh.faces.numpy())
-        mesh.vertex_normals = torch.tensor(vertex_normals, device=device, dtype=torch.float32)
+        mesh.vertex_normals = _compute_vertex_normals(mesh.vertices, mesh.faces).to(device=device, dtype=torch.float32)
 
     num_verts = len(mesh.vertices)
     num_faces = len(mesh.faces)
