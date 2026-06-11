@@ -34,10 +34,10 @@ def scale_sh_output(model, scale: float) -> None:
     """In-place scale the SH-evaluated RGB output by ``scale``.
 
     SH eval is ``rgb = features_albedo * C0 + 0.5 + sum_k Y_k * features_specular_k``.
-    To get ``s * rgb`` from a forward eval, every term must be scaled:
-      * features_specular -> s * features_specular  (linear, view-dep bands)
+    Scales each term so the forward eval yields ``s * rgb``:
+      * features_specular -> s * features_specular
       * features_albedo   -> s * features_albedo + (s - 1) * 0.5 / C0
-        compensates for the constant ``0.5`` offset in the DC band.
+        (compensates the constant ``0.5`` offset in the DC band)
     """
     if scale == 1.0:
         return
@@ -67,8 +67,7 @@ class PostProcessingBakeAdapter:
         """Optionally warm-start the SH fit with a closed-form initialization.
 
         Default is a no-op: the cloned ``baked_model`` keeps its checkpoint
-        SH coefficients as the starting point. Subclasses (e.g. PPISP) can
-        override to apply a one-shot bake before Adam takes over.
+        SH coefficients as the starting point.
         """
         del baked_model, post_processing
 
@@ -129,29 +128,23 @@ def bake_post_processing_into_sh(
 ):
     """Return a cloned model whose SH coefficients approximate fixed post-processing output.
 
-    Three parameter groups are co-optimised, mirroring 3DGS training defaults:
+    Co-optimises three parameter groups:
 
     * ``features_albedo``     at ``learning_rate``                (default 2.5e-3)
     * ``features_specular``   at ``learning_rate_specular``       (default = lr/20)
     * ``density``             at ``learning_rate_density``        (default 5e-2)
 
-    Letting density breathe absorbs spatial frequencies the SH alone can't
-    capture without aliasing -- on harder scenes (caterpillar) this is
-    worth +5 dB worst-case PSNR over fitting only colour coefficients.
-
     ``view_sampling_mode`` controls what the optimizer sees each step:
 
-    * ``"training"`` (default) -- iterate the training dataloader as usual.
+    * ``"training"`` (default) -- iterate the training dataloader.
     * ``"trajectory"`` -- order the training views along an approximate
       Hamiltonian path (NN + 2-opt on a position+direction metric),
       arc-length-parameterise the path on ``[0, 1]``, sample random
-      ``t ∈ [0, 1]``, slerp inside the bracketing segment. Helpful on
-      datasets with sparse view coverage.
+      ``t ∈ [0, 1]``, and slerp inside the bracketing segment.
 
-    The trajectory mode synthesises a ``Batch`` per step from the
-    template of the first training batch, replacing ``T_to_world`` with
-    the interpolated pose. ``steps_per_epoch`` matches
-    ``len(train_dataloader)`` so total step count is unchanged.
+    Trajectory mode synthesises a ``Batch`` per step from the template of
+    the first training batch, replacing ``T_to_world`` with the
+    interpolated pose. ``steps_per_epoch`` matches ``len(train_dataloader)``.
     """
     from threedgrut.export.usd.post_processing.view_interpolation import (
         VIEW_SAMPLING_TRAINING,
@@ -182,13 +175,10 @@ def bake_post_processing_into_sh(
     fixed_post_processing = adapter.create_fixed_post_processing(post_processing, device)
 
     # Warm-start the cloned SH state with the adapter's closed-form bake.
-    # PPISPPostProcessingBakeAdapter writes display-referred (gamma-space)
-    # DC; Adam takes over from there. Reduces the iterations needed and
-    # avoids fitting from a checkpoint state far from the optimum.
     adapter.initialize_fit(baked_model, post_processing)
 
     if learning_rate_specular is None:
-        learning_rate_specular = learning_rate / 20.0  # 3DGS default ratio
+        learning_rate_specular = learning_rate / 20.0
 
     _set_sh_fit_parameters(baked_model)
     baked_model.density.requires_grad_(True)
@@ -205,8 +195,7 @@ def bake_post_processing_into_sh(
     sampler: InterpolatedViewSampler | None = None
     if view_sampling_mode != VIEW_SAMPLING_TRAINING:
         # Cache one real training batch to seed the synthetic sampler with
-        # valid intrinsics / rays / pixel coords; only T_to_world rotates
-        # per step.
+        # valid intrinsics / rays / pixel coords; only T_to_world changes per step.
         first_batch = next(iter(train_dataloader))
         template = train_dataset.get_gpu_batch_with_intrinsics(first_batch)
         sampler = InterpolatedViewSampler(
@@ -417,29 +406,16 @@ class PPISPPostProcessingBakeAdapter(PostProcessingBakeAdapter):
 
     def apply_fit_transform(self, rgb: torch.Tensor, fixed_post_processing: nn.Module, gpu_batch) -> torch.Tensor:
         del fixed_post_processing, gpu_batch
-        # SH eval lives in display (gamma) space -- initialize_fit warm-starts
-        # with apply_srgb_to_linear=False, the loss target is the full PPISP
-        # output (also display-referred), and the loss gradient flows through
-        # identity. Matches the conditioning of training a 3DGS model
-        # directly in gamma space, where the same SH degree shows no rainbow
-        # aliasing.
+        # SH eval lives in display (gamma) space; identity transform clamped to [0, 1].
         return torch.clamp(rgb, 0.0, 1.0)
 
     def initialize_fit(self, baked_model, post_processing: nn.Module) -> None:
         """Warm-start with a DC-only simple-bake on the chosen (camera,
         frame), in display (gamma) space.
 
-        Matches the colour space the trainer used when ``post_processing.method``
-        is null/linear-to-srgb -- features_albedo lives directly in display-
-        referred RGB and ``apply_fit_transform`` is the identity. Aligns the
-        baked-SH USD asset format with no-PPISP exports.
-
-        The trained ``features_specular`` is left untouched: a higher-order
-        Jacobian rotation gives a slightly better starting PSNR but Adam
-        takes much longer to recover from the rotated specular (~7 dB at 9
-        epochs on bonsai, see tools/ppisp_export benchmark).
+        features_albedo is set in display-referred RGB; features_specular is
+        left untouched.
         """
-        # Late import: avoid pulling ppisp into modules that don't need it.
         from threedgrut.export.usd.post_processing.sh_simple_bake import simple_bake
 
         logger.info(
