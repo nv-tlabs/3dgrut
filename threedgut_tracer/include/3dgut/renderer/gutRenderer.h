@@ -22,6 +22,16 @@
 
 #include <memory>
 
+#ifndef FEATURE_OUTPUT_HALF
+#define FEATURE_OUTPUT_HALF 0
+#endif
+#if FEATURE_OUTPUT_HALF
+#include <cuda_fp16.h>
+using TFeatureDensityElem = __half;
+#else
+using TFeatureDensityElem = float;
+#endif
+
 namespace threedgut {
 
 class GUTRenderer {
@@ -67,7 +77,7 @@ public:
                          const tcnn::vec3* sensorRayDirectionCudaPtr,
                          float* worldHitCountCudaPtr,
                          float* worldHitDistanceCudaPtr,
-                         tcnn::vec4* radianceDensityCudaPtr,
+                         TFeatureDensityElem* featureDensityCudaPtr,
                          int* particlesVisibilityCudaPtr,
                          Parameters& parameters,
                          int cudaDeviceIndex,
@@ -78,8 +88,8 @@ public:
                           const tcnn::vec3* sensorRayDirectionCudaPtr,
                           const float* worldHitDistanceCudaPtr,
                           const float* worldHitDistanceGradientCudaPtr,
-                          const tcnn::vec4* radianceDensityCudaPtr,
-                          const tcnn::vec4* radianceDensityGradientCudaPtr,
+                          const TFeatureDensityElem* featureDensityCudaPtr,
+                          const float* featureDensityGradientCudaPtr,
                           tcnn::vec3* worldRayOriginGradientCudaPtr,
                           tcnn::vec3* worldRayDirectionGradientCudaPtr,
                           Parameters& parameters,

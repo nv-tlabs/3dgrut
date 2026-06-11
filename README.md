@@ -25,9 +25,14 @@ For projects that require a fast, modular, and production-ready Gaussian Splatti
 > _CVPR 2025 (Oral)_
 > __[Project page](https://research.nvidia.com/labs/toronto-ai/3DGUT)&nbsp;/ [Paper](https://research.nvidia.com/labs/toronto-ai/3DGUT/res/3DGUT_ready_main.pdf)&nbsp;/ [Video](https://research.nvidia.com/labs/toronto-ai/3DGUT/#supp_video)&nbsp;/ [BibTeX](assets/3dgut2025.bib)__
 
+> __Neural Harmonic Textures for High-Quality Primitive Based Neural Reconstruction__
+> Jorge Condor, Nicolas Moenne-Loccoz, Merlin Nimier-David, Piotr Didyk, Zan Gojcic, Qi Wu
+> _arXiv 2026_
+> __[Project page](https://research.nvidia.com/labs/sil/projects/neural-harmonic-textures/)&nbsp;/ [Paper](https://research.nvidia.com/labs/sil/projects/neural-harmonic-textures/assets/neural_harmonic_textures.pdf)&nbsp;/ [Video](https://research.nvidia.com/labs/sil/projects/neural-harmonic-textures/videos/video_nht_titleless.mp4)&nbsp;/ [BibTeX](assets/nht2026.bib)__
 
 ## 🔥 News
-- ✅[2026/03] **NCore v4:** Support for training from NCore v4 datasets ([NCore](https://github.com/NVIDIA/ncore), [commands](#training-on-ncore-v4-datasets)).
+- ✅[2026/06] 3DGRUT v2.0.0: Neural Harmonic Textures support.
+- ✅[2026/03] NCore v4: Support for training from NCore v4 datasets ([NCore](https://github.com/NVIDIA/ncore), [commands](#training-on-ncore-v4-datasets)).
 - ✅[2026/01] Physically-Plausible ISP support.
 - ✅[2025/08] Support for the 3DGRT and 3DGS/3DGRT pipelines is now available with the Vulkan API as part of the [Vulkan Gaussian Splatting Project](https://github.com/nvpro-samples/vk_gaussian_splatting). 3DGUT will also be available soon.
 - ✅[2025/07] Support for datasets with multiple sensors (only for COLMAP-style datasets).
@@ -49,6 +54,7 @@ For projects that require a fast, modular, and production-ready Gaussian Splatti
   - [Running with Docker](#running-with-docker)
 - [💻 2. Train 3DGRT or 3DGUT scenes](#-2-train-3dgrt-or-3dgut-scenes)
   - [Training on NCore v4 datasets](#training-on-ncore-v4-datasets)
+  - [Training with Neural Harmonic Textures (NHT)](#training-with-neural-harmonic-textures-nht)
   - [Using image masks](#using-image-masks)
   - [Exporting trained scenes (USD, PLY, NuRec)](#exporting-trained-scenes-usd-ply-nurec)
 - [🎥 3. Rendering from Checkpoints](#-3-rendering-from-checkpoints)
@@ -228,6 +234,14 @@ To enable MCMC, use:
 ```bash
 python train.py --config-name apps/colmap_3dgrt_mcmc.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgrt dataset.downsample_factor=2
 python train.py --config-name apps/colmap_3dgut_mcmc.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgut dataset.downsample_factor=2
+```
+
+### Training with Neural Harmonic Textures (NHT)
+
+To enable Neural Harmonic Textures (NHT), use:
+```bash
+python train.py --config-name apps/colmap_3dgrt_mcmc_nht.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgrt_nht dataset.downsample_factor=2
+python train.py --config-name apps/colmap_3dgut_mcmc_nht.yaml path=data/mipnerf360/bonsai out_dir=runs experiment_name=bonsai_3dgut_nht dataset.downsample_factor=2
 ```
 
 To enable selective Adam, use:
@@ -476,6 +490,64 @@ bash ./benchmark/scannetpp_render.sh results/scannetpp
 
 </details>
 
+<details>
+<summary><strong><a name="gut-nht-benchmark">3DGUT / NHT Results Produced on L40</a></strong></summary>
+<br/>
+
+**MipNeRF360 Dataset**
+
+```bash
+RESULT_DIR=results/mipnerf360_3dgut_nht \
+    bash ./benchmark/mipnerf360.sh apps/colmap_3dgut_mcmc_nht.yaml
+bash ./benchmark/mipnerf360_render.sh results/mipnerf360_3dgut_nht
+```
+
+Current validation uses 1M primitives, 30k iterations, MCMC, and 48 NHT features.
+
+|           | PSNR  | SSIM  | Train (s) | FPS   |
+|-----------|-------|-------|-----------|-------|
+| Bicycle   | 25.32 | 0.767 | 3177.5    | 230.9 |
+| Bonsai    | 33.65 | 0.951 | 5583.5    | 141.4 |
+| Counter   | 29.99 | 0.919 | 7229.4    | 120.5 |
+| Flowers   | 21.52 | 0.606 | 3916.8    | 179.3 |
+| Garden    | 27.52 | 0.859 | 3054.4    | 311.2 |
+| Kitchen   | 32.44 | 0.934 | 5852.5    | 162.3 |
+| Room      | 32.61 | 0.931 | 5827.3    | 139.6 |
+| Stump     | 26.68 | 0.779 | 3155.7    | 213.6 |
+| Treehill  | 23.02 | 0.653 | 3225.3    | 219.2 |
+| *Average* | 28.08 | 0.822 | 4558.0    | 190.9 |
+
+</details>
+
+<details>
+<summary><strong><a name="grt-nht-benchmark">3DGRT / NHT Results Produced on L40</a></strong></summary>
+<br/>
+
+**MipNeRF360 Dataset**
+
+```bash
+RESULT_DIR=results/mipnerf360_3dgrt_nht \
+    bash ./benchmark/mipnerf360.sh apps/colmap_3dgrt_mcmc_nht.yaml
+bash ./benchmark/mipnerf360_render.sh results/mipnerf360_3dgrt_nht
+```
+
+Current validation uses 1M primitives, 30k iterations, MCMC, and 48 NHT features.
+
+|           | PSNR  | SSIM  | Train (s) | FPS  |
+|-----------|-------|-------|-----------|------|
+| Bicycle   | 25.21 | 0.762 | 3187.1    | 58.1 |
+| Bonsai    | 33.11 | 0.949 | 6470.9    | 27.4 |
+| Counter   | 29.41 | 0.915 | 9095.5    | 18.6 |
+| Flowers   | 21.42 | 0.604 | 3676.9    | 50.9 |
+| Garden    | 27.12 | 0.850 | 2864.2    | 67.4 |
+| Kitchen   | 31.47 | 0.930 | 6025.1    | 26.6 |
+| Room      | 31.61 | 0.929 | 7548.5    | 30.5 |
+| Stump     | 25.61 | 0.744 | 2751.5    | 49.1 |
+| Treehill  | 23.05 | 0.653 | 3405.5    | 55.9 |
+| *Average* | 27.56 | 0.815 | 5002.8    | 42.7 |
+
+</details>
+
 ## 🛝 5. Interactive Playground GUI
 
 The playground allows interactive exploration of pretrained scenes, with ray-tracing effects such as inserted objects,
@@ -515,6 +587,15 @@ Formatting uses `black` and `isort`. Please run
     author={Wu, Qi and Martinez Esturo, Janick and Mirzaei, Ashkan and Moenne-Loccoz, Nicolas and Gojcic, Zan},
     journal = {Conference on Computer Vision and Pattern Recognition (CVPR)},
     year={2025}
+}
+```
+
+```
+@article{condor2026nht,
+    title={Neural Harmonic Textures for High-Quality Primitive Based Neural Reconstruction},
+    author={Condor, Jorge and Moenne-Loccoz, Nicolas and Nimier-David, Merlin and Didyk, Piotr and Gojcic, Zan and Wu, Qi},
+    journal = {arXiv preprint arXiv:2604.01204},
+    year={2026}
 }
 ```
 

@@ -28,8 +28,9 @@
       5. Pins PyTorch version constraints and configures the PyTorch index
       6. Installs the project and its dependencies (uv pip install -e .[dev,gui])
       7. Installs Kaolin (pre-built wheel for CUDA <=12)
-      8. Installs extra requirements from requirements_extra.txt
-      9. Installs slangc
+      8. Installs tiny-cuda-nn Python bindings from the pinned submodule
+      9. Installs extra requirements from requirements_extra.txt
+      10. Installs slangc
 
 .PARAMETER VenvName
     Prompt name for the virtual environment (default: 3dgrut)
@@ -58,7 +59,7 @@ $env:DISTUTILS_USE_SDK=1
 # ==========================================
 # Step 1: Initialize git submodules
 # ==========================================
-Write-Host "[1/9] Initializing git submodules..."
+Write-Host "[1/10] Initializing git submodules..."
 git submodule update --init --recursive
 if ($LASTEXITCODE -ne 0) { Write-Error-And-Exit "git submodule update failed" }
 Write-Host ""
@@ -66,7 +67,7 @@ Write-Host ""
 # ==========================================
 # Step 2: Detect CUDA
 # ==========================================
-Write-Host "[2/9] Detecting CUDA toolkit..."
+Write-Host "[2/10] Detecting CUDA toolkit..."
 
 if ($env:CUDA_HOME -and (Test-Path (Join-Path $env:CUDA_HOME "bin\nvcc.exe"))) {
     Write-Host "  Using CUDA_HOME=$env:CUDA_HOME"
@@ -105,7 +106,7 @@ Write-Host ""
 # ==========================================
 # Step 3: Detect Visual Studio build tools
 # ==========================================
-Write-Host "[3/9] Detecting Visual Studio build tools..."
+Write-Host "[3/10] Detecting Visual Studio build tools..."
 
 # CUDA 12.x officially supports MSVC from VS 2017 through VS 2022.
 $script:CudaCompatibleVsIds = @("2017", "2019", "2022", "15", "16", "17")
@@ -212,13 +213,13 @@ Write-Host ""
 # ==========================================
 # Step 4: Resolve CUDA version config
 # ==========================================
-Write-Host "[4/9] Resolving CUDA configuration..."
+Write-Host "[4/10] Resolving CUDA configuration..."
 . "$ScriptDir\scripts\cuda_helper.ps1"
 
 # ==========================================
 # Step 5: Create virtual environment
 # ==========================================
-Write-Host "[5/9] Checking virtual environment..."
+Write-Host "[5/10] Checking virtual environment..."
 
 $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
 if (-not $uvCmd) {
@@ -261,7 +262,7 @@ Write-Host ""
 # ==========================================
 # Step 6: Set constraints and index
 # ==========================================
-Write-Host "[6/9] Setting constraints and index..."
+Write-Host "[6/10] Setting constraints and index..."
 
 $constraintFile = Join-Path $env:UV_PROJECT_ENVIRONMENT "constraints.txt"
 if ($env:TORCH_VERSION) {
@@ -279,7 +280,7 @@ Write-Host ""
 # ==========================================
 # Step 7: Install project and dependencies
 # ==========================================
-Write-Host "[7/9] Installing project and dependencies..."
+Write-Host "[7/10] Installing project and dependencies..."
 uv pip install -e ".[dev,gui]"
 if ($LASTEXITCODE -ne 0) { Write-Error-And-Exit "Failed to install project dependencies" }
 Write-Host ""
@@ -288,7 +289,7 @@ Write-Host ""
 # Step 8: Install Kaolin
 # ==========================================
 if ([int]$env:CUDA_MAJOR_TARGET -le 12) {
-    Write-Host "[8/9] Installing Kaolin from pre-built wheel..."
+    Write-Host "[8/10] Installing Kaolin from pre-built wheel..."
     $torchInfo = uv pip show torch 2>&1 | Out-String
     $versionMatch = [regex]::Match($torchInfo, "Version:\s+(\S+)")
     $fullTorchVersion = $versionMatch.Groups[1].Value
@@ -305,15 +306,25 @@ if ($LASTEXITCODE -ne 0) { Write-Error-And-Exit "Failed to install Kaolin / play
 Write-Host ""
 
 # ==========================================
-# Step 9a: Install extra requirements
+# Step 9: Install tiny-cuda-nn Python bindings
 # ==========================================
-Write-Host "[9/9] Installing extra requirements..."
+Write-Host "[9/10] Installing tiny-cuda-nn Python bindings..."
+$env:INSTALL_TCNN_WITH_UV = "1"
+& "$ScriptDir\scripts\install_tinycudann.ps1"
+if ($LASTEXITCODE -ne 0) { Write-Error-And-Exit "Failed to install tiny-cuda-nn Python bindings" }
+Remove-Item Env:\INSTALL_TCNN_WITH_UV -ErrorAction SilentlyContinue
+Write-Host ""
+
+# ==========================================
+# Step 10a: Install extra requirements
+# ==========================================
+Write-Host "[10/10] Installing extra requirements..."
 uv pip install --no-cache --no-build-isolation -r requirements_extra.txt
 if ($LASTEXITCODE -ne 0) { Write-Error-And-Exit "Failed to install extra requirements" }
 Write-Host ""
 
 # ==========================================
-# Step 9b: Install slangc
+# Step 10b: Install slangc
 # ==========================================
 Write-Host "Installing slangc..."
 & "$ScriptDir\scripts\install_slangc.ps1"
@@ -326,6 +337,21 @@ Write-Host ""
 Write-Host "Verifying the installation..."
 & $env:UV_PYTHON -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
 & $env:UV_PYTHON -c "import kaolin; print(f'Kaolin: {kaolin.__version__}')"
+$VerifyTinyCudaNn = @'
+import importlib.util
+import torch
+
+if importlib.util.find_spec("tinycudann") is None:
+    raise SystemExit("tiny-cuda-nn: package not found")
+
+if not torch.cuda.is_available():
+    print("tiny-cuda-nn: installed (runtime import skipped; no CUDA device visible)")
+else:
+    import tinycudann
+
+    print("tiny-cuda-nn: ready")
+'@
+& $env:UV_PYTHON -c $VerifyTinyCudaNn
 & $env:UV_PYTHON -c "import ppisp; print(f'PPISP: {ppisp.__version__}')"
 & $env:UV_PYTHON -c "from fused_ssim import fused_ssim; print('Fused-SSIM: ready')"
 

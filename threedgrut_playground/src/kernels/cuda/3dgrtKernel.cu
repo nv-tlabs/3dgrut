@@ -28,9 +28,9 @@ extern "C" __global__ void __raygen__rg() {
 
   traceVolumetricGS(rayData, rayOrigin, rayDirection, 1e-9, 1e9);
 
-  params.rayRadiance[idx.z][idx.y][idx.x][0] = rayData.radiance.x;
-  params.rayRadiance[idx.z][idx.y][idx.x][1] = rayData.radiance.y;
-  params.rayRadiance[idx.z][idx.y][idx.x][2] = rayData.radiance.z;
+  params.rayFeatures[idx.z][idx.y][idx.x][0] = rayData.radiance.x;
+  params.rayFeatures[idx.z][idx.y][idx.x][1] = rayData.radiance.y;
+  params.rayFeatures[idx.z][idx.y][idx.x][2] = rayData.radiance.z;
   params.rayDensity[idx.z][idx.y][idx.x][0] = rayData.density;
   params.rayHitDistance[idx.z][idx.y][idx.x][0] = rayData.hitDistance;
   params.rayHitDistance[idx.z][idx.y][idx.x][1] = rayData.rayLastHitDistance;

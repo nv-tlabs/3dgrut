@@ -24,6 +24,7 @@ thirdparty/kaolin/
 
 threedgrt_tracer/.ninja_log
 threedgrt_tracer/include/3dgrt/kernels/slang/*.cuh*
+threedgut_tracer/include/threedgutSlang.cuh
 *.egg-info
 .idea
 

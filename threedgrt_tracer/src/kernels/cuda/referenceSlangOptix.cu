@@ -109,9 +109,14 @@ extern "C" __global__ void __raygen__rg() {
     float3 rayOrigin    = params.rayWorldOrigin(idx);
     float3 rayDirection = params.rayWorldDirection(idx);
 
-    float3 rayRadiance     = make_float3(0.0f);
-    float rayTransmittance = 1.0f;
-    float rayHitDistance   = 0.f;
+    FixedArray<float, RAY_FEATURE_DIM> rayFeatures;
+#pragma unroll
+    for (int i = 0; i < RAY_FEATURE_DIM; i++) {
+        rayFeatures[i] = 0.0f;
+    }
+    float rayTransmittance       = 1.0f;
+    float rayHitDistance         = 0.f;
+    float3 canonicalIntersection = make_float3(0.f);
 #ifdef ENABLE_NORMALS
     float3 rayNormal = make_float3(0.f);
 #endif
@@ -140,9 +145,10 @@ extern "C" __global__ void __raygen__rg() {
                     rayOrigin,
                     rayDirection,
                     rayHit.particleId,
-                    {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr}},
+                    {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr, true}},
                     &rayTransmittance,
                     &rayHitDistance,
+                    &canonicalIntersection,
 #ifdef ENABLE_NORMALS
                     true, &rayNormal
 #else
@@ -151,10 +157,12 @@ extern "C" __global__ void __raygen__rg() {
                 );
 
                 particleFeaturesIntegrateFwdFromBuffer(rayDirection,
+                                                       canonicalIntersection,
                                                        hitWeight,
                                                        rayHit.particleId,
-                                                       {{(float3*)params.particleRadiance, nullptr}, params.sphDegree},
-                                                       &rayRadiance);
+                                                       const_cast<TParticleFeatureElem*>(params.particleFeatures),
+                                                       params.sphDegree,
+                                                       &rayFeatures);
 
                 // NOTE(qi): Race condition here, but as we are writing the same value, it seems it is safe.
                 if (hitWeight > 0.f) {
@@ -170,9 +178,14 @@ extern "C" __global__ void __raygen__rg() {
         }
     }
 
-    params.rayRadiance[idx.z][idx.y][idx.x][0]    = rayRadiance.x;
-    params.rayRadiance[idx.z][idx.y][idx.x][1]    = rayRadiance.y;
-    params.rayRadiance[idx.z][idx.y][idx.x][2]    = rayRadiance.z;
+#pragma unroll
+    for (int i = 0; i < RAY_FEATURE_DIM; i++) {
+#if FEATURE_OUTPUT_HALF
+        params.rayFeatures[idx.z][idx.y][idx.x][i] = __float2half(rayFeatures[i]);
+#else
+        params.rayFeatures[idx.z][idx.y][idx.x][i] = rayFeatures[i];
+#endif
+    }
     params.rayDensity[idx.z][idx.y][idx.x][0]     = 1 - rayTransmittance;
     params.rayHitDistance[idx.z][idx.y][idx.x][0] = rayHitDistance;
     params.rayHitDistance[idx.z][idx.y][idx.x][1] = rayLastHitDistance;
@@ -197,7 +210,7 @@ extern "C" __global__ void __intersection__is() {
                                                                  : particleDensityHitCustom(optixGetWorldRayOrigin(),
                                                                                             optixGetWorldRayDirection(),
                                                                                             optixGetPrimitiveIndex(),
-                                                                                            {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr}},
+                                                                                            {{(gaussianParticle_RawParameters_0*)params.particleDensity, nullptr, true}},
                                                                                             optixGetRayTmin(),
                                                                                             optixGetRayTmax(),
                                                                                             params.hitMaxParticleSquaredDistance,

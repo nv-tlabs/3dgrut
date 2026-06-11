@@ -87,6 +87,16 @@ inline void* voidDataPtr(torch::Tensor& tensor) {
     }
 }
 
+torch::Tensor particleRadianceKernelTensor(const torch::Tensor& particleRadiance) {
+#if PARTICLE_FEATURE_HALF
+    return particleRadiance.scalar_type() == torch::kHalf ? particleRadiance.contiguous()
+                                                          : particleRadiance.to(torch::kHalf).contiguous();
+#else
+    return particleRadiance.scalar_type() == torch::kFloat32 ? particleRadiance.contiguous()
+                                                             : particleRadiance.to(torch::kFloat32).contiguous();
+#endif
+}
+
 using DeviceQueueHandle = uint64_t;
 
 threedgut::TSensorPose poseInverse(const TSensorPose& pose) {
@@ -192,16 +202,23 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
     const uint32_t numParticles = particleDensity.size(0);
 
     const torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
+    // Feature output dtype: fp16 halves memory bandwidth for NHT feature buffers
+#if FEATURE_OUTPUT_HALF
+    const torch::TensorOptions featureOpts = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA);
+#else
+    const torch::TensorOptions featureOpts = opts;
+#endif
 
-    torch::Tensor rayRadianceDensity = torch::zeros({height, width, 4}, opts);
-    torch::Tensor rayHitDistance     = torch::ones({height, width, 1}, opts).multiply(1e06f);
-    torch::Tensor rayHitCount        = torch::zeros({height, width, 1}, opts);
-    torch::Tensor particleVisibility = torch::zeros({numParticles, 1}, opts);
+    torch::Tensor rayRadianceDensity     = torch::zeros({height, width, static_cast<int64_t>(RAY_FEATURE_DIM + 1)}, featureOpts);
+    torch::Tensor rayHitDistance         = torch::ones({height, width, 1}, opts).multiply(1e06f);
+    torch::Tensor rayHitCount            = torch::zeros({height, width, 1}, opts);
+    torch::Tensor particleVisibility     = torch::zeros({numParticles, 1}, opts);
+    torch::Tensor particleRadianceKernel = particleRadianceKernelTensor(particleRadiance);
 
     m_parameters.values.numParticles               = numParticles;
     m_parameters.values.radianceSphDegree          = numActiveFeatures;
     m_parameters.parameters.dptrDensityParameters  = voidDataPtr(particleDensity);
-    m_parameters.parameters.dptrRadianceParameters = voidDataPtr(particleRadiance);
+    m_parameters.parameters.dptrRadianceParameters = voidDataPtr(particleRadianceKernel);
     m_parameters.valuesBuffer.setFromHost(&m_parameters.values, sizeof(m_parameters.values), reinterpret_cast<uint64_t>(cudaStream), m_logger);
     m_parameters.parametersBuffer.setFromHost(&m_parameters.parameters, sizeof(m_parameters.parameters), reinterpret_cast<uint64_t>(cudaStream), m_logger);
 
@@ -228,7 +245,7 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
         reinterpret_cast<const tcnn::vec3*>(voidDataPtr(rayDirection)),
         reinterpret_cast<float*>(voidDataPtr(rayHitCount)),
         reinterpret_cast<float*>(voidDataPtr(rayHitDistance)),
-        reinterpret_cast<tcnn::vec4*>(voidDataPtr(rayRadianceDensity)),
+        reinterpret_cast<TFeatureDensityElem*>(voidDataPtr(rayRadianceDensity)),
         reinterpret_cast<int*>(voidDataPtr(particleVisibility)),
         m_parameters,
         cudaDeviceIndex,
@@ -273,6 +290,7 @@ SplatRaster::traceBwd(uint32_t frameNumber, int numActiveFeatures,
 
     torch::Tensor particleDensityGradient  = torch::zeros({particleDensity.size(0), particleDensity.size(1)}, opts);
     torch::Tensor particleRadianceGradient = torch::zeros({particleRadiance.size(0), particleRadiance.size(1)}, opts);
+    torch::Tensor particleRadianceKernel   = particleRadianceKernelTensor(particleRadiance);
 
     const bool rayBackpropagation = false;
 
@@ -286,7 +304,7 @@ SplatRaster::traceBwd(uint32_t frameNumber, int numActiveFeatures,
     m_parameters.values.numParticles               = numParticles;
     m_parameters.values.radianceSphDegree          = numActiveFeatures;
     m_parameters.parameters.dptrDensityParameters  = voidDataPtr(particleDensity);
-    m_parameters.parameters.dptrRadianceParameters = voidDataPtr(particleRadiance);
+    m_parameters.parameters.dptrRadianceParameters = voidDataPtr(particleRadianceKernel);
     m_parameters.gradients.dptrDensityGradients    = voidDataPtr(particleDensityGradient);
     m_parameters.gradients.dptrRadianceGradients   = voidDataPtr(particleRadianceGradient);
     m_parameters.valuesBuffer.setFromHost(&m_parameters.values, sizeof(m_parameters.values), reinterpret_cast<uint64_t>(cudaStream), m_logger);
@@ -316,8 +334,8 @@ SplatRaster::traceBwd(uint32_t frameNumber, int numActiveFeatures,
         reinterpret_cast<const tcnn::vec3*>(voidDataPtr(rayDirection)),
         reinterpret_cast<float*>(voidDataPtr(rayHitDistance)),
         reinterpret_cast<float*>(voidDataPtr(rayHitDistanceGradient)),
-        reinterpret_cast<tcnn::vec4*>(voidDataPtr(rayRadianceDensity)),
-        reinterpret_cast<tcnn::vec4*>(voidDataPtr(rayRadianceDensityGradient)),
+        reinterpret_cast<const TFeatureDensityElem*>(voidDataPtr(rayRadianceDensity)),
+        reinterpret_cast<const float*>(voidDataPtr(rayRadianceDensityGradient)),
         rayBackpropagation ? reinterpret_cast<tcnn::vec3*>(voidDataPtr(rayOriginGradient)) : nullptr,
         rayBackpropagation ? reinterpret_cast<tcnn::vec3*>(voidDataPtr(rayDirectionGradient)) : nullptr,
         m_parameters, cudaDeviceIndex, cudaStream);

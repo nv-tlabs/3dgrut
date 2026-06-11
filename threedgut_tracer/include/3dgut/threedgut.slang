@@ -24,11 +24,4 @@ namespace gaussianParticle
 };
 
 #include <3dgut/kernels/slang/models/gaussianParticles.slang>
-
-namespace shRadiativeParticle
-{
-    static const int RadianceMaxNumSphCoefficients = PARTICLE_RADIANCE_NUM_COEFFS;
-    static const int Dim = 3;
-};
-
-#include <3dgut/kernels/slang/models/shRadiativeParticles.slang>
+#include <3dgut/kernels/slang/models/radiativeParticles.slang>

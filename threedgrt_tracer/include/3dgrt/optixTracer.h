@@ -72,6 +72,7 @@ protected:
 
         float particleKernelDegree;
         float particleKernelMinResponse;
+        float particleKernelMaxAlpha;
         bool particleKernelDensityClamping;
         int particleRadianceSphDegree;
 
@@ -132,6 +133,7 @@ public:
         const std::string& primitive,
         float particleKernelDegree,
         float particleKernelMinResponse,
+        float particleKernelMaxAlpha,
         bool particleKernelDensityClamping,
         int particleRadianceSphDegree,
         bool enableNormals,
@@ -144,7 +146,7 @@ public:
                                                                                                                        torch::Tensor rayOri,
                                                                                                                        torch::Tensor rayDir,
                                                                                                                        torch::Tensor particleDensity,
-                                                                                                                       torch::Tensor particleRadiance,
+                                                                                                                       torch::Tensor particleFeatures,
                                                                                                                        uint32_t renderOpts,
                                                                                                                        int sphDegree,
                                                                                                                        float minTransmittance);
@@ -153,13 +155,13 @@ public:
                                                               torch::Tensor rayToWorld,
                                                               torch::Tensor rayOri,
                                                               torch::Tensor rayDir,
-                                                              torch::Tensor rayRad,
+                                                              torch::Tensor rayFeat,
                                                               torch::Tensor rayDns,
                                                               torch::Tensor rayHit,
                                                               torch::Tensor rayNrm,
                                                               torch::Tensor particleDensity,
-                                                              torch::Tensor particleRadiance,
-                                                              torch::Tensor rayRadGrd,
+                                                              torch::Tensor particleFeatures,
+                                                              torch::Tensor rayFeatGrd,
                                                               torch::Tensor rayDnsGrd,
                                                               torch::Tensor rayHitGrd,
                                                               torch::Tensor rayNrmGrd,

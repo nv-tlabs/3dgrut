@@ -141,7 +141,7 @@ extern "C" __global__ void __raygen__rg() {
                     rayDirection,
                     rayHit.particleId,
                     params.particleDensity,
-                    params.particleRadiance,
+                    params.particleFeatures,
                     params.hitMinGaussianResponse,
                     params.alphaMinThreshold,
                     params.sphDegree,
@@ -169,9 +169,9 @@ extern "C" __global__ void __raygen__rg() {
         }
     }
 
-    params.rayRadiance[idx.z][idx.y][idx.x][0]    = rayRadiance.x;
-    params.rayRadiance[idx.z][idx.y][idx.x][1]    = rayRadiance.y;
-    params.rayRadiance[idx.z][idx.y][idx.x][2]    = rayRadiance.z;
+    params.rayFeatures[idx.z][idx.y][idx.x][0]    = rayRadiance.x;
+    params.rayFeatures[idx.z][idx.y][idx.x][1]    = rayRadiance.y;
+    params.rayFeatures[idx.z][idx.y][idx.x][2]    = rayRadiance.z;
     params.rayDensity[idx.z][idx.y][idx.x][0]     = 1 - rayTransmittance;
     params.rayHitDistance[idx.z][idx.y][idx.x][0] = rayHitDistance;
     params.rayHitDistance[idx.z][idx.y][idx.x][1] = rayLastHitDistance;

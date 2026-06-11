@@ -13,6 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// This file contains SH-specific CUDA backward pass helpers.
+// For learned features mode (FEATURE_TRANSFORM_TYPE != 0), this file compiles but provides no functions.
+// Learned features use Slang autodiff instead of these CUDA helpers.
+
 #include <optix.h>
 
 #include <3dgrt/mathUtils.h>
@@ -21,6 +25,9 @@
 // Define integer types for NVRTC compatibility
 typedef int int32_t;
 typedef unsigned int uint32_t;
+
+// Only define SH-specific functions for SH mode
+#if !defined(FEATURE_TRANSFORM_TYPE) || FEATURE_TRANSFORM_TYPE == 0
 
 void quaternionWXYZToMatrix(const float4& q, float33& ret) {
     const float r = q.x;
@@ -365,7 +372,7 @@ __device__ inline bool processHit(
     const float grayDist = dot(gcrod, gcrod);
 
     const float gres   = particleResponse<ParticleKernelDegree>(grayDist);
-    const float galpha = fminf(0.99f, gres * particleDensity);
+    const float galpha = fminf(GAUSSIAN_PARTICLE_MAX_ALPHA, gres * particleDensity);
 
     const bool acceptHit = (gres > minParticleKernelDensity) && (galpha > minParticleAlpha);
     if (acceptHit) {
@@ -506,7 +513,7 @@ __device__ inline void processHitBwd(
     const float grayDist = dot(gcrod, gcrod);
 
     const float gres   = particleResponse<ParticleKernelDegree>(grayDist);
-    const float galpha = fminf(0.99f, gres * particleDensity);
+    const float galpha = fminf(GAUSSIAN_PARTICLE_MAX_ALPHA, gres * particleDensity);
 
     if ((gres > minParticleKernelDensity) && (galpha > minParticleAlpha)) {
         ParticleDensity& particleDensityGrad = particleDensityGradPtr[particleIdx];
@@ -548,7 +555,7 @@ __device__ inline void processHitBwd(
         //   => groRayHitGrd_j = -grd_j * dot(grdsRayHitGrd * gscl, grd)
         const float grdScaledDot = dot(grdsRayHitGrd * gscl, grd);
         float3 grdRayHitGrd, groRayHitGrd;
-        if constexpr (SurfelPrimitive) {
+        if (SurfelPrimitive) {
             const float h = -gro.z / grd.z;
             grdRayHitGrd  = gscl * grdsRayHitGrd * h - make_float3(0.f, 0.f, (h / grd.z) * grdScaledDot);
             groRayHitGrd  = make_float3(0.f, 0.f, -grdScaledDot / grd.z);
@@ -723,3 +730,5 @@ __device__ inline void processHitBwd(
         transmittance = nextTransmit;
     }
 }
+
+#endif // FEATURE_TRANSFORM_TYPE == 0

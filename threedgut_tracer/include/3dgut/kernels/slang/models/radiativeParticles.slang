@@ -13,26 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#endif
+// Radiative Particles Wrapper
+// Conditionally includes the appropriate feature implementation based on FEATURE_TRANSFORM_TYPE
 
-#ifdef _MSC_VER
-#pragma warning(push, 0)
-#include <torch/extension.h>
-#pragma warning(pop)
+#if FEATURE_TRANSFORM_TYPE == 0
+    // Spherical Harmonics mode
+    #include <3dgut/kernels/slang/models/shRadiativeParticles.slang>
+#elif FEATURE_TRANSFORM_TYPE == 1
+    // Post-MLP radiance mode
+    #include <3dgut/kernels/slang/models/neuralHarmonicFeaturesParticle.slang>
 #else
-#include <torch/extension.h>
+    #error "Unknown FEATURE_TRANSFORM_TYPE. Must be 0 (SH) or 1 (neural_harmonic_features)"
 #endif
-
-#include <3dgrt/optixTracer.h>
-
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    pybind11::class_<OptixTracer>(m, "OptixTracer")
-        .def(pybind11::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::string&, float, float, float, bool, int, bool, bool>())
-        .def("trace", &OptixTracer::trace)
-        .def("trace_bwd", &OptixTracer::traceBwd)
-        .def("build_bvh", &OptixTracer::buildBVH);
-}
