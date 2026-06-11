@@ -90,11 +90,23 @@ jobs:
 
       - name: Test USD export/import
         run: |
+          set +e
           .venv/bin/python -m pytest \
             threedgrut/export/tests/test_export_import.py \
             threedgrut/export/tests/test_ppisp_cuda_export.py \
             threedgrut/export/tests/test_transcode_roundtrip.py \
             -v
+          rc=$?
+          # These tests require usd-core (pxr), which is only installed on x86_64.
+          # On arm64 they self-skip, so pytest exits 5 (no tests collected) -- tolerate
+          # that on arm64 only. On x86_64 exit 5 still fails the job, so a silently
+          # broken pxr (everything skipped) does not pass unnoticed. Real test
+          # failures (exit 1) fail everywhere.
+          if [ "$rc" -eq 5 ] && [ "$RUNNER_ARCH" = "ARM64" ]; then
+            echo "All USD export tests skipped on $RUNNER_ARCH (pxr unavailable); treating as pass."
+            exit 0
+          fi
+          exit $rc
 
   ci-uv-windows:
     name: ci-uv-windows (CUDA ${{ matrix.cuda_version }})
