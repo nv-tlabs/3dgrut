@@ -17,6 +17,8 @@
 
 set -euo pipefail
 
+export NVCC_PREPEND_FLAGS=${NVCC_PREPEND_FLAGS:-}
+
 # NOTE: this script will create a conda environment with CUDA toolkit based on the CUDA_VERSION
 # specified. It will also set the CC, CXX, and TORCH_CUDA_ARCH_LIST environment variables correctly
 # within the conda environment.
