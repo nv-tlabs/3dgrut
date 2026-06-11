@@ -17,9 +17,8 @@
 PPISP USD Writer.
 
 Export PPISP (Physically Plausible Image Signal Processing) as a UsdShade
-Shader prim on each camera's RenderProduct. Adapted from
-nre-borel/nre/utils/io/export/ppisp_export, replacing the
-rig/timestamp frame-mapping with 3DGRUT integer frame indices.
+Shader prim on each camera's RenderProduct, using 3DGRUT integer frame
+indices for the frame-mapping.
 
 PPISP pipeline stages:
 1. Exposure compensation (per-frame, time-sampled)

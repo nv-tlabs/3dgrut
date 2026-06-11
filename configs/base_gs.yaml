@@ -66,7 +66,7 @@ export_usd:
   # null = auto-export controllers when the PPISP checkpoint has them.
   # true = require controller export; false = force static/time-sampled fallback.
   enable-ppisp-controller-export: null
-  # Number of optimizer steps for sh-optimized export. null uses the Borel default (3000).
+  # Number of optimizer steps for sh-optimized export. null uses the default (3000).
   sh-optimization-num-iterations: null
   # Multiplicative scale applied to exported SH radiance.
   scene-radiance-scale: 1.0
