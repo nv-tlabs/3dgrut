@@ -28,11 +28,11 @@ PPISP automatic-parameter USD writer (EXPERIMENTAL).
 This module is the UsdShade authoring half of the controller
 export. It consumes:
 
-* :func:`threedgrut.export.usd.writers.ppisp_controller_weights.flatten_controller_weights`
+* :func:`threedgrut.export.usd.post_processing.ppisp_controller_weights.flatten_controller_weights`
   to flatten per-camera CNN/MLP weights into generated CUDA source
   files whose layout is encoded by :file:`ppisp_controller.cu`'s
   ``OFF_*`` offsets.
-* :func:`threedgrut.export.usd.writers.ppisp_controller_weights.select_camera_controller`
+* :func:`threedgrut.export.usd.post_processing.ppisp_controller_weights.select_camera_controller`
   to resolve a validated PPISP camera id into the corresponding
   ``_PPISPController`` instance.
 
@@ -94,12 +94,12 @@ import numpy as np
 import torch.nn as nn
 from pxr import Gf, Sdf, Usd, UsdShade, Vt
 
-from threedgrut.export.usd.stage_utils import NamedSerialized
-from threedgrut.export.usd.writers.ppisp_controller_weights import (
+from threedgrut.export.usd.post_processing.ppisp_controller_weights import (
     EXPECTED_CONTROLLER_WEIGHTS_LEN,
     flatten_controller_weights,
     select_camera_controller,
 )
+from threedgrut.export.usd.stage_utils import NamedSerialized
 
 if TYPE_CHECKING:
     from ppisp import PPISP  # type: ignore[import-not-found]
@@ -113,7 +113,7 @@ log = logging.getLogger(__name__)
 # =============================================================================
 
 
-PPISP_SPG_DIR = Path(__file__).parent.parent / "ppisp_spg"
+PPISP_SPG_DIR = Path(__file__).parent / "ppisp_spg"
 
 # Controller template files used to generate per-camera embedded-weight
 # sidecars.
@@ -228,7 +228,7 @@ def add_ppisp_auto_shader_to_render_product(
             ``vignetting_params`` (``[num_cameras, 3, 5]``) and
             ``crf_params`` (``[num_cameras, 3, 4]``).
         controller: Per-camera controller (typically obtained via
-            :func:`threedgrut.export.usd.writers.ppisp_controller_weights.select_camera_controller`).
+            :func:`threedgrut.export.usd.post_processing.ppisp_controller_weights.select_camera_controller`).
             Validated and embedded into generated CUDA sidecars by the
             exporter.
         responsivity: Achromatic HDR multiplier authored on the
@@ -246,7 +246,7 @@ def add_ppisp_auto_shader_to_render_product(
             via the ``ControllerParams`` AOV.
     Returns:
         The auto-PPISP shader prim, mirroring the return type of
-        :func:`threedgrut.export.usd.writers.ppisp_writer.add_ppisp_shader_to_render_product`.
+        :func:`threedgrut.export.usd.post_processing.ppisp_writer.add_ppisp_shader_to_render_product`.
 
     Raises:
         TypeError: ``camera_index`` is not an int, or

@@ -87,7 +87,7 @@ controller export. It is responsible for:
 This module is intentionally pure Python -- no USD, no Omniverse,
 no SPG asset references. The UsdShade authoring side (Shader prim
 creation, AOV wiring, RenderVar wiring) lives in
-:mod:`threedgrut.export.usd.writers.ppisp_controller_writer`, which consumes
+:mod:`threedgrut.export.usd.post_processing.ppisp_controller_writer`, which consumes
 this module's flat buffer.
 """
 

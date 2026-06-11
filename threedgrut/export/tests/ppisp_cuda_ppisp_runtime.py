@@ -29,8 +29,10 @@ def add_ninja_to_path() -> None:
     return None
 
 
-from threedgrut.export.usd.ppisp_spg import _SPG_DIR as CONTROLLER_SPG_DIR
-from threedgrut.export.usd.ppisp_spg import _SPG_DIR as STATIC_SPG_DIR
+from threedgrut.export.usd.post_processing.ppisp_spg import (
+    _SPG_DIR as CONTROLLER_SPG_DIR,
+)
+from threedgrut.export.usd.post_processing.ppisp_spg import _SPG_DIR as STATIC_SPG_DIR
 
 _STATIC_CU = STATIC_SPG_DIR / "ppisp_usd_spg.cu"
 _AUTO_CU = CONTROLLER_SPG_DIR / "ppisp_usd_spg_auto.cu"

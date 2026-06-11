@@ -48,14 +48,14 @@ from threedgrut.export.usd.particle_field_hints import (
     DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
     normalize_particle_field_sorting_mode_hint,
 )
-from threedgrut.export.usd.post_processing_sh_bake import (
-    MODE_PPISP_BAKE_VIGNETTING_NONE,
-    scale_sh_output,
-)
-from threedgrut.export.usd.ppisp_spg import (
+from threedgrut.export.usd.post_processing.ppisp_spg import (
     ppisp_has_controller,
     resolve_ppisp_controller_export_enabled,
     select_spg_files_for_export,
+)
+from threedgrut.export.usd.post_processing.sh_bake import (
+    MODE_PPISP_BAKE_VIGNETTING_NONE,
+    scale_sh_output,
 )
 from threedgrut.export.usd.stage_utils import (
     NamedSerialized,
@@ -568,7 +568,7 @@ class USDExporter(ModelExporter):
             )
 
         if uses_baked_post_processing_export:
-            from threedgrut.export.usd.post_processing_sh_bake import (
+            from threedgrut.export.usd.post_processing.sh_bake import (
                 PPISPPostProcessingBakeAdapter,
                 bake_post_processing_into_sh,
             )
@@ -1050,7 +1050,7 @@ class USDExporter(ModelExporter):
             )
             return
 
-        from threedgrut.export.usd.writers.ppisp_writer import (
+        from threedgrut.export.usd.post_processing.ppisp_writer import (
             add_ppisp_to_all_render_products,
             build_camera_frame_mapping,
             build_camera_time_mapping,

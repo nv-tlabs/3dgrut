@@ -26,6 +26,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
+pytest.importorskip("pxr", reason="usd-core (pxr) is only available on linux x86_64")
+
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdVol
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities

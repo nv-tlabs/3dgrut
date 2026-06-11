@@ -50,7 +50,7 @@ For projects that require a fast, modular, and production-ready Gaussian Splatti
 - [💻 2. Train 3DGRT or 3DGUT scenes](#-2-train-3dgrt-or-3dgut-scenes)
   - [Training on NCore v4 datasets](#training-on-ncore-v4-datasets)
   - [Using image masks](#using-image-masks)
-  - [Exporting USDZ for use in Omniverse and Isaac Sim](#exporting-usdz-for-use-in-omniverse-and-isaac-sim)
+  - [Exporting trained scenes (USD, PLY, NuRec)](#exporting-trained-scenes-usd-ply-nurec)
 - [🎥 3. Rendering from Checkpoints](#-3-rendering-from-checkpoints)
   - [To visualize training progress interactively](#to-visualize-training-progress-interactively)
   - [To visualize a pre-trained checkpoint](#to-visualize-a-pre-trained-checkpoint)
@@ -287,110 +287,24 @@ The provided masks should have the same resolution as their corresponding images
 
 **NOTE**: The masks are only used for loss computation and not for computing the metrics.
 
-### Exporting USDZ for use in Omniverse and Isaac Sim
+### Exporting trained scenes (USD, PLY, NuRec)
 
-As a beta feature, Omniverse Kit 107.3 and Isaac Sim 5.0 are able to support rendering 3D Gaussians in a specific custom USDZ-based format that uses an extension of the UsdVolVolume Schema.
-
-The 3DGRUT repository can output trained scenes to this format by enabling the `export_usd` flag:
+Trained scenes can be exported to USD ([`ParticleField`](https://openusd.org/release/user_guides/schemas/usdVol/ParticleField.html)), NuRec USDZ for Omniverse,
+or PLY, and transcoded between these formats. The simplest path is to enable export at the end of
+training:
 
 ```bash
 python train.py --config-name apps/colmap_3dgut.yaml path=data/mipnerf360/garden/ out_dir=runs experiment_name=garden_3dgut dataset.downsample_factor=2 export_usd.enabled=true
 ```
 
 > [!NOTE]
-> The USD output schema is currently compatible with Isaac Sim 5.0, but how USD and reconstruction workflows work together is highly likely to change in future versions. This is a beta feature.
+> While Isaac Sim 6.0 supports both the `ParticleField` (standard USD) schema and the custom NuRec USDZ
+> output, custom NuRec USDZ is going to be deprecated and replaced by `ParticleField`. Prefer `ParticleField`
+> for new assets.
 
-#### Converting PLY files to USDZ
-
-If you have existing Gaussian data in PLY format, for example, from 3DGS, you can convert it to the USDZ format using the `ply_to_usd.py` script:
-
-```bash
-python -m threedgrut.export.scripts.ply_to_usd path/to/your/model.ply --output_file path/to/output.usdz
-```
-
-This is useful for converting 3DGS models from other sources to the USDZ format. Note that the resulting USDZ does not include a mesh. If you need a mesh inside the USDZ (e.g. for collision geometry), follow the next step.
-
-#### Adding a Mesh to a USDZ File
-
-You can add a mesh (PLY or USD) into an existing USDZ file using the `add_mesh_to_usdz.py` script. This is useful for producing USDZ assets with physics properties such as collision geometry.
-
-
-```bash
-python -m threedgrut.export.scripts.add_mesh_to_usdz --input_usdz path/to/input.usdz --output_usdz path/to/output.usdz --mesh_ply path/to/mesh.ply --set_collision
-```
-
-Optional flags:
-- `--set_collision` — enable collision on mesh prims.
-- `--set_invisible` — make mesh prims invisible.
-- `--referencing_usd` — specify which USD file in the package to modify (default: auto-detect the one with a Volume prim).
-
-#### Exporting PPISP to USD
-
-When a checkpoint contains a supported PPISP module, USD export includes post-processing by default
-(`export_usd.export_post_processing=true`). The PPISP integration mode controls how PPISP is represented:
-
-- `spg-runtime` (default): authors Omniverse Sensor Processing Graph (SPG) CUDA shaders on the
-  RenderProducts. This preserves per-camera and animated behavior when PPISP camera/frame IDs are
-  unset, and requires a viewer that can execute the authored Omniverse/RTX SPG shaders.
-- `sh-optimized`: fits one fixed PPISP look into the Gaussian SH coefficients. The exported asset
-  does not require a runtime PPISP shader. If no PPISP camera or frame is specified, the bake uses
-  camera `0`, frame `0`.
-
-With `spg-runtime`, controller-trained checkpoints use the PPISP controller path by default. The
-exporter writes a per-camera controller graph plus generated CUDA sidecars with embedded controller
-weights, and connects the automatic-parameter PPISP shader to the RenderProduct `LdrColor` output.
-Use `--disable-ppisp-controller-export` to force the static fallback path, which authors optimized
-exposure and color parameters as USD attributes instead of running the controller. Use
-`--enable-ppisp-controller-export` to fail loudly if the checkpoint does not contain trained
-controllers. When controller export is enabled, PPISP reference camera/frame IDs are ignored.
-
-The equivalent training-config keys live under `export_usd`:
-
-```yaml
-export_usd:
-  export_post_processing: true
-  ppisp-integration-mode: spg-runtime   # spg-runtime | sh-optimized
-  ppisp-reference-camera-id: null
-  ppisp-reference-frame-id: null
-  ppisp-responsivity: 1.0
-  enable-ppisp-controller-export: null
-  sh-optimization-num-iterations: null
-  scene-radiance-scale: 1.0
-```
-
-The standalone exporter exposes the same controls:
-
-```bash
-python -m threedgrut.export.scripts.export_usd \
-    --checkpoint path/to/checkpoint.pt \
-    --dataset path/to/dataset \
-    --output path/to/asset.usdz \
-    --ppisp-integration-mode spg-runtime
-```
-
-Useful PPISP export flags:
-
-- `--export-post-processing` / `--no-export-post-processing`: include or skip checkpoint
-  post-processing effects.
-- `--ppisp-integration-mode {spg-runtime,sh-optimized}`: choose runtime Omniverse SPG export or
-  SH-optimized export.
-- `--ppisp-reference-camera-id INT`, `--ppisp-reference-frame-id INT`: select the PPISP
-  camera/frame used by `sh-optimized`, or pin `spg-runtime` static export to one camera/frame.
-- `--ppisp-responsivity FLOAT`: runtime achromatic HDR multiplier authored on `spg-runtime` PPISP
-  shaders. In controller mode, the same multiplier is authored on the controller pool so exposure
-  and color predictions use the same scaled HDR signal. The default `1.0` is a no-op and can be
-  overridden downstream in USD.
-- `--scene-radiance-scale FLOAT`: multiplicative scale applied to exported SH radiance. For
-  `spg-runtime` PPISP exports, setting `--ppisp-responsivity` to `1 / scene_radiance_scale`
-  preserves the training-time PPISP input magnitude while changing the asset radiance scale.
-- `--enable-ppisp-controller-export` / `--disable-ppisp-controller-export`: require controller
-  export or force static/time-sampled PPISP parameters. Unset auto-enables controller export only
-  when the PPISP checkpoint has trained controllers.
-- `--sh-optimization-num-iterations INT`: override the `sh-optimized` optimizer step budget.
-  Unset uses the nre-borel default of 3000 iterations.
-
-For `spg-runtime`, the exporter also authors the nre-borel render-setting gate that keeps Gaussian
-tonemapping enabled before PPISP consumes the HDR RenderVar.
+For the full set of export workflows — standalone USD export, PLY ⇄ USD ⇄ NuRec transcoding,
+PLY→USDZ conversion, adding meshes to USDZ, and PPISP post-processing export — see the export
+documentation: [`threedgrut/export/README.md`](threedgrut/export/README.md).
 
 ## 🎥 3. Rendering from Checkpoints
 Evaluate a checkpoint with splatting, the OptiX tracer, or PyTorch:
