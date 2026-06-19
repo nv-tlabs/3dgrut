@@ -606,11 +606,21 @@ class USDExporter(ModelExporter):
 
         # Get model data via accessor
         accessor = GaussianExportAccessor(model, conf)
-        attrs = accessor.get_attributes(preactivation=False)
         caps = accessor.get_capabilities()
 
-        logger.info(f"Schema: LightField (post-activation)")
-        logger.info(f"Exporting {attrs.num_gaussians} Gaussians, SH degree {caps.sh_degree}")
+        # Optional spatial partitioning: author one ParticleField prim per partition.
+        partition = kwargs.get("partition")
+        partitioned = partition is not None and getattr(partition, "is_partitioned", False)
+        if partitioned:
+            if partition.capabilities is not None:
+                caps = partition.capabilities
+            logger.info(
+                "Schema: LightField (post-activation), %d ParticleField partitions", partition.num_partitions
+            )
+        else:
+            attrs = accessor.get_attributes(preactivation=False)
+            logger.info(f"Schema: LightField (post-activation)")
+            logger.info(f"Exporting {attrs.num_gaussians} Gaussians, SH degree {caps.sh_degree}")
 
         # Compute normalizing transform if enabled
         normalizing_transform = np.eye(4)
@@ -641,21 +651,30 @@ class USDExporter(ModelExporter):
             source_transform_samples=kwargs.get("source_gaussian_transform"),
         )
 
-        # Write Gaussians
-        writer = create_gaussian_writer(
-            stage=stage,
-            capabilities=caps,
-            content_root_path=gaussians_root,
-            half_geometry=self.half_geometry,
-            half_features=self.half_features,
-            sorting_mode_hint=self.sorting_mode_hint,
-            linear_srgb=runtime_post_processing,
-            omni_usd=runtime_post_processing,
-            has_post_processing=runtime_post_processing,
-        )
-        writer.create_prim(attrs.num_gaussians)
-        writer.write_attributes(attrs)
-        writer.finalize(attrs.positions)
+        # Write Gaussians: a single ParticleField, or one prim per partition.
+        def _write_particlefield(content_root_path, sub_attrs):
+            writer = create_gaussian_writer(
+                stage=stage,
+                capabilities=caps,
+                content_root_path=content_root_path,
+                half_geometry=self.half_geometry,
+                half_features=self.half_features,
+                sorting_mode_hint=self.sorting_mode_hint,
+                linear_srgb=runtime_post_processing,
+                omni_usd=runtime_post_processing,
+                has_post_processing=runtime_post_processing,
+            )
+            writer.create_prim(sub_attrs.num_gaussians)
+            writer.write_attributes(sub_attrs)
+            writer.finalize(sub_attrs.positions)
+
+        if partitioned:
+            width = max(3, len(str(partition.num_partitions - 1)))
+            for pid, sub in partition.iter_partitions(preactivation=False):
+                _write_particlefield(f"{gaussians_root}/Partition_{pid:0{width}d}", sub)
+            logger.info("Authored %d ParticleField partitions under %s", partition.num_partitions, gaussians_root)
+        else:
+            _write_particlefield(gaussians_root, attrs)
 
         suffix = output_path.suffix.lower()
         package_as_usdz = suffix == ".usdz" or suffix not in (".usd", ".usda", ".usdc")

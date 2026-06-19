@@ -267,6 +267,46 @@ class ModelCapabilities:
     scale_activation: str = "exp"
 
 
+def merge_gaussian_attributes(
+    attrs_list: list,
+    caps_list: list,
+) -> Tuple["GaussianAttributes", "ModelCapabilities"]:
+    """Concatenate several ``GaussianAttributes`` and reduce their ``ModelCapabilities``.
+
+    Used when combining multiple Gaussian sources into one scene (multiple ParticleField prims
+    in a USD stage, or multiple input files in a transcode). Sources may carry different SH
+    degrees: each specular block is zero-padded up to the widest one before concatenation (so a
+    lower-degree source contributes zeros for its missing bands), and ``sh_degree`` is the max.
+    Surfel/activation flags come from the first source.
+    """
+    max_specular = max(a.specular.shape[1] for a in attrs_list)
+
+    def _pad_specular(spec: np.ndarray) -> np.ndarray:
+        if spec.shape[1] == max_specular:
+            return spec
+        padded = np.zeros((spec.shape[0], max_specular), dtype=spec.dtype)
+        padded[:, : spec.shape[1]] = spec
+        return padded
+
+    merged = GaussianAttributes(
+        positions=np.concatenate([a.positions for a in attrs_list], axis=0),
+        rotations=np.concatenate([a.rotations for a in attrs_list], axis=0),
+        scales=np.concatenate([a.scales for a in attrs_list], axis=0),
+        densities=np.concatenate([a.densities for a in attrs_list], axis=0),
+        albedo=np.concatenate([a.albedo for a in attrs_list], axis=0),
+        specular=np.concatenate([_pad_specular(a.specular) for a in attrs_list], axis=0),
+    )
+    merged_caps = ModelCapabilities(
+        has_spherical_harmonics=any(c.has_spherical_harmonics for c in caps_list),
+        sh_degree=max(c.sh_degree for c in caps_list),
+        num_gaussians=merged.num_gaussians,
+        is_surfel=caps_list[0].is_surfel,
+        density_activation=caps_list[0].density_activation,
+        scale_activation=caps_list[0].scale_activation,
+    )
+    return merged, merged_caps
+
+
 class GaussianExportAccessor:
     """
     Unified accessor for extracting Gaussian data from ExportableModel.

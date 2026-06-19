@@ -15,15 +15,20 @@
 
 """PLY format exporter for Gaussian splatting models."""
 
+import json
 from pathlib import Path
+from typing import TYPE_CHECKING, List
 
 import numpy as np
 import torch
 from plyfile import PlyData, PlyElement
 
-from threedgrut.export.accessor import GaussianExportAccessor
+from threedgrut.export.accessor import GaussianAttributes, GaussianExportAccessor
 from threedgrut.export.base import ExportableModel, ModelExporter
 from threedgrut.utils.logger import logger
+
+if TYPE_CHECKING:
+    from threedgrut.export.partition import PartitionResult
 
 
 class PLYExporter(ModelExporter):
@@ -50,6 +55,41 @@ class PLYExporter(ModelExporter):
             attrs.append(f"rot_{i}")
         return attrs
 
+    @classmethod
+    def _write_ply(cls, attrs: GaussianAttributes, output_path: Path) -> None:
+        """Serialize a single ``GaussianAttributes`` (pre-activation) to a PLY file."""
+        num_gaussians = attrs.num_gaussians
+
+        # Create normal vectors (placeholder, pointing up)
+        mogt_nrm = np.repeat(np.array([[0, 0, 1]], dtype=np.float32), repeats=num_gaussians, axis=0)
+
+        # Reshape specular coefficients for PLY format (channel-major layout)
+        # From [N, M*3] to [N, M, 3] to [N, 3, M] to [N, M*3] (channel-major).
+        # Derive M from the actual array width: importers pad specular to a fixed (degree-3)
+        # width while reporting the true SH degree in caps, so deriving M from a degree value
+        # would mismatch the stored width for sources below the padding degree.
+        num_speculars = attrs.specular.shape[1] // 3
+        mogt_specular = attrs.specular.reshape((num_gaussians, num_speculars, 3))
+        mogt_specular = mogt_specular.transpose(0, 2, 1).reshape((num_gaussians, num_speculars * 3))
+
+        # Build PLY dtype
+        dtype_full = [
+            (attribute, "f4")
+            for attribute in cls._construct_list_of_attributes(
+                attrs.albedo, mogt_specular, attrs.scales, attrs.rotations
+            )
+        ]
+
+        # Create PLY element
+        elements = np.empty(num_gaussians, dtype=dtype_full)
+        attributes = np.concatenate(
+            (attrs.positions, mogt_nrm, attrs.albedo, mogt_specular, attrs.densities, attrs.scales, attrs.rotations),
+            axis=1,
+        )
+        elements[:] = list(map(tuple, attributes))
+        el = PlyElement.describe(elements, "vertex")
+        PlyData([el]).write(str(output_path))
+
     @torch.no_grad()
     def export(self, model: ExportableModel, output_path: Path, dataset=None, conf=None, **kwargs) -> None:
         """Export the model to a PLY file.
@@ -66,32 +106,42 @@ class PLYExporter(ModelExporter):
         # Use accessor to get attributes
         accessor = GaussianExportAccessor(model, conf)
         attrs = accessor.get_attributes(preactivation=True)
+        self._write_ply(attrs, Path(output_path))
 
-        num_gaussians = attrs.num_gaussians
 
-        # Create normal vectors (placeholder, pointing up)
-        mogt_nrm = np.repeat(np.array([[0, 0, 1]], dtype=np.float32), repeats=num_gaussians, axis=0)
+@torch.no_grad()
+def export_partitions(result: "PartitionResult", output_path: Path) -> List[Path]:
+    """Write a partitioned scene to PLY point clouds.
 
-        # Reshape specular coefficients for PLY format (channel-major layout)
-        # From [N, M*3] to [N, M, 3] to [N, 3, M] to [N, M*3] (channel-major)
-        num_speculars = (accessor.get_max_sh_degree() + 1) ** 2 - 1
-        mogt_specular = attrs.specular.reshape((num_gaussians, num_speculars, 3))
-        mogt_specular = mogt_specular.transpose(0, 2, 1).reshape((num_gaussians, num_speculars * 3))
+    With a single partition, writes ``<stem>.ply`` (identical to a regular PLY export).
+    With multiple partitions, writes one ``<stem>_partition_NNN.ply`` per partition plus a
+    ``<stem>_partitions.json`` manifest. Returns the list of written PLY paths.
+    """
+    output_path = Path(output_path)
+    stem_path = output_path.with_suffix("")
 
-        # Build PLY dtype
-        dtype_full = [
-            (attribute, "f4")
-            for attribute in self._construct_list_of_attributes(
-                attrs.albedo, mogt_specular, attrs.scales, attrs.rotations
-            )
-        ]
+    if result.num_partitions <= 1:
+        out = stem_path.with_suffix(".ply")
+        logger.info(f"exporting ply file to {out}...")
+        PLYExporter._write_ply(result.full_attributes(preactivation=True), out)
+        return [out]
 
-        # Create PLY element
-        elements = np.empty(num_gaussians, dtype=dtype_full)
-        attributes = np.concatenate(
-            (attrs.positions, mogt_nrm, attrs.albedo, mogt_specular, attrs.densities, attrs.scales, attrs.rotations),
-            axis=1,
+    written: List[Path] = []
+    manifest = {"num_partitions": result.num_partitions, "partitions": []}
+    width = max(3, len(str(result.num_partitions - 1)))
+    for pid, sub in result.iter_partitions(preactivation=True):
+        out = stem_path.parent / f"{stem_path.name}_partition_{pid:0{width}d}.ply"
+        logger.info(f"exporting partition {pid} ({sub.num_gaussians} gaussians) to {out}...")
+        PLYExporter._write_ply(sub, out)
+        written.append(out)
+        mins = sub.positions.min(axis=0).tolist() if sub.num_gaussians else None
+        maxs = sub.positions.max(axis=0).tolist() if sub.num_gaussians else None
+        manifest["partitions"].append(
+            {"id": pid, "num_gaussians": int(sub.num_gaussians), "file": out.name, "aabb_min": mins, "aabb_max": maxs}
         )
-        elements[:] = list(map(tuple, attributes))
-        el = PlyElement.describe(elements, "vertex")
-        PlyData([el]).write(output_path)
+
+    manifest_path = stem_path.parent / f"{stem_path.name}_partitions.json"
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2)
+    logger.info(f"wrote PLY partition manifest to {manifest_path}")
+    return written

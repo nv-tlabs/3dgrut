@@ -35,7 +35,7 @@ from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
 from threedgrut.export.adapter import AttributesExportAdapter
 from threedgrut.export.formats import PLYExporter
 from threedgrut.export.importers import PLYImporter, USDImporter
-from threedgrut.export.scripts.transcode import detect_input_format, transcode
+from threedgrut.export.scripts.transcode import detect_input_format, transcode, transcode_files
 from threedgrut.export.transforms import usd_matrix_to_numpy
 from threedgrut.export.usd.exporter import USDExporter
 
@@ -705,6 +705,141 @@ class TestCrossFormatTranscode:
 
             for attr_name, result in results.items():
                 assert result["match"], f"PLY→USD→PLY transcode failed for {attr_name}: {result}"
+
+    def test_transcode_split_large_gaussians_subdivides(self):
+        """transcode --split-large-gaussians runs the exporter's split path on oversized prims."""
+        attrs = create_test_attributes(300, sh_degree=3)
+        caps = create_test_capabilities(300, sh_degree=3)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            ply_path = tmp_path / "in.ply"
+            out_path = tmp_path / "out.usda"
+
+            PLYExporter().export(AttributesExportAdapter(attrs, caps, is_preactivation=True), ply_path)
+            transcode(
+                ply_path,
+                out_path,
+                "lightfield",
+                max_per_volume=64,
+                split_large_gaussians=True,
+                validate_usd=False,
+            )
+
+            stage = Usd.Stage.Open(str(out_path))
+            fields = [p for p in stage.Traverse() if p.GetTypeName() == "ParticleField3DGaussianSplat"]
+            assert len(fields) > 1  # oversized prim subdivided
+            importer = USDImporter()
+            merged, _ = importer.load(out_path)
+            # Splitting can only add Gaussians, never drop them.
+            assert merged.num_gaussians >= 300
+
+    def test_transcode_usd_to_ply_low_sh_degree(self):
+        """USD→PLY of a sub-degree-3 source must not crash on the specular reshape."""
+        attrs = create_test_attributes(16, sh_degree=2)
+        caps = create_test_capabilities(16, sh_degree=2)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            usd_path = tmp_path / "in.usda"
+            ply_path = tmp_path / "out.ply"
+
+            USDExporter(
+                export_cameras=False,
+                export_background=False,
+                apply_normalizing_transform=False,
+            ).export(AttributesExportAdapter(attrs, caps, is_preactivation=True), usd_path, validate_usd=False)
+
+            transcode(usd_path, ply_path, "ply", validate_usd=False)
+
+            assert ply_path.exists()
+            sub, _ = PLYImporter(max_sh_degree=3).load(ply_path)
+            assert sub.num_gaussians == 16
+
+    def test_transcode_usd_partition_keeps_prims_and_copies_render_products(self):
+        """USD→USD with --max-gaussians-per-volume subdivides the prim and still copies /Render."""
+        attrs = create_test_attributes(32, sh_degree=3)
+        caps = create_test_capabilities(32, sh_degree=3)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            input_path = tmp_path / "input.usda"
+            output_path = tmp_path / "output.usda"
+
+            adapter = AttributesExportAdapter(attrs, caps, is_preactivation=True)
+            USDExporter(
+                export_cameras=True,
+                export_background=False,
+                apply_normalizing_transform=False,
+            ).export(adapter, input_path, dataset=MockCameraDataset(), validate_usd=False)
+
+            transcode(
+                input_path=input_path,
+                output_path=output_path,
+                output_format="lightfield",
+                copy_cameras_source=(input_path, tmp_path),
+                validate_usd=False,
+                max_per_volume=8,
+            )
+
+            stage = Usd.Stage.Open(str(output_path))
+            assert stage
+            fields = [p for p in stage.Traverse() if p.GetTypeName() == "ParticleField3DGaussianSplat"]
+            assert len(fields) > 1  # the 32-Gaussian prim was subdivided
+            # Source cameras / render products copied as-is.
+            product = stage.GetPrimAtPath("/Render/camera_0000")
+            assert product.IsValid()
+            assert product.GetTypeName() == "RenderProduct"
+            assert stage.GetPrimAtPath("/World/Cameras/camera_0000").IsValid()
+
+    def test_transcode_multiple_ply_to_multiprim_usd(self):
+        """Several PLY inputs combine into one USD with one ParticleField prim per input."""
+        counts = [20, 35, 15]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            ply_paths = []
+            for i, n in enumerate(counts):
+                a = create_test_attributes(n, sh_degree=3)
+                c = create_test_capabilities(n, sh_degree=3)
+                p = tmp_path / f"in_{i}.ply"
+                PLYExporter().export(AttributesExportAdapter(a, c, is_preactivation=True), p)
+                ply_paths.append(p)
+
+            out = tmp_path / "combined.usda"
+            transcode_files(ply_paths, out, "lightfield", validate_usd=False)
+
+            stage = Usd.Stage.Open(str(out))
+            fields = [p for p in stage.Traverse() if p.GetTypeName() == "ParticleField3DGaussianSplat"]
+            assert len(fields) == len(counts)
+
+            importer = USDImporter()
+            merged, _ = importer.load(out)
+            assert merged.num_gaussians == sum(counts)
+            assert importer.partition_count == len(counts)
+
+    def test_transcode_multiple_ply_to_usd_subdivides_only_oversized(self):
+        """Per-prim partitioning: small inputs are kept intact, oversized ones are subdivided."""
+        small, large = 10, 300
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            ply_paths = []
+            for i, n in enumerate((small, large)):
+                a = create_test_attributes(n, sh_degree=3)
+                c = create_test_capabilities(n, sh_degree=3)
+                p = tmp_path / f"in_{i}.ply"
+                PLYExporter().export(AttributesExportAdapter(a, c, is_preactivation=True), p)
+                ply_paths.append(p)
+
+            out = tmp_path / "combined.usda"
+            transcode_files(ply_paths, out, "lightfield", validate_usd=False, max_per_volume=64)
+
+            importer = USDImporter()
+            merged, _ = importer.load(out)
+            assert merged.num_gaussians == small + large
+            sizes = sorted(np.bincount(importer.partition_labels).tolist())
+            assert importer.partition_count >= 3  # small (1 prim) + large (>=2 prims)
+            assert min(sizes) == small  # small input preserved as a single prim
+            assert max(sizes) <= 64  # every prim respects the budget
 
 
 if __name__ == "__main__":

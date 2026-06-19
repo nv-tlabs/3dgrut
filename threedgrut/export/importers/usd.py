@@ -28,7 +28,7 @@ from typing import Optional, Tuple
 import numpy as np
 from pxr import Usd, UsdVol
 
-from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
+from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities, merge_gaussian_attributes
 from threedgrut.export.importers.base import FormatImporter
 from threedgrut.export.transforms import collect_local_to_world_transform_samples
 
@@ -43,6 +43,11 @@ class USDImporter(FormatImporter):
 
     def __init__(self) -> None:
         self.source_gaussian_transform = None
+        # Per-Gaussian source-prim index (group id) and number of ParticleField prims
+        # found in the stage. Populated by load(); lets callers preserve the partition
+        # grouping authored by the multi-prim exporter (one prim per partition).
+        self.partition_labels: Optional[np.ndarray] = None
+        self.partition_count: int = 1
 
     @property
     def stores_preactivation(self) -> bool:
@@ -92,14 +97,19 @@ class USDImporter(FormatImporter):
             return self._load_usd_stage(root_file)
 
     def _load_usd_stage(self, path: Path) -> Tuple[GaussianAttributes, ModelCapabilities]:
-        """Load USD stage and extract Gaussian data."""
+        """Load USD stage and extract Gaussian data.
+
+        Stages with several ParticleField prims (e.g. the multi-prim partition export)
+        are merged into a single ``GaussianAttributes``; the per-prim grouping is recorded
+        in ``self.partition_labels`` / ``self.partition_count`` so callers can preserve it.
+        """
         stage = Usd.Stage.Open(str(path))
         if not stage:
             raise ValueError(f"Failed to open USD stage: {path}")
 
-        # Find Gaussian prim (LightField schema only)
-        gaussian_prim = self._find_particlefield_prim(stage)
-        if gaussian_prim is None:
+        # Find all Gaussian prims (LightField schema only).
+        gaussian_prims = self._find_particlefield_prims(stage)
+        if not gaussian_prims:
             prim_types = sorted({p.GetTypeName() for p in stage.Traverse()})
             raise ValueError(
                 f"No Gaussian prim found in USD file: {path}. "
@@ -108,20 +118,42 @@ class USDImporter(FormatImporter):
                 f"NuRec (UsdVol::Volume) and other formats are not supported for import."
             )
 
-        logger.info(f"Found Gaussian prim: {gaussian_prim.GetPath()} (type: {gaussian_prim.GetTypeName()})")
-        self.source_gaussian_transform = collect_local_to_world_transform_samples(gaussian_prim)
+        # Capture the source local-to-world transform from the first prim (the multi-prim
+        # exporter shares one identity-transformed /World/Gaussians root across partitions).
+        self.source_gaussian_transform = collect_local_to_world_transform_samples(gaussian_prims[0])
 
-        # Load via UsdVol schema API (ParticleField is base; ParticleField3DGaussianSplat is derived)
-        if gaussian_prim.IsA(UsdVol.ParticleField):
-            return self._load_lightfield(gaussian_prim)
-        raise ValueError(f"Prim is not a UsdVol ParticleField: {gaussian_prim.GetTypeName()}")
+        per_prim = []
+        for prim in gaussian_prims:
+            logger.info(f"Found Gaussian prim: {prim.GetPath()} (type: {prim.GetTypeName()})")
+            per_prim.append(self._load_lightfield(prim))
 
-    def _find_particlefield_prim(self, stage: Usd.Stage) -> Optional[Usd.Prim]:
-        """Find the Gaussian data prim in the stage (UsdVol.ParticleField or derived)."""
-        for prim in stage.Traverse():
-            if prim.IsA(UsdVol.ParticleField):
-                return prim
-        return None
+        self.partition_count = len(per_prim)
+        if len(per_prim) == 1:
+            attrs, caps = per_prim[0]
+            self.partition_labels = np.zeros(attrs.num_gaussians, dtype=np.int64)
+            return attrs, caps
+
+        return self._merge_lightfields(per_prim)
+
+    def _merge_lightfields(
+        self, per_prim: list[Tuple[GaussianAttributes, ModelCapabilities]]
+    ) -> Tuple[GaussianAttributes, ModelCapabilities]:
+        """Concatenate several ParticleField prims into one ``GaussianAttributes``."""
+        attrs_list = [a for a, _ in per_prim]
+        caps_list = [c for _, c in per_prim]
+        self.partition_labels = np.concatenate(
+            [np.full(a.num_gaussians, i, dtype=np.int64) for i, a in enumerate(attrs_list)]
+        )
+        merged, merged_caps = merge_gaussian_attributes(attrs_list, caps_list)
+        logger.info(
+            f"Merged {len(per_prim)} ParticleField prims into {merged.num_gaussians} Gaussians "
+            f"(SH degree {merged_caps.sh_degree})"
+        )
+        return merged, merged_caps
+
+    def _find_particlefield_prims(self, stage: Usd.Stage) -> list[Usd.Prim]:
+        """Find all Gaussian data prims in the stage (UsdVol.ParticleField or derived)."""
+        return [prim for prim in stage.Traverse() if prim.IsA(UsdVol.ParticleField)]
 
     def _load_lightfield(self, prim: Usd.Prim) -> Tuple[GaussianAttributes, ModelCapabilities]:
         """Load from ParticleField3DGaussianSplat or ParticleField via UsdVol schema API."""
@@ -178,16 +210,15 @@ class USDImporter(FormatImporter):
         num_sh_coeffs = (sh_degree + 1) ** 2
         sh_coeffs = sh_coeffs.reshape(num_gaussians, num_sh_coeffs, 3)
         albedo = sh_coeffs[:, 0, :]
+        # Keep the source's native SH width; do not pad to a fixed degree (that would inflate a
+        # lower-degree asset into a degree-3 one with zero coefficients). Consumers derive the
+        # coefficient count from the array width / caps.sh_degree, and merging pads to the max
+        # present degree only when combining prims of differing degree.
         specular = (
             sh_coeffs[:, 1:, :].reshape(num_gaussians, -1)
             if num_sh_coeffs > 1
             else np.zeros((num_gaussians, 0), dtype=np.float32)
         )
-        max_specular_size = ((3 + 1) ** 2 - 1) * 3
-        if specular.shape[1] < max_specular_size:
-            padded = np.zeros((num_gaussians, max_specular_size), dtype=np.float32)
-            padded[:, : specular.shape[1]] = specular
-            specular = padded
 
         attrs = GaussianAttributes(
             positions=positions,
