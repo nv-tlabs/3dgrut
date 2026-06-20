@@ -458,7 +458,7 @@ class NuRecExporter(ModelExporter):
 
         # Move copied source prims (cameras/rig/...) by the canonical frame; the volume already
         # carries it. Skip the referenced gauss subtree. Preserves the source hierarchy.
-        apply_canonical_frame_to_scene(default_usd.stage, world_frame_transform, skip_paths={"/World/gauss"})
+        apply_canonical_frame_to_scene(default_usd.stage, world_frame_transform, skip_paths={_NUREC_REFERENCED_WORLD_PATH})
 
         # Write the final USDZ file
         write_to_usdz(output_path, model_file, gauss_usd, default_usd, extra_files if extra_files else None)
@@ -573,7 +573,7 @@ class NuRecExporter(ModelExporter):
                 logger.warning(f"Failed to merge source USD prims into NuRec output: {exc}")
 
         # Move copied source prims by the canonical frame (volumes already carry it).
-        apply_canonical_frame_to_scene(default_usd.stage, world_frame_transform, skip_paths={"/World/gauss"})
+        apply_canonical_frame_to_scene(default_usd.stage, world_frame_transform, skip_paths={_NUREC_REFERENCED_WORLD_PATH})
 
         write_to_usdz(output_path, payloads, gauss_usd, default_usd, extra_files if extra_files else None)
         logger.info(f"NuRec partition export complete: {total} volumes -> {output_path}")

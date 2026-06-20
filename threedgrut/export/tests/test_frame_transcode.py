@@ -85,21 +85,23 @@ def test_frame_keeps_camera_to_prim_relative_unchanged():
         USDExporter(export_cameras=True, export_background=False, apply_normalizing_transform=False).export(
             AttributesExportAdapter(attrs, caps, is_preactivation=True), src, dataset=MockCameraDataset(), validate_usd=False
         )
-        out = d / "out.usda"
-        transcode(
-            src, out, "lightfield", frame_mode="pca", up_axis="y", copy_cameras_source=(src, d), validate_usd=False
-        )
-
         def relative(stage_path):
             stage = Usd.Stage.Open(str(stage_path))
             prim = _first_particlefield(stage)
-            cam = stage.GetPrimAtPath("/World/Cameras/camera_0000")
-            assert cam.IsValid()
+            cam = next(p for p in stage.Traverse() if p.GetTypeName() == "Camera")
             m_prim = usd_matrix_to_numpy(UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default()))
             m_cam = usd_matrix_to_numpy(UsdGeom.Xformable(cam).ComputeLocalToWorldTransform(Usd.TimeCode.Default()))
             return np.linalg.inv(m_cam) @ m_prim
 
-        assert np.allclose(relative(src), relative(out), atol=1e-4)
+        rel_src = relative(src)
+        # Both .usda (frame on the local /World/Gaussians) and .usdz (frame composed through the
+        # default-layer reference) must preserve the camera<->content relative — i.e. no double-frame.
+        for ext in ("usda", "usdz"):
+            out = d / f"out.{ext}"
+            transcode(
+                src, out, "lightfield", frame_mode="pca", up_axis="y", copy_cameras_source=(src, d), validate_usd=False
+            )
+            assert np.allclose(rel_src, relative(out), atol=1e-4), f"{ext} broke camera<->content relative"
 
 
 def test_frame_multi_prim_shares_one_global_frame():
