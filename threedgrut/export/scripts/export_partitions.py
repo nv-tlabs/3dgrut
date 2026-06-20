@@ -184,7 +184,7 @@ def main():
                 usd_path,
                 conf=conf,
                 validate_usd=not args.no_usd_validate,
-                world_frame_transform=frame_T,
+                frame_transform=frame_T,
                 up_axis=args.up_axis,
             )
             logger.info(f"Wrote USD: {written_usd}")

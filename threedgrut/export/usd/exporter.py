@@ -638,14 +638,12 @@ class USDExporter(ModelExporter):
         stage = initialize_usd_stage(up_axis=up_axis)
         stage.SetTimeCodesPerSecond(self.frames_per_second)
 
-        # Canonical object frame: authored on /World so Gaussians AND cameras/copied prims move
-        # together, leaving every camera<->prim relative transform unchanged.
-        world_frame_transform = kwargs.get("world_frame_transform")
-        if world_frame_transform is not None and not np.allclose(world_frame_transform, np.eye(4)):
-            from pxr import UsdGeom
-
-            world_xform = UsdGeom.Xform.Define(stage, "/World")
-            world_xform.AddTransformOp().Set(column_vector_4x4_to_usd_matrix(np.asarray(world_frame_transform)))
+        # Canonical object frame (composition-safe): authored as a named op on the Gaussian content
+        # root (NOT on /World), and applied to cameras so camera<->prim relatives stay unchanged.
+        frame_transform = kwargs.get("frame_transform")
+        has_frame = frame_transform is not None and not np.allclose(frame_transform, np.eye(4))
+        # Net scene transform applied to cameras (only one of normalizing/frame is non-identity).
+        scene_transform = np.asarray(frame_transform) if has_frame else np.eye(4)
 
         apply_coordinate_transform = kwargs.get("apply_coordinate_transform", False)
         coordinate_transform = get_3dgrut_to_usdz_coordinate_transform() if apply_coordinate_transform else None
@@ -660,6 +658,7 @@ class USDExporter(ModelExporter):
             normalizing_transform=normalizing_transform if self.apply_normalizing_transform else None,
             coordinate_transform=coordinate_transform,
             source_transform_samples=kwargs.get("source_gaussian_transform"),
+            canonical_frame_transform=frame_transform if has_frame else None,
         )
 
         # Write Gaussians: a single ParticleField, or one prim per partition.
@@ -743,6 +742,28 @@ class USDExporter(ModelExporter):
             except Exception as e:
                 logger.warning("Failed to merge source USD prims: %s", e)
 
+            # Apply the canonical frame on top of the copied source prims (cameras/rig/...), without
+            # re-parenting or remapping — preserves any foreign hierarchy. Gaussians already carry
+            # the frame as their own named op; generated cameras get it via pose pre-multiplication.
+            if has_frame:
+                from pxr import UsdGeom
+
+                frame_mat = column_vector_4x4_to_usd_matrix(np.asarray(frame_transform))
+
+                def _apply_canonical_frame(prim):
+                    xformable = UsdGeom.Xformable(prim)
+                    if xformable:
+                        xformable.AddTransformOp(opSuffix="canonicalFrame").Set(frame_mat)
+                    else:
+                        for child in prim.GetChildren():
+                            _apply_canonical_frame(child)
+
+                world_prim = scene_stage.GetPrimAtPath("/World")
+                if world_prim and world_prim.IsValid():
+                    for child in world_prim.GetChildren():
+                        if child.GetName() != "Gaussians":
+                            _apply_canonical_frame(child)
+
         # Extract camera grouping from dataset (used by both camera export and PPISP)
         camera_names = None
         frame_to_camera = None
@@ -773,6 +794,10 @@ class USDExporter(ModelExporter):
 
                 if self.apply_normalizing_transform:
                     poses = np.einsum("ij,njk->nik", normalizing_transform, poses)
+                if has_frame:
+                    # Move generated cameras by the canonical frame so the camera<->prim
+                    # relative transform is preserved (Gaussians get it as a named op).
+                    poses = np.einsum("ij,njk->nik", scene_transform, poses)
 
                 camera_params = _extract_camera_params_from_dataset(dataset)
                 if camera_params is not None:
@@ -800,6 +825,8 @@ class USDExporter(ModelExporter):
 
                 if self.apply_normalizing_transform:
                     validation_poses = np.einsum("ij,njk->nik", normalizing_transform, validation_poses)
+                if has_frame:
+                    validation_poses = np.einsum("ij,njk->nik", scene_transform, validation_poses)
 
                 validation_camera_params = _extract_camera_params_from_dataset(validation_dataset)
                 if validation_camera_params is not None:

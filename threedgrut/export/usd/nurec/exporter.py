@@ -458,8 +458,8 @@ class NuRecExporter(ModelExporter):
 
     @staticmethod
     def _resolve_world_frame(kwargs):
-        """Return (world_frame_transform, up_axis) for the canonical frame; default Z-up, no frame."""
-        wft = kwargs.get("world_frame_transform")
+        """Return (frame_transform, up_axis) for the canonical frame; default Z-up, no frame."""
+        wft = kwargs.get("frame_transform")
         if wft is None or np.allclose(np.asarray(wft), np.eye(4)):
             return None, "Z"
         return np.asarray(wft), str(kwargs.get("up_axis") or "z").upper()

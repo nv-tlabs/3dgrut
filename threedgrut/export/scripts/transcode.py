@@ -544,7 +544,7 @@ def _transcode_core(
         source_gaussian_transform=source_transforms[0] if source_transforms else None,
         validate_usd=validate_usd if output_format == "lightfield" else False,
         partition=results if partitioned else None,
-        world_frame_transform=frame_T,
+        frame_transform=frame_T,
         up_axis=up_axis,
     )
     logger.info(f"Exporting to {output_path}...")

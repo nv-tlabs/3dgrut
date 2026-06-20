@@ -532,7 +532,7 @@ def main():
             export_kw["validate_usd"] = not args.no_usd_validate
             export_kw["up_axis"] = args.up_axis
             if world_frame_transform is not None:
-                export_kw["world_frame_transform"] = world_frame_transform
+                export_kw["frame_transform"] = world_frame_transform
         exporter.export(
             model=model,
             output_path=output_path,

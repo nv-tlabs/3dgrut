@@ -116,9 +116,11 @@ def test_frame_multi_prim_shares_one_global_frame():
         stage = Usd.Stage.Open(str(usd))
         fields = [p for p in stage.Traverse() if p.GetTypeName() == "ParticleField3DGaussianSplat"]
         assert len(fields) == 2  # one prim per input, not merged
-        # /World carries the single global frame.
-        world = stage.GetPrimAtPath("/World")
-        assert UsdGeom.Xformable(world).GetOrderedXformOps()
+        # Composition-safe: /World stays identity; the frame is a named op on the content root.
+        assert not UsdGeom.Xformable(stage.GetPrimAtPath("/World")).GetOrderedXformOps()
+        gaussians = stage.GetPrimAtPath("/World/Gaussians")
+        op_names = [op.GetOpName() for op in UsdGeom.Xformable(gaussians).GetOrderedXformOps()]
+        assert any("canonicalFrame" in n for n in op_names)
 
         # Transitive: USD(pca) -> PLY(none) reproduces the framed world for every input's points.
         importer = USDImporter()

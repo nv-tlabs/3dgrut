@@ -52,14 +52,6 @@ def initialize_usd_stage(up_axis: str = NUREC_UP_AXIS) -> Usd.Stage:
     return _initialize_usd_stage(up_axis=up_axis)
 
 
-def _author_world_frame(stage: Usd.Stage, world_frame_transform) -> None:
-    """Author a canonical-frame transform on /World (so volumes + cameras move together)."""
-    if world_frame_transform is None or np.allclose(np.asarray(world_frame_transform), np.eye(4)):
-        return
-    world_xform = UsdGeom.Xform.Define(stage, "/World")
-    world_xform.AddTransformOp().Set(column_vector_4x4_to_usd_matrix(np.asarray(world_frame_transform)))
-
-
 def serialize_usd_stage_to_bytes(stage: Usd.Stage) -> bytes:
     """
     Export a USD stage to a temporary file and read it back as bytes.
@@ -114,6 +106,7 @@ def _author_nurec_volume(
     normalizing_transform: np.ndarray,
     apply_coordinate_transform: bool,
     source_gaussian_transform: USDTransformSamples | None,
+    canonical_frame_transform=None,
 ) -> None:
     """Author a single NuRec ``UsdVol.Volume`` (referencing ``model_file``) into ``stage``."""
     # Calculate AABB from positions
@@ -143,6 +136,13 @@ def _author_nurec_volume(
     apply_usd_transform_samples(gauss_volume, source_gaussian_transform)
     matrix_op = gauss_volume.AddTransformOp()
     matrix_op.Set(Gf.Matrix4d(*corrected_matrix.flatten()))
+
+    # Canonical object frame as its own named op (outermost), on the volume — composition-safe
+    # (not authored on /World) and independently recoverable.
+    if canonical_frame_transform is not None and not np.allclose(np.asarray(canonical_frame_transform), np.eye(4)):
+        gauss_volume.AddTransformOp(opSuffix="canonicalFrame").Set(
+            column_vector_4x4_to_usd_matrix(np.asarray(canonical_frame_transform))
+        )
 
     # Define nurec volume properties
     gauss_prim.CreateAttribute("omni:nurec:isNuRecVolume", Sdf.ValueTypeNames.Bool).Set(True)
@@ -217,7 +217,6 @@ def serialize_nurec_usd(
     """
     logger.info("Creating USD file containing NuRec model")
     stage = initialize_usd_stage(up_axis=up_axis)
-    _author_world_frame(stage, world_frame_transform)
     if author_render_settings:
         _author_render_settings(
             stage,
@@ -232,6 +231,7 @@ def serialize_nurec_usd(
         normalizing_transform=normalizing_transform,
         apply_coordinate_transform=apply_coordinate_transform,
         source_gaussian_transform=source_gaussian_transform,
+        canonical_frame_transform=world_frame_transform,
     )
     return NamedUSDStage(filename="gauss.usda", stage=stage)
 
@@ -255,7 +255,6 @@ def serialize_nurec_usd_partitions(
     """
     logger.info("Creating USD file containing %d NuRec volumes", len(volume_specs))
     stage = initialize_usd_stage(up_axis=up_axis)
-    _author_world_frame(stage, world_frame_transform)
     if author_render_settings:
         _author_render_settings(
             stage,
@@ -272,6 +271,7 @@ def serialize_nurec_usd_partitions(
             normalizing_transform=normalizing_transform,
             apply_coordinate_transform=apply_coordinate_transform,
             source_gaussian_transform=source_gaussian_transform,
+            canonical_frame_transform=world_frame_transform,
         )
     return NamedUSDStage(filename="gauss.usda", stage=stage)
 

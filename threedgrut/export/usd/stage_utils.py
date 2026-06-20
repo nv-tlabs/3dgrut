@@ -143,6 +143,7 @@ def create_gaussian_model_root(
     normalizing_transform: np.ndarray = None,
     coordinate_transform: np.ndarray = None,
     source_transform_samples: Optional[USDTransformSamples] = None,
+    canonical_frame_transform: np.ndarray = None,
 ) -> str:
     """
     Create the root Xform for Gaussian content with optional coordinate transforms.
@@ -157,6 +158,9 @@ def create_gaussian_model_root(
         coordinate_transform: Optional 4x4 (e.g. 3DGRUT-to-USDZ). Applied after normalizing and scale.
         source_transform_samples: Optional source Gaussian local-to-world transform samples,
             authored before normalization / coordinate transform to match the NuRec exporter.
+        canonical_frame_transform: Optional 4x4 canonical object frame. Authored as its own named
+            ``xformOp:transform:canonicalFrame`` (outermost), so it stays independently recoverable
+            and re-authorable, and lives on this content root (not /World) to be composition-safe.
 
     Returns:
         The root path string
@@ -194,6 +198,11 @@ def create_gaussian_model_root(
             combined = column_vector_4x4_to_usd_matrix(coordinate_transform) * combined
 
         transform_op.Set(combined)
+
+    # Canonical object frame as its own named op, applied outermost (after the combined op).
+    if canonical_frame_transform is not None and not np.allclose(canonical_frame_transform, np.eye(4)):
+        frame_op = root_xform.AddTransformOp(opSuffix="canonicalFrame")
+        frame_op.Set(column_vector_4x4_to_usd_matrix(np.asarray(canonical_frame_transform)))
 
     return root_path
 
