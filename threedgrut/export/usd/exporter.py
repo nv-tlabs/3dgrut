@@ -746,7 +746,9 @@ class USDExporter(ModelExporter):
             # re-parenting or remapping — preserves any foreign hierarchy. Gaussians already carry
             # the frame as their own named op; generated cameras get it via pose pre-multiplication.
             if has_frame:
-                apply_canonical_frame_to_scene(scene_stage, frame_transform, skip_prim_names={"Gaussians"})
+                # Skip our authored Gaussian content root by path (it already carries the frame);
+                # frame every other copied /World subtree (cameras, rig, …).
+                apply_canonical_frame_to_scene(scene_stage, frame_transform, skip_paths={gaussians_root})
 
         # Extract camera grouping from dataset (used by both camera export and PPISP)
         camera_names = None

@@ -132,6 +132,34 @@ def test_frame_multi_prim_shares_one_global_frame():
         assert total_ply == total_usd == 400
 
 
+def test_frame_reframe_is_idempotent_no_op_stacking():
+    """Re-framing an already-framed asset must replace, not stack, the canonicalFrame op."""
+    attrs = create_test_attributes(150, sh_degree=3)
+    rng = np.random.default_rng(31)
+    attrs.positions[:] = (rng.standard_normal((150, 3)) * np.array([4.0, 0.3, 1.5])).astype(np.float32)
+    caps = create_test_capabilities(150, sh_degree=3)
+
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        src = d / "src.usda"
+        USDExporter(export_cameras=True, export_background=False, apply_normalizing_transform=False).export(
+            AttributesExportAdapter(attrs, caps, is_preactivation=True), src, dataset=MockCameraDataset(), validate_usd=False
+        )
+        out1 = d / "out1.usda"
+        transcode(src, out1, "lightfield", frame_mode="pca", copy_cameras_source=(src, d), validate_usd=False)
+        # Frame the already-framed asset again (cameras already carry a canonicalFrame op).
+        out2 = d / "out2.usda"
+        transcode(out1, out2, "lightfield", frame_mode="pca", copy_cameras_source=(out1, d), validate_usd=False)
+
+        stage = Usd.Stage.Open(str(out2))
+        for prim in stage.Traverse():
+            xformable = UsdGeom.Xformable(prim)
+            if not xformable:
+                continue
+            names = [op.GetOpName() for op in xformable.GetOrderedXformOps()]
+            assert names.count("xformOp:transform:canonicalFrame") <= 1, f"{prim.GetPath()} stacked frame ops"
+
+
 def test_frame_nurec_moves_copied_cameras():
     """transcode USD(with camera)->NuRec --frame pca must frame the copied cameras too (not just the volume)."""
     attrs = create_test_attributes(200, sh_degree=3)
