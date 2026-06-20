@@ -55,6 +55,7 @@ from threedgrut.export.usd.exporter import (
     _suffix_camera_names,
     normalize_ppisp_integration_mode,
 )
+from threedgrut.export.usd.stage_utils import apply_canonical_frame_to_scene, is_effective_frame
 from threedgrut.export.usd.nurec.serializer import (
     serialize_nurec_usd,
     serialize_nurec_usd_partitions,
@@ -344,6 +345,7 @@ class NuRecExporter(ModelExporter):
                 dataset=dataset,
                 normalizing_transform=normalizing_transform,
                 apply_transform=apply_transform,
+                frame_transform=world_frame_transform,
             )
             if train_cameras is None:
                 raise ValueError(
@@ -357,6 +359,7 @@ class NuRecExporter(ModelExporter):
                     normalizing_transform=normalizing_transform,
                     apply_transform=apply_transform,
                     validation=True,
+                    frame_transform=world_frame_transform,
                 )
                 if validation_cameras is None:
                     raise ValueError(
@@ -452,6 +455,10 @@ class NuRecExporter(ModelExporter):
                     )
             except Exception as exc:
                 logger.warning("Failed to merge source USD prims into NuRec output: %s", exc)
+
+        # Move copied source prims (cameras/rig/...) by the canonical frame; the volume already
+        # carries it. Skip the referenced gauss subtree. Preserves the source hierarchy.
+        apply_canonical_frame_to_scene(default_usd.stage, world_frame_transform, skip_prim_names={"gauss"})
 
         # Write the final USDZ file
         write_to_usdz(output_path, model_file, gauss_usd, default_usd, extra_files if extra_files else None)
@@ -565,6 +572,9 @@ class NuRecExporter(ModelExporter):
             except Exception as exc:
                 logger.warning(f"Failed to merge source USD prims into NuRec output: {exc}")
 
+        # Move copied source prims by the canonical frame (volumes already carry it).
+        apply_canonical_frame_to_scene(default_usd.stage, world_frame_transform, skip_prim_names={"gauss"})
+
         write_to_usdz(output_path, payloads, gauss_usd, default_usd, extra_files if extra_files else None)
         logger.info(f"NuRec partition export complete: {total} volumes -> {output_path}")
 
@@ -576,6 +586,7 @@ class NuRecExporter(ModelExporter):
         normalizing_transform: np.ndarray,
         apply_transform: bool,
         validation: bool = False,
+        frame_transform=None,
     ) -> dict | None:
         if dataset is None:
             return None
@@ -584,6 +595,10 @@ class NuRecExporter(ModelExporter):
             poses = dataset.get_poses()
             if apply_transform:
                 poses = np.einsum("ij,njk->nik", normalizing_transform, poses)
+            if is_effective_frame(frame_transform):
+                # Move generated cameras by the canonical frame so the camera<->volume
+                # relative transform is preserved (volumes carry it as a named op).
+                poses = np.einsum("ij,njk->nik", np.asarray(frame_transform), poses)
 
             camera_names, frame_to_camera = _extract_camera_grouping(dataset)
             if validation:

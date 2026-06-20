@@ -530,9 +530,10 @@ def main():
         export_kw = {}
         if args.format == "standard":
             export_kw["validate_usd"] = not args.no_usd_validate
-            export_kw["up_axis"] = args.up_axis
-            if world_frame_transform is not None:
-                export_kw["frame_transform"] = world_frame_transform
+        # Canonical frame applies to both standard (ParticleField) and nurec exporters.
+        export_kw["up_axis"] = args.up_axis
+        if world_frame_transform is not None:
+            export_kw["frame_transform"] = world_frame_transform
         exporter.export(
             model=model,
             output_path=output_path,

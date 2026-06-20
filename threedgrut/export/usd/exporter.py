@@ -61,8 +61,10 @@ from threedgrut.export.usd.post_processing.sh_bake import (
 from threedgrut.export.usd.stage_utils import (
     NamedSerialized,
     NamedUSDStage,
+    apply_canonical_frame_to_scene,
     create_gaussian_model_root,
     initialize_usd_stage,
+    is_effective_frame,
     write_to_usdz,
 )
 from threedgrut.export.usd.writers.background import export_background_to_usd
@@ -641,9 +643,7 @@ class USDExporter(ModelExporter):
         # Canonical object frame (composition-safe): authored as a named op on the Gaussian content
         # root (NOT on /World), and applied to cameras so camera<->prim relatives stay unchanged.
         frame_transform = kwargs.get("frame_transform")
-        has_frame = frame_transform is not None and not np.allclose(frame_transform, np.eye(4))
-        # Net scene transform applied to cameras (only one of normalizing/frame is non-identity).
-        scene_transform = np.asarray(frame_transform) if has_frame else np.eye(4)
+        has_frame = is_effective_frame(frame_transform)
 
         apply_coordinate_transform = kwargs.get("apply_coordinate_transform", False)
         coordinate_transform = get_3dgrut_to_usdz_coordinate_transform() if apply_coordinate_transform else None
@@ -746,23 +746,7 @@ class USDExporter(ModelExporter):
             # re-parenting or remapping — preserves any foreign hierarchy. Gaussians already carry
             # the frame as their own named op; generated cameras get it via pose pre-multiplication.
             if has_frame:
-                from pxr import UsdGeom
-
-                frame_mat = column_vector_4x4_to_usd_matrix(np.asarray(frame_transform))
-
-                def _apply_canonical_frame(prim):
-                    xformable = UsdGeom.Xformable(prim)
-                    if xformable:
-                        xformable.AddTransformOp(opSuffix="canonicalFrame").Set(frame_mat)
-                    else:
-                        for child in prim.GetChildren():
-                            _apply_canonical_frame(child)
-
-                world_prim = scene_stage.GetPrimAtPath("/World")
-                if world_prim and world_prim.IsValid():
-                    for child in world_prim.GetChildren():
-                        if child.GetName() != "Gaussians":
-                            _apply_canonical_frame(child)
+                apply_canonical_frame_to_scene(scene_stage, frame_transform, skip_prim_names={"Gaussians"})
 
         # Extract camera grouping from dataset (used by both camera export and PPISP)
         camera_names = None
@@ -797,7 +781,7 @@ class USDExporter(ModelExporter):
                 if has_frame:
                     # Move generated cameras by the canonical frame so the camera<->prim
                     # relative transform is preserved (Gaussians get it as a named op).
-                    poses = np.einsum("ij,njk->nik", scene_transform, poses)
+                    poses = np.einsum("ij,njk->nik", np.asarray(frame_transform), poses)
 
                 camera_params = _extract_camera_params_from_dataset(dataset)
                 if camera_params is not None:
@@ -826,7 +810,7 @@ class USDExporter(ModelExporter):
                 if self.apply_normalizing_transform:
                     validation_poses = np.einsum("ij,njk->nik", normalizing_transform, validation_poses)
                 if has_frame:
-                    validation_poses = np.einsum("ij,njk->nik", scene_transform, validation_poses)
+                    validation_poses = np.einsum("ij,njk->nik", np.asarray(frame_transform), validation_poses)
 
                 validation_camera_params = _extract_camera_params_from_dataset(validation_dataset)
                 if validation_camera_params is not None:

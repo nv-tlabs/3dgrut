@@ -132,6 +132,43 @@ def test_frame_multi_prim_shares_one_global_frame():
         assert total_ply == total_usd == 400
 
 
+def test_frame_nurec_moves_copied_cameras():
+    """transcode USD(with camera)->NuRec --frame pca must frame the copied cameras too (not just the volume)."""
+    attrs = create_test_attributes(200, sh_degree=3)
+    rng = np.random.default_rng(9)
+    attrs.positions[:] = (rng.standard_normal((200, 3)) * np.array([5.0, 0.4, 2.0])).astype(np.float32)
+    caps = create_test_capabilities(200, sh_degree=3)
+
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        src = d / "src.usda"
+        USDExporter(export_cameras=True, export_background=False, apply_normalizing_transform=False).export(
+            AttributesExportAdapter(attrs, caps, is_preactivation=True), src, dataset=MockCameraDataset(), validate_usd=False
+        )
+        out = d / "out.usdz"
+        transcode(src, out, "nurec", frame_mode="pca", up_axis="z", copy_cameras_source=(src, d), validate_usd=False)
+
+        def world(prim):
+            return usd_matrix_to_numpy(UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default()))
+
+        # camera<->content relative transform must be the same in source (ParticleField) and
+        # framed NuRec output (Volume) — i.e. the camera moved with the content by the frame.
+        src_stage = Usd.Stage.Open(str(src))
+        src_cam = src_stage.GetPrimAtPath("/World/Cameras/camera_0000")
+        src_content = _first_particlefield(src_stage)
+        rel_src = np.linalg.inv(world(src_cam)) @ world(src_content)
+
+        out_stage = Usd.Stage.Open(str(out))
+        out_cam = next(p for p in out_stage.Traverse() if p.GetTypeName() == "Camera")
+        out_vol = next(
+            p
+            for p in out_stage.Traverse()
+            if p.GetTypeName() == "Volume" and p.GetAttribute("omni:nurec:isNuRecVolume").Get()
+        )
+        rel_out = np.linalg.inv(world(out_cam)) @ world(out_vol)
+        assert np.allclose(rel_src, rel_out, atol=1e-4)
+
+
 def test_frame_multi_volume_nurec_authors_world_frame():
     """transcode --frame pca to multi-volume NuRec authors a /World frame and N volumes."""
     with tempfile.TemporaryDirectory() as d:

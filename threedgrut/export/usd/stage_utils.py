@@ -200,11 +200,43 @@ def create_gaussian_model_root(
         transform_op.Set(combined)
 
     # Canonical object frame as its own named op, applied outermost (after the combined op).
-    if canonical_frame_transform is not None and not np.allclose(canonical_frame_transform, np.eye(4)):
+    if is_effective_frame(canonical_frame_transform):
         frame_op = root_xform.AddTransformOp(opSuffix="canonicalFrame")
         frame_op.Set(column_vector_4x4_to_usd_matrix(np.asarray(canonical_frame_transform)))
 
     return root_path
+
+
+def is_effective_frame(transform) -> bool:
+    """True if ``transform`` is a non-None, non-identity 4x4 (worth authoring)."""
+    return transform is not None and not np.allclose(np.asarray(transform), np.eye(4))
+
+
+def apply_canonical_frame_to_scene(stage: Usd.Stage, frame_transform, skip_prim_names) -> None:
+    """Author the ``canonicalFrame`` named op on top of each /World scene subtree.
+
+    Used to move copied/foreign source prims (cameras, rig, …) by the canonical frame without
+    re-parenting or remapping — the op is prepended to the topmost Xformable of each subtree, so
+    any source hierarchy and its references are preserved. ``skip_prim_names`` are the content
+    roots that already carry the frame themselves (e.g. the Gaussian/volume prims).
+    """
+    if not is_effective_frame(frame_transform):
+        return
+    frame_mat = column_vector_4x4_to_usd_matrix(np.asarray(frame_transform))
+
+    def _apply(prim):
+        xformable = UsdGeom.Xformable(prim)
+        if xformable:
+            xformable.AddTransformOp(opSuffix="canonicalFrame").Set(frame_mat)
+        else:
+            for child in prim.GetChildren():
+                _apply(child)
+
+    world = stage.GetPrimAtPath("/World")
+    if world and world.IsValid():
+        for child in world.GetChildren():
+            if child.GetName() not in skip_prim_names:
+                _apply(child)
 
 
 def compose_default_stage(
