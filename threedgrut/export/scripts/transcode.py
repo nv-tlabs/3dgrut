@@ -256,31 +256,22 @@ def transcode(
             "--render-order-hint is only applied for lightfield format; ignoring for format '%s'",
             output_format,
         )
-    # Detect input format
     input_format = detect_input_format(input_path)
     logger.info(f"Input format: {input_format}")
     logger.info(f"Output format: {output_format}")
 
-    # Get importer and load data
     importer = get_importer(input_format, max_sh_degree)
-    attrs, caps = importer.load(input_path)
+    fields, source_transforms = _load_sources(importer, input_path)
     source_is_preactivation = importer.stores_preactivation
-    source_gaussian_transform = getattr(importer, "source_gaussian_transform", None)
-    source_partition_count = getattr(importer, "partition_count", 1)
-    # Source prim grouping: one group per source ParticleField prim (None for single-prim/PLY).
-    group_labels = getattr(importer, "partition_labels", None) if source_partition_count > 1 else None
-
     logger.info(
-        f"Loaded {attrs.num_gaussians} Gaussians (preactivation={source_is_preactivation}, "
-        f"source partitions={source_partition_count})"
+        f"Loaded {len(fields)} source field(s), {sum(a.num_gaussians for a, _ in fields)} Gaussians "
+        f"(preactivation={source_is_preactivation})"
     )
 
     _transcode_core(
-        attrs=attrs,
-        caps=caps,
+        fields=fields,
+        source_transforms=source_transforms,
         source_is_preactivation=source_is_preactivation,
-        group_labels=group_labels,
-        source_gaussian_transform=source_gaussian_transform,
         output_path=output_path,
         output_format=output_format,
         half_precision=half_precision,
@@ -303,13 +294,29 @@ def _split_options(
     split_target_fraction: float,
     max_splits: int,
 ) -> dict:
-    """Bundle the Gaussian-split options forwarded to partition_groups."""
+    """Bundle the Gaussian-split options forwarded to partition_scene."""
     return {
         "split": split_large_gaussians,
         "split_target_size": split_target_size,
         "split_target_fraction": split_target_fraction,
         "max_splits": max_splits,
     }
+
+
+def _load_sources(importer, path: Path):
+    """Load a file as a list of ``(attrs, caps)`` fields plus their source transforms.
+
+    Each ParticleField prim / source is kept separate — never concatenated. PLY/NuRec yield a
+    single field; a multi-prim USD yields one field per prim.
+    """
+    if hasattr(importer, "load_fields"):
+        fields = importer.load_fields(path)
+        transforms = getattr(importer, "source_gaussian_transforms", None)
+        if not transforms or len(transforms) != len(fields):
+            transforms = [getattr(importer, "source_gaussian_transform", None)] * len(fields)
+        return fields, transforms
+    attrs, caps = importer.load(path)
+    return [(attrs, caps)], [getattr(importer, "source_gaussian_transform", None)]
 
 
 def transcode_files(
@@ -328,12 +335,12 @@ def transcode_files(
     split_target_fraction: float = 0.5,
     max_splits: int = 4,
 ) -> None:
-    """Combine several inputs into one USD with one ParticleField prim per input.
+    """Combine several inputs into one asset with one ParticleField prim / volume per input.
 
-    Each input file becomes its own partition (ParticleField prim); an input whose Gaussian count
-    exceeds ``max_per_volume`` is subdivided into several prims (optionally splitting oversized
-    Gaussians first when ``split_large_gaussians`` is set). Output must be the ``lightfield`` USD
-    format. All inputs must agree on activation convention (e.g. all PLY).
+    Each input field becomes its own output partition; a field whose Gaussian count exceeds
+    ``max_per_volume`` is subdivided into several (optionally splitting oversized Gaussians first).
+    Inputs are never merged into one array. Output must be ``lightfield`` or ``nurec``; all inputs
+    must agree on activation convention (e.g. all PLY).
     """
     input_paths = [Path(p) for p in input_paths]
     if len(input_paths) == 1:
@@ -355,43 +362,32 @@ def transcode_files(
         )
         return
 
-    if output_format != "lightfield":
+    if output_format not in ("lightfield", "nurec"):
         raise ValueError(
-            f"Combining multiple inputs into one asset is only supported for lightfield output, got '{output_format}'."
+            f"Combining multiple inputs into one asset requires lightfield or nurec output, got '{output_format}'."
         )
 
-    import numpy as np
-
-    from threedgrut.export.accessor import merge_gaussian_attributes
-
-    attrs_list = []
-    caps_list = []
-    labels = []
+    fields = []
+    transforms = []
     preactivation_flags = set()
-    for i, p in enumerate(input_paths):
+    for p in input_paths:
         fmt = detect_input_format(p)
         importer = get_importer(fmt, max_sh_degree)
-        a, c = importer.load(p)
-        attrs_list.append(a)
-        caps_list.append(c)
-        labels.append(np.full(a.num_gaussians, i, dtype=np.int64))
+        fs, ts = _load_sources(importer, p)
+        fields.extend(fs)
+        transforms.extend(ts)
         preactivation_flags.add(importer.stores_preactivation)
-        logger.info(f"Loaded input {i} ({fmt}): {a.num_gaussians} Gaussians")
+        logger.info(f"Loaded {len(fs)} field(s) from {p} ({fmt})")
 
     if len(preactivation_flags) != 1:
         raise ValueError("All inputs must share the same activation convention (e.g. all PLY).")
     source_is_preactivation = preactivation_flags.pop()
-
-    merged, merged_caps = merge_gaussian_attributes(attrs_list, caps_list)
-    group_labels = np.concatenate(labels)
-    logger.info(f"Combining {len(input_paths)} inputs ({merged.num_gaussians} Gaussians) into {output_path}")
+    logger.info(f"Combining {len(input_paths)} inputs ({len(fields)} fields) into {output_path}")
 
     _transcode_core(
-        attrs=merged,
-        caps=merged_caps,
+        fields=fields,
+        source_transforms=transforms,
         source_is_preactivation=source_is_preactivation,
-        group_labels=group_labels,
-        source_gaussian_transform=None,
         output_path=output_path,
         output_format=output_format,
         half_precision=half_precision,
@@ -404,18 +400,15 @@ def transcode_files(
         validate_usd=validate_usd,
         max_per_volume=max_per_volume,
         split_options=_split_options(split_large_gaussians, split_target_size, split_target_fraction, max_splits),
-        force_partition=True,
     )
     logger.info(f"Transcode complete: {len(input_paths)} inputs -> {output_path}")
 
 
 def _transcode_core(
     *,
-    attrs,
-    caps,
+    fields,
+    source_transforms,
     source_is_preactivation: bool,
-    group_labels,
-    source_gaussian_transform,
     output_path: Path,
     output_format: str,
     half_precision: bool,
@@ -428,45 +421,42 @@ def _transcode_core(
     validate_usd: bool,
     max_per_volume: Optional[int],
     split_options: Optional[dict] = None,
-    force_partition: bool = False,
 ) -> None:
-    """Shared adapter + (optional) partition + export, used by single- and multi-input transcode."""
+    """Partition each source independently and author the union of partitions.
+
+    Each field becomes its own :class:`PartitionResult` (one per source, never merged); a source
+    over budget subdivides into several partitions. The writers author one ParticleField prim / PLY
+    file / NuRec volume per partition.
+    """
+    from threedgrut.export.partition import partition_scene
+
     if half_precision:
         half_geometry = True
         half_features = True
 
-    adapter = AttributesExportAdapter(attrs=attrs, caps=caps, is_preactivation=source_is_preactivation)
-
-    # NuRec export always produces USDZ (zip). Require .usdz extension.
     if output_format == "nurec" and output_path.suffix.lower() != ".usdz":
         raise ValueError(
             f"NuRec format requires output extension .usdz, got '{output_path.suffix}'. "
             f"Use e.g. -o {output_path.with_suffix('.usdz')}"
         )
 
-    partition_result = _resolve_partition(
-        adapter=adapter,
-        caps=caps,
-        output_format=output_format,
-        max_per_volume=max_per_volume,
-        group_labels=group_labels,
-        force_partition=force_partition,
-        split_options=split_options,
-    )
+    adapters = [
+        AttributesExportAdapter(attrs=a, caps=c, is_preactivation=source_is_preactivation) for a, c in fields
+    ]
+    results = [partition_scene(adapter, max_per_volume, **(split_options or {})) for adapter in adapters]
+    total_partitions = sum(r.num_partitions for r in results)
+    partitioned = total_partitions > 1
 
-    partitioned = partition_result is not None and partition_result.is_partitioned
-
-    # PLY: one file per partition (no prim hierarchy to preserve).
-    if output_format == "ply" and partitioned:
+    # PLY: one file per partition (handles the single-partition case too).
+    if output_format == "ply":
         from threedgrut.export.formats import export_partitions
 
-        written = export_partitions(partition_result, output_path)
-        logger.info("Wrote %d PLY partition file(s)", len(written))
+        written = export_partitions(results, output_path)
+        logger.info("Wrote %d PLY file(s)", len(written))
         return
 
-    # USD / NuRec / single PLY: reuse the standard exporters. For lightfield the partition
-    # is authored as multiple ParticleField prims inside the same stage, so the source-prim
-    # merge (cameras, RenderProducts, …) still copies every other prim into the target as-is.
+    # USD / NuRec: author one prim / volume per partition. The exporter's source-prim merge still
+    # copies cameras, RenderProducts and every other prim into the target as-is.
     exporter, _target_expects_preactivation = get_exporter(
         output_format,
         half_precision=half_precision,
@@ -478,55 +468,12 @@ def _transcode_core(
         apply_coordinate_transform=apply_coordinate_transform,
         copy_cameras_source=copy_cameras_source,
         copy_source_skip_subtrees=copy_source_skip_subtrees,
-        source_gaussian_transform=source_gaussian_transform,
+        source_gaussian_transform=source_transforms[0] if source_transforms else None,
         validate_usd=validate_usd if output_format == "lightfield" else False,
+        partition=results if partitioned else None,
     )
-    if output_format == "lightfield":
-        export_kwargs["partition"] = partition_result
-    elif partitioned:
-        logger.warning("Per-prim partitioning is not supported for '%s' output; exporting a single volume", output_format)
     logger.info(f"Exporting to {output_path}...")
-    exporter.export(adapter, output_path, **export_kwargs)
-
-
-def _resolve_partition(
-    *,
-    adapter,
-    caps,
-    output_format: str,
-    max_per_volume: Optional[int],
-    group_labels,
-    force_partition: bool = False,
-    split_options: Optional[dict] = None,
-):
-    """Return a PartitionResult when the output should be partitioned per-group, else None.
-
-    Groups (source ParticleField prims, or input files) are always preserved; a group whose own
-    count exceeds ``max_per_volume`` is subdivided (optionally splitting oversized Gaussians first
-    when ``split_options['split']`` is set). Partitioning applies to ply / lightfield only.
-    Returns None for a single group within budget (plain single-volume export).
-    """
-    import numpy as np
-
-    from threedgrut.export.partition import partition_groups
-
-    num_gaussians = adapter.get_positions().shape[0]
-    num_groups = int(np.asarray(group_labels).max()) + 1 if group_labels is not None and num_gaussians else 1
-    has_multiple_groups = num_groups > 1
-
-    # Nothing to do: single group and no per-prim cap requested.
-    if not force_partition and not has_multiple_groups and max_per_volume is None:
-        return None
-
-    if output_format not in ("ply", "lightfield"):
-        if max_per_volume is not None or has_multiple_groups:
-            logger.warning("Per-prim partitioning is not supported for '%s' output; merging instead", output_format)
-        return None
-
-    if group_labels is None:
-        group_labels = np.zeros(num_gaussians, dtype=np.int64)
-
-    return partition_groups(adapter, group_labels, max_per_volume, capabilities=caps, **(split_options or {}))
+    exporter.export(adapters[0], output_path, **export_kwargs)
 
 
 def parse_args():
@@ -633,38 +580,14 @@ Examples:
         help="Also copy /World/Gaussians from the source (duplicates old LightField data; can be very large).",
     )
     parser.add_argument(
-        "--max-gaussians-per-volume",
+        "--max-particles-per-field",
         dest="max_per_volume",
         type=int,
         default=None,
         help=(
-            "Subdivide any ParticleField prim / input whose own Gaussian count exceeds this into "
+            "Subdivide any ParticleField prim / input whose own particle count exceeds this into "
             "several partitions; prims within budget are kept as-is (ply and lightfield outputs only)."
         ),
-    )
-    parser.add_argument(
-        "--split-large-gaussians",
-        action="store_true",
-        help="When subdividing an oversized prim, first split its boundary-straddling Gaussians "
-        "(same as the exporter's option; reduces inter-partition overlap).",
-    )
-    parser.add_argument(
-        "--split-target-size",
-        type=float,
-        default=None,
-        help="Footprint threshold (world units) for the split pass. Defaults to a fraction of the cell edge.",
-    )
-    parser.add_argument(
-        "--split-target-fraction",
-        type=float,
-        default=0.5,
-        help="Fraction of the cell edge used for the default split threshold. Default: 0.5.",
-    )
-    parser.add_argument(
-        "--max-splits",
-        type=int,
-        default=4,
-        help="Maximum split iterations for oversized Gaussians. Default: 4.",
     )
     parser.add_argument(
         "-v",
@@ -726,10 +649,6 @@ def main():
                 render_order_hint=args.render_order_hint,
                 validate_usd=not args.no_usd_validate,
                 max_per_volume=args.max_per_volume,
-                split_large_gaussians=args.split_large_gaussians,
-                split_target_size=args.split_target_size,
-                split_target_fraction=args.split_target_fraction,
-                max_splits=args.max_splits,
             )
         else:
             input_path = input_paths[0]
@@ -758,10 +677,6 @@ def main():
                     copy_source_skip_subtrees=skip_subtrees,
                     validate_usd=not args.no_usd_validate,
                     max_per_volume=args.max_per_volume,
-                    split_large_gaussians=args.split_large_gaussians,
-                    split_target_size=args.split_target_size,
-                    split_target_fraction=args.split_target_fraction,
-                    max_splits=args.max_splits,
                 )
     except Exception as e:
         logger.error(f"Transcode failed: {e}")

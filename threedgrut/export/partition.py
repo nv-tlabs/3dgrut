@@ -303,125 +303,6 @@ class PartitionResult:
             yield pid, attrs.filter_by_mask(idx)
 
 
-def _count_metrics(labels: torch.Tensor, num_partitions: int, total: int, num_split_added: int) -> Dict:
-    """Per-partition count statistics (shared by the partition orchestrators)."""
-    counts = torch.bincount(labels, minlength=num_partitions) if total > 0 else torch.zeros(1)
-    return {
-        "num_partitions": num_partitions,
-        "total_exported": int(total),
-        "num_split_added": int(num_split_added),
-        "count_min": int(counts.min().item()),
-        "count_max": int(counts.max().item()),
-        "count_mean": float(counts.float().mean().item()),
-        "count_std": float(counts.float().std(unbiased=False).item()),
-        "overlap_ratio": None,
-    }
-
-
-def partition_groups(
-    model: ExportableModel,
-    group_labels,
-    max_per_volume: Optional[int],
-    *,
-    conf=None,
-    capabilities: Optional[ModelCapabilities] = None,
-    split: bool = False,
-    split_target_size: Optional[float] = None,
-    split_target_fraction: float = 0.5,
-    max_splits: int = 4,
-    n_sigma: float = 3.0,
-) -> PartitionResult:
-    """Partition *within* existing groups, preserving group boundaries.
-
-    Each input group (e.g. one source ParticleField prim, or one input PLY) becomes its own
-    output partition; a group whose Gaussian count exceeds ``max_per_volume`` is further
-    subdivided with the KD-tree. Groups already within budget (or all groups when
-    ``max_per_volume`` is None) are kept intact. ``group_labels`` aligns 1:1 with the model's
-    Gaussians.
-
-    When ``split`` is True, oversized groups (the only ones that get subdivided, hence the only
-    ones with internal partition boundaries) first have their boundary-straddling Gaussians split
-    via :func:`split_large_gaussians` before the KD-tree pass — the same overlap-reducing step the
-    whole-scene :func:`partition_scene` offers. Groups within budget are never split, so prims that
-    fit are preserved exactly.
-
-    This differs from :func:`partition_scene`, which ignores any existing structure and
-    partitions the whole scene. Use this for transcoding, where prims must be preserved.
-    """
-    accessor = GaussianExportAccessor(model, conf)
-    caps = capabilities if capabilities is not None else accessor.get_capabilities()
-    device = model.get_positions().device
-    n = model.get_positions().shape[0]
-
-    group_t = torch.as_tensor(np.asarray(group_labels), dtype=torch.long, device=device)
-    if group_t.numel() != n:
-        raise ValueError(f"group_labels length ({group_t.numel()}) must match Gaussian count ({n})")
-    num_groups = int(group_t.max().item()) + 1 if n > 0 else 0
-
-    # Fast path: labels map 1:1 onto the original Gaussians (no split, no expansion).
-    if not split:
-        positions = model.get_positions().detach()
-        final = torch.empty(n, dtype=torch.long, device=device)
-        next_label = 0
-        for g in range(num_groups):
-            idx = (group_t == g).nonzero(as_tuple=False).squeeze(1)
-            if idx.numel() == 0:
-                continue
-            if max_per_volume is None or idx.numel() <= max_per_volume:
-                final[idx] = next_label
-                next_label += 1
-            else:
-                sub_labels, sub_count = kdtree_partition(positions.index_select(0, idx), max_per_volume)
-                final[idx] = sub_labels + next_label
-                next_label += sub_count
-        num_partitions = max(next_label, 1)
-        metrics = _count_metrics(final, num_partitions, n, 0)
-        logger.info("Partitioned %d groups into %d volumes (counts %d-%d)", num_groups, num_partitions,
-                    metrics["count_min"], metrics["count_max"])
-        return PartitionResult(
-            labels=final, num_partitions=num_partitions, is_partitioned=num_partitions > 1,
-            capabilities=caps, metrics=metrics, _accessor=accessor,
-        )
-
-    # Split path: oversized groups may grow, so build expanded post-activation tensors.
-    post = _gather_post_tensors(model)
-    chunks: Dict[str, list] = {k: [] for k in post}
-    label_chunks = []
-    next_label = 0
-    total_added = 0
-    for g in range(num_groups):
-        idx = (group_t == g).nonzero(as_tuple=False).squeeze(1)
-        if idx.numel() == 0:
-            continue
-        sub = {k: post[k].index_select(0, idx) for k in post}
-        if max_per_volume is not None and idx.numel() > max_per_volume:
-            target = split_target_size
-            if target is None:
-                est_partitions = -(-int(idx.numel()) // max_per_volume)  # ceil
-                target = _default_target_size(sub["positions"], est_partitions, split_target_fraction)
-            sub, added = split_large_gaussians(sub, target_size=target, n_sigma=n_sigma, max_splits=max_splits)
-            total_added += added
-            sub_labels, sub_count = kdtree_partition(sub["positions"], max_per_volume)
-        else:
-            sub_count = 1
-            sub_labels = torch.zeros(sub["positions"].shape[0], dtype=torch.long, device=device)
-        for k in post:
-            chunks[k].append(sub[k])
-        label_chunks.append(sub_labels + next_label)
-        next_label += sub_count
-
-    expanded = {k: (torch.cat(chunks[k], dim=0) if chunks[k] else post[k]) for k in post}
-    final = torch.cat(label_chunks) if label_chunks else torch.zeros(0, dtype=torch.long, device=device)
-    num_partitions = max(next_label, 1)
-    metrics = _count_metrics(final, num_partitions, int(final.numel()), total_added)
-    logger.info("Partitioned %d groups into %d volumes (counts %d-%d, split-added %d)", num_groups,
-                num_partitions, metrics["count_min"], metrics["count_max"], total_added)
-    return PartitionResult(
-        labels=final, num_partitions=num_partitions, is_partitioned=num_partitions > 1,
-        capabilities=caps, metrics=metrics, _split_post=expanded,
-    )
-
-
 def _gather_post_tensors(model: ExportableModel) -> Dict[str, torch.Tensor]:
     """Post-activation tensors straight off the model (kept on their original device)."""
     densities = model.get_density(preactivation=False).detach()
@@ -515,7 +396,7 @@ def _compute_metrics(
 
 def partition_scene(
     model: ExportableModel,
-    max_per_volume: int,
+    max_per_volume: Optional[int],
     *,
     conf=None,
     split: bool = False,
@@ -524,14 +405,17 @@ def partition_scene(
     max_splits: int = 4,
     n_sigma: float = 3.0,
 ) -> PartitionResult:
-    """Partition a Gaussian scene into volume partitions of at most ``max_per_volume``.
+    """Partition one Gaussian source into volume partitions of at most ``max_per_volume``.
 
-    When ``max_per_volume >= num_gaussians`` no work is done and a single-partition
-    result is returned (exporters then reproduce the regular unpartitioned output).
+    When ``max_per_volume`` is None or >= the source's Gaussian count, no subdivision is
+    done and a single-partition result is returned (exporters then reproduce the regular
+    unpartitioned output). Each call handles a single source (one model, one ParticleField
+    prim, or one input file); callers process multiple sources independently and never merge
+    them into one array.
 
     Args:
         model: Source model (``ExportableModel``).
-        max_per_volume: Maximum Gaussians per partition.
+        max_per_volume: Maximum Gaussians per partition, or None for no subdivision.
         conf: Optional config (forwarded to the accessor for capabilities/activations).
         split: If True, run the oversized-Gaussian split pass before partitioning.
         split_target_size: Footprint threshold (world units) above which a Gaussian is
@@ -540,7 +424,7 @@ def partition_scene(
         max_splits: Maximum split iterations.
         n_sigma: Sigma multiplier for footprint/extent computation.
     """
-    if max_per_volume < 1:
+    if max_per_volume is not None and max_per_volume < 1:
         raise ValueError(f"max_per_volume must be >= 1, got {max_per_volume}")
 
     accessor = GaussianExportAccessor(model, conf)
@@ -548,13 +432,9 @@ def partition_scene(
     num_gaussians = accessor.get_num_gaussians()
 
     # No partitioning needed: single partition, regular export reproduced exactly.
-    if num_gaussians <= max_per_volume:
+    if max_per_volume is None or num_gaussians <= max_per_volume:
         labels = torch.zeros(num_gaussians, dtype=torch.long, device=model.get_positions().device)
-        logger.info(
-            "max-gaussians-per-volume (%d) >= scene size (%d); exporting a single unpartitioned volume",
-            max_per_volume,
-            num_gaussians,
-        )
+        logger.info("Source has %d Gaussians within budget; exporting a single unpartitioned volume", num_gaussians)
         return PartitionResult(
             labels=labels,
             num_partitions=1,

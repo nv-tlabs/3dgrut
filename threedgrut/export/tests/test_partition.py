@@ -270,7 +270,7 @@ def _write_partitioned_usd(path: Path, num_gaussians: int, max_per_volume: int, 
     return model, result.num_partitions
 
 
-def test_usd_importer_merges_multiple_particlefield_prims():
+def test_usd_importer_loads_prims_as_separate_fields():
     pytest.importorskip("pxr", reason="usd-core (pxr) is only available on linux x86_64")
     from threedgrut.export.importers import USDImporter
 
@@ -279,12 +279,13 @@ def test_usd_importer_merges_multiple_particlefield_prims():
         _model, num_partitions = _write_partitioned_usd(usd_path, num_gaussians=500, max_per_volume=120, seed=17)
 
         importer = USDImporter()
-        attrs, caps = importer.load(usd_path)
-        assert attrs.num_gaussians == 500
-        assert importer.partition_count == num_partitions
-        assert importer.partition_labels is not None
-        assert importer.partition_labels.shape[0] == 500
-        assert set(importer.partition_labels.tolist()) == set(range(num_partitions))
+        fields = importer.load_fields(usd_path)
+        # One field per ParticleField prim; never concatenated.
+        assert len(fields) == num_partitions
+        assert sum(attrs.num_gaussians for attrs, _ in fields) == 500
+        # load() returns the first field for the single-field contract.
+        first_attrs, _ = importer.load(usd_path)
+        assert first_attrs.num_gaussians == fields[0][0].num_gaussians
 
 
 def test_transcode_multiprim_usd_to_multi_ply():

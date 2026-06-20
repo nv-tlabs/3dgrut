@@ -608,15 +608,15 @@ class USDExporter(ModelExporter):
         accessor = GaussianExportAccessor(model, conf)
         caps = accessor.get_capabilities()
 
-        # Optional spatial partitioning: author one ParticleField prim per partition.
-        partition = kwargs.get("partition")
-        partitioned = partition is not None and getattr(partition, "is_partitioned", False)
+        # Optional spatial partitioning: a list of per-source PartitionResults, each authored as
+        # one or more ParticleField prims. None / a single partition reproduces the regular output.
+        partition_list = kwargs.get("partition")
+        if partition_list is not None and not isinstance(partition_list, (list, tuple)):
+            partition_list = [partition_list]
+        total_partitions = sum(r.num_partitions for r in partition_list) if partition_list else 0
+        partitioned = total_partitions > 1
         if partitioned:
-            if partition.capabilities is not None:
-                caps = partition.capabilities
-            logger.info(
-                "Schema: LightField (post-activation), %d ParticleField partitions", partition.num_partitions
-            )
+            logger.info("Schema: LightField (post-activation), %d ParticleField partitions", total_partitions)
         else:
             attrs = accessor.get_attributes(preactivation=False)
             logger.info(f"Schema: LightField (post-activation)")
@@ -652,10 +652,10 @@ class USDExporter(ModelExporter):
         )
 
         # Write Gaussians: a single ParticleField, or one prim per partition.
-        def _write_particlefield(content_root_path, sub_attrs):
+        def _write_particlefield(content_root_path, sub_attrs, sub_caps):
             writer = create_gaussian_writer(
                 stage=stage,
-                capabilities=caps,
+                capabilities=sub_caps,
                 content_root_path=content_root_path,
                 half_geometry=self.half_geometry,
                 half_features=self.half_features,
@@ -669,12 +669,17 @@ class USDExporter(ModelExporter):
             writer.finalize(sub_attrs.positions)
 
         if partitioned:
-            width = max(3, len(str(partition.num_partitions - 1)))
-            for pid, sub in partition.iter_partitions(preactivation=False):
-                _write_particlefield(f"{gaussians_root}/Partition_{pid:0{width}d}", sub)
-            logger.info("Authored %d ParticleField partitions under %s", partition.num_partitions, gaussians_root)
+            width = max(3, len(str(total_partitions - 1)))
+            running = 0
+            for result in partition_list:
+                # Each source keeps its own capabilities (SH degree, surfel flag) — no fusing.
+                result_caps = result.capabilities if result.capabilities is not None else caps
+                for _pid, sub in result.iter_partitions(preactivation=False):
+                    _write_particlefield(f"{gaussians_root}/Partition_{running:0{width}d}", sub, result_caps)
+                    running += 1
+            logger.info("Authored %d ParticleField partitions under %s", total_partitions, gaussians_root)
         else:
-            _write_particlefield(gaussians_root, attrs)
+            _write_particlefield(gaussians_root, attrs, caps)
 
         suffix = output_path.suffix.lower()
         package_as_usdz = suffix == ".usdz" or suffix not in (".usd", ".usda", ".usdc")

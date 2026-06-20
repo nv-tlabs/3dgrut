@@ -28,7 +28,7 @@ from typing import Optional, Tuple
 import numpy as np
 from pxr import Usd, UsdVol
 
-from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities, merge_gaussian_attributes
+from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
 from threedgrut.export.importers.base import FormatImporter
 from threedgrut.export.transforms import collect_local_to_world_transform_samples
 
@@ -42,12 +42,9 @@ class USDImporter(FormatImporter):
     """
 
     def __init__(self) -> None:
+        # Local-to-world transform(s) of the source Gaussian prim(s); singular = first field.
         self.source_gaussian_transform = None
-        # Per-Gaussian source-prim index (group id) and number of ParticleField prims
-        # found in the stage. Populated by load(); lets callers preserve the partition
-        # grouping authored by the multi-prim exporter (one prim per partition).
-        self.partition_labels: Optional[np.ndarray] = None
-        self.partition_count: int = 1
+        self.source_gaussian_transforms: list = []
 
     @property
     def stores_preactivation(self) -> bool:
@@ -55,59 +52,38 @@ class USDImporter(FormatImporter):
         return False
 
     def load(self, path: Path) -> Tuple[GaussianAttributes, ModelCapabilities]:
-        """Load USD/USDZ file into GaussianAttributes.
+        """Load a USD/USDZ file, returning the first ParticleField as (attributes, caps).
 
-        Args:
-            path: Path to USD/USDZ file
+        For stages with several ParticleField prims use :meth:`load_fields`, which returns
+        each prim independently (the prims are never concatenated).
+        """
+        return self.load_fields(path)[0]
 
-        Returns:
-            Tuple of (GaussianAttributes, ModelCapabilities)
+    def load_fields(self, path: Path) -> list:
+        """Load a USD/USDZ file as a list of per-prim ``(GaussianAttributes, ModelCapabilities)``.
+
+        Each ParticleField prim is returned independently — they are not merged — so callers can
+        treat every prim as its own field / partition.
         """
         logger.info(f"Loading USD file: {path}")
-
-        # Handle USDZ by extracting to temp dir
         if path.suffix.lower() == ".usdz":
-            return self._load_usdz(path)
-        else:
-            return self._load_usd_stage(path)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmpdir_path = Path(tmpdir)
+                with zipfile.ZipFile(path, "r") as zf:
+                    zf.extractall(tmpdir_path)
+                usd_files = list(tmpdir_path.glob("*.usd*"))
+                if not usd_files:
+                    raise ValueError(f"No USD files found in USDZ: {path}")
+                root_file = next((f for f in usd_files if f.stem == "default"), usd_files[0])
+                return self._load_fields_from_stage(root_file)
+        return self._load_fields_from_stage(path)
 
-    def _load_usdz(self, path: Path) -> Tuple[GaussianAttributes, ModelCapabilities]:
-        """Load USDZ file (extract and load root stage)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-
-            # Extract USDZ
-            with zipfile.ZipFile(path, "r") as zf:
-                zf.extractall(tmpdir_path)
-
-            # Find the root USD file (usually default.usda or first .usd*)
-            usd_files = list(tmpdir_path.glob("*.usd*"))
-            if not usd_files:
-                raise ValueError(f"No USD files found in USDZ: {path}")
-
-            # Prefer default.usda
-            root_file = None
-            for f in usd_files:
-                if f.stem == "default":
-                    root_file = f
-                    break
-            if root_file is None:
-                root_file = usd_files[0]
-
-            return self._load_usd_stage(root_file)
-
-    def _load_usd_stage(self, path: Path) -> Tuple[GaussianAttributes, ModelCapabilities]:
-        """Load USD stage and extract Gaussian data.
-
-        Stages with several ParticleField prims (e.g. the multi-prim partition export)
-        are merged into a single ``GaussianAttributes``; the per-prim grouping is recorded
-        in ``self.partition_labels`` / ``self.partition_count`` so callers can preserve it.
-        """
+    def _load_fields_from_stage(self, path: Path) -> list:
+        """Open a stage and load every ParticleField prim independently."""
         stage = Usd.Stage.Open(str(path))
         if not stage:
             raise ValueError(f"Failed to open USD stage: {path}")
 
-        # Find all Gaussian prims (LightField schema only).
         gaussian_prims = self._find_particlefield_prims(stage)
         if not gaussian_prims:
             prim_types = sorted({p.GetTypeName() for p in stage.Traverse()})
@@ -118,40 +94,16 @@ class USDImporter(FormatImporter):
                 f"NuRec (UsdVol::Volume) and other formats are not supported for import."
             )
 
-        # Capture the source local-to-world transform from the first prim (the multi-prim
-        # exporter shares one identity-transformed /World/Gaussians root across partitions).
-        self.source_gaussian_transform = collect_local_to_world_transform_samples(gaussian_prims[0])
+        self.source_gaussian_transforms = [collect_local_to_world_transform_samples(p) for p in gaussian_prims]
+        self.source_gaussian_transform = self.source_gaussian_transforms[0]
 
-        per_prim = []
+        fields = []
         for prim in gaussian_prims:
             logger.info(f"Found Gaussian prim: {prim.GetPath()} (type: {prim.GetTypeName()})")
-            per_prim.append(self._load_lightfield(prim))
+            fields.append(self._load_lightfield(prim))
+        return fields
 
-        self.partition_count = len(per_prim)
-        if len(per_prim) == 1:
-            attrs, caps = per_prim[0]
-            self.partition_labels = np.zeros(attrs.num_gaussians, dtype=np.int64)
-            return attrs, caps
-
-        return self._merge_lightfields(per_prim)
-
-    def _merge_lightfields(
-        self, per_prim: list[Tuple[GaussianAttributes, ModelCapabilities]]
-    ) -> Tuple[GaussianAttributes, ModelCapabilities]:
-        """Concatenate several ParticleField prims into one ``GaussianAttributes``."""
-        attrs_list = [a for a, _ in per_prim]
-        caps_list = [c for _, c in per_prim]
-        self.partition_labels = np.concatenate(
-            [np.full(a.num_gaussians, i, dtype=np.int64) for i, a in enumerate(attrs_list)]
-        )
-        merged, merged_caps = merge_gaussian_attributes(attrs_list, caps_list)
-        logger.info(
-            f"Merged {len(per_prim)} ParticleField prims into {merged.num_gaussians} Gaussians "
-            f"(SH degree {merged_caps.sh_degree})"
-        )
-        return merged, merged_caps
-
-    def _find_particlefield_prims(self, stage: Usd.Stage) -> list[Usd.Prim]:
+    def _find_particlefield_prims(self, stage: Usd.Stage) -> list:
         """Find all Gaussian data prims in the stage (UsdVol.ParticleField or derived)."""
         return [prim for prim in stage.Traverse() if prim.IsA(UsdVol.ParticleField)]
 

@@ -110,35 +110,48 @@ class PLYExporter(ModelExporter):
 
 
 @torch.no_grad()
-def export_partitions(result: "PartitionResult", output_path: Path) -> List[Path]:
-    """Write a partitioned scene to PLY point clouds.
+def export_partitions(results, output_path: Path) -> List[Path]:
+    """Write partitioned source(s) to PLY point clouds.
 
-    With a single partition, writes ``<stem>.ply`` (identical to a regular PLY export).
-    With multiple partitions, writes one ``<stem>_partition_NNN.ply`` per partition plus a
+    ``results`` is one or more :class:`PartitionResult` (one per source). With a single output
+    partition, writes ``<stem>.ply`` (identical to a regular PLY export). With multiple, writes one
+    ``<stem>_partition_NNN.ply`` per partition (numbered across all sources) plus a
     ``<stem>_partitions.json`` manifest. Returns the list of written PLY paths.
     """
+    if not isinstance(results, (list, tuple)):
+        results = [results]
     output_path = Path(output_path)
     stem_path = output_path.with_suffix("")
+    total = sum(r.num_partitions for r in results)
 
-    if result.num_partitions <= 1:
+    if total <= 1:
         out = stem_path.with_suffix(".ply")
         logger.info(f"exporting ply file to {out}...")
-        PLYExporter._write_ply(result.full_attributes(preactivation=True), out)
+        PLYExporter._write_ply(results[0].full_attributes(preactivation=True), out)
         return [out]
 
     written: List[Path] = []
-    manifest = {"num_partitions": result.num_partitions, "partitions": []}
-    width = max(3, len(str(result.num_partitions - 1)))
-    for pid, sub in result.iter_partitions(preactivation=True):
-        out = stem_path.parent / f"{stem_path.name}_partition_{pid:0{width}d}.ply"
-        logger.info(f"exporting partition {pid} ({sub.num_gaussians} gaussians) to {out}...")
-        PLYExporter._write_ply(sub, out)
-        written.append(out)
-        mins = sub.positions.min(axis=0).tolist() if sub.num_gaussians else None
-        maxs = sub.positions.max(axis=0).tolist() if sub.num_gaussians else None
-        manifest["partitions"].append(
-            {"id": pid, "num_gaussians": int(sub.num_gaussians), "file": out.name, "aabb_min": mins, "aabb_max": maxs}
-        )
+    manifest = {"num_partitions": total, "partitions": []}
+    width = max(3, len(str(total - 1)))
+    running = 0
+    for result in results:
+        for _pid, sub in result.iter_partitions(preactivation=True):
+            out = stem_path.parent / f"{stem_path.name}_partition_{running:0{width}d}.ply"
+            logger.info(f"exporting partition {running} ({sub.num_gaussians} gaussians) to {out}...")
+            PLYExporter._write_ply(sub, out)
+            written.append(out)
+            mins = sub.positions.min(axis=0).tolist() if sub.num_gaussians else None
+            maxs = sub.positions.max(axis=0).tolist() if sub.num_gaussians else None
+            manifest["partitions"].append(
+                {
+                    "id": running,
+                    "num_gaussians": int(sub.num_gaussians),
+                    "file": out.name,
+                    "aabb_min": mins,
+                    "aabb_max": maxs,
+                }
+            )
+            running += 1
 
     manifest_path = stem_path.parent / f"{stem_path.name}_partitions.json"
     with open(manifest_path, "w") as f:

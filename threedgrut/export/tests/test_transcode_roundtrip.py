@@ -730,9 +730,9 @@ class TestCrossFormatTranscode:
             fields = [p for p in stage.Traverse() if p.GetTypeName() == "ParticleField3DGaussianSplat"]
             assert len(fields) > 1  # oversized prim subdivided
             importer = USDImporter()
-            merged, _ = importer.load(out_path)
+            total = sum(a.num_gaussians for a, _ in importer.load_fields(out_path))
             # Splitting can only add Gaussians, never drop them.
-            assert merged.num_gaussians >= 300
+            assert total >= 300
 
     def test_transcode_usd_to_ply_low_sh_degree(self):
         """USD→PLY of a sub-degree-3 source must not crash on the specular reshape."""
@@ -813,9 +813,35 @@ class TestCrossFormatTranscode:
             assert len(fields) == len(counts)
 
             importer = USDImporter()
-            merged, _ = importer.load(out)
-            assert merged.num_gaussians == sum(counts)
-            assert importer.partition_count == len(counts)
+            fields = importer.load_fields(out)
+            assert len(fields) == len(counts)
+            assert sum(a.num_gaussians for a, _ in fields) == sum(counts)
+
+    def test_transcode_multiple_ply_to_multivolume_nurec(self):
+        """Several PLY inputs combine into one NuRec USDZ with one UsdVol.Volume per input."""
+        counts = [20, 30]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            ply_paths = []
+            for i, n in enumerate(counts):
+                a = create_test_attributes(n, sh_degree=3)
+                c = create_test_capabilities(n, sh_degree=3)
+                p = tmp_path / f"in_{i}.ply"
+                PLYExporter().export(AttributesExportAdapter(a, c, is_preactivation=True), p)
+                ply_paths.append(p)
+
+            out = tmp_path / "combined.usdz"
+            transcode_files(ply_paths, out, "nurec", validate_usd=False)
+
+            stage = Usd.Stage.Open(str(out))
+            volumes = [
+                p
+                for p in stage.Traverse()
+                if p.GetTypeName() == "Volume"
+                and p.GetAttribute("omni:nurec:isNuRecVolume").IsValid()
+                and p.GetAttribute("omni:nurec:isNuRecVolume").Get()
+            ]
+            assert len(volumes) == len(counts)
 
     def test_transcode_multiple_ply_to_usd_subdivides_only_oversized(self):
         """Per-prim partitioning: small inputs are kept intact, oversized ones are subdivided."""
@@ -834,10 +860,9 @@ class TestCrossFormatTranscode:
             transcode_files(ply_paths, out, "lightfield", validate_usd=False, max_per_volume=64)
 
             importer = USDImporter()
-            merged, _ = importer.load(out)
-            assert merged.num_gaussians == small + large
-            sizes = sorted(np.bincount(importer.partition_labels).tolist())
-            assert importer.partition_count >= 3  # small (1 prim) + large (>=2 prims)
+            sizes = sorted(a.num_gaussians for a, _ in importer.load_fields(out))
+            assert sum(sizes) == small + large
+            assert len(sizes) >= 3  # small (1 prim) + large (>=2 prims)
             assert min(sizes) == small  # small input preserved as a single prim
             assert max(sizes) <= 64  # every prim respects the budget
 

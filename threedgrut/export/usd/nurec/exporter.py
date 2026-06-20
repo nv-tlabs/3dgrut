@@ -57,6 +57,7 @@ from threedgrut.export.usd.exporter import (
 )
 from threedgrut.export.usd.nurec.serializer import (
     serialize_nurec_usd,
+    serialize_nurec_usd_partitions,
     serialize_usd_default_layer,
     write_to_usdz,
 )
@@ -209,6 +210,11 @@ class NuRecExporter(ModelExporter):
                 f"NuRec export requires render.method to be '3dgut' or '3dgrt', got '{conf.render.method}'"
             )
 
+        # Partitioned export: one NuRec UsdVol.Volume per partition (geometry only).
+        partition_list = kwargs.get("partition")
+        if partition_list and sum(r.num_partitions for r in partition_list) > 1:
+            return self._export_partitions(partition_list, output_path, conf, **kwargs)
+
         post_processing = kwargs.get("post_processing")
         validation_dataset = kwargs.get("validation_dataset")
         has_ppisp_module = _is_ppisp_post_processing(post_processing)
@@ -309,56 +315,8 @@ class NuRecExporter(ModelExporter):
                 logger.warning(f"Failed to apply normalizing transform: {e}")
                 normalizing_transform = np.eye(4)
 
-        # Set up common parameters
-        template_params = {
-            "positions": attrs.positions,
-            "rotations": attrs.rotations,
-            "scales": attrs.scales,
-            "densities": attrs.densities,
-            "features_albedo": attrs.albedo,
-            "features_specular": attrs.specular,
-            "n_active_features": caps.sh_degree,
-            "density_kernel_degree": conf.render.particle_kernel_degree,
-            # Common renderer configuration parameters
-            "density_activation": conf.model.density_activation,
-            "scale_activation": conf.model.scale_activation,
-            "rotation_activation": "normalize",  # Always normalize for rotations
-            "density_kernel_density_clamping": conf.render.particle_kernel_density_clamping,
-            "density_kernel_min_response": conf.render.particle_kernel_min_response,
-            "radiance_sph_degree": conf.render.particle_radiance_sph_degree,
-            "transmittance_threshold": conf.render.min_transmittance,
-        }
-
-        if conf.render.method == "3dgut":
-            # 3DGUT-specific splatting parameters
-            template_params.update(
-                {
-                    "global_z_order": conf.render.splat.global_z_order,
-                    "n_rolling_shutter_iterations": conf.render.splat.n_rolling_shutter_iterations,
-                    "ut_alpha": conf.render.splat.ut_alpha,
-                    "ut_beta": conf.render.splat.ut_beta,
-                    "ut_kappa": conf.render.splat.ut_kappa,
-                    "ut_require_all_sigma_points": conf.render.splat.ut_require_all_sigma_points_valid,
-                    "image_margin_factor": conf.render.splat.ut_in_image_margin_factor,
-                    "rect_bounding": conf.render.splat.rect_bounding,
-                    "tight_opacity_bounding": conf.render.splat.tight_opacity_bounding,
-                    "tile_based_culling": conf.render.splat.tile_based_culling,
-                    "k_buffer_size": conf.render.splat.k_buffer_size,
-                }
-            )
-        else:
-            # For 3DGRT renderer, fall back to default splatting parameters
-            logger.warning("Using 3DGUT NuRec template for 3DGRT data, may see slight loss of quality.")
-
-        template = fill_3dgut_template(**template_params)
-
-        # Compress the data
-        buffer = io.BytesIO()
-        with gzip.GzipFile(fileobj=buffer, mode="wb", compresslevel=0) as f:
-            packed = msgpack.packb(template)
-            f.write(packed)
-
-        model_file = NamedSerialized(filename=output_path.stem + ".nurec", serialized=buffer.getvalue())
+        # Build the compressed .nurec payload for this (single-volume) scene.
+        model_file = self._build_nurec_payload(attrs, caps, conf, output_path.stem + ".nurec")
 
         apply_coordinate_transform = kwargs.get("apply_coordinate_transform", False)
 
@@ -494,6 +452,107 @@ class NuRecExporter(ModelExporter):
 
         # Write the final USDZ file
         write_to_usdz(output_path, model_file, gauss_usd, default_usd, extra_files if extra_files else None)
+
+    def _build_nurec_payload(self, attrs, caps, conf, filename: str) -> NamedSerialized:
+        """Build one compressed ``.nurec`` msgpack payload from pre-activation attributes."""
+        template_params = {
+            "positions": attrs.positions,
+            "rotations": attrs.rotations,
+            "scales": attrs.scales,
+            "densities": attrs.densities,
+            "features_albedo": attrs.albedo,
+            "features_specular": attrs.specular,
+            "n_active_features": caps.sh_degree,
+            "density_kernel_degree": conf.render.particle_kernel_degree,
+            "density_activation": conf.model.density_activation,
+            "scale_activation": conf.model.scale_activation,
+            "rotation_activation": "normalize",
+            "density_kernel_density_clamping": conf.render.particle_kernel_density_clamping,
+            "density_kernel_min_response": conf.render.particle_kernel_min_response,
+            "radiance_sph_degree": conf.render.particle_radiance_sph_degree,
+            "transmittance_threshold": conf.render.min_transmittance,
+        }
+        if conf.render.method == "3dgut":
+            template_params.update(
+                {
+                    "global_z_order": conf.render.splat.global_z_order,
+                    "n_rolling_shutter_iterations": conf.render.splat.n_rolling_shutter_iterations,
+                    "ut_alpha": conf.render.splat.ut_alpha,
+                    "ut_beta": conf.render.splat.ut_beta,
+                    "ut_kappa": conf.render.splat.ut_kappa,
+                    "ut_require_all_sigma_points": conf.render.splat.ut_require_all_sigma_points_valid,
+                    "image_margin_factor": conf.render.splat.ut_in_image_margin_factor,
+                    "rect_bounding": conf.render.splat.rect_bounding,
+                    "tight_opacity_bounding": conf.render.splat.tight_opacity_bounding,
+                    "tile_based_culling": conf.render.splat.tile_based_culling,
+                    "k_buffer_size": conf.render.splat.k_buffer_size,
+                }
+            )
+        else:
+            logger.warning("Using 3DGUT NuRec template for 3DGRT data, may see slight loss of quality.")
+
+        template = fill_3dgut_template(**template_params)
+        buffer = io.BytesIO()
+        with gzip.GzipFile(fileobj=buffer, mode="wb", compresslevel=0) as f:
+            f.write(msgpack.packb(template))
+        return NamedSerialized(filename=filename, serialized=buffer.getvalue())
+
+    def _export_partitions(self, partition_list, output_path: Path, conf, **kwargs) -> None:
+        """Author one NuRec ``UsdVol.Volume`` per partition into a single USDZ.
+
+        Geometry only (cameras / PPISP are not regenerated); source prims are still copied
+        as-is when ``copy_cameras_source`` is provided.
+        """
+        apply_coordinate_transform = kwargs.get("apply_coordinate_transform", False)
+        source_gaussian_transform = kwargs.get("source_gaussian_transform")
+        copy_source_usd = kwargs.get("copy_source_usd") or kwargs.get("copy_cameras_source")
+
+        total = sum(r.num_partitions for r in partition_list)
+        width = max(3, len(str(total - 1)))
+        payloads: list[NamedSerialized] = []
+        volume_specs = []
+        running = 0
+        for result in partition_list:
+            rcaps = result.capabilities
+            for _pid, sub in result.iter_partitions(preactivation=True):
+                model_file = self._build_nurec_payload(
+                    sub, rcaps, conf, f"{output_path.stem}_partition_{running:0{width}d}.nurec"
+                )
+                payloads.append(model_file)
+                volume_specs.append((model_file, sub.positions))
+                running += 1
+        logger.info(f"Authoring {total} NuRec volumes")
+
+        gauss_usd = serialize_nurec_usd_partitions(
+            volume_specs,
+            normalizing_transform=np.eye(4),
+            apply_coordinate_transform=apply_coordinate_transform,
+            source_gaussian_transform=source_gaussian_transform,
+            author_render_settings=True,
+        )
+        default_usd = serialize_usd_default_layer(gauss_usd)
+
+        extra_files: list[NamedSerialized] = []
+        if copy_source_usd is not None:
+            stage_path, res_root = copy_source_usd
+            try:
+                src_stage = Usd.Stage.Open(str(stage_path))
+                if not src_stage:
+                    logger.warning(f"Could not open source USD for NuRec prim merge: {stage_path}")
+                else:
+                    merge_source_prims_and_collect_sidecars(
+                        dest_stage=default_usd.stage,
+                        source_stage=src_stage,
+                        res_root=res_root,
+                        source_stage_path=Path(stage_path),
+                        files=extra_files,
+                        skip_source_subtrees=kwargs.get("copy_source_skip_subtrees"),
+                    )
+            except Exception as exc:
+                logger.warning(f"Failed to merge source USD prims into NuRec output: {exc}")
+
+        write_to_usdz(output_path, payloads, gauss_usd, default_usd, extra_files if extra_files else None)
+        logger.info(f"NuRec partition export complete: {total} volumes -> {output_path}")
 
     def _export_dataset_cameras(
         self,

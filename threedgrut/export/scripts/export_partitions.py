@@ -18,21 +18,16 @@
 Command-line script for exporting a 3DGRUT model as spatial volume partitions.
 
 Slices the scene into axis-aligned partitions, each holding at most
-``--max-gaussians-per-volume`` Gaussians, and writes one ParticleField3DGaussianSplat
+``--max-particles-per-field`` particles, and writes one ParticleField3DGaussianSplat
 prim per partition (USD) and/or one PLY point cloud per partition.
 
-When ``--max-gaussians-per-volume`` is at least the scene's Gaussian count, no
+When ``--max-particles-per-field`` is at least the scene's particle count, no
 partitioning happens and the output is identical to a regular (geometry-only) export.
 
 Usage:
     python -m threedgrut.export.scripts.export_partitions \
         --checkpoint path/to/checkpoint.pt --output out/scene \
-        --max-gaussians-per-volume 200000 --format both
-
-    # Reduce inter-partition overlap by splitting oversized Gaussians
-    python -m threedgrut.export.scripts.export_partitions \
-        -c checkpoint.pt -o out/scene --max-gaussians-per-volume 200000 \
-        --split-large-gaussians
+        --max-particles-per-field 200000 --format both
 """
 
 import argparse
@@ -64,12 +59,12 @@ def parse_args():
         help="Output base path (extension is derived per format; e.g. out/scene -> out/scene_partition_000.ply)",
     )
     parser.add_argument(
-        "--max-gaussians-per-volume",
+        "--max-particles-per-field",
         dest="max_per_volume",
         type=int,
         required=True,
-        help="Maximum number of Gaussians per partition. Partitioning only happens when this is "
-        "smaller than the scene's Gaussian count.",
+        help="Maximum number of particles per ParticleField. Partitioning only happens when this "
+        "is smaller than the scene's particle count.",
     )
     parser.add_argument(
         "--format",
@@ -84,33 +79,6 @@ def parse_args():
         choices=["usdz", "usda", "usd", "usdc"],
         default="usdz",
         help="USD container to write when --format includes usd. Default: usdz.",
-    )
-
-    # Oversized-Gaussian split options
-    parser.add_argument(
-        "--split-large-gaussians",
-        action="store_true",
-        help="Split Gaussians whose footprint straddles partition boundaries into smaller, "
-        "moment-preserving children before partitioning (reduces inter-partition overlap).",
-    )
-    parser.add_argument(
-        "--split-target-size",
-        type=float,
-        default=None,
-        help="Footprint threshold (world units) above which a Gaussian is split. "
-        "Defaults to a fraction of the estimated partition cell edge.",
-    )
-    parser.add_argument(
-        "--split-target-fraction",
-        type=float,
-        default=0.5,
-        help="Fraction of the cell edge used for the default split threshold. Default: 0.5.",
-    )
-    parser.add_argument(
-        "--max-splits",
-        type=int,
-        default=4,
-        help="Maximum split iterations for oversized Gaussians. Default: 4.",
     )
 
     # Writer precision passthrough (USD)
@@ -151,15 +119,7 @@ def main():
     max_sh_degree = accessor.get_max_sh_degree()
     logger.info(f"Loaded model with {num_gaussians} Gaussians (max SH degree {max_sh_degree})")
 
-    result = partition_scene(
-        model,
-        max_per_volume=args.max_per_volume,
-        conf=conf,
-        split=args.split_large_gaussians,
-        split_target_size=args.split_target_size,
-        split_target_fraction=args.split_target_fraction,
-        max_splits=args.max_splits,
-    )
+    result = partition_scene(model, max_per_volume=args.max_per_volume, conf=conf)
 
     if result.is_partitioned:
         m = result.metrics
