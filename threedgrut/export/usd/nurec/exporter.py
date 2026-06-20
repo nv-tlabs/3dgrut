@@ -321,6 +321,7 @@ class NuRecExporter(ModelExporter):
         apply_coordinate_transform = kwargs.get("apply_coordinate_transform", False)
 
         # Create USD representations
+        world_frame_transform, frame_up_axis = self._resolve_world_frame(kwargs)
         gauss_usd = serialize_nurec_usd(
             model_file,
             attrs.positions,
@@ -332,6 +333,8 @@ class NuRecExporter(ModelExporter):
                 uses_omni_native_post_processing_export or copied_source_has_post_processing
             ),
             skip_gaussian_tonemapping=uses_omni_native_post_processing_export or copied_source_has_post_processing,
+            world_frame_transform=world_frame_transform,
+            up_axis=frame_up_axis,
         )
         train_cameras = None
         validation_cameras = None
@@ -453,6 +456,14 @@ class NuRecExporter(ModelExporter):
         # Write the final USDZ file
         write_to_usdz(output_path, model_file, gauss_usd, default_usd, extra_files if extra_files else None)
 
+    @staticmethod
+    def _resolve_world_frame(kwargs):
+        """Return (world_frame_transform, up_axis) for the canonical frame; default Z-up, no frame."""
+        wft = kwargs.get("world_frame_transform")
+        if wft is None or np.allclose(np.asarray(wft), np.eye(4)):
+            return None, "Z"
+        return np.asarray(wft), str(kwargs.get("up_axis") or "z").upper()
+
     def _build_nurec_payload(self, attrs, caps, conf, filename: str) -> NamedSerialized:
         """Build one compressed ``.nurec`` msgpack payload from pre-activation attributes."""
         template_params = {
@@ -523,12 +534,15 @@ class NuRecExporter(ModelExporter):
                 running += 1
         logger.info(f"Authoring {total} NuRec volumes")
 
+        world_frame_transform, frame_up_axis = self._resolve_world_frame(kwargs)
         gauss_usd = serialize_nurec_usd_partitions(
             volume_specs,
             normalizing_transform=np.eye(4),
             apply_coordinate_transform=apply_coordinate_transform,
             source_gaussian_transform=source_gaussian_transform,
             author_render_settings=True,
+            world_frame_transform=world_frame_transform,
+            up_axis=frame_up_axis,
         )
         default_usd = serialize_usd_default_layer(gauss_usd)
 

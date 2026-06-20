@@ -42,6 +42,7 @@ from threedgrut.export.usd.particle_field_hints import (
     DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
     PARTICLE_FIELD_SORTING_MODE_HINTS,
 )
+from threedgrut.export.scripts._frame_args import add_frame_arguments
 from threedgrut.utils.logger import logger
 
 
@@ -243,6 +244,9 @@ Examples:
         action="store_true",
         help="Skip OpenUSD stage validation after standard (ParticleField) export",
     )
+    # Frame default 'cameras' preserves the historical normalizing-transform behavior;
+    # --no-transform remains a deprecated alias for '--frame none'.
+    add_frame_arguments(parser, include_cameras=True, default="cameras")
 
     return parser.parse_args()
 
@@ -443,6 +447,24 @@ def main():
                 traceback.print_exc()
             sys.exit(1)
 
+    # Resolve the canonical object frame. --no-transform is a deprecated alias for '--frame none'.
+    frame_mode = "none" if args.no_transform else args.frame_mode
+    apply_normalizing = frame_mode == "cameras"
+    world_frame_transform = None
+    if frame_mode == "pca":
+        import numpy as np
+
+        from threedgrut.export.accessor import GaussianExportAccessor
+        from threedgrut.export.transforms import resolve_frame_transform
+
+        _post = GaussianExportAccessor(model, conf).get_attributes(preactivation=False)
+        world_frame_transform = resolve_frame_transform(
+            "pca",
+            fields=[(_post.positions, np.asarray(_post.densities, dtype=np.float64).reshape(-1))],
+            up_axis=args.up_axis,
+            origin=args.frame_origin,
+        )
+
     # Create exporter based on format
     if args.format == "nurec":
         exporter = NuRecExporter(
@@ -471,7 +493,7 @@ def main():
             half_features=half_features,
             export_cameras=not args.no_cameras,
             export_background=not args.no_background,
-            apply_normalizing_transform=not args.no_transform,
+            apply_normalizing_transform=apply_normalizing,
             sorting_mode_hint=_arg_or_conf(
                 args.sorting_mode_hint,
                 export_conf,
@@ -508,6 +530,9 @@ def main():
         export_kw = {}
         if args.format == "standard":
             export_kw["validate_usd"] = not args.no_usd_validate
+            export_kw["up_axis"] = args.up_axis
+            if world_frame_transform is not None:
+                export_kw["world_frame_transform"] = world_frame_transform
         exporter.export(
             model=model,
             output_path=output_path,

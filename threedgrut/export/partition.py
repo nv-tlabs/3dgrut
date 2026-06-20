@@ -44,6 +44,7 @@ import torch
 
 from threedgrut.export.accessor import GaussianAttributes, GaussianExportAccessor, ModelCapabilities
 from threedgrut.export.base import ExportableModel
+from threedgrut.export.sh_rotation import rotate_specular
 from threedgrut.utils.misc import inverse_sigmoid, quaternion_to_so3
 
 logger = logging.getLogger(__name__)
@@ -262,6 +263,10 @@ class PartitionResult:
     capabilities: ModelCapabilities
     metrics: Dict = field(default_factory=dict)
 
+    # Source field's local-to-world (M_f), authored on each of this result's USD prims so a
+    # multi-prim asset's per-prim poses are preserved. None == identity.
+    source_transform: Optional["np.ndarray"] = None
+
     # Exactly one source of attributes is set:
     #  - _accessor: not split, attributes come 1:1 from the original model.
     #  - _split_post: split, attributes come from the expanded post-activation tensors.
@@ -404,6 +409,7 @@ def partition_scene(
     split_target_fraction: float = 0.5,
     max_splits: int = 4,
     n_sigma: float = 3.0,
+    frame_transform: Optional["np.ndarray"] = None,
 ) -> PartitionResult:
     """Partition one Gaussian source into volume partitions of at most ``max_per_volume``.
 
@@ -468,6 +474,12 @@ def partition_scene(
             n_sigma=n_sigma,
         )
 
+    # Partition in the canonical (framed) space so KD-tree splits align to the chosen axes.
+    # Labels still index the original Gaussians; the exporter authors the frame on the root.
+    if frame_transform is not None:
+        Tt = torch.as_tensor(np.asarray(frame_transform), dtype=positions.dtype, device=positions.device)
+        positions = positions @ Tt[:3, :3].transpose(0, 1) + Tt[:3, 3]
+
     labels, num_partitions = kdtree_partition(positions, max_per_volume)
     metrics = _compute_metrics(positions, extents, labels, num_partitions, num_split_added)
     logger.info(
@@ -488,4 +500,44 @@ def partition_scene(
         metrics=metrics,
         _accessor=None if split_post is not None else accessor,
         _split_post=split_post,
+    )
+
+
+def apply_frame_to_attributes(attrs: GaussianAttributes, transform, max_sh_degree: int) -> GaussianAttributes:
+    """Bake a 4x4 frame transform into Gaussian attributes (for formats with no root xform, e.g. PLY).
+
+    Rotates+translates positions, composes the rotation into per-Gaussian orientations, and rotates
+    the view-dependent SH coefficients (so specular stays correct). Scales/opacity/DC are unchanged.
+    The rotation used for orientations/SH is the orthonormalized linear part (assumes a rigid frame).
+    """
+    transform = np.asarray(transform)
+    if np.allclose(transform, np.eye(4)):
+        return attrs  # identity: leave attributes (and quaternion signs) untouched
+    T = torch.as_tensor(transform, dtype=torch.float64)
+    R_full = T[:3, :3]
+    t = T[:3, 3]
+    # Orthonormalized rotation for orientation/SH (robust to tiny non-orthogonality / uniform scale).
+    U, _, Vh = torch.linalg.svd(R_full)
+    R = U @ Vh
+    if torch.linalg.det(R) < 0:
+        U[:, -1] = -U[:, -1]
+        R = U @ Vh
+
+    positions = torch.from_numpy(np.asarray(attrs.positions, dtype=np.float64))
+    new_positions = positions @ R_full.transpose(0, 1) + t
+
+    quats = torch.from_numpy(np.asarray(attrs.rotations, dtype=np.float64))
+    new_rot_mats = R.unsqueeze(0) @ quaternion_to_so3(quats)
+    new_quats = so3_to_quaternion_wxyz(new_rot_mats)
+
+    specular = torch.from_numpy(np.asarray(attrs.specular, dtype=np.float64))
+    new_specular = rotate_specular(specular, R, max_sh_degree)
+
+    return GaussianAttributes(
+        positions=new_positions.to(torch.float32).numpy(),
+        rotations=new_quats.to(torch.float32).numpy(),
+        scales=attrs.scales,
+        densities=attrs.densities,
+        albedo=attrs.albedo,
+        specular=new_specular.to(torch.float32).numpy(),
     )

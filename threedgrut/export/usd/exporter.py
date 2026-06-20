@@ -37,6 +37,7 @@ from pxr import Usd
 from threedgrut.export.accessor import GaussianExportAccessor
 from threedgrut.export.base import ExportableModel, ModelExporter
 from threedgrut.export.transforms import (
+    column_vector_4x4_to_usd_matrix,
     estimate_normalizing_transform,
     get_3dgrut_to_usdz_coordinate_transform,
 )
@@ -632,9 +633,19 @@ class USDExporter(ModelExporter):
             except (AttributeError, ValueError) as e:
                 logger.warning(f"Failed to compute normalizing transform: {e}")
 
-        # Create main USD stage with the configured time code rate
-        stage = initialize_usd_stage(up_axis="Y")
+        # Create main USD stage with the configured up axis + time code rate
+        up_axis = str(kwargs.get("up_axis") or "Y").upper()
+        stage = initialize_usd_stage(up_axis=up_axis)
         stage.SetTimeCodesPerSecond(self.frames_per_second)
+
+        # Canonical object frame: authored on /World so Gaussians AND cameras/copied prims move
+        # together, leaving every camera<->prim relative transform unchanged.
+        world_frame_transform = kwargs.get("world_frame_transform")
+        if world_frame_transform is not None and not np.allclose(world_frame_transform, np.eye(4)):
+            from pxr import UsdGeom
+
+            world_xform = UsdGeom.Xform.Define(stage, "/World")
+            world_xform.AddTransformOp().Set(column_vector_4x4_to_usd_matrix(np.asarray(world_frame_transform)))
 
         apply_coordinate_transform = kwargs.get("apply_coordinate_transform", False)
         coordinate_transform = get_3dgrut_to_usdz_coordinate_transform() if apply_coordinate_transform else None
@@ -669,13 +680,22 @@ class USDExporter(ModelExporter):
             writer.finalize(sub_attrs.positions)
 
         if partitioned:
+            from pxr import UsdGeom
+
             width = max(3, len(str(total_partitions - 1)))
             running = 0
             for result in partition_list:
                 # Each source keeps its own capabilities (SH degree, surfel flag) — no fusing.
                 result_caps = result.capabilities if result.capabilities is not None else caps
+                src_t = getattr(result, "source_transform", None)
+                has_src = src_t is not None and not np.allclose(src_t, np.eye(4))
                 for _pid, sub in result.iter_partitions(preactivation=False):
-                    _write_particlefield(f"{gaussians_root}/Partition_{running:0{width}d}", sub, result_caps)
+                    part_root = f"{gaussians_root}/Partition_{running:0{width}d}"
+                    if has_src:
+                        # Preserve this source field's local-to-world (M_f) on its prim.
+                        part_xform = UsdGeom.Xform.Define(stage, part_root)
+                        part_xform.AddTransformOp().Set(column_vector_4x4_to_usd_matrix(np.asarray(src_t)))
+                    _write_particlefield(part_root, sub, result_caps)
                     running += 1
             logger.info("Authored %d ParticleField partitions under %s", total_partitions, gaussians_root)
         else:

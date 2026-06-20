@@ -45,6 +45,7 @@ from typing import Optional, Tuple
 from threedgrut.export.adapter import AttributesExportAdapter
 from threedgrut.export.base import ModelExporter
 from threedgrut.export.formats import PLYExporter
+from threedgrut.export.scripts._frame_args import add_frame_arguments
 from threedgrut.export.importers import (
     FormatImporter,
     NuRecUSDImporter,
@@ -226,6 +227,9 @@ def transcode(
     split_target_size: Optional[float] = None,
     split_target_fraction: float = 0.5,
     max_splits: int = 4,
+    frame_mode: str = "none",
+    up_axis: str = "y",
+    frame_origin: str = "centroid",
 ) -> None:
     """Transcode a single input file between Gaussian splatting formats.
 
@@ -284,6 +288,9 @@ def transcode(
         validate_usd=validate_usd,
         max_per_volume=max_per_volume,
         split_options=_split_options(split_large_gaussians, split_target_size, split_target_fraction, max_splits),
+        frame_mode=frame_mode,
+        up_axis=up_axis,
+        frame_origin=frame_origin,
     )
     logger.info(f"Transcode complete: {input_path} -> {output_path}")
 
@@ -334,6 +341,9 @@ def transcode_files(
     split_target_size: Optional[float] = None,
     split_target_fraction: float = 0.5,
     max_splits: int = 4,
+    frame_mode: str = "none",
+    up_axis: str = "y",
+    frame_origin: str = "centroid",
 ) -> None:
     """Combine several inputs into one asset with one ParticleField prim / volume per input.
 
@@ -359,6 +369,9 @@ def transcode_files(
             split_target_size=split_target_size,
             split_target_fraction=split_target_fraction,
             max_splits=max_splits,
+            frame_mode=frame_mode,
+            up_axis=up_axis,
+            frame_origin=frame_origin,
         )
         return
 
@@ -400,8 +413,38 @@ def transcode_files(
         validate_usd=validate_usd,
         max_per_volume=max_per_volume,
         split_options=_split_options(split_large_gaussians, split_target_size, split_target_fraction, max_splits),
+        frame_mode=frame_mode,
+        up_axis=up_axis,
+        frame_origin=frame_origin,
     )
     logger.info(f"Transcode complete: {len(input_paths)} inputs -> {output_path}")
+
+
+def _samples_to_matrix(samples):
+    """Per-field local-to-world (M_f) as a column-vector 4x4 (identity if none)."""
+    import numpy as np
+
+    from threedgrut.export.transforms import usd_matrix_to_numpy
+
+    default = getattr(samples, "default", None)
+    if default is None:
+        return np.eye(4)
+    return usd_matrix_to_numpy(default).T  # USD row-vector -> column-vector
+
+
+def _sh_degree_from_specular(width: int) -> int:
+    """SH degree implied by a specular array width (M*3, M = (deg+1)^2 - 1)."""
+    m = width // 3
+    return int(round((m + 1) ** 0.5)) - 1
+
+
+def _opacity_weights(attrs, is_preactivation: bool):
+    import numpy as np
+
+    d = np.asarray(attrs.densities, dtype=np.float64).reshape(-1)
+    if is_preactivation:
+        d = 1.0 / (1.0 + np.exp(-d))
+    return np.clip(d, 0.0, None)
 
 
 def _transcode_core(
@@ -421,14 +464,21 @@ def _transcode_core(
     validate_usd: bool,
     max_per_volume: Optional[int],
     split_options: Optional[dict] = None,
+    frame_mode: str = "none",
+    up_axis: str = "y",
+    frame_origin: str = "centroid",
 ) -> None:
     """Partition each source independently and author the union of partitions.
 
     Each field becomes its own :class:`PartitionResult` (one per source, never merged); a source
-    over budget subdivides into several partitions. The writers author one ParticleField prim / PLY
-    file / NuRec volume per partition.
+    over budget subdivides into several partitions. A canonical frame ``T`` (PCA over the union of
+    all fields' world points) is authored on ``/World`` for USD/NuRec and baked into the data for
+    PLY. The writers author one ParticleField prim / PLY file / NuRec volume per partition.
     """
-    from threedgrut.export.partition import partition_scene
+    import numpy as np
+
+    from threedgrut.export.partition import apply_frame_to_attributes, partition_scene
+    from threedgrut.export.transforms import resolve_frame_transform
 
     if half_precision:
         half_geometry = True
@@ -440,23 +490,46 @@ def _transcode_core(
             f"Use e.g. -o {output_path.with_suffix('.usdz')}"
         )
 
-    adapters = [
-        AttributesExportAdapter(attrs=a, caps=c, is_preactivation=source_is_preactivation) for a, c in fields
-    ]
-    results = [partition_scene(adapter, max_per_volume, **(split_options or {})) for adapter in adapters]
-    total_partitions = sum(r.num_partitions for r in results)
-    partitioned = total_partitions > 1
+    # Per-field local-to-world M_f (column-vector). Identity for PLY / single-prim sources.
+    m_fields = [_samples_to_matrix(st) for st in (source_transforms or [None] * len(fields))]
 
-    # PLY: one file per partition (handles the single-partition case too).
+    # Global canonical frame T over the union of fields' world points (no merge of attributes).
+    if frame_mode == "pca":
+        world_fields = [
+            (attrs.positions @ m_fields[i][:3, :3].T + m_fields[i][:3, 3], _opacity_weights(attrs, source_is_preactivation))
+            for i, (attrs, _caps) in enumerate(fields)
+        ]
+        frame_T = resolve_frame_transform("pca", fields=world_fields, up_axis=up_axis, origin=frame_origin)
+    else:
+        frame_T = np.eye(4)
+
+    # PLY: bake (T · M_f) into each field (positions + quats + SH), then partition in that space.
     if output_format == "ply":
         from threedgrut.export.formats import export_partitions
 
+        results = []
+        for i, (attrs, caps) in enumerate(fields):
+            deg = _sh_degree_from_specular(attrs.specular.shape[1])
+            baked = apply_frame_to_attributes(attrs, frame_T @ m_fields[i], deg)
+            adapter = AttributesExportAdapter(attrs=baked, caps=caps, is_preactivation=source_is_preactivation)
+            results.append(partition_scene(adapter, max_per_volume, **(split_options or {})))
         written = export_partitions(results, output_path)
         logger.info("Wrote %d PLY file(s)", len(written))
         return
 
-    # USD / NuRec: author one prim / volume per partition. The exporter's source-prim merge still
-    # copies cameras, RenderProducts and every other prim into the target as-is.
+    # USD / NuRec: keep local coords, partition in world (T · M_f) space, author T on /World and
+    # M_f per prim. The exporter's source-prim merge still copies cameras/RenderProducts as-is.
+    results = []
+    for i, (attrs, caps) in enumerate(fields):
+        adapter = AttributesExportAdapter(attrs=attrs, caps=caps, is_preactivation=source_is_preactivation)
+        result = partition_scene(
+            adapter, max_per_volume, frame_transform=frame_T @ m_fields[i], **(split_options or {})
+        )
+        result.source_transform = m_fields[i]
+        results.append(result)
+    total_partitions = sum(r.num_partitions for r in results)
+    partitioned = total_partitions > 1
+
     exporter, _target_expects_preactivation = get_exporter(
         output_format,
         half_precision=half_precision,
@@ -471,9 +544,17 @@ def _transcode_core(
         source_gaussian_transform=source_transforms[0] if source_transforms else None,
         validate_usd=validate_usd if output_format == "lightfield" else False,
         partition=results if partitioned else None,
+        world_frame_transform=frame_T,
+        up_axis=up_axis,
     )
     logger.info(f"Exporting to {output_path}...")
-    exporter.export(adapters[0], output_path, **export_kwargs)
+    exporter.export(adapters_first(results, fields, source_is_preactivation), output_path, **export_kwargs)
+
+
+def adapters_first(results, fields, is_preactivation):
+    """Representative model for the exporter's single-volume fallback (first source)."""
+    attrs, caps = fields[0]
+    return AttributesExportAdapter(attrs=attrs, caps=caps, is_preactivation=is_preactivation)
 
 
 def parse_args():
@@ -600,6 +681,7 @@ Examples:
         action="store_true",
         help="Skip OpenUSD stage validation after lightfield (.usd/.usdz) export",
     )
+    add_frame_arguments(parser)  # --frame / --up-axis / --frame-origin (transcode has no dataset)
 
     return parser.parse_args()
 
@@ -649,6 +731,9 @@ def main():
                 render_order_hint=args.render_order_hint,
                 validate_usd=not args.no_usd_validate,
                 max_per_volume=args.max_per_volume,
+                frame_mode=args.frame_mode,
+                up_axis=args.up_axis,
+                frame_origin=args.frame_origin,
             )
         else:
             input_path = input_paths[0]
@@ -677,6 +762,9 @@ def main():
                     copy_source_skip_subtrees=skip_subtrees,
                     validate_usd=not args.no_usd_validate,
                     max_per_volume=args.max_per_volume,
+                    frame_mode=args.frame_mode,
+                    up_axis=args.up_axis,
+                    frame_origin=args.frame_origin,
                 )
     except Exception as e:
         logger.error(f"Transcode failed: {e}")

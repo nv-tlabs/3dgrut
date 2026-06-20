@@ -37,10 +37,15 @@ from pathlib import Path
 
 import torch
 
+import numpy as np
+
 from threedgrut.export.accessor import GaussianExportAccessor
+from threedgrut.export.adapter import AttributesExportAdapter
 from threedgrut.export.formats import export_partitions as export_ply_partitions
-from threedgrut.export.partition import partition_scene
+from threedgrut.export.partition import apply_frame_to_attributes, partition_scene
+from threedgrut.export.scripts._frame_args import add_frame_arguments
 from threedgrut.export.scripts.export_usd import load_model_from_checkpoint
+from threedgrut.export.transforms import resolve_frame_transform
 from threedgrut.export.usd.partition_exporter import VolumePartitionUSDExporter
 from threedgrut.utils.logger import logger
 
@@ -88,6 +93,7 @@ def parse_args():
     parser.add_argument("--no-usd-validate", action="store_true", help="Skip OpenUSD stage validation after USD export.")
 
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
+    add_frame_arguments(parser)  # --frame {none,pca} / --up-axis / --frame-origin
     return parser.parse_args()
 
 
@@ -119,7 +125,17 @@ def main():
     max_sh_degree = accessor.get_max_sh_degree()
     logger.info(f"Loaded model with {num_gaussians} Gaussians (max SH degree {max_sh_degree})")
 
-    result = partition_scene(model, max_per_volume=args.max_per_volume, conf=conf)
+    # Canonical object frame (geometry-based). Authored on /World for USD; baked into PLY.
+    if args.frame_mode == "pca":
+        post = accessor.get_attributes(preactivation=False)
+        weights = np.asarray(post.densities, dtype=np.float64).reshape(-1)
+        frame_T = resolve_frame_transform(
+            "pca", fields=[(post.positions, weights)], up_axis=args.up_axis, origin=args.frame_origin
+        )
+    else:
+        frame_T = np.eye(4)
+
+    result = partition_scene(model, max_per_volume=args.max_per_volume, conf=conf, frame_transform=frame_T)
 
     if result.is_partitioned:
         m = result.metrics
@@ -144,14 +160,32 @@ def main():
 
     try:
         if args.format in ("ply", "both"):
-            written = export_ply_partitions(result, output_base.with_suffix(".ply"))
+            # PLY has no root xform: bake the frame into the data, then partition in that space.
+            if args.frame_mode == "pca":
+                pre = accessor.get_attributes(preactivation=True)
+                deg = int(round((pre.specular.shape[1] // 3 + 1) ** 0.5)) - 1
+                baked = apply_frame_to_attributes(pre, frame_T, deg)
+                ply_result = partition_scene(
+                    AttributesExportAdapter(baked, accessor.get_capabilities(), is_preactivation=True),
+                    max_per_volume=args.max_per_volume,
+                    conf=conf,
+                )
+            else:
+                ply_result = result
+            written = export_ply_partitions(ply_result, output_base.with_suffix(".ply"))
             logger.info(f"Wrote {len(written)} PLY file(s)")
 
         if args.format in ("usd", "both"):
             usd_path = output_base.with_suffix(f".{args.usd_format}")
             exporter = VolumePartitionUSDExporter(half_geometry=half_geometry, half_features=half_features)
             written_usd = exporter.export(
-                model, result, usd_path, conf=conf, validate_usd=not args.no_usd_validate
+                model,
+                result,
+                usd_path,
+                conf=conf,
+                validate_usd=not args.no_usd_validate,
+                world_frame_transform=frame_T,
+                up_axis=args.up_axis,
             )
             logger.info(f"Wrote USD: {written_usd}")
     except Exception as e:  # noqa: BLE001

@@ -193,3 +193,171 @@ def apply_usd_transform_samples(
     transform_op.Set(transform_samples.default)
     for time_code, matrix in transform_samples.time_samples:
         transform_op.Set(matrix, Usd.TimeCode(time_code))
+
+
+# ---------------------------------------------------------------------------
+# Canonical object-frame estimation (geometry-based / PCA)
+# ---------------------------------------------------------------------------
+
+# Index of the up axis in the canonical frame.
+_UP_INDEX = {"y": 1, "z": 2}
+
+
+def _subsample(points: np.ndarray, weights: np.ndarray, max_samples: int, seed: int = 0):
+    """Deterministically subsample points/weights for cheap frame estimation at huge N."""
+    n = points.shape[0]
+    if n <= max_samples:
+        return points, weights
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(n, size=max_samples, replace=False)
+    return points[idx], weights[idx]
+
+
+def _robust_weighted_moments(points: np.ndarray, weights: np.ndarray, trim_percentile: float):
+    """Weighted mean + covariance after trimming far outliers (robust to floaters)."""
+    w = np.clip(weights.astype(np.float64), 0.0, None)
+    if w.sum() <= 0:
+        w = np.ones_like(w)
+    center = np.median(points, axis=0)
+    dist = np.linalg.norm(points - center, axis=1)
+    if trim_percentile < 100.0:
+        keep = dist <= np.percentile(dist, trim_percentile)
+        if keep.sum() >= 3:
+            points, w = points[keep], w[keep]
+    wsum = w.sum()
+    mean = (w[:, None] * points).sum(axis=0) / wsum
+    centered = points - mean
+    cov = (w[:, None, None] * np.einsum("ni,nj->nij", centered, centered)).sum(axis=0) / wsum
+    return mean, cov, points, w
+
+
+def _build_canonical_rotation(eigvecs: np.ndarray, up_axis: str) -> np.ndarray:
+    """Rows = canonical axes in world coords. Two largest PCs in-plane, smallest along up.
+
+    ``eigvecs`` columns are eigenvectors sorted by ascending eigenvalue (numpy ``eigh``).
+    """
+    smallest, mid, largest = eigvecs[:, 0], eigvecs[:, 1], eigvecs[:, 2]
+    if up_axis == "y":
+        # canonical x, y(up), z
+        rows = [largest, smallest, mid]
+    elif up_axis == "z":
+        # canonical x, y, z(up)
+        rows = [largest, mid, smallest]
+    else:
+        raise ValueError(f"up_axis must be 'y' or 'z', got '{up_axis}'")
+    R = np.stack(rows, axis=0)
+    # Deterministic sign: make each axis point with the dominant world component positive.
+    for i in range(3):
+        if R[i, np.argmax(np.abs(R[i]))] < 0:
+            R[i] = -R[i]
+    # Right-handed.
+    if np.linalg.det(R) < 0:
+        R[_UP_INDEX[up_axis]] = -R[_UP_INDEX[up_axis]]
+    return R
+
+
+def estimate_pca_frame(
+    points: np.ndarray,
+    weights: np.ndarray | None = None,
+    *,
+    up_axis: str = "y",
+    origin: str = "centroid",
+    up_min_percentile: float = 2.0,
+    trim_percentile: float = 99.5,
+    max_samples: int = 2_000_000,
+) -> np.ndarray:
+    """Estimate a canonical object frame from points via robust, opacity-weighted PCA.
+
+    Returns a 4x4 (column-vector) world->canonical transform: ``p_canon = R (p - origin)``.
+    The two largest principal axes span the in-plane (x,z for y-up) and the smallest-variance
+    axis is the up direction. ``origin='centroid'`` puts 0 at the weighted centroid;
+    ``origin='plane'`` keeps the in-plane centroid but sets up=0 at a robust low percentile
+    (so an object rests on its base instead of floating at mean height).
+    """
+    points = np.asarray(points, dtype=np.float64)
+    if points.shape[0] == 0:
+        return np.eye(4)
+    if weights is None:
+        weights = np.ones(points.shape[0], dtype=np.float64)
+    points_s, weights_s = _subsample(points, np.asarray(weights, dtype=np.float64), max_samples)
+    mean, cov, kept, kept_w = _robust_weighted_moments(points_s, weights_s, trim_percentile)
+
+    evals, evecs = np.linalg.eigh(cov)  # ascending
+    R = _build_canonical_rotation(evecs, up_axis)
+
+    t = -R @ mean
+    if origin == "plane":
+        up_idx = _UP_INDEX[up_axis]
+        up_coords = (kept - mean) @ R[up_idx]
+        t[up_idx] -= float(np.percentile(up_coords, up_min_percentile))
+    elif origin != "centroid":
+        raise ValueError(f"origin must be 'centroid' or 'plane', got '{origin}'")
+
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = t
+    return T
+
+
+def estimate_frame_from_fields(
+    fields,
+    *,
+    up_axis: str = "y",
+    origin: str = "centroid",
+    up_min_percentile: float = 2.0,
+    trim_percentile: float = 99.5,
+    per_field_samples: int = 1_000_000,
+) -> np.ndarray:
+    """Estimate one global frame from several sources' world points (no merge of attributes).
+
+    ``fields`` is a list of ``(world_points[N,3], weights[N])``. Each is subsampled, then the
+    subsamples are pooled for a single PCA — so multi-prim assets get one shared frame.
+    """
+    pts, wts = [], []
+    for points, weights in fields:
+        points = np.asarray(points, dtype=np.float64)
+        if points.shape[0] == 0:
+            continue
+        weights = np.ones(points.shape[0]) if weights is None else np.asarray(weights, dtype=np.float64)
+        ps, ws = _subsample(points, weights, per_field_samples)
+        pts.append(ps)
+        wts.append(ws)
+    if not pts:
+        return np.eye(4)
+    return estimate_pca_frame(
+        np.concatenate(pts, axis=0),
+        np.concatenate(wts, axis=0),
+        up_axis=up_axis,
+        origin=origin,
+        up_min_percentile=up_min_percentile,
+        trim_percentile=trim_percentile,
+        max_samples=per_field_samples * max(len(pts), 1),
+    )
+
+
+def resolve_frame_transform(
+    mode: str,
+    *,
+    fields=None,
+    poses: np.ndarray | None = None,
+    up_axis: str = "y",
+    origin: str = "centroid",
+    up_min_percentile: float = 2.0,
+) -> np.ndarray:
+    """Resolve the scene-normalizing frame transform from the selected estimator.
+
+    mode: 'none' (identity), 'cameras' (from dataset poses), 'pca' (geometry-based).
+    """
+    if mode == "none":
+        return np.eye(4)
+    if mode == "cameras":
+        if poses is None:
+            raise ValueError("frame mode 'cameras' requires camera poses (a dataset).")
+        return estimate_normalizing_transform(poses)
+    if mode == "pca":
+        if not fields:
+            raise ValueError("frame mode 'pca' requires Gaussian fields.")
+        return estimate_frame_from_fields(
+            fields, up_axis=up_axis, origin=origin, up_min_percentile=up_min_percentile
+        )
+    raise ValueError(f"Unknown frame mode '{mode}' (expected none/cameras/pca).")
