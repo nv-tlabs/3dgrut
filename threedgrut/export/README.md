@@ -91,6 +91,13 @@ The output extension selects the container: `.usdz` (packaged archive),
 - `--sorting-mode-hint {zDepth,cameraDistance,rayHitDistance}` — author the
   `ParticleField` sorting hint (use `rayHitDistance` for ray-tracing
   renderers that support ray-hit sorting).
+- `--max-particles-per-field INT` — subdivide the scene into spatial
+  partitions of at most this many particles, writing one ParticleField prim
+  per partition (standard format; off by default).
+- `--separate-partition-files` — write each partition to its own `.usdc`
+  layer inside the `.usdz`, so a partitioned scene whose combined Gaussian
+  layer would exceed the 4 GiB USDZ/ZIP per-file limit still packages. See
+  [Large scenes and the 4 GiB USDZ limit](#large-scenes-and-the-4-gib-usdz-limit).
 - `--dataset` — dataset path for camera export, overriding the path stored
   in the checkpoint.
 - `--no-usd-validate` — skip OpenUSD stage validation after standard

@@ -42,7 +42,6 @@ from threedgrut.export.usd.particle_field_hints import (
     DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
     PARTICLE_FIELD_SORTING_MODE_HINTS,
 )
-from threedgrut.export.scripts._frame_args import add_frame_arguments
 from threedgrut.utils.logger import logger
 
 
@@ -244,9 +243,55 @@ Examples:
         action="store_true",
         help="Skip OpenUSD stage validation after standard (ParticleField) export",
     )
-    # Frame default 'cameras' preserves the historical normalizing-transform behavior;
-    # --no-transform remains a deprecated alias for '--frame none'.
-    add_frame_arguments(parser, include_cameras=True, default="cameras")
+    # Canonical object frame. Default 'cameras' preserves the historical normalizing-transform
+    # behavior; --no-transform remains a deprecated alias for '--frame none'.
+    parser.add_argument(
+        "--frame",
+        dest="frame_mode",
+        choices=["none", "cameras", "pca"],
+        default="cameras",
+        help=(
+            "Re-frame the object: 'none' keeps the source frame; 'cameras' uses dataset camera "
+            "poses; 'pca' centers the centroid and aligns axes to the principal axes. Authored on "
+            "the Gaussian content root for USD/NuRec, baked into PLY."
+        ),
+    )
+    parser.add_argument(
+        "--up-axis",
+        dest="up_axis",
+        choices=["y", "z"],
+        default="y",
+        help="World up axis for the canonical frame and USD upAxis metadata. Default: y.",
+    )
+    parser.add_argument(
+        "--frame-origin",
+        dest="frame_origin",
+        choices=["centroid", "plane"],
+        default="centroid",
+        help=(
+            "Origin for --frame pca: 'centroid' (weighted center of mass) or 'plane' (in-plane "
+            "centroid with up=0 at a robust low percentile, i.e. resting on the base)."
+        ),
+    )
+    parser.add_argument(
+        "--max-particles-per-field",
+        dest="max_per_volume",
+        type=int,
+        default=None,
+        help=(
+            "Subdivide the scene into spatial partitions of at most this many particles, writing "
+            "one ParticleField prim per partition (standard format). Off by default."
+        ),
+    )
+    parser.add_argument(
+        "--separate-partition-files",
+        action="store_true",
+        help=(
+            "Write each partition to its own .usdc layer inside the .usdz (standard format). Needed "
+            "to package a partitioned scene whose combined Gaussian layer would exceed the 4 GiB "
+            "usdz/ZIP per-file limit; pair with --max-particles-per-field."
+        ),
+    )
 
     return parser.parse_args()
 
@@ -530,6 +575,16 @@ def main():
         export_kw = {}
         if args.format == "standard":
             export_kw["validate_usd"] = not args.no_usd_validate
+            # Optional spatial partitioning: one ParticleField prim (or .usdc layer) per partition.
+            if args.max_per_volume is not None:
+                from threedgrut.export.partition import partition_scene
+
+                result = partition_scene(
+                    model, args.max_per_volume, conf=conf, frame_transform=world_frame_transform
+                )
+                if result.num_partitions > 1:
+                    export_kw["partition"] = result
+                    export_kw["separate_partition_files"] = args.separate_partition_files
         # Canonical frame applies to both standard (ParticleField) and nurec exporters.
         export_kw["up_axis"] = args.up_axis
         if world_frame_transform is not None:

@@ -237,11 +237,20 @@ def test_ply_single_partition_no_suffix():
 # ---------------------------------------------------------------------------
 
 
+def _export_partitioned_usd(model, result, out: Path, *, validate_usd: bool) -> None:
+    """Export a PartitionResult to USD via USDExporter's ``partition`` kwarg (geometry only)."""
+    from threedgrut.export.usd.exporter import USDExporter
+
+    USDExporter(
+        export_cameras=False,
+        export_background=False,
+        apply_normalizing_transform=False,
+    ).export(model, out, partition=result, validate_usd=validate_usd)
+
+
 def test_usd_partition_prims():
     pytest.importorskip("pxr", reason="usd-core (pxr) is only available on linux x86_64")
     from pxr import Usd
-
-    from threedgrut.export.usd.partition_exporter import VolumePartitionUSDExporter
 
     model = RandomGaussianModel(num_gaussians=500, seed=11)
     result = partition_scene(model, max_per_volume=120)
@@ -249,8 +258,8 @@ def test_usd_partition_prims():
 
     with tempfile.TemporaryDirectory() as d:
         out = Path(d) / "scene.usda"
-        written = VolumePartitionUSDExporter().export(model, result, out, validate_usd=True)
-        stage = Usd.Stage.Open(str(written))
+        _export_partitioned_usd(model, result, out, validate_usd=True)
+        stage = Usd.Stage.Open(str(out))
         particle_fields = [p for p in stage.Traverse() if p.GetTypeName() == "ParticleField3DGaussianSplat"]
         assert len(particle_fields) == result.num_partitions
 
@@ -259,16 +268,14 @@ def test_usd_single_partition_default_path():
     pytest.importorskip("pxr", reason="usd-core (pxr) is only available on linux x86_64")
     from pxr import Usd
 
-    from threedgrut.export.usd.partition_exporter import VolumePartitionUSDExporter
-
     model = RandomGaussianModel(num_gaussians=40, seed=13)
     result = partition_scene(model, max_per_volume=100)
     assert not result.is_partitioned
 
     with tempfile.TemporaryDirectory() as d:
         out = Path(d) / "scene.usda"
-        written = VolumePartitionUSDExporter().export(model, result, out, validate_usd=True)
-        stage = Usd.Stage.Open(str(written))
+        _export_partitioned_usd(model, result, out, validate_usd=True)
+        stage = Usd.Stage.Open(str(out))
         # Regular single-prim layout: no Partition_* prims.
         assert stage.GetPrimAtPath("/World/Gaussians/gaussians").IsValid()
         assert not any(p.GetName().startswith("Partition_") for p in stage.Traverse())
@@ -281,12 +288,10 @@ def test_usd_single_partition_default_path():
 
 def _write_partitioned_usd(path: Path, num_gaussians: int, max_per_volume: int, seed: int):
     """Helper: author a multi-ParticleField USD and return (model, num_partitions)."""
-    from threedgrut.export.usd.partition_exporter import VolumePartitionUSDExporter
-
     model = RandomGaussianModel(num_gaussians=num_gaussians, seed=seed)
     result = partition_scene(model, max_per_volume=max_per_volume)
     assert result.num_partitions > 1
-    VolumePartitionUSDExporter().export(model, result, path, validate_usd=False)
+    _export_partitioned_usd(model, result, path, validate_usd=False)
     return model, result.num_partitions
 
 

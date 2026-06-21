@@ -45,7 +45,6 @@ from typing import Optional, Tuple
 from threedgrut.export.adapter import AttributesExportAdapter
 from threedgrut.export.base import ModelExporter
 from threedgrut.export.formats import PLYExporter
-from threedgrut.export.scripts._frame_args import add_frame_arguments
 from threedgrut.export.importers import (
     FormatImporter,
     NuRecUSDImporter,
@@ -700,7 +699,35 @@ Examples:
         action="store_true",
         help="Skip OpenUSD stage validation after lightfield (.usd/.usdz) export",
     )
-    add_frame_arguments(parser)  # --frame / --up-axis / --frame-origin (transcode has no dataset)
+    # Canonical object frame (transcode has no dataset, so no 'cameras' mode).
+    parser.add_argument(
+        "--frame",
+        dest="frame_mode",
+        choices=["none", "pca"],
+        default="none",
+        help=(
+            "Re-frame the object: 'none' keeps the source frame; 'pca' centers the centroid and "
+            "aligns axes to the principal axes. Authored on the Gaussian content root for "
+            "USD/NuRec, baked into PLY."
+        ),
+    )
+    parser.add_argument(
+        "--up-axis",
+        dest="up_axis",
+        choices=["y", "z"],
+        default="y",
+        help="World up axis for the canonical frame and USD upAxis metadata. Default: y.",
+    )
+    parser.add_argument(
+        "--frame-origin",
+        dest="frame_origin",
+        choices=["centroid", "plane"],
+        default="centroid",
+        help=(
+            "Origin for --frame pca: 'centroid' (weighted center of mass) or 'plane' (in-plane "
+            "centroid with up=0 at a robust low percentile, i.e. resting on the base)."
+        ),
+    )
 
     return parser.parse_args()
 
