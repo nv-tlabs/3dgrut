@@ -83,8 +83,11 @@ The output extension selects the container: `.usdz` (packaged archive),
   format.
 - `--half` / `--half-geometry` / `--half-features` — half-precision
   attributes for smaller files (LightField schema).
-- `--no-cameras`, `--no-background`, `--no-transform` — skip camera export,
-  background/environment export, or the normalizing transform.
+- `--no-cameras`, `--no-background` — skip camera export or
+  background/environment export.
+- `--frame {none,cameras,pca}` / `--up-axis {y,z}` / `--frame-origin
+  {centroid,plane}` — author a canonical object frame (default `cameras`).
+  `--no-transform` is a deprecated alias for `--frame none`.
 - `--sorting-mode-hint {zDepth,cameraDistance,rayHitDistance}` — author the
   `ParticleField` sorting hint (use `rayHitDistance` for ray-tracing
   renderers that support ray-hit sorting).
@@ -118,7 +121,9 @@ python -m threedgrut.export.scripts.transcode model.ply -o model.usdz --format n
 
 The input format is detected from the extension (`.ply` vs `.usd*`), and
 USD inputs are further refined to `nurec` vs `lightfield` by inspecting the
-stage. Output is chosen with `--format {ply,lightfield,nurec}`. Useful
+stage. Output is chosen with `--format {ply,lightfield,nurec}`. Multiple
+inputs can be passed at once to combine them into one asset with one
+ParticleField prim / volume per input (lightfield or nurec output). Useful
 flags:
 
 - `--max-sh-degree INT` — max SH degree for PLY input.
@@ -131,7 +136,34 @@ flags:
 - `--no-copy-source-prims` — do not copy non-Gaussian prims (cameras, etc.)
   from a USD source. `--copy-source-include-gaussians` also merges the
   source `/World/Gaussians` prim (skipped by default).
+- `--max-particles-per-field INT` — subdivide any ParticleField prim /
+  input whose own particle count exceeds this into several spatial
+  partitions (KD-tree median split); prims within budget are kept as-is
+  (`ply`/`lightfield` output).
+- `--separate-partition-files` — write each partition to its own `.usdc`
+  layer inside the `.usdz` (lightfield). Needed to package a partitioned
+  scene whose combined Gaussian layer would exceed the 4 GiB USDZ/ZIP
+  per-file limit; pair with `--max-particles-per-field`.
+- `--frame {none,cameras,pca}` / `--up-axis {y,z}` / `--frame-origin
+  {centroid,plane}` — author a canonical object frame (e.g. PCA-aligned,
+  center-of-mass at origin). Baked into PLY output; authored as a recoverable
+  named xform op on USD output (camera↔prim relative transform preserved).
 - `--no-usd-validate` — skip OpenUSD stage validation.
+
+### Large scenes and the 4 GiB USDZ limit
+
+A `.usdz` is a ZIP archive, and OpenUSD's reader does not support ZIP64, so
+**every layer packaged in a `.usdz` must stay under 4 GiB**. A single
+ParticleField that big (very roughly 80M+ Gaussians at degree 3, or ~250M+
+at degree 0 with `--half-features`) produces an unreadable `.usdz`. The
+transcoder estimates the layer size up front and fails fast with guidance
+rather than writing a corrupt package. To export a scene that large, either:
+
+- write an **un-zipped** crate — use `-o scene.usdc` (or `.usd`/`.usda`),
+  which has no ZIP size limit and handles multi-GB scenes directly; or
+- **partition** it and write one layer per partition:
+  `--max-particles-per-field 20000000 --separate-partition-files`, keeping
+  each `.usdc` layer well under 4 GiB inside the `.usdz`.
 
 ## Converting PLY files to USDZ
 
