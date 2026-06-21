@@ -123,6 +123,30 @@ def so3_to_quaternion_wxyz(matrix: torch.Tensor) -> torch.Tensor:
 # KD-tree partition
 # ---------------------------------------------------------------------------
 
+# Conservative KD-tree peak memory per point: positions (12 B) + argsort keys/indices/workspace.
+_KDTREE_BYTES_PER_POINT = 64
+# Fraction of free GPU memory the KD-tree is allowed to use before falling back to CPU.
+_GPU_MEMORY_HEADROOM = 0.8
+
+
+def _resolve_kdtree_device(num_points: int, reference_device: torch.device) -> torch.device:
+    """Pick CUDA for the KD-tree when positions + sort workspace fit the free budget, else CPU.
+
+    Only the ``[N, 3]`` positions move to the GPU — the bulk attributes stay on CPU — so the GPU
+    fast path is used whenever it fits (true even for very large scenes, since positions are tiny
+    relative to SH), and huge scenes that wouldn't fit transparently fall back to CPU.
+    """
+    if not torch.cuda.is_available():
+        return torch.device("cpu")
+    try:
+        free_bytes, _ = torch.cuda.mem_get_info()
+    except Exception:
+        # mem_get_info can be unavailable in some contexts; keep the data where it already is.
+        return reference_device if reference_device.type == "cuda" else torch.device("cpu")
+    if num_points * _KDTREE_BYTES_PER_POINT < free_bytes * _GPU_MEMORY_HEADROOM:
+        return torch.device("cuda")
+    return torch.device("cpu")
+
 
 def kdtree_partition(positions: torch.Tensor, max_per_volume: int) -> Tuple[torch.Tensor, int]:
     """Partition Gaussian centers via recursive median splits.
@@ -480,7 +504,12 @@ def partition_scene(
         Tt = torch.as_tensor(np.asarray(frame_transform), dtype=positions.dtype, device=positions.device)
         positions = positions @ Tt[:3, :3].transpose(0, 1) + Tt[:3, 3]
 
-    labels, num_partitions = kdtree_partition(positions, max_per_volume)
+    # Run the KD-tree on the GPU when the positions (+ sort workspace) fit the free memory
+    # budget, else fall back to CPU. Only positions move to the GPU — the bulk attributes
+    # (e.g. SH) stay on CPU — so even huge scenes get the fast GPU split without OOMing.
+    kd_device = _resolve_kdtree_device(positions.shape[0], positions.device)
+    labels, num_partitions = kdtree_partition(positions.to(kd_device), max_per_volume)
+    labels = labels.to(positions.device)
     metrics = _compute_metrics(positions, extents, labels, num_partitions, num_split_added)
     logger.info(
         "Partitioned %d Gaussians into %d volumes (counts %d-%d, mean %.0f, overlap_ratio=%s)",

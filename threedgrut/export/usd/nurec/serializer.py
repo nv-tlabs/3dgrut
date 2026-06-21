@@ -123,6 +123,10 @@ def _author_nurec_volume(
     gauss_path = volume_path
     gauss_volume = UsdVol.Volume.Define(stage, gauss_path)
     gauss_prim = gauss_volume.GetPrim()
+    logger.info(
+        f"  {gauss_path}: {len(positions)} gaussians, extent "
+        f"min=[{min_x:.4g}, {min_y:.4g}, {min_z:.4g}] max=[{max_x:.4g}, {max_y:.4g}, {max_z:.4g}]"
+    )
 
     # Apply normalizing transform (identity by default). Optionally apply 3DGRUT-to-USDZ coordinate transform.
     normalizing_inverse = np.linalg.inv(normalizing_transform)

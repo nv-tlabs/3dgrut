@@ -137,11 +137,12 @@ def export_partitions(results, output_path: Path) -> List[Path]:
     for result in results:
         for _pid, sub in result.iter_partitions(preactivation=True):
             out = stem_path.parent / f"{stem_path.name}_partition_{running:0{width}d}.ply"
-            logger.info(f"exporting partition {running} ({sub.num_gaussians} gaussians) to {out}...")
-            PLYExporter._write_ply(sub, out)
-            written.append(out)
             mins = sub.positions.min(axis=0).tolist() if sub.num_gaussians else None
             maxs = sub.positions.max(axis=0).tolist() if sub.num_gaussians else None
+            extent = f"min={[round(v, 4) for v in mins]} max={[round(v, 4) for v in maxs]}" if mins else "empty"
+            logger.info(f"exporting partition {running} ({sub.num_gaussians} gaussians, extent {extent}) to {out}...")
+            PLYExporter._write_ply(sub, out)
+            written.append(out)
             manifest["partitions"].append(
                 {
                     "id": running,

@@ -102,6 +102,26 @@ def test_kdtree_caps_covers_and_balances():
     assert int(counts.min()) > max_per_volume // 2 - 1
 
 
+def test_kdtree_device_budget(monkeypatch):
+    """KD-tree device is chosen from the free GPU-memory budget, falling back to CPU."""
+    import threedgrut.export.partition as P
+
+    cpu = torch.device("cpu")
+
+    # No CUDA -> always CPU.
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert P._resolve_kdtree_device(10**9, cpu).type == "cpu"
+
+    # CUDA available with plenty of free memory and a small point count -> CUDA.
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda *a, **k: (40 * 1024**3, 48 * 1024**3))
+    assert P._resolve_kdtree_device(1_000_000, cpu).type == "cuda"
+
+    # Same free memory but a point count whose KD-tree budget exceeds it -> CPU fallback.
+    huge = int(40 * 1024**3 * 0.8 / P._KDTREE_BYTES_PER_POINT) + 1
+    assert P._resolve_kdtree_device(huge, cpu).type == "cpu"
+
+
 def test_partition_scene_respects_cap():
     model = RandomGaussianModel(num_gaussians=1000, seed=3)
     result = partition_scene(model, max_per_volume=128)

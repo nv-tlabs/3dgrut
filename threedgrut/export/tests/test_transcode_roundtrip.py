@@ -734,6 +734,27 @@ class TestCrossFormatTranscode:
             # Splitting can only add Gaussians, never drop them.
             assert total >= 300
 
+    def test_ply_importer_uses_native_sh_width_no_padding(self):
+        """A degree-0 PLY imports with zero-width specular (no padding to degree 3)."""
+        attrs = create_test_attributes(32, sh_degree=0)
+        caps = create_test_capabilities(32, sh_degree=0)
+        assert attrs.specular.shape[1] == 0
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ply_path = Path(tmpdir) / "deg0.ply"
+            PLYExporter().export(AttributesExportAdapter(attrs, caps, is_preactivation=True), ply_path)
+            loaded, loaded_caps = PLYImporter(max_sh_degree=3).load(ply_path)
+            # Native width, not padded to degree 3 (which would be 45 columns of zeros).
+            assert loaded.specular.shape[1] == 0
+            assert loaded_caps.sh_degree == 0
+
+    def test_adapter_defaults_to_cpu(self):
+        """The export adapter wraps numpy on CPU (zero-copy), not CUDA, to avoid OOM on huge scenes."""
+        attrs = create_test_attributes(8, sh_degree=3)
+        caps = create_test_capabilities(8, sh_degree=3)
+        adapter = AttributesExportAdapter(attrs, caps, is_preactivation=True)
+        assert adapter.get_positions().device.type == "cpu"
+        assert adapter.get_features_specular().device.type == "cpu"
+
     def test_transcode_usd_to_ply_low_sh_degree(self):
         """USD→PLY of a sub-degree-3 source must not crash on the specular reshape."""
         attrs = create_test_attributes(16, sh_degree=2)
@@ -791,6 +812,62 @@ class TestCrossFormatTranscode:
             assert product.IsValid()
             assert product.GetTypeName() == "RenderProduct"
             assert stage.GetPrimAtPath("/World/Cameras/camera_0000").IsValid()
+
+    def test_estimate_particlefield_bytes(self):
+        """Per-Gaussian crate size estimate matches the precision/SH arithmetic."""
+        from threedgrut.export.usd.exporter import _estimate_particlefield_bytes
+
+        # degree-0, half features, full geometry: 4*10 + 2*(1 + 3*1) = 48 B/Gaussian.
+        assert _estimate_particlefield_bytes(1, 0, half_geometry=False, half_features=True) == 48
+        # degree-3, full precision: 4*10 + 4*(1 + 3*16) = 40 + 196 = 236 B/Gaussian.
+        assert _estimate_particlefield_bytes(1, 3, half_geometry=False, half_features=False) == 236
+
+    def test_usdz_oversized_layer_fails_fast(self, monkeypatch):
+        """A Gaussian layer over the usdz member limit raises before writing a corrupt package."""
+        import threedgrut.export.usd.exporter as exporter_mod
+
+        monkeypatch.setattr(exporter_mod, "_USDZ_MEMBER_BYTE_LIMIT", 1000)
+        attrs = create_test_attributes(64, sh_degree=3)
+        caps = create_test_capabilities(64, sh_degree=3)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = AttributesExportAdapter(attrs, caps, is_preactivation=True)
+            exporter = USDExporter(export_cameras=False, export_background=False, apply_normalizing_transform=False)
+            with pytest.raises(ValueError, match="per-file limit"):
+                exporter.export(adapter, Path(tmpdir) / "out.usdz", validate_usd=False)
+            # Same scene as .usdc (no ZIP) is fine — no size limit.
+            exporter.export(adapter, Path(tmpdir) / "out.usdc", validate_usd=False)
+            assert (Path(tmpdir) / "out.usdc").exists()
+
+    def test_separate_partition_files_usdz_roundtrip(self):
+        """--separate-partition-files packages each partition as its own .usdc layer in the .usdz."""
+        attrs = create_test_attributes(40, sh_degree=1)
+        caps = create_test_capabilities(40, sh_degree=1)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            ply_path = tmp_path / "in.ply"
+            out_path = tmp_path / "out.usdz"
+
+            PLYExporter().export(AttributesExportAdapter(attrs, caps, is_preactivation=True), ply_path)
+
+            transcode(
+                input_path=ply_path,
+                output_path=out_path,
+                output_format="lightfield",
+                max_per_volume=8,
+                separate_partition_files=True,
+                validate_usd=True,  # the whole point: the multi-layer package must be readable
+            )
+
+            with zipfile.ZipFile(out_path) as zf:
+                names = zf.namelist()
+            layers = [n for n in names if n.startswith("gaussians_") and n.endswith(".usdc")]
+            assert len(layers) >= 2, names
+            assert "gaussians.usdc" not in names  # not the single combined layer
+
+            total = sum(a.num_gaussians for a, _ in USDImporter().load_fields(out_path))
+            assert total == 40
 
     def test_transcode_multiple_ply_to_multiprim_usd(self):
         """Several PLY inputs combine into one USD with one ParticleField prim per input."""

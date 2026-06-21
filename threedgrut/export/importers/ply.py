@@ -79,45 +79,31 @@ class PLYImporter(FormatImporter):
         albedo[:, 1] = np.asarray(plydata.elements[0]["f_dc_1"])
         albedo[:, 2] = np.asarray(plydata.elements[0]["f_dc_2"])
 
-        # Extract specular (higher-order SH coefficients)
+        # Extract specular (higher-order SH coefficients). Size to the file's NATIVE SH degree
+        # rather than padding up to a fixed degree — padding a low-degree file to degree 3 wastes
+        # huge memory (e.g. a degree-0 billion-Gaussian scene -> 43 GB of zeros).
         extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
         extra_f_names = sorted(extra_f_names, key=lambda x: int(x.split("_")[-1]))
+        actual_speculars = len(extra_f_names) // 3
 
-        num_speculars = (self.max_sh_degree + 1) ** 2 - 1
-        expected_extra_f_count = 3 * num_speculars
-
-        # Determine actual SH degree from file
-        if len(extra_f_names) > 0:
-            actual_sh_degree = int(np.sqrt(len(extra_f_names) // 3 + 1)) - 1
-        else:
+        if actual_speculars == 0:
             actual_sh_degree = 0
-
-        specular = np.zeros((num_gaussians, num_speculars * 3), dtype=np.float32)
-        if len(extra_f_names) == expected_extra_f_count:
-            # Full spherical harmonics data available
-            for idx, attr_name in enumerate(extra_f_names):
-                specular[:, idx] = np.asarray(plydata.elements[0][attr_name])
-            # Convert from channel-major to feature-major layout
-            specular = specular.reshape((num_gaussians, 3, num_speculars))
-            specular = specular.transpose(0, 2, 1).reshape((num_gaussians, num_speculars * 3))
-        elif len(extra_f_names) == 0:
-            logger.info("PLY file only contains DC components, higher-order SH set to zero")
-        elif len(extra_f_names) < expected_extra_f_count:
-            # Partial SH - load what's available
-            actual_speculars = len(extra_f_names) // 3
-            temp_specular = np.zeros((num_gaussians, len(extra_f_names)), dtype=np.float32)
+            specular = np.zeros((num_gaussians, 0), dtype=np.float32)
+            logger.info("PLY file only contains DC components; no higher-order SH")
+        else:
+            # Smallest full SH degree whose band count holds all present coefficients.
+            actual_sh_degree = int(np.ceil(np.sqrt(actual_speculars + 1))) - 1
+            full_speculars = (actual_sh_degree + 1) ** 2 - 1
+            specular = np.zeros((num_gaussians, full_speculars * 3), dtype=np.float32)
+            temp_specular = np.zeros((num_gaussians, actual_speculars * 3), dtype=np.float32)
             for idx, attr_name in enumerate(extra_f_names):
                 temp_specular[:, idx] = np.asarray(plydata.elements[0][attr_name])
-            # Convert layout and pad
+            # Convert from channel-major to feature-major layout.
             temp_specular = temp_specular.reshape((num_gaussians, 3, actual_speculars))
             temp_specular = temp_specular.transpose(0, 2, 1).reshape((num_gaussians, actual_speculars * 3))
             specular[:, : actual_speculars * 3] = temp_specular
-            logger.info(f"PLY file has SH degree {actual_sh_degree}, padding to {self.max_sh_degree}")
-        else:
-            raise ValueError(
-                f"Unexpected number of f_rest_ properties: found {len(extra_f_names)}, "
-                f"expected {expected_extra_f_count} or fewer"
-            )
+            if full_speculars != actual_speculars:
+                logger.info(f"PLY has partial SH ({actual_speculars} coeffs); padded to degree {actual_sh_degree}")
 
         # Extract scales
         scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]

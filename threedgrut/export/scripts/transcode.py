@@ -230,6 +230,7 @@ def transcode(
     frame_mode: str = "none",
     up_axis: str = "y",
     frame_origin: str = "centroid",
+    separate_partition_files: bool = False,
 ) -> None:
     """Transcode a single input file between Gaussian splatting formats.
 
@@ -291,6 +292,7 @@ def transcode(
         frame_mode=frame_mode,
         up_axis=up_axis,
         frame_origin=frame_origin,
+        separate_partition_files=separate_partition_files,
     )
     logger.info(f"Transcode complete: {input_path} -> {output_path}")
 
@@ -344,6 +346,7 @@ def transcode_files(
     frame_mode: str = "none",
     up_axis: str = "y",
     frame_origin: str = "centroid",
+    separate_partition_files: bool = False,
 ) -> None:
     """Combine several inputs into one asset with one ParticleField prim / volume per input.
 
@@ -372,6 +375,7 @@ def transcode_files(
             frame_mode=frame_mode,
             up_axis=up_axis,
             frame_origin=frame_origin,
+            separate_partition_files=separate_partition_files,
         )
         return
 
@@ -416,6 +420,7 @@ def transcode_files(
         frame_mode=frame_mode,
         up_axis=up_axis,
         frame_origin=frame_origin,
+        separate_partition_files=separate_partition_files,
     )
     logger.info(f"Transcode complete: {len(input_paths)} inputs -> {output_path}")
 
@@ -467,6 +472,7 @@ def _transcode_core(
     frame_mode: str = "none",
     up_axis: str = "y",
     frame_origin: str = "centroid",
+    separate_partition_files: bool = False,
 ) -> None:
     """Partition each source independently and author the union of partitions.
 
@@ -547,6 +553,10 @@ def _transcode_core(
         frame_transform=frame_T,
         up_axis=up_axis,
     )
+    if output_format == "lightfield":
+        # Write one .usdc layer per partition so a partitioned scene fits under the 4 GiB usdz
+        # member limit. Only the lightfield USDExporter understands this; NuRec packages its own.
+        export_kwargs["separate_partition_files"] = separate_partition_files
     logger.info(f"Exporting to {output_path}...")
     exporter.export(adapters_first(results, fields, source_is_preactivation), output_path, **export_kwargs)
 
@@ -671,6 +681,15 @@ Examples:
         ),
     )
     parser.add_argument(
+        "--separate-partition-files",
+        action="store_true",
+        help=(
+            "Write each partition to its own .usdc layer inside the .usdz (lightfield output). "
+            "Needed to package a partitioned scene whose combined Gaussian layer would exceed the "
+            "4 GiB usdz/ZIP per-file limit; pair with --max-particles-per-field."
+        ),
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -734,6 +753,7 @@ def main():
                 frame_mode=args.frame_mode,
                 up_axis=args.up_axis,
                 frame_origin=args.frame_origin,
+                separate_partition_files=args.separate_partition_files,
             )
         else:
             input_path = input_paths[0]
@@ -765,6 +785,7 @@ def main():
                     frame_mode=args.frame_mode,
                     up_axis=args.up_axis,
                     frame_origin=args.frame_origin,
+                    separate_partition_files=args.separate_partition_files,
                 )
     except Exception as e:
         logger.error(f"Transcode failed: {e}")
