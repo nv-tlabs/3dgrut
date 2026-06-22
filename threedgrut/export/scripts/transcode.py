@@ -226,9 +226,7 @@ def transcode(
     split_target_size: Optional[float] = None,
     split_target_fraction: float = 0.5,
     max_splits: int = 4,
-    frame_mode: str = "none",
-    up_axis: str = "y",
-    frame_origin: str = "centroid",
+    partition_in_normalized_frame: bool = False,
     separate_partition_files: bool = False,
 ) -> None:
     """Transcode a single input file between Gaussian splatting formats.
@@ -288,9 +286,7 @@ def transcode(
         validate_usd=validate_usd,
         max_per_volume=max_per_volume,
         split_options=_split_options(split_large_gaussians, split_target_size, split_target_fraction, max_splits),
-        frame_mode=frame_mode,
-        up_axis=up_axis,
-        frame_origin=frame_origin,
+        partition_in_normalized_frame=partition_in_normalized_frame,
         separate_partition_files=separate_partition_files,
     )
     logger.info(f"Transcode complete: {input_path} -> {output_path}")
@@ -342,9 +338,7 @@ def transcode_files(
     split_target_size: Optional[float] = None,
     split_target_fraction: float = 0.5,
     max_splits: int = 4,
-    frame_mode: str = "none",
-    up_axis: str = "y",
-    frame_origin: str = "centroid",
+    partition_in_normalized_frame: bool = False,
     separate_partition_files: bool = False,
 ) -> None:
     """Combine several inputs into one asset with one ParticleField prim / volume per input.
@@ -371,9 +365,7 @@ def transcode_files(
             split_target_size=split_target_size,
             split_target_fraction=split_target_fraction,
             max_splits=max_splits,
-            frame_mode=frame_mode,
-            up_axis=up_axis,
-            frame_origin=frame_origin,
+            partition_in_normalized_frame=partition_in_normalized_frame,
             separate_partition_files=separate_partition_files,
         )
         return
@@ -416,9 +408,7 @@ def transcode_files(
         validate_usd=validate_usd,
         max_per_volume=max_per_volume,
         split_options=_split_options(split_large_gaussians, split_target_size, split_target_fraction, max_splits),
-        frame_mode=frame_mode,
-        up_axis=up_axis,
-        frame_origin=frame_origin,
+        partition_in_normalized_frame=partition_in_normalized_frame,
         separate_partition_files=separate_partition_files,
     )
     logger.info(f"Transcode complete: {len(input_paths)} inputs -> {output_path}")
@@ -442,15 +432,6 @@ def _sh_degree_from_specular(width: int) -> int:
     return int(round((m + 1) ** 0.5)) - 1
 
 
-def _opacity_weights(attrs, is_preactivation: bool):
-    import numpy as np
-
-    d = np.asarray(attrs.densities, dtype=np.float64).reshape(-1)
-    if is_preactivation:
-        d = 1.0 / (1.0 + np.exp(-d))
-    return np.clip(d, 0.0, None)
-
-
 def _transcode_core(
     *,
     fields,
@@ -468,22 +449,16 @@ def _transcode_core(
     validate_usd: bool,
     max_per_volume: Optional[int],
     split_options: Optional[dict] = None,
-    frame_mode: str = "none",
-    up_axis: str = "y",
-    frame_origin: str = "centroid",
+    partition_in_normalized_frame: bool = False,
     separate_partition_files: bool = False,
 ) -> None:
     """Partition each source independently and author the union of partitions.
 
     Each field becomes its own :class:`PartitionResult` (one per source, never merged); a source
-    over budget subdivides into several partitions. A canonical frame ``T`` (PCA over the union of
-    all fields' world points) is authored on ``/World`` for USD/NuRec and baked into the data for
-    PLY. The writers author one ParticleField prim / PLY file / NuRec volume per partition.
+    over budget subdivides into several partitions. The writers author one ParticleField prim /
+    PLY file / NuRec volume per partition. World geometry is preserved unchanged in every format.
     """
-    import numpy as np
-
     from threedgrut.export.partition import apply_frame_to_attributes, partition_scene
-    from threedgrut.export.transforms import resolve_frame_transform
 
     if half_precision:
         half_geometry = True
@@ -498,38 +473,29 @@ def _transcode_core(
     # Per-field local-to-world M_f (column-vector). Identity for PLY / single-prim sources.
     m_fields = [_samples_to_matrix(st) for st in (source_transforms or [None] * len(fields))]
 
-    # Global canonical frame T over the union of fields' world points (no merge of attributes).
-    if frame_mode == "pca":
-        world_fields = [
-            (attrs.positions @ m_fields[i][:3, :3].T + m_fields[i][:3, 3], _opacity_weights(attrs, source_is_preactivation))
-            for i, (attrs, _caps) in enumerate(fields)
-        ]
-        frame_T = resolve_frame_transform("pca", fields=world_fields, up_axis=up_axis, origin=frame_origin)
-    else:
-        frame_T = np.eye(4)
+    partition_kwargs = dict(normalized_frame=partition_in_normalized_frame, **(split_options or {}))
 
-    # PLY: bake (T · M_f) into each field (positions + quats + SH), then partition in that space.
+    # PLY has no transform/hierarchy, so bake each source field's local-to-world M_f into its
+    # attributes (positions + orientations + SH) so the points land in world space; then partition.
     if output_format == "ply":
         from threedgrut.export.formats import export_partitions
 
         results = []
         for i, (attrs, caps) in enumerate(fields):
             deg = _sh_degree_from_specular(attrs.specular.shape[1])
-            baked = apply_frame_to_attributes(attrs, frame_T @ m_fields[i], deg)
+            baked = apply_frame_to_attributes(attrs, m_fields[i], deg)
             adapter = AttributesExportAdapter(attrs=baked, caps=caps, is_preactivation=source_is_preactivation)
-            results.append(partition_scene(adapter, max_per_volume, **(split_options or {})))
+            results.append(partition_scene(adapter, max_per_volume, **partition_kwargs))
         written = export_partitions(results, output_path)
         logger.info("Wrote %d PLY file(s)", len(written))
         return
 
-    # USD / NuRec: keep local coords, partition in world (T · M_f) space, author T on /World and
-    # M_f per prim. The exporter's source-prim merge still copies cameras/RenderProducts as-is.
+    # USD / NuRec: keep source coords and author M_f per prim. The exporter's source-prim merge
+    # still copies cameras/RenderProducts as-is.
     results = []
     for i, (attrs, caps) in enumerate(fields):
         adapter = AttributesExportAdapter(attrs=attrs, caps=caps, is_preactivation=source_is_preactivation)
-        result = partition_scene(
-            adapter, max_per_volume, frame_transform=frame_T @ m_fields[i], **(split_options or {})
-        )
+        result = partition_scene(adapter, max_per_volume, **partition_kwargs)
         result.source_transform = m_fields[i]
         results.append(result)
     total_partitions = sum(r.num_partitions for r in results)
@@ -549,8 +515,6 @@ def _transcode_core(
         source_gaussian_transform=source_transforms[0] if source_transforms else None,
         validate_usd=validate_usd if output_format == "lightfield" else False,
         partition=results if partitioned else None,
-        frame_transform=frame_T,
-        up_axis=up_axis,
     )
     if output_format == "lightfield":
         # Write one .usdc layer per partition so a partitioned scene fits under the 4 GiB usdz
@@ -699,33 +663,14 @@ Examples:
         action="store_true",
         help="Skip OpenUSD stage validation after lightfield (.usd/.usdz) export",
     )
-    # Canonical object frame (transcode has no dataset, so no 'cameras' mode).
     parser.add_argument(
-        "--frame",
-        dest="frame_mode",
-        choices=["none", "pca"],
-        default="none",
+        "--partition-in-normalized-frame",
+        action="store_true",
         help=(
-            "Re-frame the object: 'none' keeps the source frame; 'pca' centers the centroid and "
-            "aligns axes to the principal axes. Authored on the Gaussian content root for "
-            "USD/NuRec, baked into PLY."
-        ),
-    )
-    parser.add_argument(
-        "--up-axis",
-        dest="up_axis",
-        choices=["y", "z"],
-        default="y",
-        help="World up axis for the canonical frame and USD upAxis metadata. Default: y.",
-    )
-    parser.add_argument(
-        "--frame-origin",
-        dest="frame_origin",
-        choices=["centroid", "plane"],
-        default="centroid",
-        help=(
-            "Origin for --frame pca: 'centroid' (weighted center of mass) or 'plane' (in-plane "
-            "centroid with up=0 at a robust low percentile, i.e. resting on the base)."
+            "Run the KD-tree in the principal-axis (covariance eigenbasis) frame so cut planes "
+            "follow the data's natural axes — more balanced, compact partitions for tilted or "
+            "elongated scenes. Grouping only: output geometry is not reoriented. Needs "
+            "--max-particles-per-field."
         ),
     )
 
@@ -777,9 +722,7 @@ def main():
                 render_order_hint=args.render_order_hint,
                 validate_usd=not args.no_usd_validate,
                 max_per_volume=args.max_per_volume,
-                frame_mode=args.frame_mode,
-                up_axis=args.up_axis,
-                frame_origin=args.frame_origin,
+                partition_in_normalized_frame=args.partition_in_normalized_frame,
                 separate_partition_files=args.separate_partition_files,
             )
         else:
@@ -809,9 +752,7 @@ def main():
                     copy_source_skip_subtrees=skip_subtrees,
                     validate_usd=not args.no_usd_validate,
                     max_per_volume=args.max_per_volume,
-                    frame_mode=args.frame_mode,
-                    up_axis=args.up_axis,
-                    frame_origin=args.frame_origin,
+                    partition_in_normalized_frame=args.partition_in_normalized_frame,
                     separate_partition_files=args.separate_partition_files,
                 )
     except Exception as e:

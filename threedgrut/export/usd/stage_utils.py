@@ -143,7 +143,6 @@ def create_gaussian_model_root(
     normalizing_transform: np.ndarray = None,
     coordinate_transform: np.ndarray = None,
     source_transform_samples: Optional[USDTransformSamples] = None,
-    canonical_frame_transform: np.ndarray = None,
 ) -> str:
     """
     Create the root Xform for Gaussian content with optional coordinate transforms.
@@ -158,9 +157,6 @@ def create_gaussian_model_root(
         coordinate_transform: Optional 4x4 (e.g. 3DGRUT-to-USDZ). Applied after normalizing and scale.
         source_transform_samples: Optional source Gaussian local-to-world transform samples,
             authored before normalization / coordinate transform to match the NuRec exporter.
-        canonical_frame_transform: Optional 4x4 canonical object frame. Authored as its own named
-            ``xformOp:transform:canonicalFrame`` (outermost), so it stays independently recoverable
-            and re-authorable, and lives on this content root (not /World) to be composition-safe.
 
     Returns:
         The root path string
@@ -199,62 +195,7 @@ def create_gaussian_model_root(
 
         transform_op.Set(combined)
 
-    # Canonical object frame as its own named op, applied outermost (after the combined op).
-    if is_effective_frame(canonical_frame_transform):
-        _set_or_add_canonical_frame(root_xform, column_vector_4x4_to_usd_matrix(np.asarray(canonical_frame_transform)))
-
     return root_path
-
-
-def is_effective_frame(transform) -> bool:
-    """True if ``transform`` is a non-None, non-identity 4x4 (worth authoring)."""
-    return transform is not None and not np.allclose(np.asarray(transform), np.eye(4))
-
-
-_CANONICAL_FRAME_OP = "xformOp:transform:canonicalFrame"
-
-
-def _set_or_add_canonical_frame(xformable: "UsdGeom.Xformable", frame_mat: Gf.Matrix4d) -> None:
-    """Set the canonicalFrame op if the prim already has one, else append it (idempotent).
-
-    Re-authoring rather than appending keeps re-framing an already-framed asset from stacking
-    multiple canonicalFrame ops (which would apply the frame more than once).
-    """
-    for op in xformable.GetOrderedXformOps():
-        if op.GetOpName() == _CANONICAL_FRAME_OP:
-            op.Set(frame_mat)
-            return
-    xformable.AddTransformOp(opSuffix="canonicalFrame").Set(frame_mat)
-
-
-def apply_canonical_frame_to_scene(stage: Usd.Stage, frame_transform, skip_paths) -> None:
-    """Author the ``canonicalFrame`` named op on top of each /World scene subtree.
-
-    Used to move copied/foreign source prims (cameras, rig, …) by the canonical frame without
-    re-parenting or remapping — the op is set on the topmost Xformable of each subtree, so any
-    source hierarchy and its references are preserved. ``skip_paths`` are the content-root prim
-    paths that already carry the frame themselves (e.g. the authored ``/World/Gaussians`` or the
-    NuRec ``/World/gauss`` reference) — identified by path, not by name, so the skip can't drift
-    from where the frame was actually authored. The op is idempotent (replaces, never stacks).
-    """
-    if not is_effective_frame(frame_transform):
-        return
-    frame_mat = column_vector_4x4_to_usd_matrix(np.asarray(frame_transform))
-    skip = {str(p) for p in skip_paths}
-
-    def _apply(prim):
-        xformable = UsdGeom.Xformable(prim)
-        if xformable:
-            _set_or_add_canonical_frame(xformable, frame_mat)
-        else:
-            for child in prim.GetChildren():
-                _apply(child)
-
-    world = stage.GetPrimAtPath("/World")
-    if world and world.IsValid():
-        for child in world.GetChildren():
-            if str(child.GetPath()) not in skip:
-                _apply(child)
 
 
 def compose_default_stage(

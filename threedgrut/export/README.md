@@ -83,11 +83,8 @@ The output extension selects the container: `.usdz` (packaged archive),
   format.
 - `--half` / `--half-geometry` / `--half-features` — half-precision
   attributes for smaller files (LightField schema).
-- `--no-cameras`, `--no-background` — skip camera export or
-  background/environment export.
-- `--frame {none,cameras,pca}` / `--up-axis {y,z}` / `--frame-origin
-  {centroid,plane}` — author a canonical object frame (default `cameras`).
-  `--no-transform` is a deprecated alias for `--frame none`.
+- `--no-cameras`, `--no-background`, `--no-transform` — skip camera export,
+  background/environment export, or the camera-pose normalizing transform.
 - `--sorting-mode-hint {zDepth,cameraDistance,rayHitDistance}` — author the
   `ParticleField` sorting hint (use `rayHitDistance` for ray-tracing
   renderers that support ray-hit sorting).
@@ -98,6 +95,10 @@ The output extension selects the container: `.usdz` (packaged archive),
   layer inside the `.usdz`, so a partitioned scene whose combined Gaussian
   layer would exceed the 4 GiB USDZ/ZIP per-file limit still packages. See
   [Large scenes and the 4 GiB USDZ limit](#large-scenes-and-the-4-gib-usdz-limit).
+- `--partition-in-normalized-frame` — run the partition KD-tree in the
+  principal-axis (covariance eigenbasis) frame so cut planes follow the
+  data's natural axes (more balanced, compact partitions). Grouping only; the
+  exported geometry is unchanged.
 - `--dataset` — dataset path for camera export, overriding the path stored
   in the checkpoint.
 - `--no-usd-validate` — skip OpenUSD stage validation after standard
@@ -151,10 +152,11 @@ flags:
   layer inside the `.usdz` (lightfield). Needed to package a partitioned
   scene whose combined Gaussian layer would exceed the 4 GiB USDZ/ZIP
   per-file limit; pair with `--max-particles-per-field`.
-- `--frame {none,cameras,pca}` / `--up-axis {y,z}` / `--frame-origin
-  {centroid,plane}` — author a canonical object frame (e.g. PCA-aligned,
-  center-of-mass at origin). Baked into PLY output; authored as a recoverable
-  named xform op on USD output (camera↔prim relative transform preserved).
+- `--partition-in-normalized-frame` — run the partition KD-tree in the
+  principal-axis (covariance eigenbasis) frame so cut planes follow the
+  data's natural axes (more balanced, compact partitions for tilted or
+  elongated scenes). Grouping only; world geometry is preserved unchanged in
+  every output format.
 - `--no-usd-validate` — skip OpenUSD stage validation.
 
 ### Large scenes and the 4 GiB USDZ limit

@@ -61,10 +61,8 @@ from threedgrut.export.usd.post_processing.sh_bake import (
 from threedgrut.export.usd.stage_utils import (
     NamedSerialized,
     NamedUSDStage,
-    apply_canonical_frame_to_scene,
     create_gaussian_model_root,
     initialize_usd_stage,
-    is_effective_frame,
     write_to_usdz,
 )
 from threedgrut.export.usd.writers.background import export_background_to_usd
@@ -701,15 +699,9 @@ class USDExporter(ModelExporter):
             except (AttributeError, ValueError) as e:
                 logger.warning(f"Failed to compute normalizing transform: {e}")
 
-        # Create main USD stage with the configured up axis + time code rate
-        up_axis = str(kwargs.get("up_axis") or "Y").upper()
-        stage = initialize_usd_stage(up_axis=up_axis)
+        # Create main USD stage with the time code rate
+        stage = initialize_usd_stage(up_axis="Y")
         stage.SetTimeCodesPerSecond(self.frames_per_second)
-
-        # Canonical object frame (composition-safe): authored as a named op on the Gaussian content
-        # root (NOT on /World), and applied to cameras so camera<->prim relatives stay unchanged.
-        frame_transform = kwargs.get("frame_transform")
-        has_frame = is_effective_frame(frame_transform)
 
         apply_coordinate_transform = kwargs.get("apply_coordinate_transform", False)
         coordinate_transform = get_3dgrut_to_usdz_coordinate_transform() if apply_coordinate_transform else None
@@ -743,7 +735,6 @@ class USDExporter(ModelExporter):
                 normalizing_transform=normalizing_transform if self.apply_normalizing_transform else None,
                 coordinate_transform=coordinate_transform,
                 source_transform_samples=kwargs.get("source_gaussian_transform"),
-                canonical_frame_transform=frame_transform if has_frame else None,
             )
 
         def _author_partition_prim(target_stage, part_root, src_t, sub, sub_caps):
@@ -766,7 +757,7 @@ class USDExporter(ModelExporter):
                 result_caps = result.capabilities if result.capabilities is not None else caps
                 src_t = getattr(result, "source_transform", None)
                 for _pid, sub in result.iter_partitions(preactivation=False):
-                    part_stage = initialize_usd_stage(up_axis=up_axis)
+                    part_stage = initialize_usd_stage(up_axis="Y")
                     part_stage.SetTimeCodesPerSecond(self.frames_per_second)
                     _make_gaussian_root(part_stage)
                     part_root = f"{gaussians_root}/Partition_{running:0{width}d}"
@@ -832,20 +823,6 @@ class USDExporter(ModelExporter):
             except Exception as e:
                 logger.warning("Failed to merge source USD prims: %s", e)
 
-            # Apply the canonical frame on top of the copied source prims (cameras/rig/...), without
-            # re-parenting or remapping — preserves any foreign hierarchy. Gaussians already carry
-            # the frame as their own named op; generated cameras get it via pose pre-multiplication.
-            if has_frame:
-                # Skip our authored Gaussian content (it already carries the frame); frame every
-                # other copied /World subtree (cameras, rig, …). In separate-layer packaging the
-                # Gaussians live in referenced layers under /World/<layer-stem>, so skip those paths.
-                gaussian_skip_paths = (
-                    {f"/World/{Path(ns.filename).stem}" for ns in data_stages}
-                    if use_separate_layers
-                    else {gaussians_root}
-                )
-                apply_canonical_frame_to_scene(scene_stage, frame_transform, skip_paths=gaussian_skip_paths)
-
         # Extract camera grouping from dataset (used by both camera export and PPISP)
         camera_names = None
         frame_to_camera = None
@@ -876,10 +853,6 @@ class USDExporter(ModelExporter):
 
                 if self.apply_normalizing_transform:
                     poses = np.einsum("ij,njk->nik", normalizing_transform, poses)
-                if has_frame:
-                    # Move generated cameras by the canonical frame so the camera<->prim
-                    # relative transform is preserved (Gaussians get it as a named op).
-                    poses = np.einsum("ij,njk->nik", np.asarray(frame_transform), poses)
 
                 camera_params = _extract_camera_params_from_dataset(dataset)
                 if camera_params is not None:
@@ -907,8 +880,6 @@ class USDExporter(ModelExporter):
 
                 if self.apply_normalizing_transform:
                     validation_poses = np.einsum("ij,njk->nik", normalizing_transform, validation_poses)
-                if has_frame:
-                    validation_poses = np.einsum("ij,njk->nik", np.asarray(frame_transform), validation_poses)
 
                 validation_camera_params = _extract_camera_params_from_dataset(validation_dataset)
                 if validation_camera_params is not None:

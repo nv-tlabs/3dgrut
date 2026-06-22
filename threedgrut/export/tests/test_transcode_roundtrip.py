@@ -482,6 +482,36 @@ class TestCrossFormatTranscode:
             output_matrix = UsdGeom.Xformable(output_prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
             _assert_usd_matrices_close(output_matrix, expected_matrix)
 
+    def test_transcode_usd_with_xform_to_ply_bakes_transform(self):
+        """USD→PLY bakes the Gaussian prim's local-to-world into the points (PLY has no xform)."""
+        attrs = create_test_attributes(32, sh_degree=1)
+        caps = create_test_capabilities(32, sh_degree=1)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            input_path = tmp_path / "input.usda"
+            ply_path = tmp_path / "out.ply"
+
+            USDExporter(
+                export_cameras=False,
+                export_background=False,
+                apply_normalizing_transform=False,
+            ).export(AttributesExportAdapter(attrs, caps, is_preactivation=True), input_path, validate_usd=False)
+
+            stage = Usd.Stage.Open(str(input_path))
+            world_matrix = _set_source_gaussian_root_transform(stage)  # local->world of the Gaussian prim
+            stage.GetRootLayer().Export(str(input_path))
+
+            transcode(input_path=input_path, output_path=ply_path, output_format="ply", validate_usd=False)
+
+            loaded, _ = PLYImporter(max_sh_degree=3).load(ply_path)
+            # Expected = source positions pushed through the prim's local-to-world (column-vector).
+            m = usd_matrix_to_numpy(world_matrix).T
+            expected = attrs.positions @ m[:3, :3].T + m[:3, 3]
+            assert np.allclose(loaded.positions, expected, atol=1e-4)
+            # The transform must actually move the points (guards against silently dropping M_f).
+            assert not np.allclose(loaded.positions, attrs.positions, atol=1e-3)
+
     def test_transcode_api_usd_to_usdz_copies_cuda_spg_sidecars(self):
         """USD→USDZ transcode preserves copied /Render CUDA SPG sidecars."""
         attrs = create_test_attributes(32, sh_degree=3)

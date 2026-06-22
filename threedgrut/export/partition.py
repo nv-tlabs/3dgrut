@@ -148,6 +148,58 @@ def _resolve_kdtree_device(num_points: int, reference_device: torch.device) -> t
     return torch.device("cpu")
 
 
+# Covariance for the principal-axis rotation is estimated on at most this many points (cheap at huge N).
+_PCA_MAX_SAMPLES = 2_000_000
+# Drop points beyond this distance percentile (from the median) when estimating the axes — keeps
+# sparse floaters from stretching the covariance along a spurious direction.
+_PCA_TRIM_PERCENTILE = 99.5
+
+
+def _rotate_to_principal_axes(
+    positions: torch.Tensor,
+    weights: Optional[torch.Tensor] = None,
+    trim_percentile: float = _PCA_TRIM_PERCENTILE,
+) -> torch.Tensor:
+    """Mean-center and rotate points into their covariance eigenbasis (rotation only).
+
+    Used so KD-tree splits align to the data's natural axes. The basis is estimated robustly — on a
+    deterministic subsample (cheap at huge N), opacity-weighted (``weights``), and after trimming
+    far outliers (floaters) — then the rotation is applied to all points.
+    """
+    n = positions.shape[0]
+    if n > _PCA_MAX_SAMPLES:
+        idx = torch.linspace(0, n - 1, steps=_PCA_MAX_SAMPLES, device=positions.device).long()
+        pts = positions.index_select(0, idx)
+        w = None if weights is None else weights.reshape(-1).index_select(0, idx)
+    else:
+        pts = positions
+        w = None if weights is None else weights.reshape(-1)
+
+    # Clean weights: clip negatives, fall back to uniform if degenerate.
+    if w is None:
+        w = torch.ones(pts.shape[0], dtype=pts.dtype, device=pts.device)
+    else:
+        w = w.to(pts.dtype).clamp_min(0.0)
+        if float(w.sum()) <= 0.0:
+            w = torch.ones_like(w)
+
+    # Trim far outliers by distance to the (robust) median center so floaters don't skew the axes.
+    if trim_percentile < 100.0 and pts.shape[0] >= 4:
+        center = pts.median(dim=0).values
+        dist = torch.linalg.vector_norm(pts - center, dim=1)
+        keep = dist <= torch.quantile(dist, trim_percentile / 100.0)
+        if int(keep.sum()) >= 3:
+            pts, w = pts[keep], w[keep]
+
+    # Opacity-weighted moments; eigh columns are orthonormal eigenvectors -> a pure rotation (no scale).
+    wsum = w.sum()
+    mean = (w.unsqueeze(1) * pts).sum(dim=0) / wsum
+    centered = pts - mean
+    cov = (centered * w.unsqueeze(1)).transpose(0, 1) @ centered / wsum
+    _evals, evecs = torch.linalg.eigh(cov)
+    return (positions - mean) @ evecs
+
+
 def kdtree_partition(positions: torch.Tensor, max_per_volume: int) -> Tuple[torch.Tensor, int]:
     """Partition Gaussian centers via recursive median splits.
 
@@ -433,7 +485,7 @@ def partition_scene(
     split_target_fraction: float = 0.5,
     max_splits: int = 4,
     n_sigma: float = 3.0,
-    frame_transform: Optional["np.ndarray"] = None,
+    normalized_frame: bool = False,
 ) -> PartitionResult:
     """Partition one Gaussian source into volume partitions of at most ``max_per_volume``.
 
@@ -453,6 +505,10 @@ def partition_scene(
         split_target_fraction: Fraction of the cell edge used for the default threshold.
         max_splits: Maximum split iterations.
         n_sigma: Sigma multiplier for footprint/extent computation.
+        normalized_frame: If True, run the KD-tree in the principal-axis (covariance eigenbasis)
+            frame so cut planes follow the data's natural axes — more balanced, compact partitions
+            for tilted/elongated scenes. Grouping only: labels still index the original Gaussians
+            and no geometry is reoriented in the output.
     """
     if max_per_volume is not None and max_per_volume < 1:
         raise ValueError(f"max_per_volume must be >= 1, got {max_per_volume}")
@@ -498,11 +554,14 @@ def partition_scene(
             n_sigma=n_sigma,
         )
 
-    # Partition in the canonical (framed) space so KD-tree splits align to the chosen axes.
-    # Labels still index the original Gaussians; the exporter authors the frame on the root.
-    if frame_transform is not None:
-        Tt = torch.as_tensor(np.asarray(frame_transform), dtype=positions.dtype, device=positions.device)
-        positions = positions @ Tt[:3, :3].transpose(0, 1) + Tt[:3, 3]
+    # Optionally rotate into the principal-axis frame so KD-tree cuts follow the data's natural
+    # axes. Grouping only — labels index the original Gaussians and the output is not reoriented.
+    # The basis is opacity-weighted (visible mass drives the axes) and floater-trimmed.
+    if normalized_frame:
+        weights = (
+            split_post["densities"] if split_post is not None else model.get_density(preactivation=False).detach()
+        )
+        positions = _rotate_to_principal_axes(positions, weights)
 
     # Run the KD-tree on the GPU when the positions (+ sort workspace) fit the free memory
     # budget, else fall back to CPU. Only positions move to the GPU — the bulk attributes
@@ -530,6 +589,7 @@ def partition_scene(
         _accessor=None if split_post is not None else accessor,
         _split_post=split_post,
     )
+
 
 
 def apply_frame_to_attributes(attrs: GaussianAttributes, transform, max_sh_degree: int) -> GaussianAttributes:

@@ -134,6 +134,37 @@ def test_partition_scene_respects_cap():
     assert attrs.num_gaussians == 1000
 
 
+def test_partition_in_normalized_frame_groups_all_within_cap():
+    """Partitioning in the principal-axis frame still caps, covers, and reorders nothing."""
+    model = RandomGaussianModel(num_gaussians=1000, seed=3)
+    result = partition_scene(model, max_per_volume=128, normalized_frame=True)
+    assert result.is_partitioned is True
+    counts = torch.bincount(result.labels, minlength=result.num_partitions)
+    assert int(counts.max()) <= 128
+    assert int(counts.sum()) == 1000
+    # Grouping only: the exported geometry is the original, unrotated positions.
+    attrs = result.full_attributes(preactivation=False)
+    assert attrs.num_gaussians == 1000
+    assert np.allclose(attrs.positions, model.get_positions().cpu().numpy(), atol=1e-5)
+
+
+def test_rotate_to_principal_axes_robust_to_transparent_floater():
+    """The principal axis follows the opaque bulk, not a far transparent floater."""
+    from threedgrut.export.partition import _rotate_to_principal_axes
+
+    torch.manual_seed(0)
+    bulk = torch.randn(2000, 3) * torch.tensor([5.0, 0.5, 0.5])  # elongated along X
+    floater = torch.tensor([[0.0, 0.0, 1000.0]])  # far, transparent
+    pts = torch.cat([bulk, floater], dim=0)
+    weights = torch.cat([torch.ones(2000), torch.zeros(1)])
+
+    rotated = _rotate_to_principal_axes(pts, weights)
+    # eigh is ascending, so the largest-variance axis is the last coordinate. It must track the
+    # bulk's long (X) axis, i.e. the floater along Z neither dominates nor flips the basis.
+    bulk_spreads = rotated[:2000].std(dim=0)
+    assert int(bulk_spreads.argmax()) == 2
+
+
 # ---------------------------------------------------------------------------
 # Oversized-Gaussian splitting
 # ---------------------------------------------------------------------------

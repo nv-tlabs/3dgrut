@@ -243,36 +243,6 @@ Examples:
         action="store_true",
         help="Skip OpenUSD stage validation after standard (ParticleField) export",
     )
-    # Canonical object frame. Default 'cameras' preserves the historical normalizing-transform
-    # behavior; --no-transform remains a deprecated alias for '--frame none'.
-    parser.add_argument(
-        "--frame",
-        dest="frame_mode",
-        choices=["none", "cameras", "pca"],
-        default="cameras",
-        help=(
-            "Re-frame the object: 'none' keeps the source frame; 'cameras' uses dataset camera "
-            "poses; 'pca' centers the centroid and aligns axes to the principal axes. Authored on "
-            "the Gaussian content root for USD/NuRec, baked into PLY."
-        ),
-    )
-    parser.add_argument(
-        "--up-axis",
-        dest="up_axis",
-        choices=["y", "z"],
-        default="y",
-        help="World up axis for the canonical frame and USD upAxis metadata. Default: y.",
-    )
-    parser.add_argument(
-        "--frame-origin",
-        dest="frame_origin",
-        choices=["centroid", "plane"],
-        default="centroid",
-        help=(
-            "Origin for --frame pca: 'centroid' (weighted center of mass) or 'plane' (in-plane "
-            "centroid with up=0 at a robust low percentile, i.e. resting on the base)."
-        ),
-    )
     parser.add_argument(
         "--max-particles-per-field",
         dest="max_per_volume",
@@ -290,6 +260,14 @@ Examples:
             "Write each partition to its own .usdc layer inside the .usdz (standard format). Needed "
             "to package a partitioned scene whose combined Gaussian layer would exceed the 4 GiB "
             "usdz/ZIP per-file limit; pair with --max-particles-per-field."
+        ),
+    )
+    parser.add_argument(
+        "--partition-in-normalized-frame",
+        action="store_true",
+        help=(
+            "Run the partition KD-tree in the principal-axis (covariance eigenbasis) frame so cut "
+            "planes follow the data's natural axes. Grouping only; output geometry is unchanged."
         ),
     )
 
@@ -492,24 +470,6 @@ def main():
                 traceback.print_exc()
             sys.exit(1)
 
-    # Resolve the canonical object frame. --no-transform is a deprecated alias for '--frame none'.
-    frame_mode = "none" if args.no_transform else args.frame_mode
-    apply_normalizing = frame_mode == "cameras"
-    world_frame_transform = None
-    if frame_mode == "pca":
-        import numpy as np
-
-        from threedgrut.export.accessor import GaussianExportAccessor
-        from threedgrut.export.transforms import resolve_frame_transform
-
-        _post = GaussianExportAccessor(model, conf).get_attributes(preactivation=False)
-        world_frame_transform = resolve_frame_transform(
-            "pca",
-            fields=[(_post.positions, np.asarray(_post.densities, dtype=np.float64).reshape(-1))],
-            up_axis=args.up_axis,
-            origin=args.frame_origin,
-        )
-
     # Create exporter based on format
     if args.format == "nurec":
         exporter = NuRecExporter(
@@ -538,7 +498,7 @@ def main():
             half_features=half_features,
             export_cameras=not args.no_cameras,
             export_background=not args.no_background,
-            apply_normalizing_transform=apply_normalizing,
+            apply_normalizing_transform=not args.no_transform,
             sorting_mode_hint=_arg_or_conf(
                 args.sorting_mode_hint,
                 export_conf,
@@ -580,15 +540,14 @@ def main():
                 from threedgrut.export.partition import partition_scene
 
                 result = partition_scene(
-                    model, args.max_per_volume, conf=conf, frame_transform=world_frame_transform
+                    model,
+                    args.max_per_volume,
+                    conf=conf,
+                    normalized_frame=args.partition_in_normalized_frame,
                 )
                 if result.num_partitions > 1:
                     export_kw["partition"] = result
                     export_kw["separate_partition_files"] = args.separate_partition_files
-        # Canonical frame applies to both standard (ParticleField) and nurec exporters.
-        export_kw["up_axis"] = args.up_axis
-        if world_frame_transform is not None:
-            export_kw["frame_transform"] = world_frame_transform
         exporter.export(
             model=model,
             output_path=output_path,
