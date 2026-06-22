@@ -21,7 +21,7 @@ configurable number of Gaussians, so that large scenes can be exported as severa
 ``ParticleField3DGaussianSplat`` UsdVol prims (and several PLY point clouds) instead
 of one monolithic volume.
 
-Design goals (see plan):
+Design goals:
 - **Capped:** no partition exceeds ``max_per_volume`` Gaussians.
 - **Balanced:** partitions have similar Gaussian counts (KD-tree median split).
 - **Non-overlapping:** axis-aligned, disjoint partitions; optionally split oversized
