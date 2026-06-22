@@ -244,6 +244,16 @@ Examples:
         help="Skip OpenUSD stage validation after standard (ParticleField) export",
     )
     parser.add_argument(
+        "--up-axis",
+        dest="up_axis",
+        choices=["y", "z"],
+        default="y",
+        help=(
+            "USD stage upAxis metadata for standard export (default: y). Metadata only — it does "
+            "not reorient geometry or cameras. Ignored for nurec (always Z)."
+        ),
+    )
+    parser.add_argument(
         "--max-particles-per-field",
         dest="max_per_volume",
         type=int,
@@ -535,6 +545,7 @@ def main():
         export_kw = {}
         if args.format == "standard":
             export_kw["validate_usd"] = not args.no_usd_validate
+            export_kw["up_axis"] = args.up_axis  # stage upAxis metadata only (no reorientation)
             # Optional spatial partitioning: one ParticleField prim (or .usdc layer) per partition.
             if args.max_per_volume is not None:
                 from threedgrut.export.partition import partition_scene

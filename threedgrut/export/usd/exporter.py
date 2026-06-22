@@ -497,11 +497,12 @@ class USDExporter(ModelExporter):
         referenced_stages: List[NamedUSDStage],
         *,
         has_runtime_ppisp: bool = False,
+        up_axis: str = "Y",
     ) -> NamedUSDStage:
         """
         Create a default.usda that references the data stages.
         """
-        stage = initialize_usd_stage(up_axis="Y")
+        stage = initialize_usd_stage(up_axis=up_axis)
         stage.SetTimeCodesPerSecond(self.frames_per_second)
         stage.SetMetadataByDictKey(
             "customLayerData",
@@ -699,8 +700,10 @@ class USDExporter(ModelExporter):
             except (AttributeError, ValueError) as e:
                 logger.warning(f"Failed to compute normalizing transform: {e}")
 
-        # Create main USD stage with the time code rate
-        stage = initialize_usd_stage(up_axis="Y")
+        # Create main USD stage. up_axis only sets the stage's `upAxis` metadata — it does not
+        # reorient any geometry (Gaussian data and camera poses are authored as-is).
+        up_axis = "Z" if str(kwargs.get("up_axis") or "Y").upper() == "Z" else "Y"
+        stage = initialize_usd_stage(up_axis=up_axis)
         stage.SetTimeCodesPerSecond(self.frames_per_second)
 
         apply_coordinate_transform = kwargs.get("apply_coordinate_transform", False)
@@ -757,7 +760,7 @@ class USDExporter(ModelExporter):
                 result_caps = result.capabilities if result.capabilities is not None else caps
                 src_t = getattr(result, "source_transform", None)
                 for _pid, sub in result.iter_partitions(preactivation=False):
-                    part_stage = initialize_usd_stage(up_axis="Y")
+                    part_stage = initialize_usd_stage(up_axis=up_axis)
                     part_stage.SetTimeCodesPerSecond(self.frames_per_second)
                     _make_gaussian_root(part_stage)
                     part_root = f"{gaussians_root}/Partition_{running:0{width}d}"
@@ -790,6 +793,7 @@ class USDExporter(ModelExporter):
             default_stage_wrapped = self._create_default_stage(
                 data_stages,
                 has_runtime_ppisp=runtime_post_processing,
+                up_axis=up_axis,
             )
         scene_stage = default_stage_wrapped.stage if default_stage_wrapped is not None else stage
         if not package_as_usdz:

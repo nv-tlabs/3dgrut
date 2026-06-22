@@ -482,6 +482,24 @@ class TestCrossFormatTranscode:
             output_matrix = UsdGeom.Xformable(output_prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
             _assert_usd_matrices_close(output_matrix, expected_matrix)
 
+    def test_export_up_axis_sets_stage_metadata_without_reorienting(self):
+        """up_axis sets the USD stage upAxis metadata only; geometry is unchanged."""
+        attrs = create_test_attributes(16, sh_degree=0)
+        caps = create_test_capabilities(16, sh_degree=0)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "out.usda"
+            USDExporter(
+                export_cameras=False,
+                export_background=False,
+                apply_normalizing_transform=False,
+            ).export(AttributesExportAdapter(attrs, caps, is_preactivation=True), out, validate_usd=False, up_axis="z")
+
+            stage = Usd.Stage.Open(str(out))
+            assert UsdGeom.GetStageUpAxis(stage) == "Z"
+            loaded, _ = USDImporter().load(out)
+            assert np.allclose(loaded.positions, attrs.positions, atol=1e-4)
+
     def test_transcode_usd_with_xform_to_ply_bakes_transform(self):
         """USD→PLY bakes the Gaussian prim's local-to-world into the points (PLY has no xform)."""
         attrs = create_test_attributes(32, sh_degree=1)

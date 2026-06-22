@@ -85,6 +85,9 @@ The output extension selects the container: `.usdz` (packaged archive),
   attributes for smaller files (LightField schema).
 - `--no-cameras`, `--no-background`, `--no-transform` — skip camera export,
   background/environment export, or the camera-pose normalizing transform.
+- `--up-axis {y,z}` — USD stage `upAxis` metadata for standard export
+  (default `y`). Metadata only; it does not reorient geometry or cameras.
+  Ignored for `nurec` (always Z).
 - `--sorting-mode-hint {zDepth,cameraDistance,rayHitDistance}` — author the
   `ParticleField` sorting hint (use `rayHitDistance` for ray-tracing
   renderers that support ray-hit sorting).
