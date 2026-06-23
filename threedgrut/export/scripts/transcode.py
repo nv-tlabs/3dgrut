@@ -221,8 +221,15 @@ def transcode(
     copy_cameras_source: Optional[Tuple[Path, Path]] = None,
     copy_source_skip_subtrees: Optional[Tuple] = None,
     validate_usd: bool = True,
+    max_per_volume: Optional[int] = None,
+    split_large_gaussians: bool = False,
+    split_target_size: Optional[float] = None,
+    split_target_fraction: float = 0.5,
+    max_splits: int = 4,
+    partition_in_normalized_frame: bool = False,
+    separate_partition_files: bool = False,
 ) -> None:
-    """Transcode between Gaussian splatting formats.
+    """Transcode a single input file between Gaussian splatting formats.
 
     Args:
         input_path: Path to input file
@@ -237,62 +244,290 @@ def transcode(
         copy_cameras_source: If set, (root_usd_path, asset_resolution_dir) to copy source /World prims from.
         copy_source_skip_subtrees: Optional tuple of Sdf.Path roots to skip under /World (None = default skip Gaussians).
         validate_usd: If True and output is lightfield, run OpenUSD stage validation after export.
+        max_per_volume: If set, each source prim/group whose own Gaussian count exceeds this is
+            subdivided into several partitions; prims within budget are kept as-is. Applies to
+            ply / lightfield outputs only.
+        split_large_gaussians: Like the exporter's option, split boundary-straddling Gaussians in
+            oversized prims before subdividing them (reduces inter-partition overlap).
+        split_target_size: Footprint threshold for the split pass (default: fraction of cell edge).
+        split_target_fraction: Fraction of the cell edge for the default split threshold.
+        max_splits: Maximum split iterations.
     """
     if render_order_hint is not None and output_format != "lightfield":
         logger.warning(
             "--render-order-hint is only applied for lightfield format; ignoring for format '%s'",
             output_format,
         )
-    # Detect input format
     input_format = detect_input_format(input_path)
     logger.info(f"Input format: {input_format}")
     logger.info(f"Output format: {output_format}")
 
-    # Get importer and load data
     importer = get_importer(input_format, max_sh_degree)
-    attrs, caps = importer.load(input_path)
+    fields, source_transforms = _load_sources(importer, input_path)
     source_is_preactivation = importer.stores_preactivation
-    source_gaussian_transform = getattr(importer, "source_gaussian_transform", None)
+    logger.info(
+        f"Loaded {len(fields)} source field(s), {sum(a.num_gaussians for a, _ in fields)} Gaussians "
+        f"(preactivation={source_is_preactivation})"
+    )
 
-    logger.info(f"Loaded {attrs.num_gaussians} Gaussians (preactivation={source_is_preactivation})")
-
-    # Get exporter
-    exporter, target_expects_preactivation = get_exporter(
-        output_format,
+    _transcode_core(
+        fields=fields,
+        source_transforms=source_transforms,
+        source_is_preactivation=source_is_preactivation,
+        output_path=output_path,
+        output_format=output_format,
         half_precision=half_precision,
         half_geometry=half_geometry,
         half_features=half_features,
-        render_order_hint=render_order_hint if output_format == "lightfield" else None,
+        apply_coordinate_transform=apply_coordinate_transform,
+        render_order_hint=render_order_hint,
+        copy_cameras_source=copy_cameras_source,
+        copy_source_skip_subtrees=copy_source_skip_subtrees,
+        validate_usd=validate_usd,
+        max_per_volume=max_per_volume,
+        split_options=_split_options(split_large_gaussians, split_target_size, split_target_fraction, max_splits),
+        partition_in_normalized_frame=partition_in_normalized_frame,
+        separate_partition_files=separate_partition_files,
     )
+    logger.info(f"Transcode complete: {input_path} -> {output_path}")
 
-    # Create adapter with correct activation state
-    # The adapter needs to know the source data state
-    adapter = AttributesExportAdapter(
-        attrs=attrs,
-        caps=caps,
-        is_preactivation=source_is_preactivation,
+
+def _split_options(
+    split_large_gaussians: bool,
+    split_target_size: Optional[float],
+    split_target_fraction: float,
+    max_splits: int,
+) -> dict:
+    """Bundle the Gaussian-split options forwarded to partition_scene."""
+    return {
+        "split": split_large_gaussians,
+        "split_target_size": split_target_size,
+        "split_target_fraction": split_target_fraction,
+        "max_splits": max_splits,
+    }
+
+
+def _load_sources(importer, path: Path):
+    """Load a file as a list of ``(attrs, caps)`` fields plus their source transforms.
+
+    Each ParticleField prim / source is kept separate — never concatenated. PLY/NuRec yield a
+    single field; a multi-prim USD yields one field per prim.
+    """
+    if hasattr(importer, "load_fields"):
+        fields = importer.load_fields(path)
+        transforms = getattr(importer, "source_gaussian_transforms", None)
+        if not transforms or len(transforms) != len(fields):
+            transforms = [getattr(importer, "source_gaussian_transform", None)] * len(fields)
+        return fields, transforms
+    attrs, caps = importer.load(path)
+    return [(attrs, caps)], [getattr(importer, "source_gaussian_transform", None)]
+
+
+def transcode_files(
+    input_paths,
+    output_path: Path,
+    output_format: str,
+    max_sh_degree: int = 3,
+    half_precision: bool = False,
+    half_geometry: bool = False,
+    half_features: bool = False,
+    render_order_hint: Optional[str] = None,
+    validate_usd: bool = True,
+    max_per_volume: Optional[int] = None,
+    split_large_gaussians: bool = False,
+    split_target_size: Optional[float] = None,
+    split_target_fraction: float = 0.5,
+    max_splits: int = 4,
+    partition_in_normalized_frame: bool = False,
+    separate_partition_files: bool = False,
+) -> None:
+    """Combine several inputs into one asset with one ParticleField prim / volume per input.
+
+    Each input field becomes its own output partition; a field whose Gaussian count exceeds
+    ``max_per_volume`` is subdivided into several (optionally splitting oversized Gaussians first).
+    Inputs are never merged into one array. Output must be ``lightfield`` or ``nurec``; all inputs
+    must agree on activation convention (e.g. all PLY).
+    """
+    input_paths = [Path(p) for p in input_paths]
+    if len(input_paths) == 1:
+        transcode(
+            input_paths[0],
+            output_path,
+            output_format,
+            max_sh_degree=max_sh_degree,
+            half_precision=half_precision,
+            half_geometry=half_geometry,
+            half_features=half_features,
+            render_order_hint=render_order_hint,
+            validate_usd=validate_usd,
+            max_per_volume=max_per_volume,
+            split_large_gaussians=split_large_gaussians,
+            split_target_size=split_target_size,
+            split_target_fraction=split_target_fraction,
+            max_splits=max_splits,
+            partition_in_normalized_frame=partition_in_normalized_frame,
+            separate_partition_files=separate_partition_files,
+        )
+        return
+
+    if output_format not in ("lightfield", "nurec"):
+        raise ValueError(
+            f"Combining multiple inputs into one asset requires lightfield or nurec output, got '{output_format}'."
+        )
+
+    fields = []
+    transforms = []
+    preactivation_flags = set()
+    for p in input_paths:
+        fmt = detect_input_format(p)
+        importer = get_importer(fmt, max_sh_degree)
+        fs, ts = _load_sources(importer, p)
+        fields.extend(fs)
+        transforms.extend(ts)
+        preactivation_flags.add(importer.stores_preactivation)
+        logger.info(f"Loaded {len(fs)} field(s) from {p} ({fmt})")
+
+    if len(preactivation_flags) != 1:
+        raise ValueError("All inputs must share the same activation convention (e.g. all PLY).")
+    source_is_preactivation = preactivation_flags.pop()
+    logger.info(f"Combining {len(input_paths)} inputs ({len(fields)} fields) into {output_path}")
+
+    _transcode_core(
+        fields=fields,
+        source_transforms=transforms,
+        source_is_preactivation=source_is_preactivation,
+        output_path=output_path,
+        output_format=output_format,
+        half_precision=half_precision,
+        half_geometry=half_geometry,
+        half_features=half_features,
+        apply_coordinate_transform=False,
+        render_order_hint=render_order_hint,
+        copy_cameras_source=None,
+        copy_source_skip_subtrees=None,
+        validate_usd=validate_usd,
+        max_per_volume=max_per_volume,
+        split_options=_split_options(split_large_gaussians, split_target_size, split_target_fraction, max_splits),
+        partition_in_normalized_frame=partition_in_normalized_frame,
+        separate_partition_files=separate_partition_files,
     )
+    logger.info(f"Transcode complete: {len(input_paths)} inputs -> {output_path}")
 
-    # NuRec export always produces USDZ (zip). Require .usdz extension.
+
+def _samples_to_matrix(samples):
+    """Per-field local-to-world (M_f) as a column-vector 4x4 (identity if none)."""
+    import numpy as np
+
+    from threedgrut.export.transforms import usd_matrix_to_numpy
+
+    default = getattr(samples, "default", None)
+    if default is None:
+        return np.eye(4)
+    return usd_matrix_to_numpy(default).T  # USD row-vector -> column-vector
+
+
+def _sh_degree_from_specular(width: int) -> int:
+    """SH degree implied by a specular array width (M*3, M = (deg+1)^2 - 1)."""
+    m = width // 3
+    return int(round((m + 1) ** 0.5)) - 1
+
+
+def _transcode_core(
+    *,
+    fields,
+    source_transforms,
+    source_is_preactivation: bool,
+    output_path: Path,
+    output_format: str,
+    half_precision: bool,
+    half_geometry: bool,
+    half_features: bool,
+    apply_coordinate_transform: bool,
+    render_order_hint: Optional[str],
+    copy_cameras_source,
+    copy_source_skip_subtrees,
+    validate_usd: bool,
+    max_per_volume: Optional[int],
+    split_options: Optional[dict] = None,
+    partition_in_normalized_frame: bool = False,
+    separate_partition_files: bool = False,
+) -> None:
+    """Partition each source independently and author the union of partitions.
+
+    Each field becomes its own :class:`PartitionResult` (one per source, never merged); a source
+    over budget subdivides into several partitions. The writers author one ParticleField prim /
+    PLY file / NuRec volume per partition. World geometry is preserved unchanged in every format.
+    """
+    from threedgrut.export.partition import apply_frame_to_attributes, partition_scene
+
+    if half_precision:
+        half_geometry = True
+        half_features = True
+
     if output_format == "nurec" and output_path.suffix.lower() != ".usdz":
         raise ValueError(
             f"NuRec format requires output extension .usdz, got '{output_path.suffix}'. "
             f"Use e.g. -o {output_path.with_suffix('.usdz')}"
         )
 
-    # Export
-    logger.info(f"Exporting to {output_path}...")
-    exporter.export(
-        adapter,
-        output_path,
+    # Per-field local-to-world M_f (column-vector). Identity for PLY / single-prim sources.
+    m_fields = [_samples_to_matrix(st) for st in (source_transforms or [None] * len(fields))]
+
+    partition_kwargs = dict(normalized_frame=partition_in_normalized_frame, **(split_options or {}))
+
+    # PLY has no transform/hierarchy, so bake each source field's local-to-world M_f into its
+    # attributes (positions + orientations + SH) so the points land in world space; then partition.
+    if output_format == "ply":
+        from threedgrut.export.formats import export_partitions
+
+        results = []
+        for i, (attrs, caps) in enumerate(fields):
+            deg = _sh_degree_from_specular(attrs.specular.shape[1])
+            baked = apply_frame_to_attributes(attrs, m_fields[i], deg)
+            adapter = AttributesExportAdapter(attrs=baked, caps=caps, is_preactivation=source_is_preactivation)
+            results.append(partition_scene(adapter, max_per_volume, **partition_kwargs))
+        written = export_partitions(results, output_path)
+        logger.info("Wrote %d PLY file(s)", len(written))
+        return
+
+    # USD / NuRec: keep source coords and author M_f per prim. The exporter's source-prim merge
+    # still copies cameras/RenderProducts as-is.
+    results = []
+    for i, (attrs, caps) in enumerate(fields):
+        adapter = AttributesExportAdapter(attrs=attrs, caps=caps, is_preactivation=source_is_preactivation)
+        result = partition_scene(adapter, max_per_volume, **partition_kwargs)
+        result.source_transform = m_fields[i]
+        results.append(result)
+    total_partitions = sum(r.num_partitions for r in results)
+    partitioned = total_partitions > 1
+
+    exporter, _target_expects_preactivation = get_exporter(
+        output_format,
+        half_precision=half_precision,
+        half_geometry=half_geometry,
+        half_features=half_features,
+        render_order_hint=render_order_hint if output_format == "lightfield" else None,
+    )
+    export_kwargs = dict(
         apply_coordinate_transform=apply_coordinate_transform,
         copy_cameras_source=copy_cameras_source,
         copy_source_skip_subtrees=copy_source_skip_subtrees,
-        source_gaussian_transform=source_gaussian_transform,
+        source_gaussian_transform=source_transforms[0] if source_transforms else None,
         validate_usd=validate_usd if output_format == "lightfield" else False,
+        partition=results if partitioned else None,
     )
+    if output_format == "lightfield":
+        # Write one .usdc layer per partition so a partitioned scene fits under the 4 GiB usdz
+        # member limit. Only the lightfield USDExporter understands this; NuRec packages its own.
+        export_kwargs["separate_partition_files"] = separate_partition_files
+    logger.info(f"Exporting to {output_path}...")
+    exporter.export(adapters_first(results, fields, source_is_preactivation), output_path, **export_kwargs)
 
-    logger.info(f"Transcode complete: {input_path} -> {output_path}")
+
+def adapters_first(results, fields, is_preactivation):
+    """Representative model for the exporter's single-volume fallback (first source)."""
+    attrs, caps = fields[0]
+    return AttributesExportAdapter(attrs=attrs, caps=caps, is_preactivation=is_preactivation)
 
 
 def parse_args():
@@ -322,7 +557,11 @@ Examples:
     parser.add_argument(
         "input",
         type=str,
-        help="Input file path (ply, usd, usda, usdc, usdz)",
+        nargs="+",
+        help=(
+            "Input file path(s) (ply, usd, usda, usdc, usdz). Pass several files to combine them "
+            "into one lightfield USD with one ParticleField prim per input."
+        ),
     )
     parser.add_argument(
         "-o",
@@ -395,6 +634,25 @@ Examples:
         help="Also copy /World/Gaussians from the source (duplicates old LightField data; can be very large).",
     )
     parser.add_argument(
+        "--max-particles-per-field",
+        dest="max_per_volume",
+        type=int,
+        default=None,
+        help=(
+            "Subdivide any ParticleField prim / input whose own particle count exceeds this into "
+            "several partitions; prims within budget are kept as-is (ply and lightfield outputs only)."
+        ),
+    )
+    parser.add_argument(
+        "--separate-partition-files",
+        action="store_true",
+        help=(
+            "Write each partition to its own .usdc layer inside the .usdz (lightfield output). "
+            "Needed to package a partitioned scene whose combined Gaussian layer would exceed the "
+            "4 GiB usdz/ZIP per-file limit; pair with --max-particles-per-field."
+        ),
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -404,6 +662,16 @@ Examples:
         "--no-usd-validate",
         action="store_true",
         help="Skip OpenUSD stage validation after lightfield (.usd/.usdz) export",
+    )
+    parser.add_argument(
+        "--partition-in-normalized-frame",
+        action="store_true",
+        help=(
+            "Run the KD-tree in the principal-axis (covariance eigenbasis) frame so cut planes "
+            "follow the data's natural axes — more balanced, compact partitions for tilted or "
+            "elongated scenes. Grouping only: output geometry is not reoriented. Needs "
+            "--max-particles-per-field."
+        ),
     )
 
     return parser.parse_args()
@@ -416,13 +684,14 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    input_path = Path(args.input)
+    input_paths = [Path(p) for p in args.input]
     output_path = Path(args.output)
 
-    # Validate input exists
-    if not input_path.exists():
-        logger.error(f"Input file does not exist: {input_path}")
-        sys.exit(1)
+    # Validate inputs exist
+    for p in input_paths:
+        if not p.exists():
+            logger.error(f"Input file does not exist: {p}")
+            sys.exit(1)
 
     # Determine output format
     output_format = args.format
@@ -439,31 +708,53 @@ def main():
     # Create output directory if needed
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    suffix_in = input_path.suffix.lower()
-    use_camera_copy_ctx = (
-        output_format in {"lightfield", "nurec"}
-        and suffix_in in (".usd", ".usda", ".usdc", ".usdz")
-        and not args.no_copy_source_prims
-    )
-    camera_ctx = usd_stage_path_context_for_camera_copy(input_path) if use_camera_copy_ctx else nullcontext(None)
-
     try:
-        with camera_ctx as copy_cameras_source:
-            skip_subtrees = () if args.copy_source_include_gaussians else None
-            transcode(
-                input_path=input_path,
+        if len(input_paths) > 1:
+            # Combine several inputs into one multi-ParticleField USD (one prim per input).
+            transcode_files(
+                input_paths=input_paths,
                 output_path=output_path,
                 output_format=output_format,
                 max_sh_degree=args.max_sh_degree,
                 half_precision=args.half,
                 half_geometry=args.half_geometry,
                 half_features=args.half_features,
-                apply_coordinate_transform=args.apply_coordinate_transform,
                 render_order_hint=args.render_order_hint,
-                copy_cameras_source=copy_cameras_source,
-                copy_source_skip_subtrees=skip_subtrees,
                 validate_usd=not args.no_usd_validate,
+                max_per_volume=args.max_per_volume,
+                partition_in_normalized_frame=args.partition_in_normalized_frame,
+                separate_partition_files=args.separate_partition_files,
             )
+        else:
+            input_path = input_paths[0]
+            suffix_in = input_path.suffix.lower()
+            use_camera_copy_ctx = (
+                output_format in {"lightfield", "nurec"}
+                and suffix_in in (".usd", ".usda", ".usdc", ".usdz")
+                and not args.no_copy_source_prims
+            )
+            camera_ctx = (
+                usd_stage_path_context_for_camera_copy(input_path) if use_camera_copy_ctx else nullcontext(None)
+            )
+            with camera_ctx as copy_cameras_source:
+                skip_subtrees = () if args.copy_source_include_gaussians else None
+                transcode(
+                    input_path=input_path,
+                    output_path=output_path,
+                    output_format=output_format,
+                    max_sh_degree=args.max_sh_degree,
+                    half_precision=args.half,
+                    half_geometry=args.half_geometry,
+                    half_features=args.half_features,
+                    apply_coordinate_transform=args.apply_coordinate_transform,
+                    render_order_hint=args.render_order_hint,
+                    copy_cameras_source=copy_cameras_source,
+                    copy_source_skip_subtrees=skip_subtrees,
+                    validate_usd=not args.no_usd_validate,
+                    max_per_volume=args.max_per_volume,
+                    partition_in_normalized_frame=args.partition_in_normalized_frame,
+                    separate_partition_files=args.separate_partition_files,
+                )
     except Exception as e:
         logger.error(f"Transcode failed: {e}")
         if args.verbose:

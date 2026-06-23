@@ -57,7 +57,11 @@ class AttributesExportAdapter(ExportableModel):
         self._attrs = attrs
         self._caps = caps
         self._is_preactivation = is_preactivation
-        self._device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        # Default to CPU: torch.from_numpy is zero-copy on CPU, so wrapping the imported numpy
+        # attributes costs no extra memory. Eagerly copying everything to CUDA OOMs on large
+        # scenes (e.g. a 259M-Gaussian transcode would push tens of GB of SH to the GPU for a
+        # format conversion that never needs it). Callers that want GPU can pass device="cuda".
+        self._device = device or "cpu"
 
         # Convert numpy arrays to torch tensors
         self._positions = torch.from_numpy(attrs.positions).to(self._device)

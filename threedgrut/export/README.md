@@ -84,10 +84,24 @@ The output extension selects the container: `.usdz` (packaged archive),
 - `--half` / `--half-geometry` / `--half-features` — half-precision
   attributes for smaller files (LightField schema).
 - `--no-cameras`, `--no-background`, `--no-transform` — skip camera export,
-  background/environment export, or the normalizing transform.
+  background/environment export, or the camera-pose normalizing transform.
+- `--up-axis {y,z}` — USD stage `upAxis` metadata for standard export
+  (default `y`). Metadata only; it does not reorient geometry or cameras.
+  Ignored for `nurec` (always Z).
 - `--sorting-mode-hint {zDepth,cameraDistance,rayHitDistance}` — author the
   `ParticleField` sorting hint (use `rayHitDistance` for ray-tracing
   renderers that support ray-hit sorting).
+- `--max-particles-per-field INT` — subdivide the scene into spatial
+  partitions of at most this many particles, writing one ParticleField prim
+  per partition (standard format; off by default).
+- `--separate-partition-files` — write each partition to its own `.usdc`
+  layer inside the `.usdz`, so a partitioned scene whose combined Gaussian
+  layer would exceed the 4 GiB USDZ/ZIP per-file limit still packages. See
+  [Large scenes and the 4 GiB USDZ limit](#large-scenes-and-the-4-gib-usdz-limit).
+- `--partition-in-normalized-frame` — run the partition KD-tree in the
+  principal-axis (covariance eigenbasis) frame so cut planes follow the
+  data's natural axes (more balanced, compact partitions). Grouping only; the
+  exported geometry is unchanged.
 - `--dataset` — dataset path for camera export, overriding the path stored
   in the checkpoint.
 - `--no-usd-validate` — skip OpenUSD stage validation after standard
@@ -118,7 +132,9 @@ python -m threedgrut.export.scripts.transcode model.ply -o model.usdz --format n
 
 The input format is detected from the extension (`.ply` vs `.usd*`), and
 USD inputs are further refined to `nurec` vs `lightfield` by inspecting the
-stage. Output is chosen with `--format {ply,lightfield,nurec}`. Useful
+stage. Output is chosen with `--format {ply,lightfield,nurec}`. Multiple
+inputs can be passed at once to combine them into one asset with one
+ParticleField prim / volume per input (lightfield or nurec output). Useful
 flags:
 
 - `--max-sh-degree INT` — max SH degree for PLY input.
@@ -131,7 +147,35 @@ flags:
 - `--no-copy-source-prims` — do not copy non-Gaussian prims (cameras, etc.)
   from a USD source. `--copy-source-include-gaussians` also merges the
   source `/World/Gaussians` prim (skipped by default).
+- `--max-particles-per-field INT` — subdivide any ParticleField prim /
+  input whose own particle count exceeds this into several spatial
+  partitions (KD-tree median split); prims within budget are kept as-is
+  (`ply`/`lightfield` output).
+- `--separate-partition-files` — write each partition to its own `.usdc`
+  layer inside the `.usdz` (lightfield). Needed to package a partitioned
+  scene whose combined Gaussian layer would exceed the 4 GiB USDZ/ZIP
+  per-file limit; pair with `--max-particles-per-field`.
+- `--partition-in-normalized-frame` — run the partition KD-tree in the
+  principal-axis (covariance eigenbasis) frame so cut planes follow the
+  data's natural axes (more balanced, compact partitions for tilted or
+  elongated scenes). Grouping only; world geometry is preserved unchanged in
+  every output format.
 - `--no-usd-validate` — skip OpenUSD stage validation.
+
+### Large scenes and the 4 GiB USDZ limit
+
+A `.usdz` is a ZIP archive, and OpenUSD's reader does not support ZIP64, so
+**every layer packaged in a `.usdz` must stay under 4 GiB**. A single
+ParticleField that big (very roughly 80M+ Gaussians at degree 3, or ~250M+
+at degree 0 with `--half-features`) produces an unreadable `.usdz`. The
+transcoder estimates the layer size up front and fails fast with guidance
+rather than writing a corrupt package. To export a scene that large, either:
+
+- write an **un-zipped** crate — use `-o scene.usdc` (or `.usd`/`.usda`),
+  which has no ZIP size limit and handles multi-GB scenes directly; or
+- **partition** it and write one layer per partition:
+  `--max-particles-per-field 20000000 --separate-partition-files`, keeping
+  each `.usdc` layer well under 4 GiB inside the `.usdz`.
 
 ## Converting PLY files to USDZ
 

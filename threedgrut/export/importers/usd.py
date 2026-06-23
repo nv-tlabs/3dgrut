@@ -42,7 +42,9 @@ class USDImporter(FormatImporter):
     """
 
     def __init__(self) -> None:
+        # Local-to-world transform(s) of the source Gaussian prim(s); singular = first field.
         self.source_gaussian_transform = None
+        self.source_gaussian_transforms: list = []
 
     @property
     def stores_preactivation(self) -> bool:
@@ -50,56 +52,40 @@ class USDImporter(FormatImporter):
         return False
 
     def load(self, path: Path) -> Tuple[GaussianAttributes, ModelCapabilities]:
-        """Load USD/USDZ file into GaussianAttributes.
+        """Load a USD/USDZ file, returning the first ParticleField as (attributes, caps).
 
-        Args:
-            path: Path to USD/USDZ file
+        For stages with several ParticleField prims use :meth:`load_fields`, which returns
+        each prim independently (the prims are never concatenated).
+        """
+        return self.load_fields(path)[0]
 
-        Returns:
-            Tuple of (GaussianAttributes, ModelCapabilities)
+    def load_fields(self, path: Path) -> list:
+        """Load a USD/USDZ file as a list of per-prim ``(GaussianAttributes, ModelCapabilities)``.
+
+        Each ParticleField prim is returned independently — they are not merged — so callers can
+        treat every prim as its own field / partition.
         """
         logger.info(f"Loading USD file: {path}")
-
-        # Handle USDZ by extracting to temp dir
         if path.suffix.lower() == ".usdz":
-            return self._load_usdz(path)
-        else:
-            return self._load_usd_stage(path)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmpdir_path = Path(tmpdir)
+                with zipfile.ZipFile(path, "r") as zf:
+                    zf.extractall(tmpdir_path)
+                usd_files = list(tmpdir_path.glob("*.usd*"))
+                if not usd_files:
+                    raise ValueError(f"No USD files found in USDZ: {path}")
+                root_file = next((f for f in usd_files if f.stem == "default"), usd_files[0])
+                return self._load_fields_from_stage(root_file)
+        return self._load_fields_from_stage(path)
 
-    def _load_usdz(self, path: Path) -> Tuple[GaussianAttributes, ModelCapabilities]:
-        """Load USDZ file (extract and load root stage)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-
-            # Extract USDZ
-            with zipfile.ZipFile(path, "r") as zf:
-                zf.extractall(tmpdir_path)
-
-            # Find the root USD file (usually default.usda or first .usd*)
-            usd_files = list(tmpdir_path.glob("*.usd*"))
-            if not usd_files:
-                raise ValueError(f"No USD files found in USDZ: {path}")
-
-            # Prefer default.usda
-            root_file = None
-            for f in usd_files:
-                if f.stem == "default":
-                    root_file = f
-                    break
-            if root_file is None:
-                root_file = usd_files[0]
-
-            return self._load_usd_stage(root_file)
-
-    def _load_usd_stage(self, path: Path) -> Tuple[GaussianAttributes, ModelCapabilities]:
-        """Load USD stage and extract Gaussian data."""
+    def _load_fields_from_stage(self, path: Path) -> list:
+        """Open a stage and load every ParticleField prim independently."""
         stage = Usd.Stage.Open(str(path))
         if not stage:
             raise ValueError(f"Failed to open USD stage: {path}")
 
-        # Find Gaussian prim (LightField schema only)
-        gaussian_prim = self._find_particlefield_prim(stage)
-        if gaussian_prim is None:
+        gaussian_prims = self._find_particlefield_prims(stage)
+        if not gaussian_prims:
             prim_types = sorted({p.GetTypeName() for p in stage.Traverse()})
             raise ValueError(
                 f"No Gaussian prim found in USD file: {path}. "
@@ -108,20 +94,18 @@ class USDImporter(FormatImporter):
                 f"NuRec (UsdVol::Volume) and other formats are not supported for import."
             )
 
-        logger.info(f"Found Gaussian prim: {gaussian_prim.GetPath()} (type: {gaussian_prim.GetTypeName()})")
-        self.source_gaussian_transform = collect_local_to_world_transform_samples(gaussian_prim)
+        self.source_gaussian_transforms = [collect_local_to_world_transform_samples(p) for p in gaussian_prims]
+        self.source_gaussian_transform = self.source_gaussian_transforms[0]
 
-        # Load via UsdVol schema API (ParticleField is base; ParticleField3DGaussianSplat is derived)
-        if gaussian_prim.IsA(UsdVol.ParticleField):
-            return self._load_lightfield(gaussian_prim)
-        raise ValueError(f"Prim is not a UsdVol ParticleField: {gaussian_prim.GetTypeName()}")
+        fields = []
+        for prim in gaussian_prims:
+            logger.info(f"Found Gaussian prim: {prim.GetPath()} (type: {prim.GetTypeName()})")
+            fields.append(self._load_lightfield(prim))
+        return fields
 
-    def _find_particlefield_prim(self, stage: Usd.Stage) -> Optional[Usd.Prim]:
-        """Find the Gaussian data prim in the stage (UsdVol.ParticleField or derived)."""
-        for prim in stage.Traverse():
-            if prim.IsA(UsdVol.ParticleField):
-                return prim
-        return None
+    def _find_particlefield_prims(self, stage: Usd.Stage) -> list:
+        """Find all Gaussian data prims in the stage (UsdVol.ParticleField or derived)."""
+        return [prim for prim in stage.Traverse() if prim.IsA(UsdVol.ParticleField)]
 
     def _load_lightfield(self, prim: Usd.Prim) -> Tuple[GaussianAttributes, ModelCapabilities]:
         """Load from ParticleField3DGaussianSplat or ParticleField via UsdVol schema API."""
@@ -178,16 +162,15 @@ class USDImporter(FormatImporter):
         num_sh_coeffs = (sh_degree + 1) ** 2
         sh_coeffs = sh_coeffs.reshape(num_gaussians, num_sh_coeffs, 3)
         albedo = sh_coeffs[:, 0, :]
+        # Keep the source's native SH width; do not pad to a fixed degree (that would inflate a
+        # lower-degree asset into a degree-3 one with zero coefficients). Consumers derive the
+        # coefficient count from the array width / caps.sh_degree, and merging pads to the max
+        # present degree only when combining prims of differing degree.
         specular = (
             sh_coeffs[:, 1:, :].reshape(num_gaussians, -1)
             if num_sh_coeffs > 1
             else np.zeros((num_gaussians, 0), dtype=np.float32)
         )
-        max_specular_size = ((3 + 1) ** 2 - 1) * 3
-        if specular.shape[1] < max_specular_size:
-            padded = np.zeros((num_gaussians, max_specular_size), dtype=np.float32)
-            padded[:, : specular.shape[1]] = specular
-            specular = padded
 
         attrs = GaussianAttributes(
             positions=positions,

@@ -20,8 +20,9 @@ Includes:
 - PLYExporter: Export to PLY point cloud format
 """
 
-from threedgrut.export.formats.ply import PLYExporter
+from threedgrut.export.formats.ply import PLYExporter, export_partitions
 
 __all__ = [
     "PLYExporter",
+    "export_partitions",
 ]

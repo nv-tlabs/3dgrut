@@ -37,6 +37,7 @@ from pxr import Usd
 from threedgrut.export.accessor import GaussianExportAccessor
 from threedgrut.export.base import ExportableModel, ModelExporter
 from threedgrut.export.transforms import (
+    column_vector_4x4_to_usd_matrix,
     estimate_normalizing_transform,
     get_3dgrut_to_usdz_coordinate_transform,
 )
@@ -357,6 +358,28 @@ def _particle_field_render_settings(*, has_runtime_ppisp: bool) -> Dict[str, Any
     return render_settings
 
 
+# A .usdz is a ZIP, and USD's .usdz reader does not support ZIP64, so every packaged layer must
+# stay under the 4 GiB ZIP per-member limit (above it the size field hits the 0xFFFFFFFF sentinel
+# and the reader treats the crate as truncated). Beyond this size, export to .usd/.usdc instead, or
+# split the Gaussians into one layer file per partition (separate_partition_files=True).
+_USDZ_MEMBER_BYTE_LIMIT = 4 * 1024**3  # 4 GiB
+
+
+def _estimate_particlefield_bytes(num_gaussians: int, sh_degree: int, half_geometry: bool, half_features: bool) -> int:
+    """Rough serialized size of a ParticleField crate layer.
+
+    Geometry (positions[3] + orientation[4] + scale[3]) uses geometry precision; opacity[1] and the
+    SH coefficients (3 channels x (deg+1)^2 bands, i.e. DC + specular) use feature precision. The
+    bulk vertex data dominates the crate, so this is an accurate-enough estimate to fail fast before
+    writing an oversized .usdz member.
+    """
+    geom_bytes = 2 if half_geometry else 4
+    feat_bytes = 2 if half_features else 4
+    sh_channels = 3 * (sh_degree + 1) ** 2
+    per_gaussian = geom_bytes * (3 + 4 + 3) + feat_bytes * (1 + sh_channels)
+    return int(num_gaussians) * per_gaussian
+
+
 class USDExporter(ModelExporter):
     """
     Exporter for OpenUSD format using ParticleField3DGaussianSplat schema.
@@ -474,11 +497,12 @@ class USDExporter(ModelExporter):
         referenced_stages: List[NamedUSDStage],
         *,
         has_runtime_ppisp: bool = False,
+        up_axis: str = "Y",
     ) -> NamedUSDStage:
         """
         Create a default.usda that references the data stages.
         """
-        stage = initialize_usd_stage(up_axis="Y")
+        stage = initialize_usd_stage(up_axis=up_axis)
         stage.SetTimeCodesPerSecond(self.frames_per_second)
         stage.SetMetadataByDictKey(
             "customLayerData",
@@ -606,11 +630,65 @@ class USDExporter(ModelExporter):
 
         # Get model data via accessor
         accessor = GaussianExportAccessor(model, conf)
-        attrs = accessor.get_attributes(preactivation=False)
         caps = accessor.get_capabilities()
 
-        logger.info(f"Schema: LightField (post-activation)")
-        logger.info(f"Exporting {attrs.num_gaussians} Gaussians, SH degree {caps.sh_degree}")
+        # Optional spatial partitioning: a list of per-source PartitionResults, each authored as
+        # one or more ParticleField prims. None / a single partition reproduces the regular output.
+        partition_list = kwargs.get("partition")
+        if partition_list is not None and not isinstance(partition_list, (list, tuple)):
+            partition_list = [partition_list]
+        total_partitions = sum(r.num_partitions for r in partition_list) if partition_list else 0
+        partitioned = total_partitions > 1
+        if partitioned:
+            logger.info("Schema: LightField (post-activation), %d ParticleField partitions", total_partitions)
+        else:
+            attrs = accessor.get_attributes(preactivation=False)
+            logger.info(f"Schema: LightField (post-activation)")
+            logger.info(f"Exporting {attrs.num_gaussians} Gaussians, SH degree {caps.sh_degree}")
+
+        # Packaging decision (computed early so the size guard can fail fast before the write).
+        suffix = output_path.suffix.lower()
+        package_as_usdz = suffix == ".usdz" or suffix not in (".usd", ".usda", ".usdc")
+        # Optionally write one .usdc layer per partition so a partitioned scene fits in a .usdz
+        # (each partition stays under the 4 GiB ZIP member limit). Only meaningful for usdz packaging.
+        use_separate_layers = bool(kwargs.get("separate_partition_files", False)) and partitioned and package_as_usdz
+
+        # Fail fast if a single packaged Gaussian layer would exceed the 4 GiB usdz/ZIP member limit
+        # (the package would be silently unreadable). When writing one layer per partition, check the
+        # largest partition instead of the combined total.
+        if package_as_usdz:
+            if use_separate_layers:
+                guard_count = max(int(r.metrics.get("count_max", r.metrics.get("total_exported", 0))) for r in partition_list)
+                guard_degree = max(
+                    (r.capabilities.sh_degree for r in partition_list if r.capabilities is not None),
+                    default=caps.sh_degree,
+                )
+                scope = "largest partition layer"
+            elif partitioned:
+                guard_count = sum(int(r.metrics.get("total_exported", 0)) for r in partition_list)
+                guard_degree = max(
+                    (r.capabilities.sh_degree for r in partition_list if r.capabilities is not None),
+                    default=caps.sh_degree,
+                )
+                scope = "combined Gaussian layer"
+            else:
+                guard_count = attrs.num_gaussians
+                guard_degree = caps.sh_degree
+                scope = "Gaussian layer"
+            est_bytes = _estimate_particlefield_bytes(guard_count, guard_degree, self.half_geometry, self.half_features)
+            if est_bytes > _USDZ_MEMBER_BYTE_LIMIT:
+                hint = (
+                    "split it further with a smaller per-field cap"
+                    if use_separate_layers
+                    else "export to .usd/.usdc (no ZIP size limit), or partition with a per-field cap and "
+                    "write one layer per partition (separate_partition_files=True / "
+                    "--separate-partition-files)"
+                )
+                raise ValueError(
+                    f"The {scope} for this .usdz would be ~{est_bytes / 1e9:.1f} GB ({guard_count} Gaussians, "
+                    f"SH degree {guard_degree}), exceeding the ~4 GiB USDZ (ZIP) per-file limit; the package "
+                    f"would be unreadable. To proceed, {hint}."
+                )
 
         # Compute normalizing transform if enabled
         normalizing_transform = np.eye(4)
@@ -622,50 +700,100 @@ class USDExporter(ModelExporter):
             except (AttributeError, ValueError) as e:
                 logger.warning(f"Failed to compute normalizing transform: {e}")
 
-        # Create main USD stage with the configured time code rate
-        stage = initialize_usd_stage(up_axis="Y")
+        # Create main USD stage. up_axis only sets the stage's `upAxis` metadata — it does not
+        # reorient any geometry (Gaussian data and camera poses are authored as-is).
+        up_axis = "Z" if str(kwargs.get("up_axis") or "Y").upper() == "Z" else "Y"
+        stage = initialize_usd_stage(up_axis=up_axis)
         stage.SetTimeCodesPerSecond(self.frames_per_second)
 
         apply_coordinate_transform = kwargs.get("apply_coordinate_transform", False)
         coordinate_transform = get_3dgrut_to_usdz_coordinate_transform() if apply_coordinate_transform else None
 
-        # Create Gaussian content root
-        gaussians_root = create_gaussian_model_root(
-            stage,
-            flip_x_axis=False,
-            flip_y_axis=False,
-            flip_z_axis=False,
-            root_path="/World/Gaussians",
-            normalizing_transform=normalizing_transform if self.apply_normalizing_transform else None,
-            coordinate_transform=coordinate_transform,
-            source_transform_samples=kwargs.get("source_gaussian_transform"),
+        gaussians_root = "/World/Gaussians"
+
+        # Author one ParticleField into a target stage at content_root_path.
+        def _write_particlefield(target_stage, content_root_path, sub_attrs, sub_caps):
+            writer = create_gaussian_writer(
+                stage=target_stage,
+                capabilities=sub_caps,
+                content_root_path=content_root_path,
+                half_geometry=self.half_geometry,
+                half_features=self.half_features,
+                sorting_mode_hint=self.sorting_mode_hint,
+                linear_srgb=runtime_post_processing,
+                omni_usd=runtime_post_processing,
+                has_post_processing=runtime_post_processing,
+            )
+            writer.create_prim(sub_attrs.num_gaussians)
+            writer.write_attributes(sub_attrs)
+            writer.finalize(sub_attrs.positions)
+
+        def _make_gaussian_root(target_stage):
+            return create_gaussian_model_root(
+                target_stage,
+                flip_x_axis=False,
+                flip_y_axis=False,
+                flip_z_axis=False,
+                root_path=gaussians_root,
+                normalizing_transform=normalizing_transform if self.apply_normalizing_transform else None,
+                coordinate_transform=coordinate_transform,
+                source_transform_samples=kwargs.get("source_gaussian_transform"),
+            )
+
+        def _author_partition_prim(target_stage, part_root, src_t, sub, sub_caps):
+            if src_t is not None and not np.allclose(src_t, np.eye(4)):
+                from pxr import UsdGeom
+
+                # Preserve this source field's local-to-world (M_f) on its prim.
+                part_xform = UsdGeom.Xform.Define(target_stage, part_root)
+                part_xform.AddTransformOp().Set(column_vector_4x4_to_usd_matrix(np.asarray(src_t)))
+            _write_particlefield(target_stage, part_root, sub, sub_caps)
+
+        # Separate-layer mode authors each partition into its own self-contained .usdc stage; the
+        # default.usda then references all of them (see packaging below). Otherwise everything goes
+        # into the single main stage (one gaussians.usdc, or the exported .usd/.usdc itself).
+        partition_layers: List[NamedUSDStage] = []
+        width = max(3, len(str(total_partitions - 1))) if partitioned else 3
+        if use_separate_layers:
+            running = 0
+            for result in partition_list:
+                result_caps = result.capabilities if result.capabilities is not None else caps
+                src_t = getattr(result, "source_transform", None)
+                for _pid, sub in result.iter_partitions(preactivation=False):
+                    part_stage = initialize_usd_stage(up_axis=up_axis)
+                    part_stage.SetTimeCodesPerSecond(self.frames_per_second)
+                    _make_gaussian_root(part_stage)
+                    part_root = f"{gaussians_root}/Partition_{running:0{width}d}"
+                    _author_partition_prim(part_stage, part_root, src_t, sub, result_caps)
+                    partition_layers.append(NamedUSDStage(filename=f"gaussians_{running:0{width}d}.usdc", stage=part_stage))
+                    running += 1
+            logger.info("Authored %d ParticleField partition layer(s)", len(partition_layers))
+        else:
+            _make_gaussian_root(stage)
+            if partitioned:
+                running = 0
+                for result in partition_list:
+                    result_caps = result.capabilities if result.capabilities is not None else caps
+                    src_t = getattr(result, "source_transform", None)
+                    for _pid, sub in result.iter_partitions(preactivation=False):
+                        part_root = f"{gaussians_root}/Partition_{running:0{width}d}"
+                        _author_partition_prim(stage, part_root, src_t, sub, result_caps)
+                        running += 1
+                logger.info("Authored %d ParticleField partitions under %s", total_partitions, gaussians_root)
+            else:
+                _write_particlefield(stage, gaussians_root, attrs, caps)
+
+        # Data layers referenced by default.usda when packaging: one gaussians.usdc, or one
+        # gaussians_NNN.usdc per partition in separate-layer mode.
+        data_stages: List[NamedUSDStage] = (
+            partition_layers if use_separate_layers else [NamedUSDStage(filename="gaussians.usdc", stage=stage)]
         )
-
-        # Write Gaussians
-        writer = create_gaussian_writer(
-            stage=stage,
-            capabilities=caps,
-            content_root_path=gaussians_root,
-            half_geometry=self.half_geometry,
-            half_features=self.half_features,
-            sorting_mode_hint=self.sorting_mode_hint,
-            linear_srgb=runtime_post_processing,
-            omni_usd=runtime_post_processing,
-            has_post_processing=runtime_post_processing,
-        )
-        writer.create_prim(attrs.num_gaussians)
-        writer.write_attributes(attrs)
-        writer.finalize(attrs.positions)
-
-        suffix = output_path.suffix.lower()
-        package_as_usdz = suffix == ".usdz" or suffix not in (".usd", ".usda", ".usdc")
-
-        gaussians_stage = NamedUSDStage(filename="gaussians.usdc", stage=stage)
         default_stage_wrapped: Optional[NamedUSDStage] = None
         if package_as_usdz:
             default_stage_wrapped = self._create_default_stage(
-                [gaussians_stage],
+                data_stages,
                 has_runtime_ppisp=runtime_post_processing,
+                up_axis=up_axis,
             )
         scene_stage = default_stage_wrapped.stage if default_stage_wrapped is not None else stage
         if not package_as_usdz:
@@ -918,10 +1046,10 @@ class USDExporter(ModelExporter):
         if suffix == ".usdz":
             if default_stage_wrapped is None:
                 default_stage_wrapped = self._create_default_stage(
-                    [gaussians_stage],
+                    data_stages,
                     has_runtime_ppisp=runtime_post_processing,
                 )
-            write_to_usdz(output_path, [default_stage_wrapped, gaussians_stage], files if files else None)
+            write_to_usdz(output_path, [default_stage_wrapped, *data_stages], files if files else None)
             written_path = output_path
         elif suffix in [".usda", ".usd", ".usdc"]:
             stage.Export(str(output_path))
@@ -932,10 +1060,10 @@ class USDExporter(ModelExporter):
             usdz_path = output_path.with_suffix(".usdz")
             if default_stage_wrapped is None:
                 default_stage_wrapped = self._create_default_stage(
-                    [gaussians_stage],
+                    data_stages,
                     has_runtime_ppisp=runtime_post_processing,
                 )
-            write_to_usdz(usdz_path, [default_stage_wrapped, gaussians_stage], files if files else None)
+            write_to_usdz(usdz_path, [default_stage_wrapped, *data_stages], files if files else None)
             written_path = usdz_path
 
         if kwargs.get("validate_usd", True):

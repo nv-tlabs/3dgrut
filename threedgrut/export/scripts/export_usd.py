@@ -243,6 +243,43 @@ Examples:
         action="store_true",
         help="Skip OpenUSD stage validation after standard (ParticleField) export",
     )
+    parser.add_argument(
+        "--up-axis",
+        dest="up_axis",
+        choices=["y", "z"],
+        default="y",
+        help=(
+            "USD stage upAxis metadata for standard export (default: y). Metadata only — it does "
+            "not reorient geometry or cameras. Ignored for nurec (always Z)."
+        ),
+    )
+    parser.add_argument(
+        "--max-particles-per-field",
+        dest="max_per_volume",
+        type=int,
+        default=None,
+        help=(
+            "Subdivide the scene into spatial partitions of at most this many particles, writing "
+            "one ParticleField prim per partition (standard format). Off by default."
+        ),
+    )
+    parser.add_argument(
+        "--separate-partition-files",
+        action="store_true",
+        help=(
+            "Write each partition to its own .usdc layer inside the .usdz (standard format). Needed "
+            "to package a partitioned scene whose combined Gaussian layer would exceed the 4 GiB "
+            "usdz/ZIP per-file limit; pair with --max-particles-per-field."
+        ),
+    )
+    parser.add_argument(
+        "--partition-in-normalized-frame",
+        action="store_true",
+        help=(
+            "Run the partition KD-tree in the principal-axis (covariance eigenbasis) frame so cut "
+            "planes follow the data's natural axes. Grouping only; output geometry is unchanged."
+        ),
+    )
 
     return parser.parse_args()
 
@@ -508,6 +545,20 @@ def main():
         export_kw = {}
         if args.format == "standard":
             export_kw["validate_usd"] = not args.no_usd_validate
+            export_kw["up_axis"] = args.up_axis  # stage upAxis metadata only (no reorientation)
+            # Optional spatial partitioning: one ParticleField prim (or .usdc layer) per partition.
+            if args.max_per_volume is not None:
+                from threedgrut.export.partition import partition_scene
+
+                result = partition_scene(
+                    model,
+                    args.max_per_volume,
+                    conf=conf,
+                    normalized_frame=args.partition_in_normalized_frame,
+                )
+                if result.num_partitions > 1:
+                    export_kw["partition"] = result
+                    export_kw["separate_partition_files"] = args.separate_partition_files
         exporter.export(
             model=model,
             output_path=output_path,
