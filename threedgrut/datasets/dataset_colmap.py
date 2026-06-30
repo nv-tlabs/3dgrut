@@ -44,6 +44,8 @@ from .utils import (
     read_colmap_extrinsics_text,
     read_colmap_intrinsics_binary,
     read_colmap_intrinsics_text,
+    read_colmap_points3D_binary,
+    read_colmap_points3D_text,
 )
 
 
@@ -78,6 +80,96 @@ def _opencv_pinhole_intrinsics_from_colmap(intr_model: str, intr_params: np.ndar
     return focal_length, principal_point, radial_coeffs, tangential_coeffs, thin_prism_coeffs
 
 
+def _transform_points(matrix: np.ndarray, points: np.ndarray) -> np.ndarray:
+    assert matrix.shape == (4, 4)
+    assert points.ndim == 2 and points.shape[1] == 3
+    return points @ matrix[:3, :3].T + matrix[:3, 3]
+
+
+def _transform_cameras(matrix: np.ndarray, camtoworlds: np.ndarray) -> np.ndarray:
+    assert matrix.shape == (4, 4)
+    assert camtoworlds.ndim == 3 and camtoworlds.shape[1:] == (4, 4)
+    camtoworlds = np.einsum("nij,ki->nkj", camtoworlds, matrix)
+    scaling = np.linalg.norm(camtoworlds[:, 0, :3], axis=1)
+    if np.any(scaling <= 0):
+        raise ValueError("Invalid camera transform scaling while normalizing COLMAP scene.")
+    camtoworlds[:, :3, :3] = camtoworlds[:, :3, :3] / scaling[:, None, None]
+    return camtoworlds
+
+
+def _similarity_from_cameras(camtoworlds: np.ndarray) -> np.ndarray:
+    t = camtoworlds[:, :3, 3].astype(np.float64)
+    R = camtoworlds[:, :3, :3].astype(np.float64)
+
+    ups = np.sum(R * np.array([0.0, -1.0, 0.0], dtype=np.float64), axis=-1)
+    world_up = np.mean(ups, axis=0)
+    world_up_norm = np.linalg.norm(world_up)
+    if world_up_norm <= 0:
+        raise ValueError("Cannot normalize COLMAP scene with degenerate camera up vectors.")
+    world_up /= world_up_norm
+
+    up_camspace = np.array([0.0, -1.0, 0.0], dtype=np.float64)
+    c = (up_camspace * world_up).sum()
+    cross = np.cross(world_up, up_camspace)
+    skew = np.array(
+        [
+            [0.0, -cross[2], cross[1]],
+            [cross[2], 0.0, -cross[0]],
+            [-cross[1], cross[0], 0.0],
+        ],
+        dtype=np.float64,
+    )
+    if c > -1:
+        R_align = np.eye(3, dtype=np.float64) + skew + (skew @ skew) / (1 + c)
+    else:
+        R_align = np.array([[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
+
+    R = R_align @ R
+    fwds = np.sum(R * np.array([0.0, 0.0, 1.0], dtype=np.float64), axis=-1)
+    t = (R_align @ t[..., None])[..., 0]
+
+    nearest = t + (fwds * -t).sum(-1)[:, None] * fwds
+    translate = -np.median(nearest, axis=0)
+
+    dists = np.linalg.norm(t + translate, axis=-1)
+    median_dist = np.median(dists)
+    if median_dist <= 0:
+        raise ValueError("Cannot normalize COLMAP scene with degenerate camera distances.")
+
+    transform = np.eye(4, dtype=np.float64)
+    transform[:3, 3] = translate
+    transform[:3, :3] = R_align
+    transform[:3, :] *= 1.0 / median_dist
+    return transform
+
+
+def _align_principal_axes(points: np.ndarray) -> np.ndarray:
+    if points.shape[0] < 3:
+        raise ValueError("Cannot PCA-align COLMAP scene with fewer than 3 points.")
+
+    centroid = np.median(points, axis=0)
+    translated_points = points - centroid
+    covariance_matrix = np.cov(translated_points, rowvar=False)
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
+    sort_indices = eigenvalues.argsort()[::-1]
+    eigenvectors = eigenvectors[:, sort_indices]
+    if np.linalg.det(eigenvectors) < 0:
+        eigenvectors[:, 0] *= -1
+
+    rotation_matrix = eigenvectors.T
+    transform = np.eye(4, dtype=np.float64)
+    transform[:3, :3] = rotation_matrix
+    transform[:3, 3] = -rotation_matrix @ centroid
+    return transform
+
+
+def _gsplat_scene_scale(camtoworlds: np.ndarray) -> float:
+    camera_locations = camtoworlds[:, :3, 3]
+    scene_center = np.mean(camera_locations, axis=0)
+    dists = np.linalg.norm(camera_locations - scene_center, axis=1)
+    return float(np.max(dists))
+
+
 class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def __init__(
         self,
@@ -90,6 +182,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         exif_exposures: Optional[list[Optional[float]]] = None,
         camera_names: Optional[list[str]] = None,
         camera_ids: Optional[list[int]] = None,
+        normalize_world_space: bool = False,
     ):
         self.path = path
         self.device = device
@@ -100,6 +193,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self._all_exif_exposures = exif_exposures  # Exposure values for all frames (pre-split)
         self.camera_names = list(camera_names) if camera_names is not None else None
         self.camera_ids = [int(camera_id) for camera_id in camera_ids] if camera_ids is not None else None
+        self.normalize_world_space = bool(normalize_world_space)
+        self.world_normalization_transform = np.eye(4, dtype=np.float32)
 
         # Worker-based GPU cache for multiprocessing compatibility
         self._worker_gpu_cache = {}
@@ -122,6 +217,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         self.n_frames = len(self.cam_extrinsics)
         self.load_camera_data()
+        if self.normalize_world_space:
+            self.apply_world_space_normalization()
         indices = np.arange(self.n_frames)
 
         # If test_split_interval is set, every test_split_interval frame will be excluded from the training set
@@ -156,6 +253,54 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         # Clear existing worker caches to force recreation with new intrinsics
         self._worker_gpu_cache.clear()
+
+    def _load_points_for_world_normalization(self) -> np.ndarray:
+        points_candidates = [
+            (os.path.join(self.path, "sparse/0", "points3D.bin"), read_colmap_points3D_binary),
+            (os.path.join(self.path, "sparse/0", "points3D.txt"), read_colmap_points3D_text),
+            (os.path.join(self.path, "colmap", "points3D.txt"), read_colmap_points3D_text),
+        ]
+        for points_file, reader in points_candidates:
+            if os.path.isfile(points_file):
+                points, _, _ = reader(points_file)
+                if points.shape[0] == 0:
+                    raise ValueError(f"COLMAP point file is empty: {points_file}")
+                return points.astype(np.float64)
+        raise FileNotFoundError(f"Could not find COLMAP points3D file under {self.path}")
+
+    def apply_world_space_normalization(self) -> None:
+        points = self._load_points_for_world_normalization()
+
+        T1 = _similarity_from_cameras(self.poses)
+        camtoworlds = _transform_cameras(T1, self.poses)
+        points = _transform_points(T1, points)
+
+        T2 = _align_principal_axes(points)
+        camtoworlds = _transform_cameras(T2, camtoworlds)
+        points = _transform_points(T2, points)
+        transform = T2 @ T1
+
+        if np.median(points[:, 2]) > np.mean(points[:, 2]):
+            T3 = np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, -1.0, 0.0, 0.0],
+                    [0.0, 0.0, -1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                dtype=np.float64,
+            )
+            camtoworlds = _transform_cameras(T3, camtoworlds)
+            transform = T3 @ transform
+
+        self.poses = camtoworlds.astype(np.float32)
+        self.camera_centers = self.poses[:, :3, 3].copy()
+        self.cameras_extent = _gsplat_scene_scale(self.poses) * 1.1
+        self.world_normalization_transform = transform.astype(np.float32)
+        logger.info(
+            "Applied GSplat-style COLMAP world normalization "
+            f"(scene_extent={self.cameras_extent:.6f}, split={self.split})"
+        )
 
     def load_intrinsics_and_extrinsics(self):
         try:
@@ -507,6 +652,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def get_observer_points(self):
         return self.camera_centers
+
+    def get_world_normalization_transform(self) -> np.ndarray:
+        return self.world_normalization_transform
 
     def get_poses(self) -> np.ndarray:
         """Get camera poses as 4x4 transformation matrices.
