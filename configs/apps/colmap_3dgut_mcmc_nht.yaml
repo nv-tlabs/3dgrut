@@ -14,9 +14,12 @@ model:
 val_frequency: 999999 # never validate during reference-style training
 
 render:
-  particle_feature_half: true
-  feature_output_half: true
+  particle_feature_half: false
+  feature_output_half: false
   particle_kernel_max_alpha: 0.999
+
+initialization:
+  use_observation_points: false
 
 loss:
   use_opacity: true
