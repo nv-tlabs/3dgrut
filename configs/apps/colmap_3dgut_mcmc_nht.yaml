@@ -15,11 +15,15 @@ val_frequency: 999999 # never validate during reference-style training
 
 dataset:
   normalize_world_space: true
+  gsplat_image_downscale: true
 
 render:
   particle_feature_half: false
   feature_output_half: false
-  particle_kernel_max_alpha: 0.999
+  particle_kernel_max_alpha: 0.99
+  splat:
+    ut_alpha: 0.1
+    tile_based_culling: false
 
 initialization:
   use_observation_points: false

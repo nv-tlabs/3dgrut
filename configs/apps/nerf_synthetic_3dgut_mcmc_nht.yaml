@@ -14,7 +14,10 @@ model:
 render:
   particle_feature_half: false
   feature_output_half: false
-  particle_kernel_max_alpha: 0.999
+  particle_kernel_max_alpha: 0.99
+  splat:
+    ut_alpha: 0.1
+    tile_based_culling: false
 
 loss:
   use_opacity: true

@@ -49,6 +49,37 @@ from .utils import (
 )
 
 
+def _get_rel_paths(path_dir: str) -> list[str]:
+    paths = []
+    for dirpath, _, filenames in os.walk(path_dir):
+        for filename in filenames:
+            paths.append(os.path.relpath(os.path.join(dirpath, filename), path_dir))
+    return paths
+
+
+def _resize_image_folder_bicubic(image_dir: str, resized_dir: str, factor: int) -> str:
+    logger.info(f"Downscaling images by {factor}x from {image_dir} to {resized_dir}.")
+    os.makedirs(resized_dir, exist_ok=True)
+
+    resampling = getattr(Image, "Resampling", Image).BICUBIC
+    for image_file in _get_rel_paths(image_dir):
+        image_path = os.path.join(image_dir, image_file)
+        resized_path = os.path.join(resized_dir, os.path.splitext(image_file)[0] + ".png")
+        if os.path.isfile(resized_path):
+            continue
+
+        os.makedirs(os.path.dirname(resized_path), exist_ok=True)
+        with Image.open(image_path) as image:
+            image = image.convert("RGB")
+            resized_size = (
+                int(round(image.size[0] / factor)),
+                int(round(image.size[1] / factor)),
+            )
+            image.resize(resized_size, resampling).save(resized_path)
+
+    return resized_dir
+
+
 def _opencv_pinhole_intrinsics_from_colmap(intr_model: str, intr_params: np.ndarray, scaling_factor: float):
     """Convert COLMAP distorted pinhole parameters to OpenCVPinholeCameraModelParameters fields."""
     intr_params = np.asarray(intr_params, dtype=np.float32)
@@ -77,6 +108,43 @@ def _opencv_pinhole_intrinsics_from_colmap(intr_model: str, intr_params: np.ndar
     else:
         raise ValueError(f"Unsupported distorted pinhole camera model: {intr_model}")
 
+    return focal_length, principal_point, radial_coeffs, tangential_coeffs, thin_prism_coeffs
+
+
+def _opencv_pinhole_intrinsics_from_colmap_gsplat(
+    intr_model: str,
+    intr_params: np.ndarray,
+    factor: int,
+    image_scale: np.ndarray,
+):
+    intr_params = np.asarray(intr_params, dtype=np.float32)
+    radial_coeffs = np.zeros((6,), dtype=np.float32)
+    tangential_coeffs = np.zeros((2,), dtype=np.float32)
+    thin_prism_coeffs = np.zeros((4,), dtype=np.float32)
+
+    if intr_model == "SIMPLE_RADIAL":
+        focal_length = np.array([intr_params[0], intr_params[0]], dtype=np.float32)
+        principal_point = intr_params[1:3]
+        radial_coeffs[0] = intr_params[3]
+    elif intr_model == "RADIAL":
+        focal_length = np.array([intr_params[0], intr_params[0]], dtype=np.float32)
+        principal_point = intr_params[1:3]
+        radial_coeffs[:2] = intr_params[3:5]
+    elif intr_model == "OPENCV":
+        focal_length = intr_params[:2]
+        principal_point = intr_params[2:4]
+        radial_coeffs[:2] = intr_params[4:6]
+        tangential_coeffs[:] = intr_params[6:8]
+    elif intr_model == "FULL_OPENCV":
+        focal_length = intr_params[:2]
+        principal_point = intr_params[2:4]
+        radial_coeffs[:] = intr_params[[4, 5, 8, 9, 10, 11]]
+        tangential_coeffs[:] = intr_params[6:8]
+    else:
+        raise ValueError(f"Unsupported distorted pinhole camera model: {intr_model}")
+
+    focal_length = focal_length / factor * image_scale
+    principal_point = principal_point / factor * image_scale
     return focal_length, principal_point, radial_coeffs, tangential_coeffs, thin_prism_coeffs
 
 
@@ -183,6 +251,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         camera_names: Optional[list[str]] = None,
         camera_ids: Optional[list[int]] = None,
         normalize_world_space: bool = False,
+        gsplat_image_downscale: bool = False,
     ):
         self.path = path
         self.device = device
@@ -194,6 +263,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self.camera_names = list(camera_names) if camera_names is not None else None
         self.camera_ids = [int(camera_id) for camera_id in camera_ids] if camera_ids is not None else None
         self.normalize_world_space = bool(normalize_world_space)
+        self.gsplat_image_downscale = bool(gsplat_image_downscale)
+        self._image_dir = os.path.join(self.path, self.get_images_folder())
+        self._image_name_to_rel_path: dict[str, str] | None = None
         self.world_normalization_transform = np.eye(4, dtype=np.float32)
 
         # Worker-based GPU cache for multiprocessing compatibility
@@ -380,6 +452,90 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         downsample_suffix = "" if self.downsample_factor == 1 else f"_{self.downsample_factor}"
         return f"images{downsample_suffix}"
 
+    def _prepare_image_paths(self):
+        image_dir = os.path.join(self.path, self.get_images_folder())
+        self._image_dir = image_dir
+        self._image_name_to_rel_path = None
+
+        if not self.gsplat_image_downscale:
+            return
+
+        colmap_image_dir = os.path.join(self.path, "images")
+        for directory in [image_dir, colmap_image_dir]:
+            if not os.path.exists(directory):
+                raise ValueError(f"Image folder {directory} does not exist.")
+
+        colmap_files = sorted(_get_rel_paths(colmap_image_dir))
+        image_files = sorted(_get_rel_paths(image_dir))
+        if not image_files:
+            raise ValueError(f"Image folder {image_dir} is empty.")
+
+        if (
+            self.downsample_factor > 1
+            and os.path.splitext(image_files[0])[1].lower() == ".jpg"
+        ):
+            image_dir = _resize_image_folder_bicubic(
+                colmap_image_dir,
+                image_dir + "_png",
+                factor=self.downsample_factor,
+            )
+            image_files = sorted(_get_rel_paths(image_dir))
+
+        if len(colmap_files) != len(image_files):
+            raise ValueError(
+                f"Cannot map COLMAP images to GSplat image folder: "
+                f"{len(colmap_files)} files in {colmap_image_dir}, {len(image_files)} files in {image_dir}."
+            )
+
+        self._image_dir = image_dir
+        self._image_name_to_rel_path = dict(zip(colmap_files, image_files))
+        logger.info(
+            f"Using GSplat-style COLMAP image mapping ({len(image_files)} images, "
+            f"image_dir={self._image_dir}, split={self.split})"
+        )
+
+    def _resolve_image_path(self, image_name: str) -> str:
+        if self._image_name_to_rel_path is None:
+            return os.path.join(self._image_dir, image_name)
+
+        rel_path = self._image_name_to_rel_path.get(image_name)
+        if rel_path is None:
+            normalized_name = image_name.replace("\\", os.sep)
+            rel_path = self._image_name_to_rel_path.get(normalized_name)
+        if rel_path is None:
+            raise FileNotFoundError(
+                f"COLMAP image {image_name} is not present in GSplat image mapping for {self._image_dir}."
+            )
+        return os.path.join(self._image_dir, rel_path)
+
+    def _intrinsic_scale(self, intr, width: int, height: int):
+        if not self.gsplat_image_downscale:
+            scaling_factor = int(round(intr.height / height))
+            expected_size = f"{intr.width / scaling_factor}x{intr.height / scaling_factor}"
+            assert (
+                abs(intr.width / scaling_factor - width) <= 1
+            ), f"Scaled image dimension {expected_size} (factor {scaling_factor}x) does not match the actual image dimensions {width}x{height}"
+            assert (
+                abs(intr.height / scaling_factor - height) <= 1
+            ), f"Scaled image dimension {expected_size} (factor {scaling_factor}x) does not match the actual image dimensions {width}x{height}"
+            return scaling_factor, np.ones(2, dtype=np.float32)
+
+        factor = int(self.downsample_factor)
+        expected_width = intr.width // factor
+        expected_height = intr.height // factor
+        if expected_width <= 0 or expected_height <= 0:
+            raise ValueError(f"Invalid COLMAP downsample factor {factor} for image size {intr.width}x{intr.height}.")
+        expected_size = f"{intr.width / factor}x{intr.height / factor}"
+        assert (
+            abs(intr.width / factor - width) <= 1
+        ), f"Scaled image dimension {expected_size} (factor {factor}x) does not match the actual image dimensions {width}x{height}"
+        assert (
+            abs(intr.height / factor - height) <= 1
+        ), f"Scaled image dimension {expected_size} (factor {factor}x) does not match the actual image dimensions {width}x{height}"
+
+        image_scale = np.array([width / expected_width, height / expected_height], dtype=np.float32)
+        return factor, image_scale
+
     def load_camera_data(self):
         """
         Load the camera data and generate rays for each camera.
@@ -391,6 +547,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def _store_camera_params_cpu(self):
         """Store camera parameters on CPU for multiprocessing compatibility."""
+        self._prepare_image_paths()
 
         def create_pinhole_camera(focalx, focaly, w, h, cx=None, cy=None):
             cx = cx if cx is not None else w / 2.0
@@ -494,14 +651,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         cam_id_to_image_name = {extr.camera_id: extr.name for extr in self.cam_extrinsics}
 
         for intr in self.cam_intrinsics.values():
-            full_width = intr.width
-            full_height = intr.height
-
             image_name = cam_id_to_image_name[intr.id]
-            image_name = (
-                os.path.join(os.path.split(image_name)[1], "") if self.get_images_folder() in image_name else image_name
-            )
-            image_path = os.path.join(self.path, self.get_images_folder(), image_name)
+            image_path = self._resolve_image_path(image_name)
 
             try:
                 # Load the image to get its actual dimensions
@@ -511,37 +662,52 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 logger.error(f"Image {image_path} not found. Cannot determine dimensions for intrinsic ID {intr.id}.")
                 continue
 
-            # Calculate scaling factor to match the image dimensions to the intrinsic dimensions
-            scaling_factor = int(round(intr.height / height))
-            expected_size = f"{full_width / scaling_factor}x{full_height / scaling_factor}"
-            assert (
-                abs(full_width / scaling_factor - width) <= 1
-            ), f"Scaled image dimension {expected_size} (factor {scaling_factor}x) does not match the actual image dimensions {width}x{height}"
-            assert (
-                abs(full_height / scaling_factor - height) <= 1
-            ), f"Scaled image dimension {expected_size} (factor {scaling_factor}x) does not match the actual image dimensions {width}x{height}"
+            scaling_factor, image_scale = self._intrinsic_scale(intr, width, height)
 
             if intr.model == "SIMPLE_PINHOLE":
-                focal_length = intr.params[0] / scaling_factor
-                cx = intr.params[1] / scaling_factor
-                cy = intr.params[2] / scaling_factor
+                if self.gsplat_image_downscale:
+                    focal_length_x = intr.params[0] / scaling_factor * image_scale[0]
+                    focal_length_y = intr.params[0] / scaling_factor * image_scale[1]
+                    cx = intr.params[1] / scaling_factor * image_scale[0]
+                    cy = intr.params[2] / scaling_factor * image_scale[1]
+                else:
+                    focal_length_x = intr.params[0] / scaling_factor
+                    focal_length_y = focal_length_x
+                    cx = intr.params[1] / scaling_factor
+                    cy = intr.params[2] / scaling_factor
                 self.intrinsics[intr.id] = create_pinhole_camera(
-                    focal_length, focal_length, width, height, cx=cx, cy=cy
+                    focal_length_x, focal_length_y, width, height, cx=cx, cy=cy
                 )
 
             elif intr.model == "PINHOLE":
-                focal_length_x = intr.params[0] / scaling_factor
-                focal_length_y = intr.params[1] / scaling_factor
-                cx = intr.params[2] / scaling_factor
-                cy = intr.params[3] / scaling_factor
+                if self.gsplat_image_downscale:
+                    focal_length_x = intr.params[0] / scaling_factor * image_scale[0]
+                    focal_length_y = intr.params[1] / scaling_factor * image_scale[1]
+                    cx = intr.params[2] / scaling_factor * image_scale[0]
+                    cy = intr.params[3] / scaling_factor * image_scale[1]
+                else:
+                    focal_length_x = intr.params[0] / scaling_factor
+                    focal_length_y = intr.params[1] / scaling_factor
+                    cx = intr.params[2] / scaling_factor
+                    cy = intr.params[3] / scaling_factor
                 self.intrinsics[intr.id] = create_pinhole_camera(
                     focal_length_x, focal_length_y, width, height, cx=cx, cy=cy
                 )
 
             elif intr.model in {"SIMPLE_RADIAL", "RADIAL", "OPENCV", "FULL_OPENCV"}:
-                focal_length, principal_point, radial_coeffs, tangential_coeffs, thin_prism_coeffs = (
-                    _opencv_pinhole_intrinsics_from_colmap(intr.model, intr.params, scaling_factor)
-                )
+                if self.gsplat_image_downscale:
+                    focal_length, principal_point, radial_coeffs, tangential_coeffs, thin_prism_coeffs = (
+                        _opencv_pinhole_intrinsics_from_colmap_gsplat(
+                            intr.model,
+                            intr.params,
+                            scaling_factor,
+                            image_scale,
+                        )
+                    )
+                else:
+                    focal_length, principal_point, radial_coeffs, tangential_coeffs, thin_prism_coeffs = (
+                        _opencv_pinhole_intrinsics_from_colmap(intr.model, intr.params, scaling_factor)
+                    )
                 self.intrinsics[intr.id] = create_opencv_pinhole_camera(
                     focal_length,
                     principal_point,
@@ -554,7 +720,13 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
             elif intr.model == "OPENCV_FISHEYE":
                 params = copy.deepcopy(intr.params)
-                params[:4] = params[:4] / scaling_factor
+                if self.gsplat_image_downscale:
+                    params[:4] = params[:4] / scaling_factor * np.array(
+                        [image_scale[0], image_scale[1], image_scale[0], image_scale[1]],
+                        dtype=np.float32,
+                    )
+                else:
+                    params[:4] = params[:4] / scaling_factor
                 self.intrinsics[intr.id] = create_fisheye_camera(params, width, height)
 
             else:
@@ -584,7 +756,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
             self.poses.append(C2W)
             cam_centers.append(C2W[:3, 3])
 
-            image_path = os.path.join(self.path, self.get_images_folder(), extr.name)
+            image_path = self._resolve_image_path(extr.name)
             self.image_paths.append(image_path)
             self.mask_paths.append(os.path.splitext(image_path)[0] + "_mask.png")
 

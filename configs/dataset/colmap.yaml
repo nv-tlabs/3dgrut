@@ -2,6 +2,7 @@ type: colmap
 downsample_factor: 1
 test_split_interval: 8
 normalize_world_space: false
+gsplat_image_downscale: false
 camera_names: null  # Optional folder-name filter, e.g. [front_stereo_camera_left]
 camera_ids: null    # Optional COLMAP numeric camera id filter, e.g. [2]
 load_exif: true  # Load EXIF exposure data from JPEG images for post-processing
