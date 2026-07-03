@@ -27,6 +27,7 @@ from .utils import read_colmap_extrinsics_binary, read_colmap_extrinsics_text
 def _load_colmap_exif_exposures(
     dataset_path: str,
     downsample_factor: int,
+    original_images: bool = False,
 ) -> list[Optional[float]]:
     """Load EXIF exposure data for all COLMAP images.
 
@@ -37,6 +38,7 @@ def _load_colmap_exif_exposures(
     Args:
         dataset_path: Path to COLMAP dataset root
         downsample_factor: Downsample factor for images folder suffix
+        original_images: Read EXIF from the original images folder instead of a downsampled image folder
 
     Returns:
         List of mean-normalized log2 exposure values for all images.
@@ -52,7 +54,7 @@ def _load_colmap_exif_exposures(
         cam_extrinsics = read_colmap_extrinsics_text(cameras_extrinsic_file)
 
     # Build image paths
-    downsample_suffix = "" if downsample_factor == 1 else f"_{downsample_factor}"
+    downsample_suffix = "" if original_images or downsample_factor == 1 else f"_{downsample_factor}"
     images_folder = f"images{downsample_suffix}"
 
     image_paths: list[Path] = []
@@ -78,11 +80,13 @@ def make(name: str, config, ray_jitter):
                 bg_color=config.model.background.color,
             )
         case "colmap":
+            gsplat_image_downscale = config.dataset.get("gsplat_image_downscale", False)
             # Load EXIF exposure data if enabled (shared between train and val)
             if config.dataset.get("load_exif", True):
                 exif_exposures = _load_colmap_exif_exposures(
                     config.path,
                     config.dataset.downsample_factor,
+                    original_images=gsplat_image_downscale,
                 )
             else:
                 exif_exposures = None
@@ -97,6 +101,7 @@ def make(name: str, config, ray_jitter):
                 camera_names=config.dataset.get("camera_names", None),
                 camera_ids=config.dataset.get("camera_ids", None),
                 normalize_world_space=config.dataset.get("normalize_world_space", False),
+                gsplat_image_downscale=gsplat_image_downscale,
             )
             val_dataset = ColmapDataset(
                 config.path,
@@ -107,6 +112,7 @@ def make(name: str, config, ray_jitter):
                 camera_names=config.dataset.get("camera_names", None),
                 camera_ids=config.dataset.get("camera_ids", None),
                 normalize_world_space=config.dataset.get("normalize_world_space", False),
+                gsplat_image_downscale=gsplat_image_downscale,
             )
         case "scannetpp":
             train_dataset = ScannetppDataset(
@@ -203,11 +209,13 @@ def make_test(name: str, config):
                 bg_color=config.model.background.color,
             )
         case "colmap":
+            gsplat_image_downscale = config.dataset.get("gsplat_image_downscale", False)
             # Load EXIF exposure data if enabled
             if config.dataset.get("load_exif", True):
                 exif_exposures = _load_colmap_exif_exposures(
                     config.path,
                     config.dataset.downsample_factor,
+                    original_images=gsplat_image_downscale,
                 )
             else:
                 exif_exposures = None
@@ -221,6 +229,7 @@ def make_test(name: str, config):
                 camera_names=config.dataset.get("camera_names", None),
                 camera_ids=config.dataset.get("camera_ids", None),
                 normalize_world_space=config.dataset.get("normalize_world_space", False),
+                gsplat_image_downscale=gsplat_image_downscale,
             )
         case "scannetpp":
             dataset = ScannetppDataset(
