@@ -16,7 +16,9 @@ val_frequency: 999999 # never validate during reference-style training
 render:
   particle_feature_half: true
   feature_output_half: true
-  particle_kernel_max_alpha: 0.999
+  particle_kernel_max_alpha: 0.99
+  splat:
+    ut_alpha: 0.1
 
 loss:
   use_opacity: true
