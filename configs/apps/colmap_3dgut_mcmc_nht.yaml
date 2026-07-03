@@ -20,6 +20,9 @@ render:
   splat:
     ut_alpha: 0.1
 
+initialization:
+  use_observation_points: false
+
 loss:
   use_opacity: true
   lambda_opacity: 0.02
