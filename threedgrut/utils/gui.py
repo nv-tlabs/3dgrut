@@ -25,14 +25,19 @@ from threedgrut.datasets.protocols import Batch, DatasetVisualization
 from threedgrut.datasets.utils import DEFAULT_DEVICE, fov2focal
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import to_np
+from threedgrut.utils.render import apply_feature_decoder
 from threedgrut.utils.timer import CudaTimer
 
 trajectory = []
 
 
 class GUI:
-    def __init__(self, conf, model, train_dataset, val_dataset, scene_bbox):
+    def __init__(self, conf, model, train_dataset, val_dataset, scene_bbox, feature_decoder=None):
         self.conf = conf
+        self.feature_decoder = feature_decoder
+        self.feature_decoder_center_ray_encoding = bool(
+            getattr(getattr(conf.model, "nht_decoder", None), "center_ray_encoding", False)
+        )
 
         self.update_from_device = self.conf.gui_update_from_device
         if not self.update_from_device:
@@ -199,6 +204,16 @@ class GUI:
 
             self.render_timer.start()
             outputs = self.model(inputs, train=self.viz_render_train_view)
+
+            # The model returns learned NHT features. Decode them here so the
+            # GUI always receives the same RGB output as the training loop.
+            outputs = apply_feature_decoder(
+                self.feature_decoder,
+                outputs,
+                inputs,
+                training=self.viz_render_train_view,
+                center_ray_encoding=self.feature_decoder_center_ray_encoding,
+            )
             self.render_timer.end()
             self.render_width = window_w
             self.render_height = window_h
