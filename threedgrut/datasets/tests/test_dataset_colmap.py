@@ -15,10 +15,14 @@
 
 import numpy as np
 import pytest
+from PIL import Image
 
 pytest.importorskip("ncore")
 
-from threedgrut.datasets.dataset_colmap import _opencv_pinhole_intrinsics_from_colmap
+from threedgrut.datasets.dataset_colmap import (
+    _opencv_pinhole_intrinsics_from_colmap,
+    _resize_image_folder,
+)
 
 
 @pytest.mark.parametrize(
@@ -80,3 +84,15 @@ def test_opencv_pinhole_intrinsics_from_colmap(
 def test_opencv_pinhole_intrinsics_rejects_unsupported_model():
     with pytest.raises(ValueError, match="Unsupported distorted pinhole camera model"):
         _opencv_pinhole_intrinsics_from_colmap("FOV", np.zeros((5,)), scaling_factor=1)
+
+
+def test_resize_image_folder_matches_gsplat_rounding(tmp_path):
+    source = tmp_path / "images"
+    target = tmp_path / "images_2_png"
+    source.mkdir()
+    Image.new("RGB", (7, 5), color=(10, 20, 30)).save(source / "frame.jpg")
+
+    _resize_image_folder(str(source), str(target), factor=2)
+
+    with Image.open(target / "frame.png") as image:
+        assert image.size == (4, 2)

@@ -15,6 +15,7 @@ val_frequency: 999999 # never validate during reference-style training
 
 dataset:
   normalize_world_space: true
+  gsplat_image_downscale: true
 
 render:
   particle_feature_half: true
