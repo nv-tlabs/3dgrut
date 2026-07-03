@@ -28,7 +28,11 @@ from threedgrut.datasets.utils import read_colmap_points3D_text, read_next_bytes
 from threedgrut.export import PLYExporter
 from threedgrut.export.base import ExportableModel
 from threedgrut.model.features import Features
-from threedgrut.model.geometry import k_nearest_neighbors, nearest_neighbor_dist_cpuKD
+from threedgrut.model.geometry import (
+    apply_points_transform,
+    k_nearest_neighbors,
+    nearest_neighbor_dist_cpuKD,
+)
 from threedgrut.optimizers import SelectiveAdam
 from threedgrut.utils.logger import logger
 from threedgrut.utils.misc import (
@@ -308,7 +312,12 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         else:
             raise ValueError(f"Unknown feature_type: {self.feature_type}")
 
-    def init_from_colmap(self, root_path: str, observer_pts):
+    def init_from_colmap(
+        self,
+        root_path: str,
+        observer_pts,
+        points_transform: np.ndarray | torch.Tensor | None = None,
+    ):
         # Special case for scannetpp dataset
         if self.conf.dataset.type == "scannetpp":
             points_file = os.path.join(root_path, "colmap", "points3D.txt")
@@ -346,6 +355,8 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
                 file_pts = torch.tensor(file_pts, dtype=torch.float32, device=self.device)
                 file_rgb = torch.tensor(file_rgb, dtype=torch.uint8, device=self.device)
 
+        file_pts = apply_points_transform(file_pts, points_transform)
+
         assert file_rgb.dtype == torch.uint8, "Expecting RGB values to be in [0, 255] range"
         self.default_initialize_from_points(
             file_pts,
@@ -354,7 +365,12 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
             use_observer_pts=self.conf.initialization.use_observation_points,
         )
 
-    def init_from_fused_point_cloud(self, pc_path: str, observer_pts):
+    def init_from_fused_point_cloud(
+        self,
+        pc_path: str,
+        observer_pts,
+        points_transform: np.ndarray | torch.Tensor | None = None,
+    ):
         """
         Initialize gaussians from an fused point cloud PLY file.
         Similar to init_from_colmap but loads from a given PLY file instead of sparse/0/points3D.txt
@@ -362,6 +378,7 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         Args:
             pc_path: Path to the PLY point cloud file
             observer_pts: Observer points tensor for scale initialization
+            points_transform: Optional transform from point-cloud coordinates to model world coordinates
         """
         logger.info(f"Loading fused point cloud from {pc_path}...")
 
@@ -383,6 +400,7 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         # Convert to torch tensors
         file_pts = torch.tensor(xyz, dtype=torch.float32, device=self.device)
         file_rgb = torch.tensor(rgb, dtype=torch.uint8, device=self.device)
+        file_pts = apply_points_transform(file_pts, points_transform)
 
         logger.info(f"Loaded {len(file_pts)} points from accumulated point cloud")
 

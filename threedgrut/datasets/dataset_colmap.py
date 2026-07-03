@@ -1,4 +1,5 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright 2024-2025 the Regents of the University of California, Nerfstudio Team and contributors. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -30,6 +31,7 @@ from torch.utils.data import Dataset
 
 from threedgrut.utils.logger import logger
 
+from .colmap_gsplat import normalize_world_space, scene_scale
 from .protocols import Batch, BoundedMultiViewDataset, DatasetVisualization
 from .utils import (
     compute_max_radius,
@@ -43,6 +45,8 @@ from .utils import (
     read_colmap_extrinsics_text,
     read_colmap_intrinsics_binary,
     read_colmap_intrinsics_text,
+    read_colmap_points3D_binary,
+    read_colmap_points3D_text,
 )
 
 
@@ -89,6 +93,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         exif_exposures: Optional[list[Optional[float]]] = None,
         camera_names: Optional[list[str]] = None,
         camera_ids: Optional[list[int]] = None,
+        normalize_world_space: bool = False,
     ):
         self.path = path
         self.device = device
@@ -99,6 +104,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         self._all_exif_exposures = exif_exposures  # Exposure values for all frames (pre-split)
         self.camera_names = list(camera_names) if camera_names is not None else None
         self.camera_ids = [int(camera_id) for camera_id in camera_ids] if camera_ids is not None else None
+        self.normalize_world_space = bool(normalize_world_space)
+        self.world_normalization_transform = np.eye(4, dtype=np.float32)
 
         # Worker-based GPU cache for multiprocessing compatibility
         self._worker_gpu_cache = {}
@@ -109,6 +116,7 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
     def reload(self):
         # GPU cache of processed camera intrinsics - now per camera ID
         self.intrinsics = {}
+        self.world_normalization_transform = np.eye(4, dtype=np.float32)
 
         # Get the scene data
         self.load_intrinsics_and_extrinsics()
@@ -121,6 +129,8 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         self.n_frames = len(self.cam_extrinsics)
         self.load_camera_data()
+        if self.normalize_world_space:
+            self._apply_world_space_normalization()
         indices = np.arange(self.n_frames)
 
         # If test_split_interval is set, every test_split_interval frame will be excluded from the training set
@@ -155,6 +165,33 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
         # Clear existing worker caches to force recreation with new intrinsics
         self._worker_gpu_cache.clear()
+
+    def _load_points_for_world_normalization(self) -> np.ndarray:
+        points_candidates = [
+            (os.path.join(self.path, "sparse/0", "points3D.bin"), read_colmap_points3D_binary),
+            (os.path.join(self.path, "sparse/0", "points3D.txt"), read_colmap_points3D_text),
+            (os.path.join(self.path, "colmap", "points3D.txt"), read_colmap_points3D_text),
+        ]
+        for points_file, reader in points_candidates:
+            if os.path.isfile(points_file):
+                points, _, _ = reader(points_file)
+                if points.shape[0] == 0:
+                    raise ValueError(f"COLMAP point file is empty: {points_file}")
+                return points.astype(np.float64)
+        raise FileNotFoundError(f"Could not find COLMAP points3D file under {self.path}")
+
+    def _apply_world_space_normalization(self) -> None:
+        points = self._load_points_for_world_normalization()
+        camtoworlds, _, transform = normalize_world_space(self.poses, points)
+
+        self.poses = camtoworlds.astype(np.float32)
+        self.camera_centers = self.poses[:, :3, 3].copy()
+        self.cameras_extent = scene_scale(self.poses) * 1.1
+        self.world_normalization_transform = transform.astype(np.float32)
+        logger.info(
+            "Applied GSplat-style COLMAP world normalization "
+            f"(scene_extent={self.cameras_extent:.6f}, split={self.split})"
+        )
 
     def load_intrinsics_and_extrinsics(self):
         try:
@@ -506,6 +543,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
 
     def get_observer_points(self):
         return self.camera_centers
+
+    def get_world_normalization_transform(self) -> np.ndarray:
+        return self.world_normalization_transform.copy()
 
     def get_poses(self) -> np.ndarray:
         """Get camera poses as 4x4 transformation matrices.
