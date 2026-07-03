@@ -115,6 +115,32 @@ class BoundedMultiViewDataset(Protocol):
 
 
 @runtime_checkable
+class WorldTransformProvider(Protocol):
+    """Optional dataset capability for mapping source geometry into dataset world space."""
+
+    def get_world_normalization_transform(self) -> np.ndarray:
+        """Return the 4x4 transform from source coordinates to dataset world coordinates."""
+        ...
+
+
+def get_dataset_world_transform(dataset: object) -> np.ndarray | None:
+    """Return a validated, non-identity source-to-dataset transform when available."""
+    if not isinstance(dataset, WorldTransformProvider):
+        return None
+
+    transform = np.asarray(dataset.get_world_normalization_transform())
+    if transform.shape != (4, 4):
+        raise ValueError(f"Dataset world transform must have shape (4, 4), got {transform.shape}.")
+    if not np.issubdtype(transform.dtype, np.number) or np.iscomplexobj(transform):
+        raise ValueError(f"Dataset world transform must be real-valued, got dtype {transform.dtype}.")
+    if not np.all(np.isfinite(transform)):
+        raise ValueError("Dataset world transform must contain only finite values.")
+    if np.array_equal(transform, np.eye(4, dtype=transform.dtype)):
+        return None
+    return transform.copy()
+
+
+@runtime_checkable
 class DatasetVisualization(Protocol):
     """Defines the basic functionality required from all datasets that can be visualized in the GUI app."""
 

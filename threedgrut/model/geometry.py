@@ -21,6 +21,24 @@ import torch
 from threedgrut.utils.misc import to_np
 
 
+def apply_points_transform(
+    points: torch.Tensor,
+    transform: np.ndarray | torch.Tensor | None,
+) -> torch.Tensor:
+    """Apply a 4x4 affine transform to an ``(N, 3)`` point tensor."""
+    if transform is None:
+        return points
+    if points.ndim != 2 or points.shape[1] != 3:
+        raise ValueError(f"points must have shape (N, 3), got {tuple(points.shape)}")
+
+    transform_tensor = torch.as_tensor(transform, dtype=points.dtype, device=points.device)
+    if transform_tensor.shape != (4, 4):
+        raise ValueError(f"transform must have shape (4, 4), got {tuple(transform_tensor.shape)}")
+    if not torch.isfinite(transform_tensor).all():
+        raise ValueError("transform must contain only finite values")
+    return points @ transform_tensor[:3, :3].T + transform_tensor[:3, 3]
+
+
 def k_nearest_neighbors(x: torch.Tensor, K: int = 4) -> torch.Tensor:
     x_np = x.cpu().numpy()
     model = sklearn.neighbors.NearestNeighbors(

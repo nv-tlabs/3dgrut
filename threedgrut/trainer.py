@@ -30,7 +30,10 @@ from torchmetrics.image import StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 import threedgrut.datasets as datasets
-from threedgrut.datasets.protocols import BoundedMultiViewDataset
+from threedgrut.datasets.protocols import (
+    BoundedMultiViewDataset,
+    get_dataset_world_transform,
+)
 from threedgrut.datasets.utils import DEFAULT_DEVICE, MultiEpochsDataLoader, PointCloud
 from threedgrut.model.losses import ssim
 from threedgrut.model.model import MixtureOfGaussians
@@ -321,8 +324,15 @@ class Trainer3DGRUT:
             model.build_acc()
             global_step = conf.import_ply.init_global_step
         else:
-            logger.info(f"🤸 Initiating new 3dgrut training..")
-            match conf.initialization.method:
+            logger.info("🤸 Initiating new 3dgrut training..")
+            initialization_method = conf.initialization.method
+            points_transform = (
+                get_dataset_world_transform(train_dataset)
+                if initialization_method in {"colmap", "fused_point_cloud", "point_cloud"}
+                else None
+            )
+
+            match initialization_method:
                 case "random":
                     model.init_from_random_point_cloud(
                         num_gaussians=conf.initialization.num_gaussians,
@@ -335,7 +345,7 @@ class Trainer3DGRUT:
                         dtype=torch.float32,
                         device=self.device,
                     )
-                    model.init_from_colmap(conf.path, observer_points)
+                    model.init_from_colmap(conf.path, observer_points, points_transform=points_transform)
                 case "fused_point_cloud":
                     observer_points = torch.tensor(
                         train_dataset.get_observer_points(),
@@ -344,8 +354,18 @@ class Trainer3DGRUT:
                     )
                     ply_path = conf.initialization.fused_point_cloud_path
                     logger.info(f"Initializing from accumulated point cloud: {ply_path}")
-                    model.init_from_fused_point_cloud(ply_path, observer_points)
+                    model.init_from_fused_point_cloud(
+                        ply_path,
+                        observer_points,
+                        points_transform=points_transform,
+                    )
                 case "point_cloud":
+                    if points_transform is not None:
+                        raise ValueError(
+                            "initialization.method=point_cloud loads complete Gaussian geometry and cannot safely "
+                            "apply the dataset world transform. Use COLMAP/fused-point initialization, disable "
+                            "world normalization, or import a model already expressed in normalized coordinates."
+                        )
                     try:
                         ply_path = os.path.join(conf.path, "point_cloud.ply")
                         model.init_from_pretrained_point_cloud(ply_path)
@@ -376,7 +396,8 @@ class Trainer3DGRUT:
                     model.init_from_lidar(pc, observer_points)
                 case _:
                     raise ValueError(
-                        f"unrecognized initialization.method {conf.initialization.method}, choose from [colmap, point_cloud, random, checkpoint, lidar]"
+                        f"unrecognized initialization.method {initialization_method}, choose from "
+                        "[colmap, fused_point_cloud, point_cloud, random, checkpoint, lidar]"
                     )
 
             self.strategy.init_densification_buffer()

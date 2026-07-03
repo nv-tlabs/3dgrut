@@ -96,6 +96,7 @@ def make(name: str, config, ray_jitter):
                 exif_exposures=exif_exposures,
                 camera_names=config.dataset.get("camera_names", None),
                 camera_ids=config.dataset.get("camera_ids", None),
+                normalize_world_space=config.dataset.get("normalize_world_space", False),
             )
             val_dataset = ColmapDataset(
                 config.path,
@@ -105,6 +106,7 @@ def make(name: str, config, ray_jitter):
                 exif_exposures=exif_exposures,
                 camera_names=config.dataset.get("camera_names", None),
                 camera_ids=config.dataset.get("camera_ids", None),
+                normalize_world_space=config.dataset.get("normalize_world_space", False),
             )
         case "scannetpp":
             train_dataset = ScannetppDataset(
@@ -218,6 +220,7 @@ def make_test(name: str, config):
                 exif_exposures=exif_exposures,
                 camera_names=config.dataset.get("camera_names", None),
                 camera_ids=config.dataset.get("camera_ids", None),
+                normalize_world_space=config.dataset.get("normalize_world_space", False),
             )
         case "scannetpp":
             dataset = ScannetppDataset(
