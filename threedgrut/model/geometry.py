@@ -35,7 +35,6 @@ def nearest_neighbors(pts_src, k=2):
     pts_src_np = to_np(pts_src)
 
     # distance from a point set to itself
-    pts_target = pts_src
     pts_target_np = pts_src_np
 
     # Build the tree

@@ -13,15 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import gzip
 import os
 from pathlib import Path
-from typing import Any
 
-import msgpack
 import numpy as np
 import torch
-from plyfile import PlyData, PlyElement
+from plyfile import PlyData
 
 import threedgrt_tracer
 import threedgrut.model.background as background

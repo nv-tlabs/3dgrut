@@ -15,7 +15,6 @@
 
 import copy
 import os
-import platform
 from typing import Optional
 
 import ncore.sensors
@@ -585,9 +584,6 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
         # Load image and get its actual dimensions
         image_data = np.asarray(Image.open(self.image_paths[idx]))
         actual_h, actual_w = image_data.shape[:2]
-
-        # Use actual image dimensions for output shape
-        out_shape = (1, actual_h, actual_w, 3)
 
         assert image_data.dtype == np.uint8, "Image data must be of type uint8"
 
