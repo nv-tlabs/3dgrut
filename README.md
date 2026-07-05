@@ -563,6 +563,12 @@ See [Playground README](threedgrut_playground/README.md) for details.
 
 *Update (2025/04): The playground engine is now exposed, and remote rendering is supported; see README for details.*
 
+## 📦 6. Asset Preparation and Re-export
+
+This repository includes tools for converting, combining, partitioning, and
+re-exporting Gaussian assets between PLY, ParticleField USD, and NuRec.
+See the [asset transcoding and re-export documentation](threedgrut/export/README.md#transcoding-between-formats).
+
 ## 📄 7. Contributing
 
 Contributions are welcome! Please feel free to submit a pull request.
