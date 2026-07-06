@@ -15,6 +15,7 @@ post-processing export has its own deep dive in
 - [Converting PLY files to USDZ](#converting-ply-files-to-usdz)
 - [Adding a mesh to a USDZ file](#adding-a-mesh-to-a-usdz-file)
 - [PPISP post-processing export](#ppisp-post-processing-export)
+- [Partitioning large scenes for export](#partitioning-large-scenes-for-export)
 
 ## Formats
 
@@ -222,3 +223,96 @@ per-camera controller path.
 
 The full rationale, CLI/config reference, authored USD surface, traps and
 troubleshooting live in [`usd/post_processing/README.md`](usd/post_processing/README.md).
+
+## Partitioning large scenes for export
+
+Partitioning divides a large Gaussian scene into spatial groups so it can be
+exported as several assets rather than one monolithic asset. Use it when the
+destination has a per-asset particle limit, or when a large output needs to be
+split for downstream processing. Partitioning is optional and off by default.
+
+The option is available for standalone standard-USD export and for transcodes
+to ParticleField USD or PLY. It subdivides each input independently:
+
+```bash
+# Partition a standard USD export at 20 million Gaussians per group.
+python -m threedgrut.export.scripts.export_usd \
+    --checkpoint path/to/checkpoint.pt \
+    --output scene.usdz \
+    --max-particles-per-field 20000000
+
+# For a large packaged USDZ, put each partition in its own crate layer.
+python -m threedgrut.export.scripts.export_usd \
+    --checkpoint path/to/checkpoint.pt \
+    --output scene.usdz \
+    --max-particles-per-field 20000000 \
+    --separate-partition-files
+```
+
+Choose the cap from the most restrictive downstream limit, with headroom
+rather than relying on an absolute maximum. If no cap is given, or the source
+is already at or below the cap, export remains a single unpartitioned asset.
+
+### Partitioning behavior
+
+The exporter divides the scene into spatial groups whose particle counts do
+not exceed the configured cap. Gaussian attributes and world-space geometry
+are preserved; this is grouping for export, not simplification, LOD
+generation, or streaming.
+
+By default, grouping is computed in the exported coordinate frame. Add
+`--partition-in-normalized-frame` to choose groups in a principal-axis frame
+instead. This can produce more compact groups for tilted or elongated scenes.
+It changes only which Gaussians are grouped together; it does not rotate or
+otherwise change the exported geometry.
+
+### Representation in the output
+
+**ParticleField USD.** Each group is authored as a separate
+`ParticleField3DGaussianSplat` under `/World/Gaussians/Partition_…`. The
+partitions collectively represent the original scene and share its stage,
+transforms, cameras, and background. Without `--separate-partition-files`,
+these prims are written into the normal Gaussian layer. With that option on a
+`.usdz`, each partition is written to its own `.usdc` layer inside the
+package, while the root layer composes them together.
+
+**PLY.** Each group is written as a separate
+`<stem>_partition_NNN.ply` file. The accompanying
+`<stem>_partitions.json` manifest identifies every file, its particle count,
+and its axis-aligned bounds. A single-partition PLY output retains the
+requested filename. PLY has no scene-composition mechanism, so an application
+loading a partitioned PLY export must load the files listed in the manifest.
+
+### Parameters
+
+- `--max-particles-per-field INT` sets the maximum Gaussian count for each
+  spatial partition. It must be at least `1`. A source is partitioned only
+  when its own count exceeds this value; multiple input sources are never
+  merged before partitioning. Despite its USD-oriented name, this option also
+  controls PLY partitioning.
+- `--partition-in-normalized-frame` changes the frame used to choose the
+  spatial groups. It often produces more compact groups for non-axis-aligned
+  scenes, but does not change output coordinates or reduce the particle count.
+
+### Format-specific limitations
+
+**PLY.** Partitioning produces several files. The manifest records the set of
+files and their bounds, but PLY itself has no composition or scene hierarchy;
+the consuming application is responsible for loading every partition.
+
+**ParticleField USD.** The destination renderer must support multiple
+`ParticleField` prims and the selected ParticleField schema. For a packaged
+USDZ, `--separate-partition-files` writes one crate layer per partition. This
+option is only meaningful for ParticleField USDZ output and should be paired
+with a particle cap when a combined Gaussian layer would be too large.
+
+A `.usdz` is a ZIP archive and OpenUSD readers do not support ZIP64, so every
+individual layer must remain below 4 GiB. The exporter rejects a package whose
+combined Gaussian layer is too large; when separate partition files are
+enabled, it checks the largest partition layer instead. Use an unzipped
+`.usdc`/`.usd` asset when this packaging limit is not required, or lower the
+particle cap until each partition fits.
+
+Finally, partitioning is an export representation, not a compatibility layer:
+it does not reduce memory use at render time in itself or guarantee a
+renderer-specific performance improvement.

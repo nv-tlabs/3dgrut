@@ -62,9 +62,10 @@ For projects that require a fast, modular, and production-ready Gaussian Splatti
   - [To visualize a pre-trained checkpoint](#to-visualize-a-pre-trained-checkpoint)
 - [📋 4. Evaluations](#-4-evaluations)
 - [🛝 5. Interactive Playground GUI](#-5-interactive-playground-gui)
-- [📄 6. Contributing](#-6-contributing)
-- [🎓 7. Citations](#-7-citations)
-- [🙏 8. Acknowledgements](#-8-acknowledgements)
+- [📦 6. Asset Preparation and Re-export](threedgrut/export/README.md#transcoding-between-formats)
+- [📄 7. Contributing](#-7-contributing)
+- [🎓 8. Citations](#-8-citations)
+- [🙏 9. Acknowledgements](#-9-acknowledgements)
 
 ## 🔧 1 Dependencies and Installation
 - Supported CUDA versions: 11.8, 12.4, 12.6, 12.8 (default), 13.0 (experimental)
@@ -562,7 +563,13 @@ See [Playground README](threedgrut_playground/README.md) for details.
 
 *Update (2025/04): The playground engine is now exposed, and remote rendering is supported; see README for details.*
 
-## 📄 6. Contributing
+## 📦 6. Asset Preparation and Re-export
+
+This repository includes tools for converting, combining, partitioning, and
+re-exporting Gaussian assets between PLY, ParticleField USD, and NuRec.
+See the [asset transcoding and re-export documentation](threedgrut/export/README.md#transcoding-between-formats).
+
+## 📄 7. Contributing
 
 Contributions are welcome! Please feel free to submit a pull request.
 
@@ -570,7 +577,7 @@ Formatting uses `black` and `isort`. Please run
 `black . --target-version=py311 --line-length=120 --exclude=thirdparty/tiny-cuda-nn` and
 `isort . --skip=thirdparty/tiny-cuda-nn --profile=black` before submitting a pull request.
 
-## 🎓 7. Citations
+## 🎓 8. Citations
 
 ```
 @article{loccoz20243dgrt,
@@ -599,7 +606,7 @@ Formatting uses `black` and `isort`. Please run
 }
 ```
 
-## 🙏 8. Acknowledgements
+## 🙏 9. Acknowledgements
 
 We sincerely thank our colleagues for their valuable contributions to this project.
 
