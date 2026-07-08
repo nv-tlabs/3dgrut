@@ -66,8 +66,10 @@ def apply_feature_decoder(
     alpha = outputs["pred_opacity"]  # [B, H, W] or [B, H, W, 1]
     B, H, W, N = feature_map.shape
 
-    R = gpu_batch.T_to_world[:, :3, :3]  # [B, 3, 3] c2w rotation
     rays_dir_cam = gpu_batch.rays_dir  # [B, H, W, 3]
+    # GUI camera batches keep poses on the CPU while rays/features are on the
+    # GPU. Match the pose device and ray dtype before computing world rays.
+    R = gpu_batch.T_to_world[:, :3, :3].to(device=rays_dir_cam.device, dtype=rays_dir_cam.dtype)  # [B, 3, 3]
     if center_ray_encoding:
         # center-ray mode uses the camera optical axis, i.e. row 2 of the
         # world-to-camera view matrix, which is equivalent to column 2 of
