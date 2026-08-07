@@ -53,10 +53,12 @@ HybridOptixTracer::HybridOptixTracer(
     const std::string &cuda_path, const std::string &pipeline,
     const std::string &backwardPipeline, const std::string &primitive,
     float particleKernelDegree, float particleKernelMinResponse,
+    float particleKernelMaxAlpha,
     bool particleKernelDensityClamping, int particleRadianceSphDegree,
     bool enableNormals, bool enableHitCounts)
     : OptixTracer(threedgrtPath, cuda_path, pipeline, backwardPipeline,
                   primitive, particleKernelDegree, particleKernelMinResponse,
+                  particleKernelMaxAlpha,
                   particleKernelDensityClamping, particleRadianceSphDegree,
                   enableNormals, enableHitCounts) {
 
