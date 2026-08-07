@@ -90,7 +90,8 @@ HybridOptixTracer::HybridOptixTracer(
                  &_playgroundState->pipelineTriGSTracing,
                  _playgroundState->sbtTriGSTracing, 32,
                  {threedgrtPath + "/include",
-                  playgroundPath + "/src/kernels/cuda/"} // extra includes
+                  playgroundPath + "/src/kernels/cuda/"}, // extra includes
+                 true // hybridMeshParticles
   );
 }
 
