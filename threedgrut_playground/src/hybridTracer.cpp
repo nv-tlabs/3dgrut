@@ -53,12 +53,12 @@ HybridOptixTracer::HybridOptixTracer(
     const std::string &cuda_path, const std::string &pipeline,
     const std::string &backwardPipeline, const std::string &primitive,
     float particleKernelDegree, float particleKernelMinResponse,
-    bool particleKernelDensityClamping, int particleRadianceSphDegree,
-    bool enableNormals, bool enableHitCounts)
+    float particleKernelMaxAlpha, bool particleKernelDensityClamping,
+    int particleRadianceSphDegree, bool enableNormals, bool enableHitCounts)
     : OptixTracer(threedgrtPath, cuda_path, pipeline, backwardPipeline,
                   primitive, particleKernelDegree, particleKernelMinResponse,
-                  particleKernelDensityClamping, particleRadianceSphDegree,
-                  enableNormals, enableHitCounts) {
+                  particleKernelMaxAlpha, particleKernelDensityClamping,
+                  particleRadianceSphDegree, enableNormals, enableHitCounts) {
 
   char log[2048]; // For error reporting from OptiX creation functions
   std::vector<std::string> defines = generateDefines(
