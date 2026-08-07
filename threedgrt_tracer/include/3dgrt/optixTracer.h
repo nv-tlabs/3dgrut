@@ -117,7 +117,8 @@ protected:
                         OptixPipeline* pipeline,
                         OptixShaderBindingTable& sbt,
                         uint32_t numPayloadValues                      = 32,
-                        const std::vector<std::string>& extra_includes = {});
+                        const std::vector<std::string>& extra_includes = {},
+                        bool hybridMeshParticles                       = false);
     void reallocateBuffer(CUdeviceptr* bufferPtr, size_t& size, size_t newSize, cudaStream_t cudaStream);
     void reallocatePrimGeomBuffer(cudaStream_t stream);
     void reallocateParamsDevice(size_t sz, cudaStream_t stream);
