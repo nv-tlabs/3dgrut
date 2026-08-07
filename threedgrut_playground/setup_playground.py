@@ -16,6 +16,7 @@
 import os
 from pathlib import Path
 
+from threedgrut.model.features import Features
 from threedgrut.utils import jit
 
 
@@ -24,6 +25,24 @@ from threedgrut.utils import jit
 def setup_playground(conf):
     def to_cpp_bool(value):
         return "true" if value else "false"
+
+    feat = Features(conf)
+    transform_defines = [
+        f"-DPARTICLE_FEATURE_DIM={feat.particle_feature_dim}",
+        f"-DRAY_FEATURE_DIM={feat.ray_feature_dim}",
+        f"-DFEATURE_TRANSFORM_TYPE={feat.transform_type}",
+    ]
+    nht_defines = [
+        f"-DFEATURE_INTERPOLATION_TYPE={feat.interpolation_type}",
+        f"-DFEATURE_INTERPOLATION_SUPPORT={feat.interpolation_support}",
+        f"-DFEATURE_ACTIVATION_TYPE={feat.activation_type}",
+        f"-DFEATURE_ACTIVATION_NUM_FREQUENCIES={feat.activation_num_frequencies}",
+        f"-DINTERP_POINT_FEATURE_DIM={feat.interp_point_feature_dim}",
+    ]
+    half_defines = [
+        f"-DPARTICLE_FEATURE_HALF={1 if conf.render.particle_feature_half else 0}",
+        f"-DFEATURE_OUTPUT_HALF={1 if conf.render.feature_output_half else 0}",
+    ]
 
     include_paths = []
 
@@ -60,6 +79,10 @@ def setup_playground(conf):
             f"-DGAUSSIAN_PARTICLE_MAX_ALPHA={conf.render.particle_kernel_max_alpha}",
             f"-DGAUSSIAN_PARTICLE_ENABLE_NORMAL={to_cpp_bool(conf.render.enable_normals)}",
             f"-DGAUSSIAN_PARTICLE_SURFEL={to_cpp_bool(conf.render.primitive_type == 'trisurfel')}",
+            # Feature-based radiance dimensions
+            *transform_defines,
+            *nht_defines,
+            *half_defines,
         ],
         include_paths=[
             os.path.join(THREEDGRT_ROOT, "include"),
@@ -67,10 +90,36 @@ def setup_playground(conf):
         ],
     )
 
+    # Compiler options. Same -D for feature dims so pipelineParameters.h and JIT OptiX pipeline (generateDefines) stay in sync.
+    cflags = [
+        *transform_defines,
+        *half_defines,
+    ]
+    cuda_flags = [
+        # Feature-based radiance dimensions (must match Slang compilation)
+        *transform_defines,
+        *nht_defines,
+        *half_defines,
+        # Other particle parameters
+        f"-DPARTICLE_RADIANCE_NUM_COEFFS={(conf.render.particle_radiance_sph_degree + 1) ** 2}",
+        f"-DGAUSSIAN_PARTICLE_KERNEL_DEGREE={conf.render.particle_kernel_degree}",
+        f"-DGAUSSIAN_PARTICLE_MIN_KERNEL_DENSITY={conf.render.particle_kernel_min_response}",
+        f"-DGAUSSIAN_PARTICLE_MIN_ALPHA={conf.render.particle_kernel_min_alpha}",
+        f"-DGAUSSIAN_PARTICLE_MAX_ALPHA={conf.render.particle_kernel_max_alpha}",
+        f"-DGAUSSIAN_MIN_TRANSMITTANCE_THRESHOLD={conf.render.min_transmittance}",
+    ]
+    # When PARTICLE_FEATURE_HALF=1 the Slang-generated header uses __half types;
+    # the Slang prelude only pulls in <cuda_fp16.h> and defines __half when
+    # SLANG_CUDA_ENABLE_HALF is set.
+    if conf.render.particle_feature_half or conf.render.feature_output_half:
+        cuda_flags.append("-DSLANG_CUDA_ENABLE_HALF=1")
+
     # Compile and load.
     source_paths = [os.path.abspath(os.path.join(os.path.dirname(__file__), fn)) for fn in source_files]
     return jit.load(
         name="libplayground_cc",
         sources=source_paths,
+        extra_cflags=cflags,
+        extra_cuda_cflags=cuda_flags,
         extra_include_paths=include_paths,
     )
