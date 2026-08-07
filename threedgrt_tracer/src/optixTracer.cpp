@@ -35,6 +35,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <algorithm>
+#include <cstdlib>
 #include <cuda_runtime.h>
 #include <fstream>
 #include <nvrtc.h>
@@ -272,6 +273,15 @@ OptixTracer::OptixTracer(
         OptixDeviceContextOptions options = {};
         options.logCallbackFunction       = &contextLogCB;
         options.logCallbackLevel          = 3;
+
+        // Opt-in OptiX validation mode for tests/debugging: catches invalid
+        // pipeline configurations (e.g. traversableGraphFlags mismatches) that
+        // release drivers only surface as silent misbehavior.
+        const char* validationEnv = std::getenv("THREEDGRUT_OPTIX_VALIDATION");
+        if (validationEnv && validationEnv[0] == '1') {
+            options.validationMode   = OPTIX_DEVICE_CONTEXT_VALIDATION_MODE_ALL;
+            options.logCallbackLevel = 4;
+        }
 
         // Associate a CUDA context (and therefore a specific GPU) with this
         // device context
