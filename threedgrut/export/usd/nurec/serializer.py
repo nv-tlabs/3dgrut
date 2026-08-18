@@ -22,7 +22,7 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
-from pxr import Gf, Sdf, Usd, UsdGeom, UsdUtils, UsdVol
+from pxr import Gf, Sdf, Usd, UsdUtils, UsdVol
 
 from threedgrut.export.transforms import (
     USDTransformSamples,

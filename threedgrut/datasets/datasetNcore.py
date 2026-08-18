@@ -143,7 +143,7 @@ class NCoreDataset(torch.utils.data.Dataset, BoundedMultiViewDataset, DatasetVis
         with open(path, "r") as fp:
             try:
                 dataset_meta = json.load(fp)
-            except ValueError as e:
+            except ValueError:
                 raise ValueError(f"NCoreDataset: provided file {path} not a json file")
 
         assert all(
@@ -953,7 +953,7 @@ class NCoreDataset(torch.utils.data.Dataset, BoundedMultiViewDataset, DatasetVis
         sequence_point_clouds_source_ids = self.sequence_point_clouds_source_ids[self.sequence_id]
         assert len(
             sequence_point_clouds_source_ids
-        ), f"NCoreDataset: At least a single point cloud source needs to be available for point-cloud generation"
+        ), "NCoreDataset: At least a single point cloud source needs to be available for point-cloud generation"
         if point_clouds_source_ids is None:
             point_clouds_source_ids = [sequence_point_clouds_source_ids[0]]
 

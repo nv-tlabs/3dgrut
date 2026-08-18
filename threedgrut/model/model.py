@@ -696,7 +696,7 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         Observer points can be any set locations that observation came from.
         Camera centers, ray source points, etc. They are used to estimate initial scales.
         """
-        logger.info(f"Initializing based on lidar point cloud ...")
+        logger.info("Initializing based on lidar point cloud ...")
 
         self.default_initialize_from_points(
             point_cloud.xyz_end.to(device=self.device),
@@ -971,7 +971,7 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
             mogt_specular = mogt_specular.transpose(0, 2, 1).reshape((num_gaussians, num_speculars * 3))
         elif len(extra_f_names) == 0:
             # Only DC components available, create zero-filled higher-order harmonics
-            logger.info(f"PLY file only contains DC components, initializing higher-order spherical harmonics to zero")
+            logger.info("PLY file only contains DC components, initializing higher-order spherical harmonics to zero")
         else:
             # Partial data - this is unexpected
             raise ValueError(

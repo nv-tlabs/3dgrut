@@ -28,10 +28,10 @@ As of March 26, 2025 the latest public release is kaolin 0.17.0, hence it's incl
 
 
 __all__ = [
+    "camera_path_generator",
+    "infinite_loop_camera_path_generator",
     "interpolate_camera_on_polynomial_path",
     "interpolate_camera_on_spline_path",
-    "infinite_loop_camera_path_generator",
-    "camera_path_generator",
 ]
 
 

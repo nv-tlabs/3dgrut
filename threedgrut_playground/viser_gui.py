@@ -14,12 +14,10 @@ except ImportError:
 import argparse
 from collections import deque
 
-import cv2
-import kaolin
 from kaolin.render.camera import Camera
 
 from threedgrut.utils.misc import quaternion_to_so3
-from threedgrut_playground.engine import Engine3DGRUT, OptixPrimitiveTypes
+from threedgrut_playground.engine import Engine3DGRUT
 
 # Below code referenced from viser https://github.com/nerfstudio-project/viser
 # and viser 3dgs example: https://github.com/WangFeng18/3d-gaussian-splatting/blob/main/visergui.py

@@ -21,7 +21,6 @@ Options
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 import time
@@ -177,7 +176,7 @@ def _write_report(rows: list[tuple], args, nht_ok: bool) -> str:
         f"Scene: `{args.data}`  \n",
         f"Iterations: {args.iterations}  \n",
         f"Particles: {args.particles:,}  \n",
-        f"Strategy: MCMC  \n",
+        "Strategy: MCMC  \n",
         f"NHT requested: {args.nht}  ",
         f"{'(supported)' if nht_ok else '(not available in this build — skipped)'}  \n\n",
         "## Results\n\n",
@@ -227,7 +226,7 @@ def main():
             rows.append((name, {}, 0.0))
             continue
 
-        print(f"\n[2/2] Evaluating ...")
+        print("\n[2/2] Evaluating ...")
         try:
             metrics = _render(name, ckpt, args)
         except subprocess.CalledProcessError as e:

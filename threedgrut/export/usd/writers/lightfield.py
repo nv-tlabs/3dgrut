@@ -24,7 +24,7 @@ import logging
 from typing import Optional
 
 import numpy as np
-from pxr import Gf, Sdf, Usd, UsdGeom, UsdVol, Vt
+from pxr import Gf, Usd, UsdGeom, UsdVol, Vt
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
 from threedgrut.export.usd.particle_field_hints import (
@@ -272,9 +272,7 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
         num_gaussians = len(positions)
         if num_gaussians:
             mn, mx = positions.min(axis=0), positions.max(axis=0)
-            extent_str = (
-                f"min=[{mn[0]:.4g}, {mn[1]:.4g}, {mn[2]:.4g}] max=[{mx[0]:.4g}, {mx[1]:.4g}, {mx[2]:.4g}]"
-            )
+            extent_str = f"min=[{mn[0]:.4g}, {mn[1]:.4g}, {mn[2]:.4g}] max=[{mx[0]:.4g}, {mx[1]:.4g}, {mx[2]:.4g}]"
         else:
             extent_str = "empty"
         logger.info(f"  {self.prim.GetPath()}: {num_gaussians} gaussians, extent {extent_str}")

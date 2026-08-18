@@ -167,7 +167,7 @@ class FeatureDecoder(nn.Module):
                 W,
                 3,
             ), f"Ray directions shape mismatch: expected {(B, H, W, 3)}, got {ray_dirs_shape}"
-            assert N == self.ray_feature_dim, f"Expected {self.ray_feature_dim} features, got {N}"
+            assert self.ray_feature_dim == N, f"Expected {self.ray_feature_dim} features, got {N}"
 
             features_flat = features.reshape(B * H * W, N)
             ray_dirs_flat = ray_directions.reshape(B * H * W, 3)
@@ -179,7 +179,7 @@ class FeatureDecoder(nn.Module):
         elif len(features_shape) == 2:  # [H*W, N]
             HW, N = features_shape
             assert ray_dirs_shape == (HW, 3), f"Ray directions shape mismatch: expected {(HW, 3)}, got {ray_dirs_shape}"
-            assert N == self.ray_feature_dim, f"Expected {self.ray_feature_dim} features, got {N}"
+            assert self.ray_feature_dim == N, f"Expected {self.ray_feature_dim} features, got {N}"
             alpha_flat = alpha.reshape(HW, 1) if alpha is not None else None
             return self._process(features, ray_directions, alpha_flat)
         else:

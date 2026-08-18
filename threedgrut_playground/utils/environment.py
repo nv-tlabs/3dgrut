@@ -107,10 +107,7 @@ class Environment:
         return self.envmap
 
     def set_env(self, env_name: Optional[str] = None) -> None:
-        if env_name == "Model-Background":
-            self._hdr_data = None
-            self.envmap = torch.zeros([512, 512, 4], dtype=torch.float32, device=self.device)
-        elif env_name == "Black":
+        if env_name == "Model-Background" or env_name == "Black":
             self._hdr_data = None
             self.envmap = torch.zeros([512, 512, 4], dtype=torch.float32, device=self.device)
         elif env_name == "White":
