@@ -26,8 +26,8 @@ from threedgrut.export.usd.nurec.serializer import serialize_nurec_usd
 from threedgrut.export.usd.nurec.templates import NamedSerialized, fill_3dgut_template
 
 __all__ = [
-    "NuRecExporter",
     "NamedSerialized",
+    "NuRecExporter",
     "fill_3dgut_template",
     "serialize_nurec_usd",
 ]

@@ -30,16 +30,13 @@ from kaolin.render.camera import (
     generate_pinhole_rays,
 )
 
-from threedgrut.model.background import BackgroundColor
 from threedgrut.model.model import MixtureOfGaussians
-from threedgrut.utils.logger import logger
 from threedgrut_playground.tracer import Tracer
 from threedgrut_playground.utils.depth_of_field import DepthOfField
 from threedgrut_playground.utils.environment import Environment
 from threedgrut_playground.utils.kaolin_future.fisheye import generate_fisheye_rays
 from threedgrut_playground.utils.kaolin_future.transform import ObjectTransform
 from threedgrut_playground.utils.mesh_io import (
-    create_procedural_mesh,
     create_quad_mesh,
     load_materials,
     load_mesh,
@@ -915,7 +912,7 @@ class Engine3DGRUT:
             )
             rb["opacity"] = (rb["opacity"] * i + spp_rb["pred_opacity"]) / (i + self.spp.batch_size)
 
-    @torch.cuda.nvtx.range(f"playground._render_playground_hybrid")
+    @torch.cuda.nvtx.range("playground._render_playground_hybrid")
     def _render_playground_hybrid(self, rays_o: torch.Tensor, rays_d: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Internal method for hybrid rendering of Gaussians and mesh primitives.
         Performs ray tracing through the scene, handling both 3D Gaussians and mesh

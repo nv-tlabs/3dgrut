@@ -15,10 +15,14 @@
 
 """Tests for SH coefficient rotation (equivariance, round-trip transitivity, homomorphism)."""
 
-import numpy as np
 import torch
 
-from threedgrut.export.sh_rotation import band_rotation_matrices, eval_sh, num_sh_coefficients, rotate_specular
+from threedgrut.export.sh_rotation import (
+    band_rotation_matrices,
+    eval_sh,
+    num_sh_coefficients,
+    rotate_specular,
+)
 
 
 def _random_rotation(seed: int) -> torch.Tensor:

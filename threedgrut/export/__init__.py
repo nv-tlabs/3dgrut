@@ -83,9 +83,9 @@ try:
     from threedgrut.export.transforms import estimate_normalizing_transform
 
     __all__ += [
-        "estimate_normalizing_transform",
         "compute_average_visibility",
         "compute_visibility_and_filter",
+        "estimate_normalizing_transform",
     ]
 except ModuleNotFoundError as e:
     # Only suppress when an optional dependency is absent: pxr (usd-core) for
@@ -104,8 +104,8 @@ try:
     from threedgrut.export.usd.nurec.exporter import NuRecExporter
 
     __all__ += [
-        "USDExporter",  # ParticleField3DGaussianSplat schema
         "NuRecExporter",  # Omniverse-compatible format
+        "USDExporter",  # ParticleField3DGaussianSplat schema
         "USDImporter",
     ]
 except ModuleNotFoundError as e:

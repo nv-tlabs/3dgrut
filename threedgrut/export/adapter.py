@@ -20,7 +20,6 @@ Provides an adapter that wraps GaussianAttributes as an ExportableModel,
 allowing existing exporters to work with imported data.
 """
 
-import numpy as np
 import torch
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities

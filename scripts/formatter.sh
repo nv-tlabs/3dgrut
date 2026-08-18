@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR=$(dirname "$0")
+REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 CHECK_MODE=false
 
 while [[ $# -gt 0 ]]; do
@@ -23,7 +23,7 @@ else
     ACTION="Formatting"
 fi
 
-pushd "$SCRIPT_DIR" &> /dev/null
+pushd "$REPO_ROOT" &> /dev/null
 
 CLANG_FORMAT_REQUIRED_VERSION=18
 if command -v clang-format &> /dev/null; then
@@ -47,7 +47,8 @@ if command -v clang-format &> /dev/null; then
     fi
     echo ""
 else
-    echo "clang-format not found. Install with: pip3 install clang-format"
+    echo "clang-format not found. Install with: pip3 install 'clang-format==18.*'"
+    FAILED=1
     echo ""
 fi
 
@@ -57,6 +58,14 @@ echo ""
 
 echo "$ACTION Python code with isort..."
 isort . ${ISORT_OPTS[@]+"${ISORT_OPTS[@]}"} --skip-gitignore --dont-follow-links --extend-skip=thirdparty/tiny-cuda-nn --profile=black || FAILED=1
+echo ""
+
+echo "$ACTION Python code with ruff..."
+if [ "$CHECK_MODE" = true ]; then
+    ruff check . || FAILED=1
+else
+    ruff check . --fix || FAILED=1
+fi
 echo ""
 
 popd &> /dev/null

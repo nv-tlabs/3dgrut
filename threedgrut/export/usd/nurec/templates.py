@@ -19,8 +19,9 @@ from typing import Any, Dict
 
 import numpy as np
 
-# Import NamedSerialized from the canonical location
-from threedgrut.export.usd.stage_utils import NamedSerialized
+# Re-exported: serializer.py, exporter.py and nurec/__init__.py import NamedSerialized
+# from here, though stage_utils is the canonical definition.
+from threedgrut.export.usd.stage_utils import NamedSerialized  # noqa: F401
 
 
 def _fill_state_dict_tensors(

@@ -371,7 +371,7 @@ class Renderer:
             # Record the time
             inference_time.append(outputs["frame_time_ms"])
 
-            logger.log_progress(task_name="Rendering", advance=1, iteration=f"{str(iteration)}", psnr=psnr[-1])
+            logger.log_progress(task_name="Rendering", advance=1, iteration=f"{iteration!s}", psnr=psnr[-1])
 
         logger.end_progress(task_name="Rendering")
 

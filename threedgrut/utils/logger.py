@@ -78,7 +78,7 @@ class RichLogger:
 
     def log_table(self, title: str, record: dict):
         table = Table(title=title)
-        for key in record.keys():
+        for key in record:
             table.add_column(key, justify="left", style="yellow3", no_wrap=True)
         table.add_row(*[f"{'{:.3f}'.format(v)}" if isinstance(v, float) else v for v in record.values()])
         self.console.print(table)

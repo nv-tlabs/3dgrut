@@ -35,7 +35,11 @@ from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
 from threedgrut.export.adapter import AttributesExportAdapter
 from threedgrut.export.formats import PLYExporter
 from threedgrut.export.importers import PLYImporter, USDImporter
-from threedgrut.export.scripts.transcode import detect_input_format, transcode, transcode_files
+from threedgrut.export.scripts.transcode import (
+    detect_input_format,
+    transcode,
+    transcode_files,
+)
 from threedgrut.export.transforms import usd_matrix_to_numpy
 from threedgrut.export.usd.exporter import USDExporter
 

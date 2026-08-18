@@ -31,8 +31,8 @@ try:
     from threedgrut.export.usd.stage_utils import initialize_usd_stage
 
     __all__ += [
-        "USDExporter",
         "NuRecExporter",
+        "USDExporter",
         "initialize_usd_stage",
     ]
 except ModuleNotFoundError as e:
