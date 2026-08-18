@@ -42,7 +42,11 @@ from typing import Dict, Iterator, Optional, Tuple
 import numpy as np
 import torch
 
-from threedgrut.export.accessor import GaussianAttributes, GaussianExportAccessor, ModelCapabilities
+from threedgrut.export.accessor import (
+    GaussianAttributes,
+    GaussianExportAccessor,
+    ModelCapabilities,
+)
 from threedgrut.export.base import ExportableModel
 from threedgrut.export.sh_rotation import rotate_specular
 from threedgrut.utils.misc import inverse_sigmoid, quaternion_to_so3
@@ -306,9 +310,7 @@ def split_large_gaussians(
         spec_b = post["specular"].index_select(0, b)
 
         post = {
-            "positions": torch.cat(
-                [post["positions"].index_select(0, keep), child0_pos, child1_pos], dim=0
-            ),
+            "positions": torch.cat([post["positions"].index_select(0, keep), child0_pos, child1_pos], dim=0),
             "scales": _cat_children("scales", child_scales),
             "rotations": _cat_children("rotations", child_quat),
             "densities": torch.cat([post["densities"].index_select(0, keep), dens_b, dens_b], dim=0),
@@ -542,7 +544,9 @@ def partition_scene(
         logger.info("Splitting oversized Gaussians (target footprint=%.4g, max_splits=%d)", target, max_splits)
         post, num_split_added = split_large_gaussians(post, target_size=target, n_sigma=n_sigma, max_splits=max_splits)
         if num_split_added:
-            logger.info("Split pass added %d Gaussians (%d -> %d)", num_split_added, num_gaussians, post["positions"].shape[0])
+            logger.info(
+                "Split pass added %d Gaussians (%d -> %d)", num_split_added, num_gaussians, post["positions"].shape[0]
+            )
         split_post = post
         positions = post["positions"]
         extents = gaussian_extents(post["scales"], post["rotations"], n_sigma=n_sigma)
@@ -558,9 +562,7 @@ def partition_scene(
     # axes. Grouping only — labels index the original Gaussians and the output is not reoriented.
     # The basis is opacity-weighted (visible mass drives the axes) and floater-trimmed.
     if normalized_frame:
-        weights = (
-            split_post["densities"] if split_post is not None else model.get_density(preactivation=False).detach()
-        )
+        weights = split_post["densities"] if split_post is not None else model.get_density(preactivation=False).detach()
         positions = _rotate_to_principal_axes(positions, weights)
 
     # Run the KD-tree on the GPU when the positions (+ sort workspace) fit the free memory
@@ -589,7 +591,6 @@ def partition_scene(
         _accessor=None if split_post is not None else accessor,
         _split_post=split_post,
     )
-
 
 
 def apply_frame_to_attributes(attrs: GaussianAttributes, transform, max_sh_degree: int) -> GaussianAttributes:

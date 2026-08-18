@@ -24,7 +24,7 @@ from typing import Optional, Tuple
 
 import msgpack
 import numpy as np
-from pxr import Gf, Sdf, Usd, UsdGeom
+from pxr import Gf, Usd, UsdGeom
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
 from threedgrut.export.importers.base import FormatImporter

@@ -17,7 +17,7 @@
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import List
 
 import numpy as np
 import torch
@@ -26,9 +26,6 @@ from plyfile import PlyData, PlyElement
 from threedgrut.export.accessor import GaussianAttributes, GaussianExportAccessor
 from threedgrut.export.base import ExportableModel, ModelExporter
 from threedgrut.utils.logger import logger
-
-if TYPE_CHECKING:
-    from threedgrut.export.partition import PartitionResult
 
 
 class PLYExporter(ModelExporter):

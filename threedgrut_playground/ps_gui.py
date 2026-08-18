@@ -660,7 +660,7 @@ class Playground:
             if self.engine.use_spp:
                 panel_width = psim.GetContentRegionAvail()[0]
                 progress_width = round(panel_width / 1.2)
-                progress_label = f"{str(self.engine.spp.spp_accumulated_for_frame)}/{str(self.engine.spp.spp)}"
+                progress_label = f"{self.engine.spp.spp_accumulated_for_frame!s}/{self.engine.spp.spp!s}"
                 psim.ProgressBar(
                     fraction=self.engine.spp.spp_accumulated_for_frame / self.engine.spp.spp,
                     size_arg=(progress_width, 0),
@@ -699,7 +699,7 @@ class Playground:
                 panel_width = psim.GetContentRegionAvail()[0]
                 progress_width = round(panel_width / 1.2)
                 progress_label = (
-                    f"{str(self.engine.depth_of_field.spp_accumulated_for_frame)}/{str(self.engine.depth_of_field.spp)}"
+                    f"{self.engine.depth_of_field.spp_accumulated_for_frame!s}/{self.engine.depth_of_field.spp!s}"
                 )
                 psim.ProgressBar(
                     fraction=self.engine.depth_of_field.spp_accumulated_for_frame / self.engine.depth_of_field.spp,
@@ -811,26 +811,26 @@ class Playground:
                     if material.diffuse_map is not None:
                         psim.Text(f"Diffuse Texture: {material.diffuse_map.shape[0]}x{material.diffuse_map.shape[1]}")
                     else:
-                        psim.Text(f"Diffuse Texture: No")
+                        psim.Text("Diffuse Texture: No")
 
                     if material.emissive_map is not None:
                         psim.Text(
                             f"Emissive Texture: {material.emissive_map.shape[0]}x{material.emissive_map.shape[1]}"
                         )
                     else:
-                        psim.Text(f"Emissive Texture: No")
+                        psim.Text("Emissive Texture: No")
 
                     if material.metallic_roughness_map is not None:
                         psim.Text(
                             f"Metal-Rough Texture: {material.metallic_roughness_map.shape[0]}x{material.metallic_roughness_map.shape[1]}"
                         )
                     else:
-                        psim.Text(f"Metal-Rough Texture: No")
+                        psim.Text("Metal-Rough Texture: No")
 
                     if material.normal_map is not None:
                         psim.Text(f"Normal Texture: {material.normal_map.shape[0]}x{material.normal_map.shape[1]}")
                     else:
-                        psim.Text(f"Normal Texture: No")
+                        psim.Text("Normal Texture: No")
 
                     psim.TreePop()
             psim.TreePop()

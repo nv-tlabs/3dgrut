@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import os
-from pathlib import Path
 
 from threedgrut.utils import jit
 

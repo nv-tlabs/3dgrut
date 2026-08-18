@@ -643,7 +643,7 @@ class USDExporter(ModelExporter):
             logger.info("Schema: LightField (post-activation), %d ParticleField partitions", total_partitions)
         else:
             attrs = accessor.get_attributes(preactivation=False)
-            logger.info(f"Schema: LightField (post-activation)")
+            logger.info("Schema: LightField (post-activation)")
             logger.info(f"Exporting {attrs.num_gaussians} Gaussians, SH degree {caps.sh_degree}")
 
         # Packaging decision (computed early so the size guard can fail fast before the write).
@@ -658,7 +658,9 @@ class USDExporter(ModelExporter):
         # largest partition instead of the combined total.
         if package_as_usdz:
             if use_separate_layers:
-                guard_count = max(int(r.metrics.get("count_max", r.metrics.get("total_exported", 0))) for r in partition_list)
+                guard_count = max(
+                    int(r.metrics.get("count_max", r.metrics.get("total_exported", 0))) for r in partition_list
+                )
                 guard_degree = max(
                     (r.capabilities.sh_degree for r in partition_list if r.capabilities is not None),
                     default=caps.sh_degree,
@@ -765,7 +767,9 @@ class USDExporter(ModelExporter):
                     _make_gaussian_root(part_stage)
                     part_root = f"{gaussians_root}/Partition_{running:0{width}d}"
                     _author_partition_prim(part_stage, part_root, src_t, sub, result_caps)
-                    partition_layers.append(NamedUSDStage(filename=f"gaussians_{running:0{width}d}.usdc", stage=part_stage))
+                    partition_layers.append(
+                        NamedUSDStage(filename=f"gaussians_{running:0{width}d}.usdc", stage=part_stage)
+                    )
                     running += 1
             logger.info("Authored %d ParticleField partition layer(s)", len(partition_layers))
         else:

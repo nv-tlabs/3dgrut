@@ -644,16 +644,16 @@ class Trainer3DGRUT:
             metrics["hits_max"] = outputs["hits_count"].max().item()
 
         if is_compute_validation_metrics:
-            with torch.cuda.nvtx.range(f"criterions_psnr"):
+            with torch.cuda.nvtx.range("criterions_psnr"):
                 metrics["psnr"] = psnr(rgb_pred, rgb_gt).item()
 
             rgb_gt_full = rgb_gt.permute(0, 3, 1, 2)
             pred_features_full = rgb_pred.permute(0, 3, 1, 2)
             pred_features_full_clipped = rgb_pred.clip(0, 1).permute(0, 3, 1, 2)
 
-            with torch.cuda.nvtx.range(f"criterions_ssim"):
+            with torch.cuda.nvtx.range("criterions_ssim"):
                 metrics["ssim"] = ssim(pred_features_full, rgb_gt_full).item()
-            with torch.cuda.nvtx.range(f"criterions_lpips"):
+            with torch.cuda.nvtx.range("criterions_lpips"):
                 metrics["lpips"] = lpips(pred_features_full_clipped, rgb_gt_full).item()
 
             if iteration in self.conf.writer.log_image_views:
@@ -697,7 +697,7 @@ class Trainer3DGRUT:
         loss_l1 = torch.zeros(1, device=self.device)
         lambda_l1 = 0.0
         if self.conf.loss.use_l1:
-            with torch.cuda.nvtx.range(f"loss-l1"):
+            with torch.cuda.nvtx.range("loss-l1"):
                 loss_l1 = torch.abs(rgb_pred - rgb_gt).mean()
                 lambda_l1 = self.conf.loss.lambda_l1
 
@@ -705,7 +705,7 @@ class Trainer3DGRUT:
         loss_l2 = torch.zeros(1, device=self.device)
         lambda_l2 = 0.0
         if self.conf.loss.use_l2:
-            with torch.cuda.nvtx.range(f"loss-l2"):
+            with torch.cuda.nvtx.range("loss-l2"):
                 loss_l2 = torch.nn.functional.mse_loss(outputs["pred_features"], rgb_gt)
                 lambda_l2 = self.conf.loss.lambda_l2
 
@@ -713,7 +713,7 @@ class Trainer3DGRUT:
         loss_ssim = torch.zeros(1, device=self.device)
         lambda_ssim = 0.0
         if self.conf.loss.use_ssim:
-            with torch.cuda.nvtx.range(f"loss-ssim"):
+            with torch.cuda.nvtx.range("loss-ssim"):
                 rgb_gt_full = torch.permute(rgb_gt, (0, 3, 1, 2))
                 pred_features_full = torch.permute(rgb_pred, (0, 3, 1, 2))
                 loss_ssim = 1.0 - ssim(pred_features_full, rgb_gt_full)
@@ -723,7 +723,7 @@ class Trainer3DGRUT:
         loss_opacity = torch.zeros(1, device=self.device)
         lambda_opacity = 0.0
         if self.conf.loss.use_opacity and not self._in_color_refine:
-            with torch.cuda.nvtx.range(f"loss-opacity"):
+            with torch.cuda.nvtx.range("loss-opacity"):
                 loss_opacity = torch.abs(self.model.get_density()).mean()
                 lambda_opacity = self.conf.loss.lambda_opacity
 
@@ -731,7 +731,7 @@ class Trainer3DGRUT:
         loss_scale = torch.zeros(1, device=self.device)
         lambda_scale = 0.0
         if self.conf.loss.use_scale and not self._in_color_refine:
-            with torch.cuda.nvtx.range(f"loss-scale"):
+            with torch.cuda.nvtx.range("loss-scale"):
                 loss_scale = torch.abs(self.model.get_scale()).mean()
                 lambda_scale = self.conf.loss.lambda_scale
 
@@ -764,7 +764,7 @@ class Trainer3DGRUT:
         logger.log_progress(
             task_name="Validation",
             advance=1,
-            iteration=f"{str(iteration)}",
+            iteration=f"{iteration!s}",
             psnr=batch_metrics["psnr"],
             loss=batch_metrics["losses"]["total_loss"],
         )
@@ -847,7 +847,7 @@ class Trainer3DGRUT:
             table[time_key] = f"{'{:.2f}'.format(mean_timings[time_key])}" + " ms/it"
         logger.log_table(f"📊 Validation Metrics - Step {global_step}", record=table)
 
-    @torch.cuda.nvtx.range(f"log_training_iter")
+    @torch.cuda.nvtx.range("log_training_iter")
     def log_training_iter(
         self,
         gpu_batch: dict[str, torch.Tensor],
@@ -925,11 +925,11 @@ class Trainer3DGRUT:
         logger.log_progress(
             task_name="Training",
             advance=1,
-            step=f"{str(self.global_step)}",
+            step=f"{self.global_step!s}",
             loss=batch_metrics["losses"]["total_loss"],
         )
 
-    @torch.cuda.nvtx.range(f"log_training_pass")
+    @torch.cuda.nvtx.range("log_training_pass")
     def log_training_pass(self, metrics):
         """Log information after a single training pass.
         Args:
@@ -937,7 +937,7 @@ class Trainer3DGRUT:
         """
         pass
 
-    @torch.cuda.nvtx.range(f"on_training_end")
+    @torch.cuda.nvtx.range("on_training_end")
     def on_training_end(self):
         """Callback that prompts at the end of training."""
         conf = self.conf
@@ -1032,7 +1032,7 @@ class Trainer3DGRUT:
                 if self.feature_decoder is not None:
                     self.feature_decoder.restore_ema()
 
-    @torch.cuda.nvtx.range(f"save_checkpoint")
+    @torch.cuda.nvtx.range("save_checkpoint")
     def save_checkpoint(self, last_checkpoint: bool = False):
         """Saves checkpoint to a path under {conf.out_dir}/{conf.experiment_name}.
         Args:
@@ -1115,7 +1115,7 @@ class Trainer3DGRUT:
                 while not gui.viz_do_train:
                     time.sleep(0.0001)
 
-    @torch.cuda.nvtx.range(f"run_train_iter")
+    @torch.cuda.nvtx.range("run_train_iter")
     def run_train_iter(
         self,
         global_step: int,
@@ -1297,7 +1297,7 @@ class Trainer3DGRUT:
             elif self.conf.with_gui:
                 self.render_gui(scene_updated)
 
-    @torch.cuda.nvtx.range(f"run_train_pass")
+    @torch.cuda.nvtx.range("run_train_pass")
     def run_train_pass(self, conf: DictConfig):
         """Runs a single train epoch over the dataset."""
         metrics = []
@@ -1320,7 +1320,7 @@ class Trainer3DGRUT:
 
         self.log_training_pass(metrics)
 
-    @torch.cuda.nvtx.range(f"run_validation_pass")
+    @torch.cuda.nvtx.range("run_validation_pass")
     @torch.no_grad()
     def run_validation_pass(self, conf: DictConfig) -> dict[str, Any]:
         """Runs a single validation epoch over the dataset.
@@ -1427,14 +1427,14 @@ class Trainer3DGRUT:
             training_time=f"{stats['elapsed']:.2f} s",
             iteration_speed=f"{self.global_step / stats['elapsed']:.2f} it/s",
         )
-        logger.log_table(f"🎊 Training Statistics", record=table)
+        logger.log_table("🎊 Training Statistics", record=table)
 
         # Perform testing
         self.on_training_end()
-        logger.info(f"🥳 Training Complete.")
+        logger.info("🥳 Training Complete.")
 
         # Updating the GUI
         if self.gui is not None:
             self.gui.training_done = True
-            logger.info(f"🎨 GUI Blocking... Terminate GUI to Stop.")
+            logger.info("🎨 GUI Blocking... Terminate GUI to Stop.")
             self.gui.block_in_rendering_loop(fps=60)

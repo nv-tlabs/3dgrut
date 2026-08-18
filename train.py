@@ -19,7 +19,6 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 
 from threedgrut.utils.logger import logger
-from threedgrut.utils.timer import timing_options
 
 OmegaConf.register_new_resolver("int_list", lambda l: [int(x) for x in l])
 
@@ -38,7 +37,7 @@ def get_git_revision_hash() -> str:
 @hydra.main(config_path="configs", version_base=None)
 def main(conf: DictConfig) -> None:
     logger.info(f"Git hash: {get_git_revision_hash()}")
-    logger.info(f"Compiling native code..")
+    logger.info("Compiling native code..")
     from threedgrut.trainer import Trainer3DGRUT
 
     # # NOTE: It is also possible to directly instantiate a trainer from a checkpoint/INGP/PLY file
