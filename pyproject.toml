@@ -173,10 +173,14 @@ ignore = [
     "C414",    #  1  unnecessary-double-cast-or-process
     "PERF102", #  1  incorrect-dict-iterator
     "RUF001",  #  1  ambiguous-unicode-character-string
-    "RUF022",  #  1  unsorted-dunder-all
     "RUF043",  #  1  pytest-raises-ambiguous-pattern
     "SIM401",  #  1  if-else-block-instead-of-dict-get
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# This __all__ is grouped into commented sections mirroring the import order
+# above it; sorting reorders the entries out from under those comments.
+"threedgrut/export/__init__.py" = ["RUF022"]
 
 [tool.black]
 target-version = ["py311"]
