@@ -172,6 +172,9 @@ class ColmapDataset(Dataset, BoundedMultiViewDataset, DatasetVisualization):
                 indices = np.mod(indices, self.test_split_interval) != 0
             else:
                 indices = np.mod(indices, self.test_split_interval) == 0
+        else:
+            # Use all frames: convert to boolean mask (all True).
+            indices = np.ones(self.n_frames, dtype=bool)
 
         self.cam_extrinsics = [self.cam_extrinsics[i] for i in np.where(indices)[0]]
         self.poses = self.poses[indices].astype(np.float32)
