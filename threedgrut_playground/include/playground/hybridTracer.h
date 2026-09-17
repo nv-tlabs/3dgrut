@@ -106,15 +106,13 @@ protected:
   void reallocatePlaygroundParamsDevice(size_t sz, cudaStream_t stream);
 
 public:
-  HybridOptixTracer(const std::string &threedgrtPath,
-                    const std::string &playgroundPath,
-                    const std::string &cuda_path, const std::string &pipeline,
-                    const std::string &backwardPipeline,
-                    const std::string &primitive, float particleKernelDegree,
-                    float particleKernelMinResponse,
-                    bool particleKernelDensityClamping,
-                    int particleRadianceSphDegree, bool enableNormals,
-                    bool enableHitCounts);
+  HybridOptixTracer(
+      const std::string &threedgrtPath, const std::string &playgroundPath,
+      const std::string &cuda_path, const std::string &pipeline,
+      const std::string &backwardPipeline, const std::string &primitive,
+      float particleKernelDegree, float particleKernelMinResponse,
+      float particleKernelMaxAlpha, bool particleKernelDensityClamping,
+      int particleRadianceSphDegree, bool enableNormals, bool enableHitCounts);
 
   ~HybridOptixTracer() override;
 
