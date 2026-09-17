@@ -469,7 +469,11 @@ class NuRecExporter(ModelExporter):
             "rotation_activation": "normalize",
             "density_kernel_density_clamping": conf.render.particle_kernel_density_clamping,
             "density_kernel_min_response": conf.render.particle_kernel_min_response,
-            "radiance_sph_degree": conf.render.particle_radiance_sph_degree,
+            # Match the radiance SH degree to the actual exported feature data
+            # (caps.sh_degree). Using the hardcoded config default (3) while the
+            # data carries a lower degree makes the NuRec shader read a mismatched
+            # specular buffer and renders black in Omniverse/Isaac Sim.
+            "radiance_sph_degree": caps.sh_degree,
             "transmittance_threshold": conf.render.min_transmittance,
         }
         if conf.render.method == "3dgut":
