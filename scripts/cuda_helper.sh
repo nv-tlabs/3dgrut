@@ -48,6 +48,10 @@ case "$CUDA_VERSION" in
         export CUDA_RUNFILE_URL="https://developer.download.nvidia.com/compute/cuda/${CUDA_FULL_VERSION}/local_installers/cuda_${CUDA_FULL_VERSION}_580.95.05_linux.run"
         export MAX_GCC_VERSION=16
         export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.9;9.0;10.0;12.0+PTX"
+        # PyTorch 2.14 requires C++20 headers, while tiny-cuda-nn v2.0's
+        # PyTorch bindings build with C++17. Pin the newest CUDA 13 wheel
+        # compatible with that binding until tiny-cuda-nn supports C++20.
+        TORCH_VERSION="==2.13.0"
         ;;
     *)
         echo "ERROR: Unsupported CUDA version: $CUDA_VERSION"

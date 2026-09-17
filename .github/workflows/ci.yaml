@@ -44,20 +44,6 @@ jobs:
           - cuda_version: "13.0.2"
             ubuntu_version: "24.04-arm"
     steps:
-      - name: Free Disk Space (Ubuntu)
-        uses: jlumbroso/free-disk-space@main
-        with:
-          # this might remove tools that are actually needed,
-          # when set to "true" but frees about 6 GB
-          tool-cache: true
-          # all of these default to true, but feel free to set to
-          # "false" if necessary for your workflow
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          swap-storage: true
-
       - name: Install CUDA toolkit
         uses: Jimver/cuda-toolkit@v0.2.34
         id: cuda-toolkit

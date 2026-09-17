@@ -46,7 +46,10 @@ switch -Regex ($env:CUDA_VERSION) {
     "^(13\.0\.2|13\.0|13)$" {
         $env:CUDA_FULL_VERSION      = "13.0.2"
         $env:TORCH_CUDA_ARCH_LIST   = "7.5;8.0;8.9;9.0;10.0;12.0+PTX"
-        $script:TORCH_VERSION       = ""
+        # PyTorch 2.14 requires C++20 headers, while tiny-cuda-nn v2.0's
+        # PyTorch bindings build with C++17. Pin the newest CUDA 13 wheel
+        # compatible with that binding until tiny-cuda-nn supports C++20.
+        $script:TORCH_VERSION       = "==2.13.0"
     }
     default {
         Write-Host "ERROR: Unsupported CUDA version: $env:CUDA_VERSION" -ForegroundColor Red
