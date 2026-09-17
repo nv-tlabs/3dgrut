@@ -14,5 +14,6 @@ max_consecutive_bvh_update: 15
 enable_normals: false
 enable_hitcounts: true
 enable_kernel_timings: false
+optix_validation: false
 particle_feature_half: false
 feature_output_half: false

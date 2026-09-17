@@ -255,7 +255,8 @@ OptixTracer::OptixTracer(
     bool particleKernelDensityClamping,
     int particleRadianceSphDegree,
     bool enableNormals,
-    bool enableHitCounts) {
+    bool enableHitCounts,
+    bool enableOptixValidation) {
 
     _state = new State();
     memset(_state, 0, sizeof(State));
@@ -272,6 +273,14 @@ OptixTracer::OptixTracer(
         OptixDeviceContextOptions options = {};
         options.logCallbackFunction       = &contextLogCB;
         options.logCallbackLevel          = 3;
+
+        // Opt-in OptiX validation mode for tests/debugging: catches invalid
+        // pipeline configurations (e.g. traversableGraphFlags mismatches) that
+        // release drivers only surface as silent misbehavior.
+        if (enableOptixValidation) {
+            options.validationMode   = OPTIX_DEVICE_CONTEXT_VALIDATION_MODE_ALL;
+            options.logCallbackLevel = 4;
+        }
 
         // Associate a CUDA context (and therefore a specific GPU) with this
         // device context
@@ -352,8 +361,10 @@ void OptixTracer::createPipeline(const OptixDeviceContext context,
                                  OptixPipeline* pipeline,
                                  OptixShaderBindingTable& sbt,
                                  uint32_t numPayloadValues,
-                                 const std::vector<std::string>& extra_includes) {
+                                 const std::vector<std::string>& extra_includes,
+                                 bool hybridMeshParticles) {
     char log[2048];
+    uint32_t maxTravDepth = 1; // set with traversableGraphFlags below
 
     OptixPipelineCompileOptions pipeline_compile_options = {};
     OptixModule builtinIsModule                          = nullptr;
@@ -363,8 +374,21 @@ void OptixTracer::createPipeline(const OptixDeviceContext context,
         module_compile_options.optLevel                  = OPTIX_COMPILE_OPTIMIZATION_LEVEL_3;
         module_compile_options.debugLevel                = OPTIX_COMPILE_DEBUG_LEVEL_MINIMAL;
 
-        pipeline_compile_options.usesMotionBlur                   = false;
-        pipeline_compile_options.traversableGraphFlags            = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
+        pipeline_compile_options.usesMotionBlur = false;
+        // Declare the traversable graph this pipeline actually traces: `instances` builds an
+        // IAS over a unit-primitive GAS (single-level instancing, graph depth 2); every other
+        // primitive mode traces a bare GAS (graph depth 1). The playground hybrid pipeline
+        // additionally traces the mesh GAS, so it ORs that flag in (flags are combinable).
+        {
+            const bool instGraph    = _state->gPrimType == MOGTracingInstances;
+            unsigned int graphFlags = instGraph ? OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING
+                                                : OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
+            if (hybridMeshParticles) {
+                graphFlags |= OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS; // the mesh GAS
+            }
+            pipeline_compile_options.traversableGraphFlags = graphFlags;
+            maxTravDepth                                   = instGraph ? 2 : 1;
+        }
         pipeline_compile_options.numPayloadValues                 = numPayloadValues;
         pipeline_compile_options.numAttributeValues               = 0;
         pipeline_compile_options.exceptionFlags                   = OPTIX_EXCEPTION_FLAG_NONE;
@@ -499,7 +523,7 @@ void OptixTracer::createPipeline(const OptixDeviceContext context,
                                                &direct_callable_stack_size_from_state, &continuation_stack_size));
         OPTIX_CHECK(optixPipelineSetStackSize(*pipeline, direct_callable_stack_size_from_traversal,
                                               direct_callable_stack_size_from_state, continuation_stack_size,
-                                              1 // maxTraversableDepth
+                                              maxTravDepth // maxTraversableGraphDepth
                                               ));
     }
 
