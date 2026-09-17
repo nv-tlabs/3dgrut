@@ -323,29 +323,29 @@ OptixTracer::OptixTracer(
 }
 
 OptixTracer::~OptixTracer(void) {
-    OPTIX_CHECK(optixPipelineDestroy(_state->pipelineTracingFwd));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->sbtTracingFwd.raygenRecord)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->sbtTracingFwd.missRecordBase)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->sbtTracingFwd.hitgroupRecordBase)));
-    OPTIX_CHECK(optixModuleDestroy(_state->moduleTracingFwd));
+    OPTIX_CHECK_NOTHROW(optixPipelineDestroy(_state->pipelineTracingFwd));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->sbtTracingFwd.raygenRecord)));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->sbtTracingFwd.missRecordBase)));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->sbtTracingFwd.hitgroupRecordBase)));
+    OPTIX_CHECK_NOTHROW(optixModuleDestroy(_state->moduleTracingFwd));
 
-    OPTIX_CHECK(optixPipelineDestroy(_state->pipelineTracingBwd));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->sbtTracingBwd.raygenRecord)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->sbtTracingBwd.missRecordBase)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->sbtTracingBwd.hitgroupRecordBase)));
-    OPTIX_CHECK(optixModuleDestroy(_state->moduleTracingBwd));
+    OPTIX_CHECK_NOTHROW(optixPipelineDestroy(_state->pipelineTracingBwd));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->sbtTracingBwd.raygenRecord)));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->sbtTracingBwd.missRecordBase)));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->sbtTracingBwd.hitgroupRecordBase)));
+    OPTIX_CHECK_NOTHROW(optixModuleDestroy(_state->moduleTracingBwd));
 
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->gPrimVrt)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->gPrimTri)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->gPrimAABB)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->iasBuffer)));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->gPrimVrt)));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->gPrimTri)));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->gPrimAABB)));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->iasBuffer)));
 
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->optixAabbPtr)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->paramsDevice)));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->optixAabbPtr)));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->paramsDevice)));
 
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->gasBuffer)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(_state->gasBufferTmp)));
-    OPTIX_CHECK(optixDeviceContextDestroy(_state->context));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->gasBuffer)));
+    CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void*>(_state->gasBufferTmp)));
+    OPTIX_CHECK_NOTHROW(optixDeviceContextDestroy(_state->context));
 
     delete _state;
 }
@@ -428,7 +428,7 @@ void OptixTracer::createPipeline(const OptixDeviceContext context,
 
         if (!(flags & PipelineFlag_HasIS) && (flags & PipelineFlag_SpherePrim)) {
             OptixBuiltinISOptions isOptions = {OPTIX_PRIMITIVE_TYPE_SPHERE, 0, OPTIX_BUILD_FLAG_PREFER_FAST_TRACE, 0};
-            OPTIX_CHECK_LOG(optixBuiltinISModuleGet(context, &module_compile_options, &pipeline_compile_options, &isOptions, &builtinIsModule));
+            OPTIX_CHECK(optixBuiltinISModuleGet(context, &module_compile_options, &pipeline_compile_options, &isOptions, &builtinIsModule));
         }
     }
 
@@ -619,6 +619,8 @@ OptixTraversableHandle OptixTracer::createParticleInstanceAS(cudaStream_t cudaSt
 void OptixTracer::reallocateBuffer(CUdeviceptr* bufferPtr, size_t& size, size_t newSize, cudaStream_t cudaStream) {
     if (newSize > size) {
         CUDA_CHECK(cudaFreeAsync(reinterpret_cast<void*>(*bufferPtr), cudaStream));
+        *bufferPtr = 0;
+        size       = 0;
         CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(bufferPtr), newSize, cudaStream));
         size = newSize;
     }
