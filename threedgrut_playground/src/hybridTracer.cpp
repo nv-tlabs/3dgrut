@@ -100,21 +100,25 @@ HybridOptixTracer::~HybridOptixTracer(void) {
   if (_playgroundState)
     _playgroundState->denoiser.release(); // Release if allocated
 
-  OPTIX_CHECK(optixPipelineDestroy(_playgroundState->pipelineTriGSTracing));
-  CUDA_CHECK(cudaFree(reinterpret_cast<void *>(
+  OPTIX_CHECK_NOTHROW(
+      optixPipelineDestroy(_playgroundState->pipelineTriGSTracing));
+  CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void *>(
       _playgroundState->sbtTriGSTracing.raygenRecord)));
-  CUDA_CHECK(cudaFree(reinterpret_cast<void *>(
+  CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void *>(
       _playgroundState->sbtTriGSTracing.missRecordBase)));
-  CUDA_CHECK(cudaFree(reinterpret_cast<void *>(
+  CUDA_CHECK_NOTHROW(cudaFree(reinterpret_cast<void *>(
       _playgroundState->sbtTriGSTracing.hitgroupRecordBase)));
-  OPTIX_CHECK(optixModuleDestroy(_playgroundState->moduleTriGSTracing));
+  OPTIX_CHECK_NOTHROW(optixModuleDestroy(_playgroundState->moduleTriGSTracing));
 
-  CUDA_CHECK(cudaFree(reinterpret_cast<void *>(_playgroundState->fPrimVrt)));
-  CUDA_CHECK(cudaFree(reinterpret_cast<void *>(_playgroundState->fPrimTri)));
-  CUDA_CHECK(cudaFree(reinterpret_cast<void *>(_playgroundState->gasBuffer)));
-  CUDA_CHECK(
+  CUDA_CHECK_NOTHROW(
+      cudaFree(reinterpret_cast<void *>(_playgroundState->fPrimVrt)));
+  CUDA_CHECK_NOTHROW(
+      cudaFree(reinterpret_cast<void *>(_playgroundState->fPrimTri)));
+  CUDA_CHECK_NOTHROW(
+      cudaFree(reinterpret_cast<void *>(_playgroundState->gasBuffer)));
+  CUDA_CHECK_NOTHROW(
       cudaFree(reinterpret_cast<void *>(_playgroundState->gasBufferTmp)));
-  CUDA_CHECK(
+  CUDA_CHECK_NOTHROW(
       cudaFree(reinterpret_cast<void *>(_playgroundState->paramsDevice)));
 
   delete _playgroundState;
@@ -508,13 +512,11 @@ void OptixDenoiserWrapper::setup(unsigned int width, unsigned int height,
     return;
   }
   release(stream);
-  _width = width;
-  _height = height;
   OptixDenoiserOptions denoiserOptions = {};
   OPTIX_CHECK(optixDenoiserCreate(optixContext, OPTIX_DENOISER_MODEL_KIND_LDR,
                                   &denoiserOptions, &_denoiser));
   OptixDenoiserSizes denoiserReturnSizes;
-  OPTIX_CHECK(optixDenoiserComputeMemoryResources(_denoiser, _width, _height,
+  OPTIX_CHECK(optixDenoiserComputeMemoryResources(_denoiser, width, height,
                                                   &denoiserReturnSizes));
   _denoiserScratchSz =
       std::max(denoiserReturnSizes.withOverlapScratchSizeInBytes,
@@ -524,17 +526,19 @@ void OptixDenoiserWrapper::setup(unsigned int width, unsigned int height,
   _denoiserStateSz = denoiserReturnSizes.stateSizeInBytes;
   CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void **>(&_denoiserStatePtr),
                              _denoiserStateSz, stream));
-  OPTIX_CHECK(optixDenoiserSetup(_denoiser, 0, _width, _height,
-                                 _denoiserStatePtr, _denoiserStateSz,
-                                 _denoiserScratchPtr, _denoiserScratchSz));
+  OPTIX_CHECK(optixDenoiserSetup(_denoiser, 0, width, height, _denoiserStatePtr,
+                                 _denoiserStateSz, _denoiserScratchPtr,
+                                 _denoiserScratchSz));
+  _width = width;
+  _height = height;
 }
 
 void OptixDenoiserWrapper::release(cudaStream_t stream) {
   if (_denoiser) {
-    OPTIX_CHECK(optixDenoiserDestroy(_denoiser));
-    CUDA_CHECK(
+    OPTIX_CHECK_NOTHROW(optixDenoiserDestroy(_denoiser));
+    CUDA_CHECK_NOTHROW(
         cudaFreeAsync(reinterpret_cast<void *>(_denoiserScratchPtr), stream));
-    CUDA_CHECK(
+    CUDA_CHECK_NOTHROW(
         cudaFreeAsync(reinterpret_cast<void *>(_denoiserStatePtr), stream));
   }
   _denoiser = nullptr;

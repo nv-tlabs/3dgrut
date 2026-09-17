@@ -15,6 +15,10 @@
 
 #pragma once
 
+#include <cstdio>
+#include <sstream>
+#include <stdexcept>
+
 //------------------------------------------------------------------------------
 // CUDA / OPTIX macros
 //------------------------------------------------------------------------------
@@ -25,22 +29,46 @@
         if (error != cudaSuccess) {                                   \
             std::stringstream ss;                                     \
             ss << "CUDA call (" << #call << " ) failed with error: '" \
+               << cudaGetErrorName(error) << ": "                     \
                << cudaGetErrorString(error)                           \
                << "' (" __FILE__ << ":" << __LINE__ << ")\n";         \
+            throw std::runtime_error(ss.str());                       \
         }                                                             \
     } while (0)
 
 #define CUDA_CHECK_LAST() \
     CUDA_CHECK(cudaGetLastError())
 
-#define OPTIX_CHECK(call)                                              \
-    do {                                                               \
-        OptixResult res = call;                                        \
-        if (res != OPTIX_SUCCESS) {                                    \
-            std::stringstream ss;                                      \
-            ss << "Optix call '" << #call << "' failed: " __FILE__ ":" \
-               << __LINE__ << ")\n";                                   \
-        }                                                              \
+#define CUDA_CHECK_NOTHROW(call)                                                                  \
+    do {                                                                                          \
+        cudaError_t error = call;                                                                 \
+        if (error != cudaSuccess) {                                                               \
+            std::fprintf(stderr, "CUDA call (%s ) failed with error: '%s: %s' (%s:%d)\n", #call,  \
+                         cudaGetErrorName(error), cudaGetErrorString(error), __FILE__, __LINE__); \
+        }                                                                                         \
+    } while (0)
+
+#define OPTIX_CHECK(call)                                     \
+    do {                                                      \
+        OptixResult res = call;                               \
+        if (res != OPTIX_SUCCESS) {                           \
+            std::stringstream ss;                             \
+            ss << "Optix call '" << #call << "' failed: '"    \
+               << optixGetErrorName(res) << ": "              \
+               << optixGetErrorString(res)                    \
+               << "' (" __FILE__ << ":" << __LINE__ << ")\n"; \
+            throw std::runtime_error(ss.str());               \
+        }                                                     \
+    } while (0)
+
+#define OPTIX_CHECK_NOTHROW(call)                                                     \
+    do {                                                                              \
+        OptixResult res = call;                                                       \
+        if (res != OPTIX_SUCCESS) {                                                   \
+            std::fprintf(stderr, "Optix call '%s' failed: '%s: %s' (%s:%d)\n", #call, \
+                         optixGetErrorName(res), optixGetErrorString(res), __FILE__,  \
+                         __LINE__);                                                   \
+        }                                                                             \
     } while (0)
 
 #define OPTIX_CHECK_LOG(call)                                                                   \
@@ -50,11 +78,14 @@
         sizeof_log                       = sizeof(log); /* reset sizeof_log for future calls */ \
         if (res != OPTIX_SUCCESS) {                                                             \
             std::stringstream ss;                                                               \
-            ss << "Optix call '" << #call << "' failed: " __FILE__ ":"                          \
-               << __LINE__ << ")\nLog:\n"                                                       \
+            ss << "Optix call '" << #call << "' failed: '"                                      \
+               << optixGetErrorName(res) << ": "                                                \
+               << optixGetErrorString(res)                                                      \
+               << "' (" __FILE__ << ":" << __LINE__ << ")\nLog:\n"                              \
                << log                                                                           \
                << (sizeof_log_returned > sizeof(log) ? "<TRUNCATED>" : "")                      \
                << "\n";                                                                         \
+            throw std::runtime_error(ss.str());                                                 \
         }                                                                                       \
     } while (0)
 
