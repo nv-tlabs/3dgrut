@@ -35,7 +35,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <algorithm>
-#include <cstdlib>
 #include <cuda_runtime.h>
 #include <fstream>
 #include <nvrtc.h>
@@ -256,7 +255,8 @@ OptixTracer::OptixTracer(
     bool particleKernelDensityClamping,
     int particleRadianceSphDegree,
     bool enableNormals,
-    bool enableHitCounts) {
+    bool enableHitCounts,
+    bool enableOptixValidation) {
 
     _state = new State();
     memset(_state, 0, sizeof(State));
@@ -277,8 +277,7 @@ OptixTracer::OptixTracer(
         // Opt-in OptiX validation mode for tests/debugging: catches invalid
         // pipeline configurations (e.g. traversableGraphFlags mismatches) that
         // release drivers only surface as silent misbehavior.
-        const char* validationEnv = std::getenv("THREEDGRUT_OPTIX_VALIDATION");
-        if (validationEnv && validationEnv[0] == '1') {
+        if (enableOptixValidation) {
             options.validationMode   = OPTIX_DEVICE_CONTEXT_VALIDATION_MODE_ALL;
             options.logCallbackLevel = 4;
         }

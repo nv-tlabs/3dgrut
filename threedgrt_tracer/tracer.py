@@ -190,6 +190,7 @@ class Tracer:
             self.conf.render.particle_radiance_sph_degree,
             self.conf.render.enable_normals,
             self.conf.render.enable_hitcounts,
+            self.conf.render.optix_validation,
         )
 
         self.frame_timer = CudaTimer() if self.conf.render.enable_kernel_timings else None

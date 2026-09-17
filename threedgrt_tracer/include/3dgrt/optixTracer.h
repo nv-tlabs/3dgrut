@@ -138,7 +138,8 @@ public:
         bool particleKernelDensityClamping,
         int particleRadianceSphDegree,
         bool enableNormals,
-        bool enableHitCounts);
+        bool enableHitCounts,
+        bool enableOptixValidation = false);
 
     virtual ~OptixTracer();
 

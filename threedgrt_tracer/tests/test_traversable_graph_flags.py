@@ -15,7 +15,7 @@
 
 """Pipeline traversal-declaration <-> traced-graph consistency tests.
 
-Each case runs in its own subprocess: the validation-mode env var is read
+Each case runs in its own subprocess: render.optix_validation is applied
 once at OptiX context creation, and an aborted launch leaves the process
 CUDA context unusable. Validation failures surface only through the OptiX
 log callback on stderr (OPTIX_CHECK builds but never emits the message).
@@ -45,6 +45,7 @@ def _make_conf(primitive_type):
     conf.render = OmegaConf.load(_REPO_ROOT / "configs" / "render" / "3dgrt.yaml")
     conf.render.primitive_type = primitive_type
     conf.render.enable_kernel_timings = False
+    conf.render.optix_validation = True
     return conf
 
 
@@ -133,10 +134,6 @@ def _probe(primitive_type):
 @pytest.mark.parametrize("primitive_type", ["icosahedron", "instances"])
 def test_flags_match_traced_graph(primitive_type):
     env = dict(os.environ)
-    # Validation mode turns the unspecified outcomes of a mismatched traversal
-    # declaration into a deterministic, architecture-independent failure. Set
-    # before the interpreter starts: it is read at OptiX context creation.
-    env["THREEDGRUT_OPTIX_VALIDATION"] = "1"
     env["PYTHONPATH"] = str(_REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
 
     proc = subprocess.run(
