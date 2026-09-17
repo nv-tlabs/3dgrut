@@ -54,11 +54,11 @@ def set_custom_cugl_bindings():
 
 def initialize_cugl_interop():
     try:
-        import polyscope
+        import polyscope  # noqa: F401  # availability probe
 
         try:
-            import cuda
-            import cupy
+            import cuda  # noqa: F401  # availability probe
+            import cupy  # noqa: F401  # availability probe
 
             logger.info("polyscope loaded with cupy, cuda-python for cu-opengl interop.")
             # polyscope is available with cupy / cuda-python, do nothing

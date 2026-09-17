@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Collection, Iterator, List, Optional, Set, Tuple
 
-from pxr import Sdf, Usd, UsdGeom, UsdUtils
+from pxr import Sdf, Usd, UsdUtils
 
 from threedgrut.export.usd.stage_utils import NamedSerialized
 

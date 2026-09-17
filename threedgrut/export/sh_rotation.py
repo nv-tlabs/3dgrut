@@ -32,7 +32,6 @@ this convention by construction (validated by held-out-direction equivariance in
 
 from typing import Dict
 
-import numpy as np
 import torch
 
 # Standard 3DGS real spherical-harmonics constants (match threedgrut/utils/render.py:C0..C2).

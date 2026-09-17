@@ -32,7 +32,7 @@ class DepthOfField:
     """
 
     def __init__(self, spp=64, aperture_size=0.1, focus_z=1.0):
-        assert 0.0 <= aperture_size and 0.1 >= aperture_size
+        assert aperture_size >= 0.0 and aperture_size <= 0.1
         assert self.RNG_MODE in (
             "independent_random",
             "low_discrepancy_seq",

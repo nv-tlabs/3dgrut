@@ -67,6 +67,7 @@ dependencies = [
 dev = [
     "black==26.3.1",
     "isort==5.13.0",
+    "ruff==0.15.7",
     "clang-format==18.1.8",
 ]
 gui = [
@@ -118,6 +119,68 @@ url = "https://pypi.org/simple"
 # [[tool.uv.index]]
 # name = "pytorch"
 # url = "https://download.pytorch.org/whl"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+# Notebooks are left to their own tooling: black/isort do not process them either.
+extend-exclude = ["thirdparty", "*.ipynb"]
+
+[tool.ruff.lint]
+# Import sorting (I) is deliberately absent: isort already owns it.
+# pyupgrade (UP) is deliberately absent: PEP 585/604 modernisation is a separate,
+# repo-wide change, not a lint gate.
+select = ["E4", "E7", "E9", "F", "B", "SIM", "C4", "PERF", "RUF"]
+
+# Backlog: every rule below is violated by code that predates this config. They are
+# ignored so the gate is enforceable today, and are meant to be emptied one rule at a
+# time. Counts are as of the commit that introduced this list -- regenerate with
+# `ruff check --statistics .` after temporarily clearing an entry.
+ignore = [
+    # -- Correctness risk: fix these first --
+    "B023",    #  2  function-uses-loop-variable (closure captures the loop var)
+    "B026",    #  1  star-arg-unpacking-after-keyword-arg
+    "E722",    #  2  bare-except
+    "B011",    #  3  assert-false (vanishes under `python -O`)
+    "B904",    #  4  raise-without-from-inside-except (loses the original traceback)
+    "RUF013",  #  4  implicit-optional
+    "B905",    # 11  zip-without-explicit-strict
+    "RUF012",  # 12  mutable-class-default
+    "B008",    #  4  function-call-in-default-argument
+    "RUF018",  #  1  assignment-in-assert (vanishes under `python -O`)
+    "RUF028",  #  4  invalid-formatter-suppression-comment (fmt: off/on that does nothing)
+
+    # -- Dead code --
+    "F841",    # 11  unused-variable
+    "RUF059",  # 20  unused-unpacked-variable
+    "B007",    #  5  unused-loop-control-variable
+
+    # -- Style / readability --
+    "C408",    # 31  unnecessary-collection-call (dict() -> {})
+    "SIM108",  # 10  if-else-block-instead-of-if-exp
+    "PERF401", #  7  manual-list-comprehension
+    "RUF046",  #  6  unnecessary-cast-to-int
+    "E741",    #  5  ambiguous-variable-name
+    "SIM210",  #  4  if-expr-with-true-false
+    "E731",    #  3  lambda-assignment
+    "SIM102",  #  3  collapsible-if
+    "C404",    #  2  unnecessary-list-comprehension-dict
+    "C416",    #  2  unnecessary-comprehension
+    "E402",    #  2  module-import-not-at-top-of-file
+    "RUF005",  #  2  collection-literal-concatenation
+    "SIM103",  #  2  needless-bool
+    "SIM118",  #  2  in-dict-keys
+    "C414",    #  1  unnecessary-double-cast-or-process
+    "PERF102", #  1  incorrect-dict-iterator
+    "RUF001",  #  1  ambiguous-unicode-character-string
+    "RUF043",  #  1  pytest-raises-ambiguous-pattern
+    "SIM401",  #  1  if-else-block-instead-of-dict-get
+]
+
+[tool.ruff.lint.per-file-ignores]
+# This __all__ is grouped into commented sections mirroring the import order
+# above it; sorting reorders the entries out from under those comments.
+"threedgrut/export/__init__.py" = ["RUF022"]
 
 [tool.black]
 target-version = ["py311"]

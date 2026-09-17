@@ -36,4 +36,4 @@ def _read_version() -> str:
 
 __version__ = _read_version()
 
-__all__ = ["gui", "__version__"]
+__all__ = ["__version__", "gui"]

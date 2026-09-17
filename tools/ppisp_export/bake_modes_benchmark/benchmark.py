@@ -48,17 +48,15 @@ import torch.nn as nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from threedgrut.export.usd.post_processing_sh_bake import (  # noqa: E402
+from threedgrut.export.usd.post_processing_sh_bake import (
     MODE_PPISP_BAKE_VIGNETTING_NONE,
     FixedPPISP,
     PPISPPostProcessingBakeAdapter,
     bake_post_processing_into_sh,
 )
-from threedgrut.export.usd.post_processing_sh_simple_bake import (  # noqa: E402
-    simple_bake,
-)
-from threedgrut.render import Renderer  # noqa: E402
-from threedgrut.utils.render import apply_post_processing  # noqa: E402
+from threedgrut.export.usd.post_processing_sh_simple_bake import simple_bake
+from threedgrut.render import Renderer
+from threedgrut.utils.render import apply_post_processing
 
 logger = logging.getLogger("bake_modes_benchmark")
 
