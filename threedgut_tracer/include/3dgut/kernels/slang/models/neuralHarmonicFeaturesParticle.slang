@@ -17,7 +17,7 @@
 // Same CudaDeviceExport API as shRadiativeParticles.slang for drop-in replacement.
 // Compile-time: FEATURE_INTERPOLATION_TYPE, FEATURE_INTERPOLATION_SUPPORT, FEATURE_ACTIVATION_TYPE, FEATURE_ACTIVATION_NUM_FREQUENCIES,
 //   PARTICLE_FEATURE_DIM (total K per particle = buffer stride), INTERP_POINT_FEATURE_DIM (per-interpolation-point = K/num_points).
-// Support: center -> K=interpPointDim; tetrahedra -> K=4*interpPointDim.
+// Support: center -> K=interpPointDim; tetrahedra or two coplanar triangles -> K=4*interpPointDim.
 // With sincos activation: N = interpPointDim * num_frequencies * 2 (separate sin/cos channels).
 
 namespace neuralHarmonicFeaturesParticle
@@ -40,7 +40,7 @@ static const int InterpolationType = FEATURE_INTERPOLATION_TYPE;
 // Interpolation support (compile-time from FEATURE_INTERPOLATION_SUPPORT)
 static const int InterpolationSupport_Center = 0;
 static const int InterpolationSupport_Tetrahedra = 1;
-static const int InterpolationSupport_CoTriangles = 2; // 2 coplanar triangles / Not supported yet
+static const int InterpolationSupport_CoTriangles = 2; // 2 coplanar triangles
 static const int InterpolationSupport = FEATURE_INTERPOLATION_SUPPORT;
 
 // Canonical regular tetrahedron matching the GSplat NHT reference layout:
@@ -133,6 +133,22 @@ float4 barycentricTetrahedronCanonical(float3 P)
     return weights;
 }
 
+// The trisurfel is the union of triangles (0, 1, 2) and (0, 1, 3), with
+// canonical vertices (sqrt(2), 0), (-sqrt(2), 0), (0, sqrt(2)), and
+// (0, -sqrt(2)) in the local xy plane. The shared edge is y == 0.
+[BackwardDifferentiable][ForceInline]
+float3 barycentricTriSurfelCanonical(float3 P, out int thirdVertex)
+{
+    const float diagonal = 1.4142135623730951f;
+    const bool upperTriangle = P.y >= 0.0f;
+    const float signedY = upperTriangle ? P.y : -P.y;
+    const float wThird = signedY / diagonal;
+    const float w0 = 0.5f * (1.0f - wThird + P.x / diagonal);
+    const float w1 = 0.5f * (1.0f - wThird - P.x / diagonal);
+    thirdVertex = upperTriangle ? 2 : 3;
+    return float3(w0, w1, wThird);
+}
+
 // Encode and activate : none -> identity; siren -> sin(b*2^f); relu -> max(0,b).
 [BackwardDifferentiable][ForceInline]
 float encodeAndActivate(float baseVal, no_diff int f)
@@ -166,6 +182,18 @@ void featuresFromParametersBuffer(ParametersBuffer parametersBuffer,
             [ForceUnroll] for (int n = 0; n < InterpPointFeatureDim; ++n) {
                 baseFeatures[n] += barycentricWeights[k] * parameters.features[n];
             }
+        }
+    } else if (InterpolationSupport == InterpolationSupport_CoTriangles && InterpolationType == InterpolationType_Barycentric) {
+        int thirdVertex;
+        float3 barycentricWeights = barycentricTriSurfelCanonical(canonicalPosition, thirdVertex);
+        [ForceUnroll] for (int n = 0; n < InterpPointFeatureDim; ++n) {
+            baseFeatures[n] *= barycentricWeights[0];
+        }
+        Parameters secondParameters = fetchParametersFromBuffer(particleIdx, 1, parametersBuffer);
+        Parameters thirdParameters = fetchParametersFromBuffer(particleIdx, thirdVertex, parametersBuffer);
+        [ForceUnroll] for (int n = 0; n < InterpPointFeatureDim; ++n) {
+            baseFeatures[n] += barycentricWeights[1] * secondParameters.features[n];
+            baseFeatures[n] += barycentricWeights[2] * thirdParameters.features[n];
         }
     }
 

@@ -373,7 +373,9 @@ __device__ inline bool processHitFwd(
         particleScale,
         particleRotation,
         particleDensity);
-
+    if constexpr (SurfelPrimitive) {
+        particleScale.z = 1e-6f;
+    }
     const float3 giscl   = make_float3(1 / particleScale.x, 1 / particleScale.y, 1 / particleScale.z);
     const float3 gposc   = (rayOrigin - particlePosition);
     const float3 gposcr  = (gposc * particleRotation);
@@ -381,6 +383,11 @@ __device__ inline bool processHitFwd(
     const float3 rayDirR = rayDirection * particleRotation;
     const float3 grdu    = giscl * rayDirR;
     const float3 grd     = safe_normalize(grdu);
+    if constexpr (SurfelPrimitive) {
+        if (fabsf(grd.z) <= 1e-6f) {
+            return false;
+        }
+    }
 
     const float3 gcrod   = SurfelPrimitive ? gro + grd * -gro.z / grd.z : cross(grd, gro);
     const float grayDist = dot(gcrod, gcrod);
@@ -412,9 +419,14 @@ __device__ inline bool processHitFwd(
         *depth += hitT * weight;
 
         if (normal) {
-            constexpr float ellispoidSqRadius = 9.0f;
-            const float3 particleScaleRotated = (particleRotation * particleScale);
-            *normal += weight * (SurfelPrimitive ? make_float3(0, 0, (grd.z > 0 ? 1 : -1) * particleScaleRotated.z) : safe_normalize((gro + grd * (dot(grd, -1 * gro) - sqrtf(ellispoidSqRadius - grayDist))) * particleScaleRotated));
+            if constexpr (SurfelPrimitive) {
+                const float3 surfelNormal = safe_normalize(make_float3(0, 0, (grd.z > 0 ? 1 : -1)) * particleRotation);
+                *normal += weight * surfelNormal;
+            } else {
+                constexpr float ellispoidSqRadius = 9.0f;
+                const float3 particleScaleRotated = (particleRotation * particleScale);
+                *normal += weight * safe_normalize((gro + grd * (dot(grd, -1 * gro) - sqrtf(ellispoidSqRadius - grayDist))) * particleScaleRotated);
+            }
         }
     }
 
@@ -512,6 +524,9 @@ __device__ inline void processHitBwd(
     {
         particlePosition = particleData.position;
         gscl             = particleData.scale;
+        if constexpr (SurfelPrimitive) {
+            gscl.z = 1e-6f;
+        }
         grot             = particleData.quaternion;
         quaternionWXYZToMatrix(grot, particleRotation);
         particleDensity = particleData.density;
@@ -525,6 +540,11 @@ __device__ inline void processHitBwd(
     const float3 rayDirR = rayDirection * particleRotation;
     const float3 grdu    = giscl * rayDirR;
     const float3 grd     = safe_normalize(grdu);
+    if constexpr (SurfelPrimitive) {
+        if (fabsf(grd.z) <= 1e-6f) {
+            return;
+        }
+    }
     const float3 gcrod   = SurfelPrimitive ? gro + grd * -gro.z / grd.z : cross(grd, gro);
     const float grayDist = dot(gcrod, gcrod);
 
@@ -734,7 +754,13 @@ __device__ inline void processHitBwd(
         // ---> grdu = (1/gscl)*rayDirR
         // ===> d_grdu / d_gscl = -rayDirR/(gscl*gscl)
         // ===> d_grdu / d_rayDirR = (1/gscl)
-        particleDensityGradPtr->scale = gsclRayHitGrd + gsclGrdGro + (-rayDirR / (gscl * gscl)) * grduGrd;
+        float3 scaleGrd = gsclRayHitGrd + gsclGrdGro + (-rayDirR / (gscl * gscl)) * grduGrd;
+        if constexpr (SurfelPrimitive) {
+            // The canonical thickness is fixed above and does not depend on
+            // the stored third scale component.
+            scaleGrd.z = 0.0f;
+        }
+        particleDensityGradPtr->scale = scaleGrd;
         const float3 rayDirRGrd       = giscl * grduGrd;
 
         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
