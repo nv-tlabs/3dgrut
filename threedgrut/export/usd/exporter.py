@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 from ncore.data import (
+    FThetaCameraModelParameters,
     OpenCVFisheyeCameraModelParameters,
     OpenCVPinholeCameraModelParameters,
     ShutterType,
@@ -155,11 +156,36 @@ def _normalize_ppisp_responsivity(value: Any) -> float:
     return _normalize_positive_finite_float("ppisp_responsivity", value)
 
 
+def _extract_camera_params_from_ncore_dataset(dataset) -> List:
+    """Per-frame camera parameters of an NCoreDataset (None for frames of unsupported camera models)."""
+    supported = (
+        OpenCVPinholeCameraModelParameters,
+        OpenCVFisheyeCameraModelParameters,
+        FThetaCameraModelParameters,
+    )
+    # camera names are unique sensor ids, while the camera models are keyed by sequence and logical camera id
+    unique_id_to_camera_model = {
+        unique_id.id: camera_models[camera_id]
+        for sequence_id, camera_models in dataset.sequence_camera_models.items()
+        for camera_id, unique_id in dataset.sequence_camera_unique_ids[sequence_id].items()
+    }
+    params_per_camera: List = []
+    for camera_name in dataset.get_camera_names():
+        camera_model = unique_id_to_camera_model.get(camera_name)
+        params = camera_model.get_parameters() if camera_model is not None else None
+        if not isinstance(params, supported):
+            logger.warning(f"Unsupported camera model for NCore camera '{camera_name}': {type(params).__name__}")
+            params = None
+        params_per_camera.append(params)
+    return [params_per_camera[dataset.get_camera_idx(frame_idx)] for frame_idx in range(len(dataset))]
+
+
 def _extract_camera_params_from_dataset(dataset) -> Optional[List]:
     """
     Extract per-frame camera parameters from a dataset.
 
     Handles different dataset types:
+    - NCoreDataset: native NCore camera model parameters (OpenCV pinhole / fisheye, FTheta) of each frame's camera
     - ColmapDataset: intrinsics dict keyed by camera_id, use get_intrinsics_idx() per frame
     - NeRFDataset: single intrinsics list [fx, fy, cx, cy] for all frames
 
@@ -168,6 +194,11 @@ def _extract_camera_params_from_dataset(dataset) -> Optional[List]:
     """
     num_frames = len(dataset)
     camera_params = []
+
+    from threedgrut.datasets.datasetNcore import NCoreDataset
+
+    if isinstance(dataset, NCoreDataset):
+        return _extract_camera_params_from_ncore_dataset(dataset)
 
     # Check if dataset has ColmapDataset-style intrinsics (dict with camera params)
     if hasattr(dataset, "intrinsics") and isinstance(dataset.intrinsics, dict):

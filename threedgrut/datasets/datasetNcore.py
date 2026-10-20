@@ -538,6 +538,19 @@ class NCoreDataset(torch.utils.data.Dataset, BoundedMultiViewDataset, DatasetVis
             dtype=np.int32,
         )
 
+    def get_camera_idx(self, frame_idx: int) -> int:
+        """Return the 0-based camera index of a frame index.
+
+        Frame indices are camera-blocked: the frames of the first camera come first, followed by the frames of the
+        second camera, and so on, using the split-specific counts of get_frames_per_camera().
+        """
+        frame_ends = getattr(self, "_camera_frame_ends", None)
+        if frame_ends is None:
+            frame_ends = self._camera_frame_ends = np.cumsum(self.get_n_frames_per_camera())
+        if not 0 <= frame_idx < frame_ends[-1]:
+            raise IndexError(f"Frame index {frame_idx} out of range [0, {frame_ends[-1]})")
+        return int(np.searchsorted(frame_ends, frame_idx, side="right"))
+
     def _get_camera_centers(self, camera_id: str, frame_indices: np.ndarray) -> np.ndarray:
         """Return camera centers in world-global space for the given frame indices."""
         sequence_id = self.sequence_id
@@ -575,7 +588,7 @@ class NCoreDataset(torch.utils.data.Dataset, BoundedMultiViewDataset, DatasetVis
         return self._get_camera_centers(camera_id, frame_indices)
 
     def get_poses(self) -> np.ndarray:
-        """Get camera poses as (N, 4, 4) C2W matrices in world-global frame.
+        """Get camera poses as (N, 4, 4) C2W matrices in world-global frame, of the frames of the current split.
 
         Batches frame retrieval per camera (one RPC call per camera, not per frame)
         to avoid O(N_frames) overhead on long sequences.
@@ -584,9 +597,14 @@ class NCoreDataset(torch.utils.data.Dataset, BoundedMultiViewDataset, DatasetVis
 
         assert len(self.camera_ids), "NCoreDataset: no camera sensors loaded"
 
+        # split-specific frame indices, in the same camera-blocked order as get_frames_per_camera()
+        split_frame_indices = (
+            self.camera_train_frame_indices if self.split.startswith("train") else self.camera_val_frame_indices
+        )
+
         all_poses = []
         for camera_id in self.camera_ids:
-            frame_indices = self.camera_train_frame_indices[camera_id]
+            frame_indices = split_frame_indices[camera_id]
             if len(frame_indices) == 0:
                 continue
             try:
