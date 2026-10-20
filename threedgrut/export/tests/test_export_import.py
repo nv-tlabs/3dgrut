@@ -38,6 +38,9 @@ from threedgrut.export.base import ExportableModel
 from threedgrut.export.formats import PLYExporter
 from threedgrut.export.importers import PLYImporter, USDImporter
 from threedgrut.export.usd.exporter import USDExporter
+from threedgrut.export.usd.particle_field_hints import (
+    resolve_particle_field_sorting_mode_hint,
+)
 
 
 def _assert_default_camera_render_product(
@@ -813,6 +816,46 @@ class TestUSDSampleExports:
 
 class TestUSDExportSortingModeHint:
     """Test ParticleField sortingModeHint authoring."""
+
+    @pytest.mark.parametrize(
+        ("k_buffer_size", "global_z_order", "expected"),
+        [
+            (0, True, "zDepth"),
+            (0, False, "cameraDistance"),
+            (16, True, "rayHitDistance"),
+            (16, False, "rayHitDistance"),
+        ],
+    )
+    def test_3dgut_auto_sorting_mode_hint(self, k_buffer_size, global_z_order, expected):
+        conf = SimpleNamespace(
+            render=SimpleNamespace(
+                method="3dgut",
+                splat=SimpleNamespace(k_buffer_size=k_buffer_size, global_z_order=global_z_order),
+            )
+        )
+        assert resolve_particle_field_sorting_mode_hint(None, conf) == expected
+        assert resolve_particle_field_sorting_mode_hint("cameraDistance", conf) == "cameraDistance"
+
+    def test_3dgrt_auto_sorting_mode_hint(self):
+        conf = SimpleNamespace(render=SimpleNamespace(method="3dgrt"))
+        assert resolve_particle_field_sorting_mode_hint(None, conf) == "rayHitDistance"
+        assert resolve_particle_field_sorting_mode_hint("zDepth", conf) == "zDepth"
+
+    @pytest.mark.parametrize("conf", [None, SimpleNamespace(), SimpleNamespace(render=SimpleNamespace(method=None))])
+    def test_auto_sorting_mode_hint_without_render_method_uses_default(self, conf):
+        assert resolve_particle_field_sorting_mode_hint(None, conf) == "cameraDistance"
+
+    def test_3dgut_auto_sorting_mode_hint_without_global_z_order_uses_default(self):
+        conf = SimpleNamespace(
+            render=SimpleNamespace(method="3dgut", splat=SimpleNamespace(k_buffer_size=0, global_z_order=None))
+        )
+        assert resolve_particle_field_sorting_mode_hint(None, conf) == "cameraDistance"
+
+    def test_from_config_resolves_sorting_mode_hint(self):
+        conf = SimpleNamespace(render=SimpleNamespace(method="3dgrt"), export_usd=SimpleNamespace())
+        assert USDExporter.from_config(conf).sorting_mode_hint == "rayHitDistance"
+        conf.export_usd = SimpleNamespace(sorting_mode_hint="zDepth")
+        assert USDExporter.from_config(conf).sorting_mode_hint == "zDepth"
 
     def test_usd_export_sorting_mode_hint_ray_hit_distance(self):
         """Export can author the usd-core 26.5 rayHitDistance sorting hint."""

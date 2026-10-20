@@ -48,6 +48,7 @@ from threedgrut.export.usd.camera_copy import (
 from threedgrut.export.usd.particle_field_hints import (
     DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
     normalize_particle_field_sorting_mode_hint,
+    resolve_particle_field_sorting_mode_hint,
 )
 from threedgrut.export.usd.post_processing.ppisp_spg import (
     ppisp_has_controller,
@@ -1255,7 +1256,9 @@ class USDExporter(ModelExporter):
             export_cameras=getattr(export_conf, "export_cameras", True),
             export_background=getattr(export_conf, "export_background", True),
             apply_normalizing_transform=getattr(export_conf, "apply_normalizing_transform", True),
-            sorting_mode_hint=getattr(export_conf, "sorting_mode_hint", DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT),
+            sorting_mode_hint=resolve_particle_field_sorting_mode_hint(
+                getattr(export_conf, "sorting_mode_hint", None), conf
+            ),
             export_post_processing=_get_export_config_value(
                 export_conf,
                 "export-post-processing",

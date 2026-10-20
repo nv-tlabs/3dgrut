@@ -61,7 +61,7 @@ export_usd:
   export_cameras: true
   export_background: true
   apply_normalizing_transform: true
-  sorting_mode_hint: cameraDistance   # zDepth | cameraDistance | rayHitDistance
+  sorting_mode_hint: null             # null = auto (see below) | zDepth | cameraDistance | rayHitDistance
   export_post_processing: true        # PPISP — see usd/post_processing/README.md
 ```
 
@@ -90,8 +90,11 @@ The output extension selects the container: `.usdz` (packaged archive),
   (default `y`). Metadata only; it does not reorient geometry or cameras.
   Ignored for `nurec` (always Z).
 - `--sorting-mode-hint {zDepth,cameraDistance,rayHitDistance}` — author the
-  `ParticleField` sorting hint (use `rayHitDistance` for ray-tracing
-  renderers that support ray-hit sorting).
+  `ParticleField` sorting hint. When unset it is chosen from the checkpoint:
+  3DGRT -> `rayHitDistance`; 3DGUT -> `rayHitDistance` if
+  `render.splat.k_buffer_size > 0`, otherwise `zDepth` if
+  `render.splat.global_z_order` else `cameraDistance`. Sources without render info use
+  `cameraDistance`. An explicit value always wins.
 - `--max-particles-per-field INT` — subdivide the scene into spatial
   partitions of at most this many particles, writing one ParticleField prim
   per partition (standard format; off by default).
