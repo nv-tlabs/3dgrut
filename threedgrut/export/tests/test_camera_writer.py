@@ -134,7 +134,7 @@ def test_ftheta_uses_lens_distortion_schema(export_single_camera):
     assert _get(prim, "model") == "ftheta"
     assert _get(prim, "ftheta:nominalWidth") == pytest.approx(1936.0)
     assert _get(prim, "ftheta:nominalHeight") == pytest.approx(1216.0)
-    assert _get(prim, "ftheta:opticalCenter") == Gf.Vec2f(970.5, 600.25)
+    assert _get(prim, "ftheta:opticalCenter") == Gf.Vec2f(971.0, 600.75)
     assert _get(prim, "ftheta:maxFov") == pytest.approx(200.0, abs=1e-3)
     assert [_get(prim, f"ftheta:k{i}") for i in range(3)] == pytest.approx([0.0, 0.00245, 1e-9])
 

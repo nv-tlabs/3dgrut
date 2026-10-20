@@ -117,7 +117,12 @@ def _add_ftheta_camera_intrinsics(
     values: Dict[str, Tuple[Sdf.ValueTypeName, object]] = {
         "nominalWidth": (float_type, float(resolution[0])),
         "nominalHeight": (float_type, float(resolution[1])),
-        "opticalCenter": (Sdf.ValueTypeNames.Float2, Gf.Vec2f(float(principal_point[0]), float(principal_point[1]))),
+        # NCore's FTheta principal point has pixel indices at the pixel centers, RTX's optical center is relative
+        # to the top-left corner of the image
+        "opticalCenter": (
+            Sdf.ValueTypeNames.Float2,
+            Gf.Vec2f(float(principal_point[0]) + 0.5, float(principal_point[1]) + 0.5),
+        ),
         "maxFov": (float_type, float(2.0 * np.rad2deg(params.max_angle))),
     }
     if params.reference_poly != FThetaCameraModelParameters.PolynomialType.PIXELDIST_TO_ANGLE:
