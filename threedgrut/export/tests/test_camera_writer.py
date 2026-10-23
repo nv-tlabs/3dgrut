@@ -17,7 +17,6 @@
 
 import numpy as np
 import pytest
-
 from ncore.data import (
     FThetaCameraModelParameters,
     OpenCVFisheyeCameraModelParameters,
@@ -92,11 +91,28 @@ def test_pinhole_uses_lens_distortion_schema(export_single_camera):
     assert _get(prim, "opencvPinhole:imageSize") == Gf.Vec2i(1920, 1280)
     assert _get(prim, "opencvPinhole:fx") == pytest.approx(2059.0)
     assert _get(prim, "opencvPinhole:fy") == pytest.approx(2060.0)
+    # the principal point is exported as is, in the same corner-based convention as NCore
     assert _get(prim, "opencvPinhole:cx") == pytest.approx(935.5)
     assert _get(prim, "opencvPinhole:cy") == pytest.approx(635.25)
     assert [_get(prim, f"opencvPinhole:k{i}") for i in range(1, 7)] == pytest.approx([0.04, -0.34, 0.1, 0.2, 0.3, 0.4])
     assert [_get(prim, f"opencvPinhole:p{i}") for i in (1, 2)] == pytest.approx([0.0018, -0.00055])
     assert [_get(prim, f"opencvPinhole:s{i}") for i in range(1, 5)] == pytest.approx([0.01, 0.02, 0.03, 0.04])
+
+
+def test_pinhole_standard_camera_attributes_match_the_projection(export_single_camera):
+    from pxr import UsdGeom
+
+    params = _pinhole()
+    prim = export_single_camera(params)
+    width, height = (int(v) for v in params.resolution)
+    fx, fy = (float(v) for v in params.focal_length)
+    cx, cy = (float(v) for v in params.principal_point)
+    projection = np.array(UsdGeom.Camera(prim).GetCamera(0).frustum.ComputeProjectionMatrix())
+    for x, y, z in ((0.3, -0.2, -2.0), (-0.5, 0.4, -3.0), (0.7, 0.5, -4.0)):
+        clip = np.array([x, y, z, 1.0]) @ projection
+        ndc = clip[:2] / clip[3]
+        assert (ndc[0] + 1) / 2 * width == pytest.approx(fx * x / -z + cx, abs=1e-2)
+        assert (1 - ndc[1]) / 2 * height == pytest.approx(cy - fy * y / -z, abs=1e-2)
 
 
 def test_fisheye_uses_lens_distortion_schema(export_single_camera):
@@ -107,6 +123,18 @@ def test_fisheye_uses_lens_distortion_schema(export_single_camera):
     assert _get(prim, "opencvFisheye:fx") == pytest.approx(1913.5)
     assert _get(prim, "opencvFisheye:cy") == pytest.approx(1083.5)
     assert [_get(prim, f"opencvFisheye:k{i}") for i in range(1, 5)] == pytest.approx([-0.03, -0.005, -0.0008, 0.001])
+
+
+@pytest.mark.parametrize("make_params", [_pinhole, _fisheye], ids=["pinhole", "fisheye"])
+@pytest.mark.parametrize("size", [(1920, 1080), (1921, 1081), (1921, 1080)], ids=["even", "odd", "odd_width"])
+def test_opencv_principal_point_is_exported_as_is_for_even_and_odd_image_sizes(export_single_camera, make_params, size):
+    params = make_params()
+    params.resolution = np.array(size, dtype=np.uint64)
+    prim = export_single_camera(params)
+    model = "opencvPinhole" if isinstance(params, OpenCVPinholeCameraModelParameters) else "opencvFisheye"
+    cx, cy = (float(v) for v in params.principal_point)
+    assert _get(prim, f"{model}:cx") == pytest.approx(cx)
+    assert _get(prim, f"{model}:cy") == pytest.approx(cy)
 
 
 @pytest.mark.parametrize("params", [_pinhole(), _fisheye()], ids=["pinhole", "fisheye"])

@@ -80,6 +80,9 @@ _DEFAULT_RENDER_PRODUCT_VAR = "LdrColor"
 _PPISP_INPUT_RENDER_PRODUCT_VAR = "HdrColor"
 _VALIDATION_CAMERA_SUFFIX = "_val"
 _RENDER_SETTING_TONEMAP_OP = "rtx:post:tonemap:op"
+# DEPRECATED: renamed ``omni:rtx:gaussian:skipTonemapping:enabled`` and now authored per RenderProduct (see
+# ``create_render_products``). The global layer setting is kept only for backward compatibility with older
+# renderers; remove it once they are no longer supported.
 _RENDER_SETTING_SKIP_GAUSSIAN_TONEMAPPING = "rtx:rtpt:gaussian:skipTonemapping:enabled"
 PPISP_INTEGRATION_MODE_SPG_RUNTIME = "spg-runtime"
 PPISP_INTEGRATION_MODE_SH_OPTIMIZED = "sh-optimized"

@@ -29,7 +29,31 @@ from pxr import Gf, Sdf, Usd
 log = logging.getLogger(__name__)
 
 _LDR_COLOR_VAR = "LdrColor"
+_HDR_COLOR_VAR = "HdrColor"
+_SKIP_GAUSSIAN_TONEMAPPING_ATTR = "omni:rtx:gaussian:skipTonemapping:enabled"
 _RENDER_SCOPE_PATH = "/Render"
+
+
+def disable_gaussian_skip_tonemapping(product_prim: Usd.Prim) -> None:
+    """Disable the Gaussian skip-tonemapping path of a RenderProduct whose color is post-processed at runtime."""
+    product_prim.CreateAttribute(_SKIP_GAUSSIAN_TONEMAPPING_ATTR, Sdf.ValueTypeNames.Bool, custom=True).Set(False)
+
+
+def disable_gaussian_skip_tonemapping_on_post_processed_products(
+    stage: Usd.Stage, render_scope_path: str = _RENDER_SCOPE_PATH
+) -> None:
+    """Apply :func:`disable_gaussian_skip_tonemapping` to the RenderProducts under ``render_scope_path`` that are
+    post-processed at runtime, i.e. that request ``HdrColor`` or carry a post-processing shader."""
+    scope = stage.GetPrimAtPath(render_scope_path)
+    for product in scope.GetChildren() if scope.IsValid() else ():
+        if product.GetTypeName() != "RenderProduct":
+            continue
+        for child in product.GetChildren():
+            source_name = child.GetAttribute("sourceName")
+            requests_hdr = source_name.IsValid() and source_name.Get() == _HDR_COLOR_VAR
+            if requests_hdr or child.GetTypeName() == "Shader":
+                disable_gaussian_skip_tonemapping(product)
+                break
 
 
 def create_render_products(
@@ -45,6 +69,8 @@ def create_render_products(
     - ``resolution`` attribute.
     - ``orderedVars`` relationship to child RenderVars.
     - Child ``RenderVar`` prims with matching ``sourceName`` values.
+    - ``omni:rtx:gaussian:skipTonemapping:enabled = false`` when ``HdrColor`` is requested: runtime
+      post-processing (PPISP) consumes the HDR Gaussian output and produces the LDR color itself.
 
     Args:
         stage: USD stage that already contains the camera prims.
@@ -70,12 +96,19 @@ def create_render_products(
         existing_product = stage.GetPrimAtPath(product_path)
         if existing_product.IsValid():
             log.info("Keeping existing RenderProduct at %s; not overwriting", product_path)
+            if _HDR_COLOR_VAR in render_vars:
+                disable_gaussian_skip_tonemapping(existing_product)
             continue
 
         product_prim = stage.DefinePrim(product_path, "RenderProduct")
 
         # Resolution
         product_prim.CreateAttribute("resolution", Sdf.ValueTypeNames.Int2).Set(Gf.Vec2i(int(width), int(height)))
+
+        if _HDR_COLOR_VAR in render_vars:
+            product_prim.CreateAttribute(_SKIP_GAUSSIAN_TONEMAPPING_ATTR, Sdf.ValueTypeNames.Bool, custom=True).Set(
+                False
+            )
 
         # Camera relationship
         camera_rel = product_prim.CreateRelationship("camera")

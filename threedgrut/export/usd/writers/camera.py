@@ -68,7 +68,11 @@ def _author_lens_distortion(
 def _opencv_intrinsics_values(
     params: OpenCVPinholeCameraModelParameters | OpenCVFisheyeCameraModelParameters,
 ) -> Dict[str, Tuple[Sdf.ValueTypeName, object]]:
-    """Calibration image size, focal lengths, principal point and radial coefficients shared by the OpenCV models."""
+    """Calibration image size, focal lengths, principal point and radial coefficients shared by the OpenCV models.
+
+    The principal point is relative to the top-left corner of the image, like the RTX one (checked by rendering a
+    single Gaussian with image sizes from 256 to 263: the RTX projection is exact for even and odd sizes).
+    """
     float_type = Sdf.ValueTypeNames.Float
     resolution = params.resolution.tolist()
     focal_length = params.focal_length.tolist()
@@ -84,6 +88,34 @@ def _opencv_intrinsics_values(
     return values
 
 
+_PINHOLE_HORIZONTAL_APERTURE = 20.955  # USD default (mm), the focal length and vertical aperture are derived from it
+
+
+def _author_pinhole_camera_attributes(camera_prim: Usd.Prim, params: OpenCVPinholeCameraModelParameters) -> None:
+    """
+    Author the standard USD camera attributes (focal length, apertures and aperture offsets) matching the pinhole
+    intrinsics, ignoring the distortion, for viewers that do not read the lens distortion schemas (e.g. the Kit
+    viewport, which would otherwise show a default 50 mm perspective camera). RTX renders use the lens distortion
+    schema instead. Only pinhole cameras can be described this way: the fisheye and FTheta cameras keep the default
+    perspective attributes.
+    """
+    width, height = (float(v) for v in params.resolution.tolist())
+    fx, fy = (float(v) for v in params.focal_length.tolist())
+    cx, cy = (float(v) for v in params.principal_point.tolist())
+    horizontal_aperture = _PINHOLE_HORIZONTAL_APERTURE
+    focal_length = fx * horizontal_aperture / width
+    vertical_aperture = focal_length * height / fy
+    values = {
+        "focalLength": focal_length,
+        "horizontalAperture": horizontal_aperture,
+        "verticalAperture": vertical_aperture,
+        "horizontalApertureOffset": (width / 2.0 - cx) * horizontal_aperture / width,
+        "verticalApertureOffset": (cy - height / 2.0) * vertical_aperture / height,
+    }
+    for name, value in values.items():
+        camera_prim.GetAttribute(name).Set(value)
+
+
 def _add_opencv_pinhole_camera_intrinsics(
     camera_prim: Usd.Prim,
     params: OpenCVPinholeCameraModelParameters,
@@ -93,6 +125,7 @@ def _add_opencv_pinhole_camera_intrinsics(
     values.update({f"p{i + 1}": (float_type, float(v)) for i, v in enumerate(params.tangential_coeffs.tolist())})
     values.update({f"s{i + 1}": (float_type, float(v)) for i, v in enumerate(params.thin_prism_coeffs.tolist())})
     _author_lens_distortion(camera_prim, "OmniLensDistortionOpenCvPinholeAPI", "opencvPinhole", values)
+    _author_pinhole_camera_attributes(camera_prim, params)
 
 
 def _add_opencv_fisheye_camera_intrinsics(

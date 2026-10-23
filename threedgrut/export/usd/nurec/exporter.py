@@ -68,7 +68,10 @@ from threedgrut.export.usd.post_processing.ppisp_spg import (
     select_spg_files_for_export,
 )
 from threedgrut.export.usd.writers.camera import export_cameras_to_usd
-from threedgrut.export.usd.writers.render_product import create_render_products
+from threedgrut.export.usd.writers.render_product import (
+    create_render_products,
+    disable_gaussian_skip_tonemapping_on_post_processed_products,
+)
 from threedgrut.utils.logger import logger
 
 _DEFAULT_RENDER_PRODUCT_VAR = "LdrColor"
@@ -449,6 +452,10 @@ class NuRecExporter(ModelExporter):
                     )
             except Exception as exc:
                 logger.warning("Failed to merge source USD prims into NuRec output: %s", exc)
+
+        if uses_omni_native_post_processing_export or copied_source_has_post_processing:
+            # Runtime post-processing consumes the HDR Gaussian output and produces the LDR color itself.
+            disable_gaussian_skip_tonemapping_on_post_processed_products(default_usd.stage)
 
         # Write the final USDZ file
         write_to_usdz(output_path, model_file, gauss_usd, default_usd, extra_files if extra_files else None)

@@ -686,6 +686,10 @@ class TestUSDExportColorSpace:
             render_settings = stage.GetRootLayer().customLayerData["renderSettings"]
             assert render_settings["rtx:post:tonemap:op"] == 2
             assert render_settings["rtx:rtpt:gaussian:skipTonemapping:enabled"] is False
+            products = [p for p in stage.Traverse() if p.GetTypeName() == "RenderProduct"]
+            assert products
+            for product in products:
+                assert product.GetAttribute("omni:rtx:gaussian:skipTonemapping:enabled").Get() is False
 
     def test_runtime_ppisp_rejects_frame_reference_without_camera_reference(self, monkeypatch):
         """spg-runtime: frame-only static PPISP export is ambiguous."""
@@ -929,6 +933,8 @@ class TestNuRecExport:
             gauss = self._open_gauss_layer(usd_path, tmp_path)
             assert gauss.GetPrimAtPath("/World/Cameras/camera_0000").IsValid()
             _assert_default_camera_render_product(gauss)
+            ldr_product = gauss.GetPrimAtPath("/Render/camera_0000")
+            assert not ldr_product.GetAttribute("omni:rtx:gaussian:skipTonemapping:enabled").IsValid()
 
     def test_nurec_export_with_native_ppisp_authors_root_spg_and_ppisp_render_settings(self, monkeypatch):
         """Native NuRec PPISP export exposes the SPG graph and disables registered-compositing inversions."""
@@ -958,6 +964,7 @@ class TestNuRecExport:
             assert render_settings["rtx:rtpt:gaussian:skipTonemapping:enabled"] is False
 
             product = composed.GetPrimAtPath("/Render/camera_0000")
+            assert product.GetAttribute("omni:rtx:gaussian:skipTonemapping:enabled").Get() is False
             assert product.GetRelationship("camera").GetTargets() == [
                 Sdf.Path("/World/gauss/Cameras/camera_0000_ppisp")
             ]
