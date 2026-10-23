@@ -92,6 +92,8 @@ def _author_render_settings(
         "rtx:matteObject:visibility:secondaryRays": True,
     }
     if skip_gaussian_tonemapping:
+        # DEPRECATED: renamed ``omni:rtx:gaussian:skipTonemapping:enabled`` and now authored per RenderProduct. Kept only
+        # for backward compatibility with older renderers; remove it once they are no longer supported.
         render_settings["rtx:rtpt:gaussian:skipTonemapping:enabled"] = False
     stage.SetMetadataByDictKey("customLayerData", "renderSettings", render_settings)
 

@@ -47,7 +47,9 @@ export_usd:
   export_cameras: true
   export_background: true
   # zDepth | cameraDistance | rayHitDistance
-  sorting_mode_hint: cameraDistance
+  # null: 3dgrt or 3dgut with k_buffer_size > 0 -> rayHitDistance
+  #       3dgut without k-buffer -> zDepth if global_z_order else cameraDistance
+  sorting_mode_hint: null
   # Enable post-processing export when the checkpoint contains a supported module.
   # Defaults to true; ppisp-integration-mode controls how PPISP is exported.
   export_post_processing: true

@@ -18,14 +18,16 @@ Camera USD writer for exporting camera poses and intrinsics.
 
 Exports one Camera prim per physical camera with time-sampled transforms
 and static intrinsics, following the pattern established in NRE's
-rig_trajectories.py.
+rig_trajectories.py. Intrinsics are authored with the ``omni:lensdistortion:*``
+attributes of the OmniLensDistortion*API schemas (opencvPinhole / opencvFisheye / ftheta).
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from ncore.data import (
+    FThetaCameraModelParameters,
     OpenCVFisheyeCameraModelParameters,
     OpenCVPinholeCameraModelParameters,
 )
@@ -34,6 +36,9 @@ from pxr import Gf, Sdf, Tf, Usd, UsdGeom
 from threedgrut.export.transforms import column_vector_4x4_to_usd_matrix
 
 logger = logging.getLogger(__name__)
+
+_LENS_DISTORTION_PREFIX = "omni:lensdistortion"
+_FTHETA_SCHEMA_ORDER = 5  # the OmniLensDistortionFthetaAPI schema declares k0..k4
 
 DEFAULT_NEAR_CLIP = 0.001
 DEFAULT_FAR_CLIP = 10000000.0
@@ -47,68 +52,135 @@ def _make_usd_prim_name(name: str) -> str:
     return Tf.MakeValidIdentifier(name)
 
 
+def _author_lens_distortion(
+    camera_prim: Usd.Prim,
+    api_schema: str,
+    model: str,
+    values: Dict[str, Tuple[Sdf.ValueTypeName, object]],
+) -> None:
+    """Apply an OmniLensDistortion*API schema and author its ``omni:lensdistortion:<model>:*`` attributes."""
+    camera_prim.AddAppliedSchema(api_schema)
+    camera_prim.CreateAttribute(f"{_LENS_DISTORTION_PREFIX}:model", Sdf.ValueTypeNames.Token).Set(model)
+    for name, (value_type, value) in values.items():
+        camera_prim.CreateAttribute(f"{_LENS_DISTORTION_PREFIX}:{model}:{name}", value_type).Set(value)
+
+
+def _opencv_intrinsics_values(
+    params: OpenCVPinholeCameraModelParameters | OpenCVFisheyeCameraModelParameters,
+) -> Dict[str, Tuple[Sdf.ValueTypeName, object]]:
+    """Calibration image size, focal lengths, principal point and radial coefficients shared by the OpenCV models.
+
+    The principal point is relative to the top-left corner of the image, like the RTX one (checked by rendering a
+    single Gaussian with image sizes from 256 to 263: the RTX projection is exact for even and odd sizes).
+    """
+    float_type = Sdf.ValueTypeNames.Float
+    resolution = params.resolution.tolist()
+    focal_length = params.focal_length.tolist()
+    principal_point = params.principal_point.tolist()
+    values: Dict[str, Tuple[Sdf.ValueTypeName, object]] = {
+        "imageSize": (Sdf.ValueTypeNames.Int2, Gf.Vec2i(int(resolution[0]), int(resolution[1]))),
+        "fx": (float_type, float(focal_length[0])),
+        "fy": (float_type, float(focal_length[1])),
+        "cx": (float_type, float(principal_point[0])),
+        "cy": (float_type, float(principal_point[1])),
+    }
+    values.update({f"k{i + 1}": (float_type, float(v)) for i, v in enumerate(params.radial_coeffs.tolist())})
+    return values
+
+
+_PINHOLE_HORIZONTAL_APERTURE = 20.955  # USD default (mm), the focal length and vertical aperture are derived from it
+
+
+def _author_pinhole_camera_attributes(camera_prim: Usd.Prim, params: OpenCVPinholeCameraModelParameters) -> None:
+    """
+    Author the standard USD camera attributes (focal length, apertures and aperture offsets) matching the pinhole
+    intrinsics, ignoring the distortion, for viewers that do not read the lens distortion schemas (e.g. the Kit
+    viewport, which would otherwise show a default 50 mm perspective camera). RTX renders use the lens distortion
+    schema instead. Only pinhole cameras can be described this way: the fisheye and FTheta cameras keep the default
+    perspective attributes.
+    """
+    width, height = (float(v) for v in params.resolution.tolist())
+    fx, fy = (float(v) for v in params.focal_length.tolist())
+    cx, cy = (float(v) for v in params.principal_point.tolist())
+    horizontal_aperture = _PINHOLE_HORIZONTAL_APERTURE
+    focal_length = fx * horizontal_aperture / width
+    vertical_aperture = focal_length * height / fy
+    values = {
+        "focalLength": focal_length,
+        "horizontalAperture": horizontal_aperture,
+        "verticalAperture": vertical_aperture,
+        "horizontalApertureOffset": (width / 2.0 - cx) * horizontal_aperture / width,
+        "verticalApertureOffset": (cy - height / 2.0) * vertical_aperture / height,
+    }
+    for name, value in values.items():
+        camera_prim.GetAttribute(name).Set(value)
+
+
 def _add_opencv_pinhole_camera_intrinsics(
     camera_prim: Usd.Prim,
     params: OpenCVPinholeCameraModelParameters,
 ) -> None:
-    camera_prim.CreateAttribute("cameraProjectionType", Sdf.ValueTypeNames.Token).Set("pinholeOpenCV")
-
-    resolution_list = params.resolution.tolist()
-    camera_prim.CreateAttribute("fthetaWidth", Sdf.ValueTypeNames.Float).Set(float(resolution_list[0]))
-    camera_prim.CreateAttribute("fthetaHeight", Sdf.ValueTypeNames.Float).Set(float(resolution_list[1]))
-
-    principal_point_list = params.principal_point.tolist()
-    camera_prim.CreateAttribute("fthetaCx", Sdf.ValueTypeNames.Float).Set(float(principal_point_list[0]))
-    camera_prim.CreateAttribute("fthetaCy", Sdf.ValueTypeNames.Float).Set(float(principal_point_list[1]))
-
-    focal_length_list = params.focal_length.tolist()
-    camera_prim.CreateAttribute("openCVFx", Sdf.ValueTypeNames.Float).Set(float(focal_length_list[0]))
-    camera_prim.CreateAttribute("openCVFy", Sdf.ValueTypeNames.Float).Set(float(focal_length_list[1]))
-
-    radial_coeffs_list = params.radial_coeffs.tolist()
-    camera_prim.CreateAttribute("fthetaPolyA", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[0]))
-    camera_prim.CreateAttribute("fthetaPolyB", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[1]))
-    camera_prim.CreateAttribute("fthetaPolyC", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[2]))
-    camera_prim.CreateAttribute("fthetaPolyD", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[3]))
-    camera_prim.CreateAttribute("fthetaPolyE", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[4]))
-    camera_prim.CreateAttribute("fthetaPolyF", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[5]))
-
-    tangential_coeffs_list = params.tangential_coeffs.tolist()
-    camera_prim.CreateAttribute("p0", Sdf.ValueTypeNames.Float).Set(float(tangential_coeffs_list[0]))
-    camera_prim.CreateAttribute("p1", Sdf.ValueTypeNames.Float).Set(float(tangential_coeffs_list[1]))
-
-    thin_prism_coeffs_list = params.thin_prism_coeffs.tolist()
-    camera_prim.CreateAttribute("s0", Sdf.ValueTypeNames.Float).Set(float(thin_prism_coeffs_list[0]))
-    camera_prim.CreateAttribute("s1", Sdf.ValueTypeNames.Float).Set(float(thin_prism_coeffs_list[1]))
-    camera_prim.CreateAttribute("s2", Sdf.ValueTypeNames.Float).Set(float(thin_prism_coeffs_list[2]))
-    camera_prim.CreateAttribute("s3", Sdf.ValueTypeNames.Float).Set(float(thin_prism_coeffs_list[3]))
+    float_type = Sdf.ValueTypeNames.Float
+    values = _opencv_intrinsics_values(params)
+    values.update({f"p{i + 1}": (float_type, float(v)) for i, v in enumerate(params.tangential_coeffs.tolist())})
+    values.update({f"s{i + 1}": (float_type, float(v)) for i, v in enumerate(params.thin_prism_coeffs.tolist())})
+    _author_lens_distortion(camera_prim, "OmniLensDistortionOpenCvPinholeAPI", "opencvPinhole", values)
+    _author_pinhole_camera_attributes(camera_prim, params)
 
 
 def _add_opencv_fisheye_camera_intrinsics(
     camera_prim: Usd.Prim,
     params: OpenCVFisheyeCameraModelParameters,
 ) -> None:
-    camera_prim.CreateAttribute("cameraProjectionType", Sdf.ValueTypeNames.Token).Set("fisheyeOpenCV")
+    # The fisheye schema has no field-of-view limit: RTX derives it from the intrinsics, so max_angle is not exported
+    _author_lens_distortion(
+        camera_prim, "OmniLensDistortionOpenCvFisheyeAPI", "opencvFisheye", _opencv_intrinsics_values(params)
+    )
 
-    resolution_list = params.resolution.tolist()
-    camera_prim.CreateAttribute("fthetaWidth", Sdf.ValueTypeNames.Float).Set(float(resolution_list[0]))
-    camera_prim.CreateAttribute("fthetaHeight", Sdf.ValueTypeNames.Float).Set(float(resolution_list[1]))
 
-    principal_point_list = params.principal_point.tolist()
-    camera_prim.CreateAttribute("fthetaCx", Sdf.ValueTypeNames.Float).Set(float(principal_point_list[0]))
-    camera_prim.CreateAttribute("fthetaCy", Sdf.ValueTypeNames.Float).Set(float(principal_point_list[1]))
+def _add_ftheta_camera_intrinsics(
+    camera_prim: Usd.Prim,
+    params: FThetaCameraModelParameters,
+) -> None:
+    float_type = Sdf.ValueTypeNames.Float
+    if not np.allclose(params.linear_cde, (1.0, 0.0, 0.0)):
+        logger.warning(f"{camera_prim.GetPath()}: FTheta linear_cde {params.linear_cde.tolist()} is not exported")
+    resolution = params.resolution.tolist()
+    principal_point = params.principal_point.tolist()
+    values: Dict[str, Tuple[Sdf.ValueTypeName, object]] = {
+        "nominalWidth": (float_type, float(resolution[0])),
+        "nominalHeight": (float_type, float(resolution[1])),
+        # NCore's FTheta principal point has pixel indices at the pixel centers, RTX's optical center is relative
+        # to the top-left corner of the image
+        "opticalCenter": (
+            Sdf.ValueTypeNames.Float2,
+            Gf.Vec2f(float(principal_point[0]) + 0.5, float(principal_point[1]) + 0.5),
+        ),
+        "maxFov": (float_type, float(2.0 * np.rad2deg(params.max_angle))),
+    }
+    if params.reference_poly != FThetaCameraModelParameters.PolynomialType.PIXELDIST_TO_ANGLE:
+        logger.warning(
+            f"{camera_prim.GetPath()}: FTheta reference polynomial is {params.reference_poly.name}, "
+            "the exported pixel-distance-to-angle polynomial is only an approximation of the model"
+        )
+    # RTX's ftheta polynomial maps pixel distance to angle. The schema declares k0..k4 only: higher order
+    # coefficients are authored (RTX reads k5) only when they are not zero.
+    poly = params.pixeldist_to_angle_poly.tolist()
+    values.update({f"k{i}": (float_type, float(v)) for i, v in enumerate(poly) if i < _FTHETA_SCHEMA_ORDER or v != 0.0})
+    _author_lens_distortion(camera_prim, "OmniLensDistortionFthetaAPI", "ftheta", values)
 
-    focal_length_list = params.focal_length.tolist()
-    camera_prim.CreateAttribute("openCVFx", Sdf.ValueTypeNames.Float).Set(float(focal_length_list[0]))
-    camera_prim.CreateAttribute("openCVFy", Sdf.ValueTypeNames.Float).Set(float(focal_length_list[1]))
 
-    radial_coeffs_list = params.radial_coeffs.tolist()
-    camera_prim.CreateAttribute("fthetaPolyA", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[0]))
-    camera_prim.CreateAttribute("fthetaPolyB", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[1]))
-    camera_prim.CreateAttribute("fthetaPolyC", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[2]))
-    camera_prim.CreateAttribute("fthetaPolyD", Sdf.ValueTypeNames.Float).Set(float(radial_coeffs_list[3]))
-
-    camera_prim.CreateAttribute("fthetaMaxFov", Sdf.ValueTypeNames.Float).Set(float(2.0 * np.rad2deg(params.max_angle)))
+def _add_camera_intrinsics(camera_prim: Usd.Prim, params) -> bool:
+    """Author the intrinsics of a supported camera model; returns False for unsupported models."""
+    if isinstance(params, OpenCVPinholeCameraModelParameters):
+        _add_opencv_pinhole_camera_intrinsics(camera_prim, params)
+    elif isinstance(params, OpenCVFisheyeCameraModelParameters):
+        _add_opencv_fisheye_camera_intrinsics(camera_prim, params)
+    elif isinstance(params, FThetaCameraModelParameters):
+        _add_ftheta_camera_intrinsics(camera_prim, params)
+    else:
+        return False
+    return True
 
 
 def export_cameras_to_usd(
@@ -135,7 +207,7 @@ def export_cameras_to_usd(
             (right-down-front).
         camera_names: Logical name for each physical camera, indexed by camera_idx.
         frame_to_camera: Per-frame camera index mapping, length N_frames.
-        camera_params: Per-frame CameraModelParameters (OpenCVPinhole / Fisheye).
+        camera_params: Per-frame CameraModelParameters (OpenCVPinhole / Fisheye / FTheta).
             Intrinsics are taken from the first frame of each camera.
         frame_time_codes: Per-frame USD time code mapping, length N_frames.
             When omitted, frame indices are used as time codes.
@@ -183,11 +255,7 @@ def export_cameras_to_usd(
         first_frame = frame_indices[0]
         if camera_params is not None and first_frame < len(camera_params) and camera_params[first_frame] is not None:
             params = camera_params[first_frame]
-            if isinstance(params, OpenCVPinholeCameraModelParameters):
-                _add_opencv_pinhole_camera_intrinsics(camera_prim, params)
-            elif isinstance(params, OpenCVFisheyeCameraModelParameters):
-                _add_opencv_fisheye_camera_intrinsics(camera_prim, params)
-            else:
+            if not _add_camera_intrinsics(camera_prim, params):
                 camera.GetFocalLengthAttr().Set(24.0)
                 logger.warning(f"Unsupported camera model for '{cam_name}', using default focal length")
         else:
@@ -285,11 +353,7 @@ def export_camera_rig_with_timestamps(
 
     if camera_params is not None and len(camera_params) > 0:
         params = camera_params[0]
-        if isinstance(params, OpenCVPinholeCameraModelParameters):
-            _add_opencv_pinhole_camera_intrinsics(camera_prim, params)
-        elif isinstance(params, OpenCVFisheyeCameraModelParameters):
-            _add_opencv_fisheye_camera_intrinsics(camera_prim, params)
-        else:
+        if not _add_camera_intrinsics(camera_prim, params):
             camera.GetFocalLengthAttr().Set(24.0)
     else:
         camera.GetFocalLengthAttr().Set(24.0)

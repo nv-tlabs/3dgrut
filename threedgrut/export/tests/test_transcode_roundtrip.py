@@ -616,6 +616,8 @@ class TestCrossFormatTranscode:
             assert render_settings["rtx:post:registeredCompositing:invertToneMap"] is False
             assert render_settings["rtx:post:registeredCompositing:invertColorCorrection"] is False
             assert render_settings["rtx:rtpt:gaussian:skipTonemapping:enabled"] is False
+            product = stage.GetPrimAtPath("/Render/camera_0000")
+            assert product.GetAttribute("omni:rtx:gaussian:skipTonemapping:enabled").Get() is False
             with zipfile.ZipFile(output_path) as zf:
                 names = set(zf.namelist())
                 gauss_usda = zf.read("gauss.usda").decode("utf-8")
