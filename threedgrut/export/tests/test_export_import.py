@@ -41,6 +41,7 @@ from threedgrut.export.usd.exporter import USDExporter
 from threedgrut.export.usd.particle_field_hints import (
     resolve_particle_field_sorting_mode_hint,
 )
+from threedgrut.export.usd.writers.lightfield import GaussianLightFieldWriter
 
 
 def _assert_default_camera_render_product(
@@ -502,10 +503,25 @@ class TestExportImportConsistency:
             ).export(model, usd_path)
 
 
+_SH_COEFFS_ATTR_NAMES = (
+    "radiance:sphericalHarmonicsCoefficients",
+    "radiance:sphericalHarmonicsCoefficientsh",
+)
+
+
+def _sh_color_spaces(prim: Usd.Prim) -> dict:
+    """Map each authored SH coefficients attribute of the prim to its colorSpace metadata."""
+    return {
+        name: prim.GetAttribute(name).GetColorSpace()
+        for name in _SH_COEFFS_ATTR_NAMES
+        if prim.GetAttribute(name) and prim.GetAttribute(name).IsAuthored()
+    }
+
+
 def _find_prim_with_color_space_api(stage: Usd.Stage):
-    """Return the first prim that has ColorSpaceAPI applied (the Gaussian particle prim)."""
+    """Return the first prim with an SH coefficients attribute carrying colorSpace (the Gaussian particle prim)."""
     for prim in Usd.PrimRange(stage.GetPseudoRoot()):
-        if prim.HasAPI(Usd.ColorSpaceAPI):
+        if _sh_color_spaces(prim):
             return prim
     return None
 
@@ -592,7 +608,7 @@ class TestPPISPRuntimeMode:
 
 
 class TestUSDExportColorSpace:
-    """Test that USD export applies ColorSpaceAPI with correct color space name."""
+    """Test that USD export authors colorSpace metadata on the SH coefficients attributes."""
 
     def test_usd_export_color_space_default_srgb(self):
         """Standard export sets color space to srgb_rec709_display."""
@@ -608,11 +624,58 @@ class TestUSDExportColorSpace:
             stage = Usd.Stage.Open(str(usd_path))
             assert stage
             prim = _find_prim_with_color_space_api(stage)
-            assert prim is not None, "No prim with ColorSpaceAPI found"
-            api = Usd.ColorSpaceAPI(prim)
-            attr = api.GetColorSpaceNameAttr()
-            assert attr, "ColorSpaceName attribute missing"
-            assert attr.Get() == "srgb_rec709_display"
+            assert prim is not None, "No prim with SH colorSpace metadata found"
+            assert _sh_color_spaces(prim) == {"radiance:sphericalHarmonicsCoefficients": "srgb_rec709_display"}
+            assert not prim.HasAPI(Usd.ColorSpaceAPI)
+
+    def test_usd_export_color_space_half_precision_features(self):
+        """Half-precision features author the color space on the *h coefficients attribute."""
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usdz"
+            USDExporter(
+                half_precision=True,
+                export_cameras=False,
+                export_background=False,
+                apply_normalizing_transform=False,
+            ).export(model, usd_path)
+            stage = Usd.Stage.Open(str(usd_path))
+            assert stage
+            prim = _find_prim_with_color_space_api(stage)
+            assert prim is not None, "No prim with SH colorSpace metadata found"
+            assert _sh_color_spaces(prim) == {"radiance:sphericalHarmonicsCoefficientsh": "srgb_rec709_display"}
+
+    def test_usd_export_color_space_covers_both_precisions(self):
+        """Every SH coefficients attribute present on the prim gets the same color space."""
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usda"
+            USDExporter(
+                half_precision=False,
+                export_cameras=False,
+                export_background=False,
+                apply_normalizing_transform=False,
+            ).export(model, usd_path)
+            stage = Usd.Stage.Open(str(usd_path))
+            prim = _find_prim_with_color_space_api(stage)
+            assert prim is not None
+            prim.CreateAttribute("radiance:sphericalHarmonicsCoefficientsh", Sdf.ValueTypeNames.Half3Array)
+            writer = GaussianLightFieldWriter.__new__(GaussianLightFieldWriter)
+            writer.capabilities = SimpleNamespace(has_spherical_harmonics=True)
+            writer.linear_srgb = True
+            writer.apply_color_space_to_sh_attributes(prim)
+            assert _sh_color_spaces(prim) == {
+                "radiance:sphericalHarmonicsCoefficients": "lin_rec709_scene",
+                "radiance:sphericalHarmonicsCoefficientsh": "lin_rec709_scene",
+            }
+
+    def test_writer_without_spherical_harmonics_authors_no_color_space(self):
+        """No colorSpace metadata is authored when the model has no SH coefficients."""
+        stage = Usd.Stage.CreateInMemory()
+        capabilities = SimpleNamespace(is_surfel=False, has_spherical_harmonics=False, sh_degree=None)
+        prim = GaussianLightFieldWriter(stage, capabilities).create_prim(5)
+        assert prim.GetTypeName() == "ParticleField3DGaussianSplat"
+        assert _sh_color_spaces(prim) == {}
 
     def test_usdz_export_camera_is_composed_from_root_stage(self):
         """USDZ camera prims are authored where the package root composes them."""
@@ -678,7 +741,7 @@ class TestUSDExportColorSpace:
             assert stage
             prim = _find_prim_with_color_space_api(stage)
             assert prim is not None
-            assert Usd.ColorSpaceAPI(prim).GetColorSpaceNameAttr().Get() == "lin_rec709_scene"
+            assert set(_sh_color_spaces(prim).values()) == {"lin_rec709_scene"}
             shader_prim = _find_prim_with_attribute(stage, "inputs:apply_srgb_linear")
             assert shader_prim is not None
             assert shader_prim.GetAttribute("inputs:apply_srgb_linear").Get() is False

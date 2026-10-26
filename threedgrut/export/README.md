@@ -31,6 +31,10 @@ post-processing export has its own deep dive in
 > `ParticleField`. Prefer `ParticleField` for new assets. This is a beta
 > feature and the workflows are likely to change in future versions.
 
+The color space of the spherical harmonics (`srgb_rec709_display`, or `lin_rec709_scene` when
+post-processing is attached) is authored as `colorSpace` metadata on each
+`radiance:sphericalHarmonicsCoefficients[h]` attribute of the `ParticleField` prim, matching the pending OpenUSD ParticleField color space proposal.
+
 ## Requirements
 
 USD and NuRec export depend on `usd-core` (the `pxr` module), which

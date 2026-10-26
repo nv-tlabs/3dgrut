@@ -47,6 +47,12 @@ class GaussianUSDWriter(ABC):
         content_root_path: Root path for content in USD stage
     """
 
+    # Both SH coefficient precisions the ParticleField schema defines. A prim may carry either or both.
+    _SH_COEFFS_ATTR_NAMES = (
+        "radiance:sphericalHarmonicsCoefficients",
+        "radiance:sphericalHarmonicsCoefficientsh",
+    )
+
     def __init__(
         self,
         stage: Usd.Stage,
@@ -64,16 +70,29 @@ class GaussianUSDWriter(ABC):
         self.has_post_processing = has_post_processing
         self.prim: Optional[Usd.Prim] = None
 
-    def apply_color_space_to_prim(self, prim: Usd.Prim) -> None:
-        """Apply ColorSpaceAPI and set color space based on linear_srgb flag.
+    def apply_color_space_to_sh_attributes(self, prim: Usd.Prim) -> None:
+        """Author ``colorSpace`` metadata on every SH coefficients attribute of the prim.
+
+        Mirrors the OpenUSD ParticleField proposal, where the color space applies to the RGB
+        reconstructed from the SH coefficients and is set on the coefficients attributes (both
+        precisions share one value).
 
         Per USD color space conventions:
-        - lin_rec709_scene: Linear Rec.709 (post-processed/linear RGB data)
-        - srgb_rec709_display: sRGB Rec.709 (gamma-encoded data)
+        - lin_rec709_scene: Linear Rec.709 color space (for post-processed/linear RGB data)
+        - srgb_rec709_display: sRGB Rec.709 color space (for gamma-encoded data)
+
+        Args:
+            prim: Particle field prim whose SH coefficients attributes are annotated
         """
+        if not self.capabilities.has_spherical_harmonics:
+            return
+
         color_space = "lin_rec709_scene" if self.linear_srgb else "srgb_rec709_display"
-        color_space_api = Usd.ColorSpaceAPI.Apply(prim)
-        color_space_api.CreateColorSpaceNameAttr().Set(color_space)
+        for attr_name in self._SH_COEFFS_ATTR_NAMES:
+            attr = prim.GetAttribute(attr_name)
+            # IsAuthored skips schema-declared attributes the writer did not create.
+            if attr and attr.IsAuthored():
+                attr.SetColorSpace(color_space)
 
     @abstractmethod
     def create_prim(self, num_gaussians: int) -> Usd.Prim:

@@ -103,7 +103,7 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
         # Set rendering hints
         self._set_rendering_hints()
 
-        self.apply_color_space_to_prim(self.prim)
+        self.apply_color_space_to_sh_attributes(self.prim)
         if self.omni_usd:
             from threedgrut.export.usd.writers.omni_material import (
                 bind_particlefield_emissive_material,
