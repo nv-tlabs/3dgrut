@@ -859,11 +859,11 @@ class TestUSDExportSurfel:
     """Test the planar (surfel) ParticleField written for trisurfel models."""
 
     @staticmethod
-    def _write_surfel():
+    def _write_surfel(linear_srgb=False):
         n = 4
         stage = Usd.Stage.CreateInMemory()
         capabilities = SimpleNamespace(is_surfel=True, has_spherical_harmonics=True, sh_degree=0)
-        writer = GaussianLightFieldWriter(stage, capabilities)
+        writer = GaussianLightFieldWriter(stage, capabilities, linear_srgb=linear_srgb)
         prim = writer.create_prim(n)
         attributes = GaussianAttributes(
             positions=np.zeros((n, 3), dtype=np.float32),
@@ -886,6 +886,14 @@ class TestUSDExportSurfel:
         _stage, prim = self._write_surfel()
         assert prim.GetAttribute("projectionModeHint").Get() == "perspective"
         assert prim.GetAttribute("sortingModeHint").Get() == DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT
+
+    @pytest.mark.parametrize(
+        "linear_srgb, expected",
+        [(False, "srgb_rec709_display"), (True, "lin_rec709_scene")],
+    )
+    def test_surfel_sh_color_space(self, linear_srgb, expected):
+        _stage, prim = self._write_surfel(linear_srgb=linear_srgb)
+        assert _sh_color_spaces(prim) == {"radiance:sphericalHarmonicsCoefficients": expected}
 
     def test_surfel_z_scale_is_zeroed(self):
         _stage, prim = self._write_surfel()
