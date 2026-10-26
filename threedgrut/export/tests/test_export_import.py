@@ -32,13 +32,15 @@ import torch
 
 pytest.importorskip("pxr", reason="usd-core (pxr) is only available on linux x86_64")
 
-from pxr import Sdf, Usd
+from pxr import Sdf, Usd, UsdVol
 
+from threedgrut.export.accessor import GaussianAttributes
 from threedgrut.export.base import ExportableModel
 from threedgrut.export.formats import PLYExporter
 from threedgrut.export.importers import PLYImporter, USDImporter
 from threedgrut.export.usd.exporter import USDExporter
 from threedgrut.export.usd.particle_field_hints import (
+    DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
     resolve_particle_field_sorting_mode_hint,
 )
 from threedgrut.export.usd.writers.lightfield import GaussianLightFieldWriter
@@ -851,6 +853,46 @@ class TestUSDExportColorSpace:
             right_transform = stage.GetPrimAtPath("/World/Cameras/camera_right").GetAttribute("xformOp:transform")
             assert left_transform.GetTimeSamples() == [0.0, 2.0, 4.0]
             assert right_transform.GetTimeSamples() == [1.0, 3.0, 5.0]
+
+
+class TestUSDExportSurfel:
+    """Test the planar (surfel) ParticleField written for trisurfel models."""
+
+    @staticmethod
+    def _write_surfel():
+        n = 4
+        stage = Usd.Stage.CreateInMemory()
+        capabilities = SimpleNamespace(is_surfel=True, has_spherical_harmonics=True, sh_degree=0)
+        writer = GaussianLightFieldWriter(stage, capabilities)
+        prim = writer.create_prim(n)
+        attributes = GaussianAttributes(
+            positions=np.zeros((n, 3), dtype=np.float32),
+            rotations=np.tile(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32), (n, 1)),
+            scales=np.full((n, 3), 0.3, dtype=np.float32),
+            densities=np.full((n, 1), 0.5, dtype=np.float32),
+            albedo=np.full((n, 3), 0.5, dtype=np.float32),
+            specular=np.zeros((n, 0), dtype=np.float32),
+        )
+        writer.write_attributes(attributes)
+        writer.finalize(attributes.positions)
+        return stage, prim
+
+    def test_surfel_prim_uses_surflet_kernel(self):
+        _stage, prim = self._write_surfel()
+        assert prim.GetTypeName() == "ParticleField"
+        assert prim.HasAPI(UsdVol.ParticleFieldKernelGaussianSurfletAPI)
+
+    def test_surfel_prim_authors_rendering_hints(self):
+        _stage, prim = self._write_surfel()
+        assert prim.GetAttribute("projectionModeHint").Get() == "perspective"
+        assert prim.GetAttribute("sortingModeHint").Get() == DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT
+
+    def test_surfel_z_scale_is_zeroed(self):
+        _stage, prim = self._write_surfel()
+        scales = np.array(prim.GetAttribute("scales").Get())
+        assert scales.shape == (4, 3)
+        assert np.allclose(scales[:, :2], 0.3)
+        assert np.all(scales[:, 2] == 0.0)
 
 
 class TestUSDSampleExports:

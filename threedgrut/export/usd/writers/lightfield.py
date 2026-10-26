@@ -24,7 +24,7 @@ import logging
 from typing import Optional
 
 import numpy as np
-from pxr import Gf, Usd, UsdGeom, UsdVol, Vt
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdVol, Vt
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
 from threedgrut.export.usd.particle_field_hints import (
@@ -192,10 +192,18 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
             self._schema.CreateProjectionModeHintAttr().Set(self.projection_mode_hint)
             self._schema.CreateSortingModeHintAttr().Set(self.sorting_mode_hint)
         else:
-            # Surfel: prim is ParticleField; use base ParticleField schema for hint attrs
-            field_schema = UsdVol.ParticleField(self.prim)
-            field_schema.CreateProjectionModeHintAttr().Set(self.projection_mode_hint)
-            field_schema.CreateSortingModeHintAttr().Set(self.sorting_mode_hint)
+            # Surfel: the hints are only defined on ParticleField3DGaussianSplat, not on the base
+            # ParticleField, so author them as plain attributes with the same names and types.
+            for name, value in (
+                ("projectionModeHint", self.projection_mode_hint),
+                ("sortingModeHint", self.sorting_mode_hint),
+            ):
+                self.prim.CreateAttribute(
+                    name,
+                    Sdf.ValueTypeNames.Token,
+                    custom=False,
+                    variability=Sdf.VariabilityUniform,
+                ).Set(value)
 
     def write_attributes(
         self,
@@ -222,11 +230,15 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
             quats = [Gf.Quatf(float(q[0]), float(q[1]), float(q[2]), float(q[3])) for q in attributes.rotations]
             self.orientations_attr.Set(Vt.QuatfArray(quats))
 
-        # Scales (geometry)
+        # Scales (geometry). The surfel kernel is a flat disk and ignores the z scale, so zero it.
+        scales = attributes.scales
+        if self.use_surflet_kernel:
+            scales = scales.copy()
+            scales[:, 2] = 0.0
         if self.half_geometry:
-            self.scales_attr.Set(Vt.Vec3hArray.FromNumpy(attributes.scales.astype(np.float16)))
+            self.scales_attr.Set(Vt.Vec3hArray.FromNumpy(scales.astype(np.float16)))
         else:
-            self.scales_attr.Set(Vt.Vec3fArray.FromNumpy(attributes.scales.astype(np.float32)))
+            self.scales_attr.Set(Vt.Vec3fArray.FromNumpy(scales.astype(np.float32)))
 
         # Opacities (features)
         densities_clamped = np.clip(attributes.densities.flatten(), 0.0, 1.0)
