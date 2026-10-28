@@ -39,8 +39,8 @@ import torch
 from threedgrut.export.usd.exporter import VALID_PPISP_INTEGRATION_MODES, USDExporter
 from threedgrut.export.usd.nurec.exporter import NuRecExporter
 from threedgrut.export.usd.particle_field_hints import (
-    DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
     PARTICLE_FIELD_SORTING_MODE_HINTS,
+    resolve_particle_field_sorting_mode_hint,
 )
 from threedgrut.utils.logger import logger
 
@@ -131,7 +131,8 @@ Examples:
         default=None,
         help=(
             "ParticleField sortingModeHint for standard USD export. "
-            "Use rayHitDistance for ray-tracing renderers that support ray-hit sorting."
+            "Defaults to rayHitDistance for 3DGRT and for 3DGUT with k_buffer_size > 0; "
+            "otherwise 3DGUT uses zDepth or cameraDistance based on global_z_order."
         ),
     )
     post_processing_group = parser.add_mutually_exclusive_group()
@@ -509,12 +510,9 @@ def main():
             export_cameras=not args.no_cameras,
             export_background=not args.no_background,
             apply_normalizing_transform=not args.no_transform,
-            sorting_mode_hint=_arg_or_conf(
-                args.sorting_mode_hint,
-                export_conf,
-                "sorting-mode-hint",
-                "sorting_mode_hint",
-                DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
+            sorting_mode_hint=resolve_particle_field_sorting_mode_hint(
+                _arg_or_conf(args.sorting_mode_hint, export_conf, "sorting-mode-hint", "sorting_mode_hint", None),
+                conf,
             ),
             export_post_processing=export_post_processing,
             ppisp_integration_mode=ppisp_integration_mode,
