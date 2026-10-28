@@ -103,7 +103,7 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
         # Set rendering hints
         self._set_rendering_hints()
 
-        self.apply_color_space_to_sh_attributes(self.prim)
+        self._apply_sh_color_space()
         if self.omni_usd:
             from threedgrut.export.usd.writers.omni_material import (
                 bind_particlefield_emissive_material,
@@ -115,6 +115,20 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
                 has_post_processing=self.has_post_processing,
             )
         return self.prim
+
+    def _apply_sh_color_space(self) -> None:
+        """Author ``colorSpace`` metadata on the SH coefficients attribute.
+
+        Mirrors the OpenUSD ParticleField proposal, where the color space applies to the RGB
+        reconstructed from the SH coefficients and is set on the coefficients attribute.
+
+        Per USD color space conventions:
+        - lin_rec709_scene: Linear Rec.709 color space (for post-processed/linear RGB data)
+        - srgb_rec709_display: sRGB Rec.709 color space (for gamma-encoded data)
+        """
+        if self.sh_coeffs_attr is None:
+            return
+        self.sh_coeffs_attr.SetColorSpace("lin_rec709_scene" if self.linear_srgb else "srgb_rec709_display")
 
     def _apply_surflet_kernel_schemas(self) -> None:
         """Apply API schemas for 2DGS/surfel particles via UsdVol schema types."""
