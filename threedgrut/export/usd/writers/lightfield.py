@@ -24,7 +24,7 @@ import logging
 from typing import Optional
 
 import numpy as np
-from pxr import Gf, Usd, UsdGeom, UsdVol, Vt
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdVol, Vt
 
 from threedgrut.export.accessor import GaussianAttributes, ModelCapabilities
 from threedgrut.export.usd.particle_field_hints import (
@@ -103,7 +103,7 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
         # Set rendering hints
         self._set_rendering_hints()
 
-        self.apply_color_space_to_prim(self.prim)
+        self._apply_sh_color_space()
         if self.omni_usd:
             from threedgrut.export.usd.writers.omni_material import (
                 bind_particlefield_emissive_material,
@@ -115,6 +115,20 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
                 has_post_processing=self.has_post_processing,
             )
         return self.prim
+
+    def _apply_sh_color_space(self) -> None:
+        """Author ``colorSpace`` metadata on the SH coefficients attribute.
+
+        Mirrors the OpenUSD ParticleField proposal, where the color space applies to the RGB
+        reconstructed from the SH coefficients and is set on the coefficients attribute.
+
+        Per USD color space conventions:
+        - lin_rec709_scene: Linear Rec.709 color space (for post-processed/linear RGB data)
+        - srgb_rec709_display: sRGB Rec.709 color space (for gamma-encoded data)
+        """
+        if self.sh_coeffs_attr is None:
+            return
+        self.sh_coeffs_attr.SetColorSpace("lin_rec709_scene" if self.linear_srgb else "srgb_rec709_display")
 
     def _apply_surflet_kernel_schemas(self) -> None:
         """Apply API schemas for 2DGS/surfel particles via UsdVol schema types."""
@@ -192,10 +206,18 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
             self._schema.CreateProjectionModeHintAttr().Set(self.projection_mode_hint)
             self._schema.CreateSortingModeHintAttr().Set(self.sorting_mode_hint)
         else:
-            # Surfel: prim is ParticleField; use base ParticleField schema for hint attrs
-            field_schema = UsdVol.ParticleField(self.prim)
-            field_schema.CreateProjectionModeHintAttr().Set(self.projection_mode_hint)
-            field_schema.CreateSortingModeHintAttr().Set(self.sorting_mode_hint)
+            # Surfel: the hints are only defined on ParticleField3DGaussianSplat, not on the base
+            # ParticleField, so author them as plain attributes with the same names and types.
+            for name, value in (
+                ("projectionModeHint", self.projection_mode_hint),
+                ("sortingModeHint", self.sorting_mode_hint),
+            ):
+                self.prim.CreateAttribute(
+                    name,
+                    Sdf.ValueTypeNames.Token,
+                    custom=False,
+                    variability=Sdf.VariabilityUniform,
+                ).Set(value)
 
     def write_attributes(
         self,
@@ -222,11 +244,15 @@ class GaussianLightFieldWriter(GaussianUSDWriter):
             quats = [Gf.Quatf(float(q[0]), float(q[1]), float(q[2]), float(q[3])) for q in attributes.rotations]
             self.orientations_attr.Set(Vt.QuatfArray(quats))
 
-        # Scales (geometry)
+        # Scales (geometry). The surfel kernel is a flat disk and ignores the z scale, so zero it.
+        scales = attributes.scales
+        if self.use_surflet_kernel:
+            scales = scales.copy()
+            scales[:, 2] = 0.0
         if self.half_geometry:
-            self.scales_attr.Set(Vt.Vec3hArray.FromNumpy(attributes.scales.astype(np.float16)))
+            self.scales_attr.Set(Vt.Vec3hArray.FromNumpy(scales.astype(np.float16)))
         else:
-            self.scales_attr.Set(Vt.Vec3fArray.FromNumpy(attributes.scales.astype(np.float32)))
+            self.scales_attr.Set(Vt.Vec3fArray.FromNumpy(scales.astype(np.float32)))
 
         # Opacities (features)
         densities_clamped = np.clip(attributes.densities.flatten(), 0.0, 1.0)

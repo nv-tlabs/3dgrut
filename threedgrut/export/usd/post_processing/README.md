@@ -409,6 +409,9 @@ the latter are inert custom data; consumers can ignore them safely.
 
 - `UsdVol ParticleField3DGaussianSplat` (or `UsdGeomPoints`) primitive
   carrying the Gaussian payload. Schema selected by `--format`.
+  The spherical harmonics color space is authored as `colorSpace` metadata on the
+  `radiance:sphericalHarmonicsCoefficients[h]` attributes: `lin_rec709_scene` when
+  post-processing is attached, otherwise `srgb_rec709_display`.
 - `UsdLux DomeLight` for the trained sky environment, when one exists.
 - The original rig `Camera` prims, untouched.
 

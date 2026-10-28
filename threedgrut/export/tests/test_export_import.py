@@ -32,15 +32,18 @@ import torch
 
 pytest.importorskip("pxr", reason="usd-core (pxr) is only available on linux x86_64")
 
-from pxr import Sdf, Usd
+from pxr import Sdf, Usd, UsdVol
 
+from threedgrut.export.accessor import GaussianAttributes
 from threedgrut.export.base import ExportableModel
 from threedgrut.export.formats import PLYExporter
 from threedgrut.export.importers import PLYImporter, USDImporter
 from threedgrut.export.usd.exporter import USDExporter
 from threedgrut.export.usd.particle_field_hints import (
+    DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT,
     resolve_particle_field_sorting_mode_hint,
 )
+from threedgrut.export.usd.writers.lightfield import GaussianLightFieldWriter
 
 
 def _assert_default_camera_render_product(
@@ -502,10 +505,22 @@ class TestExportImportConsistency:
             ).export(model, usd_path)
 
 
-def _find_prim_with_color_space_api(stage: Usd.Stage):
-    """Return the first prim that has ColorSpaceAPI applied (the Gaussian particle prim)."""
+_SH_COEFFS_ATTR_PREFIX = "radiance:sphericalHarmonicsCoefficients"
+
+
+def _sh_color_spaces(prim: Usd.Prim) -> dict:
+    """Map each authored SH coefficients attribute of the prim to its colorSpace metadata."""
+    return {
+        attr.GetName(): attr.GetColorSpace()
+        for attr in prim.GetAuthoredAttributes()
+        if attr.GetName().startswith(_SH_COEFFS_ATTR_PREFIX)
+    }
+
+
+def _find_prim_with_sh_color_space(stage: Usd.Stage):
+    """Return the first prim with an SH coefficients attribute carrying colorSpace (the Gaussian particle prim)."""
     for prim in Usd.PrimRange(stage.GetPseudoRoot()):
-        if prim.HasAPI(Usd.ColorSpaceAPI):
+        if _sh_color_spaces(prim):
             return prim
     return None
 
@@ -592,7 +607,7 @@ class TestPPISPRuntimeMode:
 
 
 class TestUSDExportColorSpace:
-    """Test that USD export applies ColorSpaceAPI with correct color space name."""
+    """Test that USD export authors colorSpace metadata on the SH coefficients attributes."""
 
     def test_usd_export_color_space_default_srgb(self):
         """Standard export sets color space to srgb_rec709_display."""
@@ -607,12 +622,42 @@ class TestUSDExportColorSpace:
             ).export(model, usd_path)
             stage = Usd.Stage.Open(str(usd_path))
             assert stage
-            prim = _find_prim_with_color_space_api(stage)
-            assert prim is not None, "No prim with ColorSpaceAPI found"
-            api = Usd.ColorSpaceAPI(prim)
-            attr = api.GetColorSpaceNameAttr()
-            assert attr, "ColorSpaceName attribute missing"
-            assert attr.Get() == "srgb_rec709_display"
+            prim = _find_prim_with_sh_color_space(stage)
+            assert prim is not None, "No prim with SH colorSpace metadata found"
+            assert _sh_color_spaces(prim) == {"radiance:sphericalHarmonicsCoefficients": "srgb_rec709_display"}
+            assert not prim.HasAPI(Usd.ColorSpaceAPI)
+
+    def test_usd_export_color_space_half_precision_features(self):
+        """Half-precision features author the color space on the *h coefficients attribute."""
+        model = MockGaussianModel(num_gaussians=5, sh_degree=3)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "test.usdz"
+            USDExporter(
+                half_precision=True,
+                export_cameras=False,
+                export_background=False,
+                apply_normalizing_transform=False,
+            ).export(model, usd_path)
+            stage = Usd.Stage.Open(str(usd_path))
+            assert stage
+            prim = _find_prim_with_sh_color_space(stage)
+            assert prim is not None, "No prim with SH colorSpace metadata found"
+            assert _sh_color_spaces(prim) == {"radiance:sphericalHarmonicsCoefficientsh": "srgb_rec709_display"}
+
+    def test_writer_linear_srgb_authors_linear_color_space(self):
+        """Post-processed (linear) output authors lin_rec709_scene on the coefficients attribute."""
+        stage = Usd.Stage.CreateInMemory()
+        capabilities = SimpleNamespace(is_surfel=False, has_spherical_harmonics=True, sh_degree=3)
+        prim = GaussianLightFieldWriter(stage, capabilities, linear_srgb=True).create_prim(5)
+        assert _sh_color_spaces(prim) == {"radiance:sphericalHarmonicsCoefficients": "lin_rec709_scene"}
+
+    def test_writer_without_spherical_harmonics_authors_no_color_space(self):
+        """No colorSpace metadata is authored when the model has no SH coefficients."""
+        stage = Usd.Stage.CreateInMemory()
+        capabilities = SimpleNamespace(is_surfel=False, has_spherical_harmonics=False, sh_degree=None)
+        prim = GaussianLightFieldWriter(stage, capabilities).create_prim(5)
+        assert prim.GetTypeName() == "ParticleField3DGaussianSplat"
+        assert _sh_color_spaces(prim) == {}
 
     def test_usdz_export_camera_is_composed_from_root_stage(self):
         """USDZ camera prims are authored where the package root composes them."""
@@ -676,9 +721,9 @@ class TestUSDExportColorSpace:
 
             stage = Usd.Stage.Open(str(usd_path))
             assert stage
-            prim = _find_prim_with_color_space_api(stage)
+            prim = _find_prim_with_sh_color_space(stage)
             assert prim is not None
-            assert Usd.ColorSpaceAPI(prim).GetColorSpaceNameAttr().Get() == "lin_rec709_scene"
+            assert set(_sh_color_spaces(prim).values()) == {"lin_rec709_scene"}
             shader_prim = _find_prim_with_attribute(stage, "inputs:apply_srgb_linear")
             assert shader_prim is not None
             assert shader_prim.GetAttribute("inputs:apply_srgb_linear").Get() is False
@@ -790,6 +835,54 @@ class TestUSDExportColorSpace:
             assert right_transform.GetTimeSamples() == [1.0, 3.0, 5.0]
 
 
+class TestUSDExportSurfel:
+    """Test the planar (surfel) ParticleField written for trisurfel models."""
+
+    @staticmethod
+    def _write_surfel(linear_srgb=False):
+        n = 4
+        stage = Usd.Stage.CreateInMemory()
+        capabilities = SimpleNamespace(is_surfel=True, has_spherical_harmonics=True, sh_degree=0)
+        writer = GaussianLightFieldWriter(stage, capabilities, linear_srgb=linear_srgb)
+        prim = writer.create_prim(n)
+        attributes = GaussianAttributes(
+            positions=np.zeros((n, 3), dtype=np.float32),
+            rotations=np.tile(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32), (n, 1)),
+            scales=np.full((n, 3), 0.3, dtype=np.float32),
+            densities=np.full((n, 1), 0.5, dtype=np.float32),
+            albedo=np.full((n, 3), 0.5, dtype=np.float32),
+            specular=np.zeros((n, 0), dtype=np.float32),
+        )
+        writer.write_attributes(attributes)
+        writer.finalize(attributes.positions)
+        return stage, prim
+
+    def test_surfel_prim_uses_surflet_kernel(self):
+        _stage, prim = self._write_surfel()
+        assert prim.GetTypeName() == "ParticleField"
+        assert prim.HasAPI(UsdVol.ParticleFieldKernelGaussianSurfletAPI)
+
+    def test_surfel_prim_authors_rendering_hints(self):
+        _stage, prim = self._write_surfel()
+        assert prim.GetAttribute("projectionModeHint").Get() == "perspective"
+        assert prim.GetAttribute("sortingModeHint").Get() == DEFAULT_PARTICLE_FIELD_SORTING_MODE_HINT
+
+    @pytest.mark.parametrize(
+        "linear_srgb, expected",
+        [(False, "srgb_rec709_display"), (True, "lin_rec709_scene")],
+    )
+    def test_surfel_sh_color_space(self, linear_srgb, expected):
+        _stage, prim = self._write_surfel(linear_srgb=linear_srgb)
+        assert _sh_color_spaces(prim) == {"radiance:sphericalHarmonicsCoefficients": expected}
+
+    def test_surfel_z_scale_is_zeroed(self):
+        _stage, prim = self._write_surfel()
+        scales = np.array(prim.GetAttribute("scales").Get())
+        assert scales.shape == (4, 3)
+        assert np.allclose(scales[:, :2], 0.3)
+        assert np.all(scales[:, 2] == 0.0)
+
+
 class TestUSDSampleExports:
     """Sample USD exports that exercise representative exporter options."""
 
@@ -815,7 +908,7 @@ class TestUSDSampleExports:
             assert stage.GetTimeCodesPerSecond() == 24.0
             assert stage.GetPrimAtPath("/World/Cameras/camera_0000").IsValid()
             _assert_default_camera_render_product(stage)
-            assert _find_prim_with_color_space_api(stage) is not None
+            assert _find_prim_with_sh_color_space(stage) is not None
 
 
 class TestUSDExportSortingModeHint:
@@ -875,7 +968,7 @@ class TestUSDExportSortingModeHint:
             ).export(model, usd_path)
             stage = Usd.Stage.Open(str(usd_path))
             assert stage
-            prim = _find_prim_with_color_space_api(stage)
+            prim = _find_prim_with_sh_color_space(stage)
             assert prim is not None, "No Gaussian particle prim found"
             assert prim.GetAttribute("sortingModeHint").Get() == "rayHitDistance"
 

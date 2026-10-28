@@ -64,17 +64,6 @@ class GaussianUSDWriter(ABC):
         self.has_post_processing = has_post_processing
         self.prim: Optional[Usd.Prim] = None
 
-    def apply_color_space_to_prim(self, prim: Usd.Prim) -> None:
-        """Apply ColorSpaceAPI and set color space based on linear_srgb flag.
-
-        Per USD color space conventions:
-        - lin_rec709_scene: Linear Rec.709 (post-processed/linear RGB data)
-        - srgb_rec709_display: sRGB Rec.709 (gamma-encoded data)
-        """
-        color_space = "lin_rec709_scene" if self.linear_srgb else "srgb_rec709_display"
-        color_space_api = Usd.ColorSpaceAPI.Apply(prim)
-        color_space_api.CreateColorSpaceNameAttr().Set(color_space)
-
     @abstractmethod
     def create_prim(self, num_gaussians: int) -> Usd.Prim:
         """Create the USD prim for Gaussian data.
