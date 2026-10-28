@@ -446,7 +446,7 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
                                                   float& transmittance,
                                                   TFeaturesVec& features,
                                                   float& hitT) const {
-        return threedgut::processHitFwd<ExtParams::KernelDegree, false, PerRayRadiance>(
+        return threedgut::processHitFwd<ExtParams::KernelDegree, GAUSSIAN_PARTICLE_SURFEL, PerRayRadiance>(
             reinterpret_cast<const float3&>(rayOrigin),
             reinterpret_cast<const float3&>(rayDirection),
             particleIdx,
@@ -480,7 +480,7 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
                                                   float hitTBackward,
                                                   float hitTGradient) const {
 
-        threedgut::processHitBwd<ExtParams::KernelDegree, false, PerRayRadiance>(
+        threedgut::processHitBwd<ExtParams::KernelDegree, GAUSSIAN_PARTICLE_SURFEL, PerRayRadiance>(
             reinterpret_cast<const float3&>(rayOrigin),
             reinterpret_cast<const float3&>(rayDirection),
             particleIdx,

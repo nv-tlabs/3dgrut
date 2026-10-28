@@ -193,12 +193,6 @@ class MixtureOfGaussians(torch.nn.Module, ExportableModel):
         # Feature type configuration - determine feature storage mode
         self.feature_type = Features.Type.from_string(self.conf.model.feature_type)
 
-        primitive_type = (getattr(conf.render, "primitive_type", None) or "").lower()
-        if self.feature_type == Features.Type.NHT and primitive_type == "trisurfel":
-            raise ValueError(
-                "Trisurfels are not supported in NHT mode. Use primitive_type 'instances' or 'icosahedron'."
-            )
-
         if self.feature_type == Features.Type.SH:
             # Spherical harmonics mode: separate albedo and specular features
             self.features_albedo = torch.nn.Parameter(
