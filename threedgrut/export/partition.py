@@ -172,7 +172,7 @@ def _rotate_to_principal_axes(
     """
     n = positions.shape[0]
     if n > _PCA_MAX_SAMPLES:
-        idx = torch.linspace(0, n - 1, steps=_PCA_MAX_SAMPLES, device=positions.device).long()
+        idx = torch.linspace(0, n - 1, steps=_PCA_MAX_SAMPLES, device=positions.device).long().clamp_(max=n - 1)
         pts = positions.index_select(0, idx)
         w = None if weights is None else weights.reshape(-1).index_select(0, idx)
     else:
