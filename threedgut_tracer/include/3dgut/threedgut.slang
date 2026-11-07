@@ -20,7 +20,7 @@ namespace gaussianParticle
     static const float MaxParticleAlpha = GAUSSIAN_PARTICLE_MAX_ALPHA;
     static const float MinParticleAlpha = GAUSSIAN_PARTICLE_MIN_ALPHA;
     static const bool EnableNormal = false;
-    static const bool Surfel = false;
+    static const bool Surfel = GAUSSIAN_PARTICLE_SURFEL;
 };
 
 #include <3dgut/kernels/slang/models/gaussianParticles.slang>

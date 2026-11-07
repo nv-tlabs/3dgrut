@@ -177,20 +177,32 @@ struct Parameters : IDifferentiable {
     }
 }
 
-[BackwardDifferentiable][ForceInline] float canonicalRayDistance(
+[BackwardDifferentiable][ForceInline] float canonicalRayHitParameter<let Surfel : bool>(
+    float3 canonicalRayOrigin,
+    float3 canonicalRayDirection) {
+    if (Surfel) {
+        if (abs(canonicalRayDirection.z) <= 1e-6f) {
+            return 0.0f;
+        }
+        return -canonicalRayOrigin.z / canonicalRayDirection.z;
+    }
+    return dot(canonicalRayDirection, -1 * canonicalRayOrigin);
+}
+
+[BackwardDifferentiable][ForceInline] float canonicalRayDistance<let Surfel : bool>(
     float3 canonicalRayOrigin,
     float3 canonicalRayDirection,
     float3 scale) {
-    const float3 grds = scale * canonicalRayDirection * dot(canonicalRayDirection, -1 * canonicalRayOrigin);
+    const float3 grds = scale * canonicalRayDirection * canonicalRayHitParameter<Surfel>(canonicalRayOrigin, canonicalRayDirection);
     return sqrt(dot(grds, grds));
 }
 
-[BackwardDifferentiable] [ForceInline] float canonicalRayIntersection(
+[BackwardDifferentiable] [ForceInline] float canonicalRayIntersection<let Surfel : bool>(
     float3 canonicalRayOrigin,
     float3 canonicalRayDirection,
     float3 scale,
     out float3 canonicalIntersection) {
-    const float3 canonicalGrds = canonicalRayDirection * dot(canonicalRayDirection, -1 * canonicalRayOrigin);
+    const float3 canonicalGrds = canonicalRayDirection * canonicalRayHitParameter<Surfel>(canonicalRayOrigin, canonicalRayDirection);
     canonicalIntersection = canonicalRayOrigin + canonicalGrds;
     const float3 grds = scale * canonicalGrds;
     return sqrt(dot(grds, grds));
@@ -236,10 +248,11 @@ bool hit(
         canonicalRayDirection);
 
     alpha = min(MaxParticleAlpha, maxResponse * parameters.density); // needed for the stability of the backward pass
-    const bool acceptHit = ((maxResponse > MinParticleKernelDensity) && (alpha > MinParticleAlpha));
+    const bool acceptHit = (!Surfel || abs(canonicalRayDirection.z) > 1e-6f) &&
+                           (maxResponse > MinParticleKernelDensity) && (alpha > MinParticleAlpha);
     if (acceptHit)
     {
-        depth = canonicalRayIntersection(canonicalRayOrigin, canonicalRayDirection, parameters.scale, canonicalIntersection);
+        depth = canonicalRayIntersection<Surfel>(canonicalRayOrigin, canonicalRayDirection, parameters.scale, canonicalIntersection);
         if (enableNormal)
         {
             normal = canonicalRayNormal<Surfel>(canonicalRayOrigin, canonicalRayDirection, parameters.scale, parameters.rotationT);
@@ -512,10 +525,10 @@ bool particleDensityHitCustom(
         canonicalRayOrigin,
         canonicalRayDirection);
 
-    // distance to the gaussian center projection on the ray
-    hitDistance = gaussianParticle.canonicalRayDistance(canonicalRayOrigin, canonicalRayDirection, parameters.scale);
+    hitDistance = gaussianParticle.canonicalRayDistance<gaussianParticle.Surfel>(canonicalRayOrigin, canonicalRayDirection, parameters.scale);
 
-    return (hitDistance > minHitDistance) &&
+    return (!gaussianParticle.Surfel || abs(canonicalRayDirection.z) > 1e-6f) &&
+           (hitDistance > minHitDistance) &&
            (hitDistance < maxHitDistance) &&
            (gaussianParticle.canonicalRayMinSquaredDistance<gaussianParticle.Surfel>(
                 canonicalRayOrigin, canonicalRayDirection) < maxParticleSquaredDistance);
@@ -531,10 +544,18 @@ bool particleDensityHitInstance(
     out float hitDistance
 )
 {
-    const float numerator = -dot(canonicalRayOrigin, canonicalUnormalizedRayDirection);
-    const float denominator = rcp(dot(canonicalUnormalizedRayDirection, canonicalUnormalizedRayDirection));
-    hitDistance = numerator * denominator;
-    return (hitDistance > minHitDistance) &&
+    const bool validIntersection = !gaussianParticle.Surfel || abs(canonicalUnormalizedRayDirection.z) > 1e-6f;
+    if (gaussianParticle.Surfel) {
+        hitDistance = 0.0f;
+        if (validIntersection) {
+            hitDistance = -canonicalRayOrigin.z / canonicalUnormalizedRayDirection.z;
+        }
+    } else {
+        const float numerator = -dot(canonicalRayOrigin, canonicalUnormalizedRayDirection);
+        const float denominator = rcp(dot(canonicalUnormalizedRayDirection, canonicalUnormalizedRayDirection));
+        hitDistance = numerator * denominator;
+    }
+    return validIntersection && (hitDistance > minHitDistance) &&
            (hitDistance < maxHitDistance) &&
            (gaussianParticle.canonicalRayMinSquaredDistance<gaussianParticle.Surfel>(
                 canonicalRayOrigin,
@@ -559,4 +580,3 @@ bool particleDensityHitInstance(
     // 3DGRT: incidentDirectionFromBuffer returns no_diff; position gradient
     // from incident direction is not propagated back in the 3DGRT path.
 }
-

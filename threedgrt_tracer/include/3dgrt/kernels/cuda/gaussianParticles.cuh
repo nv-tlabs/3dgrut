@@ -367,6 +367,11 @@ __device__ inline bool processHit(
     const float3 rayDirR = rayDirection * particleRotation;
     const float3 grdu    = giscl * rayDirR;
     const float3 grd     = safe_normalize(grdu);
+    if constexpr (SurfelPrimitive) {
+        if (fabsf(grd.z) <= 1e-6f) {
+            return false;
+        }
+    }
 
     const float3 gcrod   = SurfelPrimitive ? gro + grd * -gro.z / grd.z : cross(grd, gro);
     const float grayDist = dot(gcrod, gcrod);
@@ -509,6 +514,11 @@ __device__ inline void processHitBwd(
     const float3 rayDirR = rayDirection * particleRotation;
     const float3 grdu    = giscl * rayDirR;
     const float3 grd     = safe_normalize(grdu);
+    if constexpr (SurfelPrimitive) {
+        if (fabsf(grd.z) <= 1e-6f) {
+            return;
+        }
+    }
     const float3 gcrod   = SurfelPrimitive ? gro + grd * -gro.z / grd.z : cross(grd, gro);
     const float grayDist = dot(gcrod, gcrod);
 
