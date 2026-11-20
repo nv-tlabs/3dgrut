@@ -51,7 +51,7 @@ For projects that require a fast, modular, and production-ready Gaussian Splatti
 - [🔥 News](#-news)
 - [Contents](#contents)
 - [🔧 1 Dependencies and Installation](#-1-dependencies-and-installation)
-  - [Running with Docker](#running-with-docker)
+  - [Building and Running with Docker](#building-and-running-with-docker)
 - [💻 2. Train 3DGRT or 3DGUT scenes](#-2-train-3dgrt-or-3dgut-scenes)
   - [Training on NCore v4 datasets](#training-on-ncore-v4-datasets)
   - [Training with Neural Harmonic Textures (NHT)](#training-with-neural-harmonic-textures-nht)
@@ -188,10 +188,10 @@ docker build --build-arg CUDA_VERSION=11.8.0 --build-arg UBUNTU_VERSION=22.04 -t
 docker buildx build --platform linux/amd64,linux/arm64 --build-arg CUDA_VERSION=13.0.2 -t 3dgrut:cuda13 .
 ```
 
-Run it:
+Run it (use the tag you built above):
 ```bash
 xhost +local:root
-docker run -v --rm -it --gpus=all --net=host --ipc=host -v $PWD:/workspace --runtime=nvidia -e DISPLAY 3dgrut
+docker run --rm -it --gpus=all --net=host --ipc=host -v $PWD:/workspace --runtime=nvidia -e DISPLAY 3dgrut:cuda12
 ```
 > [!NOTE]
 > Remember to set the DISPLAY environment variable if you are running on a remote server from the command line.
